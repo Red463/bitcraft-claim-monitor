@@ -454,6 +454,8 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
 
 function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   type SortKey = "name" | "total" | "highest" | number;
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [focusSkill, setFocusSkill] = React.useState<number>(SKILL_IDS[0]);
   const [sortKey, setSortKey] = React.useState<SortKey>("total");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
   const citizens = data.citizens;
@@ -471,7 +473,8 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     }
   }
 
-  const sorted = [...citizens].sort((a, b) => {
+  const filtered = citizens.filter((citizen) => getName(citizen).toLowerCase().includes(searchTerm.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => {
     if (sortKey === "name") {
       return sortDir === "asc" ? getName(a).localeCompare(getName(b)) : getName(b).localeCompare(getName(a));
     }
@@ -480,19 +483,69 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     return sortDir === "asc" ? va - vb : vb - va;
   });
 
-  const guildTotalXP = citizens.reduce((sum, c) => sum + getXP(c), 0);
-  const guildTotalLevel = citizens.reduce((sum, c) => sum + getTotal(c), 0);
-  const guildBest = Math.max(...citizens.map(getHighest), 0);
+  const settlementTotalXP = citizens.reduce((sum, c) => sum + getXP(c), 0);
+  const settlementTotalLevel = citizens.reduce((sum, c) => sum + getTotal(c), 0);
+  const settlementBest = Math.max(...citizens.map(getHighest), 0);
+  const averageTotal = citizens.length ? settlementTotalLevel / citizens.length : 0;
   const topMember = sorted[0] ? getName(sorted[0]) : "-";
+  const focusRows = [...citizens].sort((a, b) => getSkill(b, focusSkill) - getSkill(a, focusSkill)).slice(0, 5);
+  const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusSkill), 0) / citizens.length : 0;
+  const focus20 = citizens.filter((c) => getSkill(c, focusSkill) >= 20).length;
+  const focus40 = citizens.filter((c) => getSkill(c, focusSkill) >= 40).length;
+  const coverage = SKILL_IDS.map((id) => {
+    const levels = citizens.map((c) => getSkill(c, id));
+    const max = Math.max(...levels, 0);
+    const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
+    const specialists = levels.filter((level) => level >= 40).length;
+    return { id, name: SKILL_NAMES[id], max, avg, specialists };
+  }).sort((a, b) => b.max - a.max || b.avg - a.avg);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
     <div className="panel">
-      <Header title="Member Skills">{citizens.length} citizens - {formatNumber(guildTotalXP)} total XP</Header>
-      <div className="summary-grid">
-        <MiniStat icon={<TrendingUp />} label="Guild Total Level" value={formatNumber(guildTotalLevel)} />
-        <MiniStat icon={<Star />} label="Highest Skill" value={guildBest} />
+      <Header title="Member Skills">{citizens.length} citizens - {formatNumber(settlementTotalXP)} total XP</Header>
+      <div className="summary-grid skills-summary">
+        <MiniStat icon={<TrendingUp />} label="Settlement Total Level" value={formatNumber(settlementTotalLevel)} />
+        <MiniStat icon={<Star />} label="Highest Skill" value={settlementBest} />
+        <MiniStat icon={<Activity />} label="Average Total Level" value={formatNumber(averageTotal, 1)} />
         <MiniStat icon={<Swords />} label="Top Member" value={topMember} />
+      </div>
+      <div className="skills-dashboard">
+        <section className="focus-panel">
+          <div className="split-header">
+            <h3><Star size={17} /> Skill Focus</h3>
+            <select className="select-control" value={focusSkill} onChange={(event) => setFocusSkill(Number(event.target.value))}>
+              {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
+            </select>
+          </div>
+          <div className="focus-metrics">
+            <Info label="Average level" value={formatNumber(focusAverage, 1)} />
+            <Info label="Level 20+" value={`${focus20} members`} />
+            <Info label="Level 40+" value={`${focus40} members`} />
+          </div>
+          <div className="focus-list">
+            {focusRows.map((citizen) => {
+              const level = getSkill(citizen, focusSkill);
+              return <div key={citizen.entityId ?? getName(citizen)}><span>{getName(citizen)}</span><strong>Lv {level}</strong></div>;
+            })}
+          </div>
+        </section>
+        <section className="coverage-panel">
+          <h3><Swords size={17} /> Skill Coverage</h3>
+          <div className="coverage-list">
+            {coverage.slice(0, 8).map((skill) => (
+              <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
+                <span>{skill.name}</span>
+                <b>Max {skill.max}</b>
+                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at 40+</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+      <div className="toolbar-row">
+        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
+        <span>{sorted.length} shown</span>
       </div>
       <div className="heatmap-wrap">
         <table className="skill-table">
@@ -534,7 +587,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             <tr>
               <td className="sticky-col member-cell">Settlement Max</td>
               <td className="numeric">-</td>
-              <td className="numeric best">{guildBest}</td>
+              <td className="numeric best">{settlementBest}</td>
               {SKILL_IDS.map((id) => {
                 const max = Math.max(...citizens.map((c) => getSkill(c, id)), 0);
                 return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)}>{max > 0 ? max : "-"}</td>;

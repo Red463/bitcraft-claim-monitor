@@ -121,6 +121,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .pill.buy { color: var(--good); border-color: rgba(93,224,162,.35); }
 .pill.sell { color: var(--gold); border-color: rgba(240,198,79,.44); }
 .summary-grid, .metric-grid, .rank-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.skills-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .rank-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .mini-stat { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 14px; display: grid; grid-template-columns: 40px 1fr; column-gap: 12px; align-items: center; }
@@ -128,26 +129,40 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .mini-stat svg { width: 18px; height: 18px; }
 .mini-stat span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .mini-stat strong { font-family: Rajdhani, sans-serif; font-size: 23px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skills-dashboard { display: grid; grid-template-columns: minmax(320px, .9fr) minmax(360px, 1.1fr); gap: 14px; align-items: start; }
+.focus-panel, .coverage-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
+.focus-panel h3, .coverage-panel h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
+.focus-metrics { border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); padding: 8px 12px; }
+.focus-list { display: grid; gap: 7px; }
+.focus-list div { min-height: 34px; border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.focus-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-list strong { color: var(--gold); font-family: "JetBrains Mono", monospace; font-size: 12px; }
+.coverage-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.coverage-list button { min-height: 62px; border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); color: var(--muted); padding: 9px 10px; display: grid; gap: 3px; text-align: left; cursor: pointer; }
+.coverage-list button:hover, .coverage-list button.active { border-color: rgba(240,198,79,.45); background: rgba(240,198,79,.08); }
+.coverage-list span { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coverage-list b { color: var(--gold); font-size: 12px; }
+.coverage-list small { color: var(--muted); }
 .heatmap-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; background: var(--panel); }
-.skill-table { min-width: 1050px; table-layout: fixed; }
-.skill-table th, .skill-table td { padding: 8px 6px; text-align: center; }
-.skill-table thead th { height: 42px; cursor: pointer; user-select: none; }
-.skill-table .sticky-col { position: sticky; left: 0; z-index: 1; min-width: 132px; width: 132px; text-align: left; background: #121716; }
-.skill-table thead .sticky-col { z-index: 2; background: #101615; }
+.skill-table { min-width: 1120px; table-layout: fixed; }
+.skill-table th, .skill-table td { padding: 7px 6px; text-align: center; }
+.skill-table thead th { height: 38px; cursor: pointer; user-select: none; }
+.skill-table .sticky-col { position: sticky; left: 0; z-index: 1; min-width: 150px; width: 150px; text-align: left; background: #141820; }
+.skill-table thead .sticky-col { z-index: 2; background: #10141b; }
 .skill-table .name-spacer { height: 86px; }
-.skill-table .vertical-label { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.skill-table .vertical-label { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; color: var(--muted); font-size: 10px; font-weight: 500; }
 .skill-table th.sorted .vertical-label { color: var(--gold); }
 .skill-table .clickable { color: var(--muted); font-size: 12px; }
 .skill-table .clickable:hover { color: var(--text); }
 .skill-table .numeric { width: 64px; text-align: right; font-family: "JetBrains Mono", monospace; color: var(--muted); }
 .skill-table .best { color: var(--gold); font-weight: 600; }
 .skill-table .member-cell { font-weight: 600; color: var(--text); }
-.skill-cell { width: 46px; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+.skill-cell { width: 46px; font-family: "JetBrains Mono", monospace; font-size: 12px; color: #f7f1df; border-left: 1px solid rgba(255,255,255,.025); }
 .lvl0 { color: rgba(137,144,156,.28); }
-.lvl1 { color: #94a3b8; }
-.lvl2 { color: #cbd5e1; }
-.lvl3 { color: #fbbf24; }
-.lvl4 { color: #fde68a; font-weight: 700; }
+.lvl1 { color: #b7c2d2; }
+.lvl2 { color: #e0e6ef; }
+.lvl3 { color: #f5cd67; }
+.lvl4 { color: #ffe9a7; font-weight: 700; }
 .legend { color: var(--muted); font-size: 11px; margin: 0; }
 .crafter-pills { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; max-width: 390px; }
 .crafter-pills span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 9px; font-size: 12px; }
@@ -282,7 +297,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .ops-grid, .overview-layout { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list { grid-template-columns: 1fr; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .split-header { display: grid; }
   .bar-row { grid-template-columns: 1fr; }
