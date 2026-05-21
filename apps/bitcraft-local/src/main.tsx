@@ -800,6 +800,18 @@ function Segmented({ options, value, onChange, label }: { options: string[]; val
   );
 }
 
+const MATERIAL_WATCHLIST = [
+  { label: "Planks", terms: ["plank"] },
+  { label: "Bricks", terms: ["brick"] },
+  { label: "Leather", terms: ["leather", "hide"] },
+  { label: "Ingots", terms: ["ingot", "bar"] },
+  { label: "Stone", terms: ["stone", "rock"] },
+  { label: "Logs", terms: ["log", "wood"] },
+  { label: "Cloth", terms: ["cloth", "fabric", "textile"] },
+  { label: "Fiber", terms: ["fiber", "flax", "cotton"] },
+  { label: "Fuel", terms: ["fuel", "charcoal", "coal"] },
+] as const;
+
 function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [q, setQ] = React.useState("");
   const [containerQ, setContainerQ] = React.useState("");
@@ -833,6 +845,20 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     };
   });
   const allRows = containers.flatMap((container) => container.items);
+  const materialSummary = MATERIAL_WATCHLIST.map((group) => {
+    const matches = allRows.filter((row: AnyRecord) => {
+      const haystack = `${row.name ?? ""} ${row.tag ?? ""}`.toLowerCase();
+      return group.terms.some((term) => haystack.includes(term));
+    });
+    const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
+    const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
+    const topItems = (Object.entries(matches.reduce((acc: Record<string, number>, row: AnyRecord) => {
+      const name = String(row.name ?? "Unknown");
+      acc[name] = (acc[name] ?? 0) + toNumber(row.quantity);
+      return acc;
+    }, {})) as Array<[string, number]>).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    return { ...group, quantity, containerCount, topItems };
+  });
   const filteredContainers = containers.map((container) => ({
     ...container,
     items: container.items.filter((row: AnyRecord) => {
@@ -863,6 +889,22 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<Package />} label="Total Volume" value={formatCompact(totalVolume)} />
         <MiniStat icon={<Building2 />} label="Containers" value={containers.length} />
       </div>
+      <section className="material-watch">
+        <div className="split-header">
+          <h3><Package size={17} /> Important Materials</h3>
+          <p className="legend">Totals across all containers, unaffected by filters.</p>
+        </div>
+        <div className="material-watch-grid">
+          {materialSummary.map((group) => (
+            <article className={`material-card ${group.quantity ? "" : "empty"}`} key={group.label}>
+              <span>{group.label}</span>
+              <strong>{formatNumber(group.quantity)}</strong>
+              <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None found"}</small>
+              {group.topItems.length ? <em>{group.topItems.map(([name, qty]) => `${name} ${formatNumber(qty)}`).join(" / ")}</em> : null}
+            </article>
+          ))}
+        </div>
+      </section>
       <div className="toolbar-row">
         <SearchBox value={q} onChange={setQ} placeholder="Search inventory" />
         <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" />

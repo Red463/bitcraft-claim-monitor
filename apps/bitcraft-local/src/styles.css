@@ -239,6 +239,15 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .material-grid div { border: 1px solid rgba(240,198,79,.34); background: rgba(240,198,79,.095); border-radius: 6px; padding: 9px; display: grid; gap: 3px; }
 .material-grid strong { font-size: 12px; }
 .material-grid span { color: var(--muted); font-size: 11px; }
+.material-watch { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
+.material-watch h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
+.material-watch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.material-card { border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: var(--panel-2); padding: 12px; display: grid; gap: 4px; min-width: 0; }
+.material-card.empty { opacity: .62; }
+.material-card span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.material-card strong { color: var(--text); font-family: Rajdhani, sans-serif; font-size: 25px; line-height: 1; }
+.material-card small { color: var(--muted); font-size: 11px; }
+.material-card em { color: var(--gold); font-style: normal; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .two-col section { display: grid; gap: 8px; align-content: start; max-height: 640px; overflow: auto; }
 .research-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); padding: 10px; }
@@ -297,7 +306,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list { grid-template-columns: 1fr; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .split-header { display: grid; }
   .bar-row { grid-template-columns: 1fr; }
