@@ -599,7 +599,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </tfoot>
         </table>
       </div>
-      <p className="legend">Skill tiers: <span className="lvl0">0</span> <span className="lvl1">T1-T2</span> <span className="lvl2">T3-T5</span> <span className="lvl3">T6-T8</span> <span className="lvl4">T9-T10</span> - cells show exact level, hover for tier</p>
+      <p className="legend">Skill tiers: <span className="lvl0">0</span> <span className="lvl1">T1 1-19</span> <span className="lvl2">T2-T5</span> <span className="lvl3">T6-T8</span> <span className="lvl4">T9-T10</span> - cells show exact level, hover for tier</p>
     </div>
   );
 }
@@ -618,13 +618,14 @@ function skillStyle(level: number): React.CSSProperties {
 
 function skillTier(level: number): number {
   if (level <= 0) return 0;
-  return Math.min(10, Math.max(1, Math.floor(level / 10) + 1));
+  if (level < 20) return 1;
+  return Math.min(10, Math.floor(level / 10));
 }
 
 function skillTierLabel(level: number): string {
   const tier = skillTier(level);
   if (!tier) return "No tier";
-  const low = tier === 1 ? 0 : (tier - 1) * 10;
+  const low = tier === 1 ? 0 : tier * 10;
   const high = tier === 10 ? 100 : tier * 10 - 1;
   return `T${tier} (${low}-${high})`;
 }
