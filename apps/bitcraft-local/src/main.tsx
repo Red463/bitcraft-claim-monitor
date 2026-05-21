@@ -490,13 +490,13 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const topMember = sorted[0] ? getName(sorted[0]) : "-";
   const focusRows = [...citizens].sort((a, b) => getSkill(b, focusSkill) - getSkill(a, focusSkill)).slice(0, 5);
   const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusSkill), 0) / citizens.length : 0;
-  const focus20 = citizens.filter((c) => getSkill(c, focusSkill) >= 20).length;
-  const focus40 = citizens.filter((c) => getSkill(c, focusSkill) >= 40).length;
+  const focus50 = citizens.filter((c) => getSkill(c, focusSkill) >= 50).length;
+  const focus75 = citizens.filter((c) => getSkill(c, focusSkill) >= 75).length;
   const coverage = SKILL_IDS.map((id) => {
     const levels = citizens.map((c) => getSkill(c, id));
     const max = Math.max(...levels, 0);
     const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
-    const specialists = levels.filter((level) => level >= 40).length;
+    const specialists = levels.filter((level) => level >= 75).length;
     return { id, name: SKILL_NAMES[id], max, avg, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
@@ -520,8 +520,8 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
           <div className="focus-metrics">
             <Info label="Average level" value={formatNumber(focusAverage, 1)} />
-            <Info label="Level 20+" value={`${focus20} members`} />
-            <Info label="Level 40+" value={`${focus40} members`} />
+            <Info label="Level 50+" value={`${focus50} members`} />
+            <Info label="Level 75+" value={`${focus75} members`} />
           </div>
           <div className="focus-list">
             {focusRows.map((citizen) => {
@@ -537,7 +537,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
                 <span>{skill.name}</span>
                 <b>Max {skill.max}</b>
-                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at 40+</small>
+                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at 75+</small>
               </button>
             ))}
           </div>
@@ -596,7 +596,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </tfoot>
         </table>
       </div>
-      <p className="legend">Skill level: <span className="lvl0">0</span> <span className="lvl1">1-19</span> <span className="lvl2">20-39</span> <span className="lvl3">40-49</span> <span className="lvl4">50+</span> - Click any column to sort</p>
+      <p className="legend">Skill level: <span className="lvl0">0</span> <span className="lvl1">1-24</span> <span className="lvl2">25-49</span> <span className="lvl3">50-74</span> <span className="lvl4">75-100</span> - Click any column to sort</p>
     </div>
   );
 }
@@ -607,7 +607,7 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function skillStyle(level: number): React.CSSProperties {
   if (level <= 0) return {};
-  const t = Math.min(1, level / 60);
+  const t = Math.min(1, level / 100);
   if (t < 0.25) return { backgroundColor: `rgba(51,65,85,${0.15 + t * 0.6})` };
   if (t < 0.6) return { backgroundColor: `rgba(120,53,15,${0.1 + t * 0.4})` };
   return { backgroundColor: `rgba(180,83,9,${0.2 + t * 0.45})` };
@@ -615,9 +615,9 @@ function skillStyle(level: number): React.CSSProperties {
 
 function levelClass(level: number): string {
   if (level <= 0) return "lvl0";
-  if (level < 20) return "lvl1";
-  if (level < 40) return "lvl2";
-  if (level < 50) return "lvl3";
+  if (level < 25) return "lvl1";
+  if (level < 50) return "lvl2";
+  if (level < 75) return "lvl3";
   return "lvl4";
 }
 
