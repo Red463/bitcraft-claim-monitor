@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "BitCraft Claim Monitor"
+version = "1.0.0"
+id = "artifacts/bitcraft-monitor"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18428
+
+[services.development]
+run = "pnpm --filter @workspace/bitcraft-monitor run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/bitcraft-monitor", "run", "build" ]
+publicDir = "artifacts/bitcraft-monitor/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18428"
+BASE_PATH = "/"

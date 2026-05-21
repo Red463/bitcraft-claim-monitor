@@ -1,0 +1,829 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: BitCraft Claim Monitor API - proxies Bitjita public API endpoints
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: claim
+    description: Claim data endpoints
+  - name: crafts
+    description: Crafting endpoints
+  - name: claims
+    description: Region claims endpoints
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /bitjita/claims/{claimId}:
+    get:
+      operationId: getClaim
+      tags: [claim]
+      summary: Get claim details
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimDetail"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/members:
+    get:
+      operationId: getClaimMembers
+      tags: [claim]
+      summary: Get claim members
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClaimMember"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/citizens:
+    get:
+      operationId: getClaimCitizens
+      tags: [claim]
+      summary: Get claim citizens
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim citizens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClaimCitizen"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/buildings:
+    get:
+      operationId: getClaimBuildings
+      tags: [claim]
+      summary: Get claim buildings
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim buildings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClaimBuilding"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/layout:
+    get:
+      operationId: getClaimLayout
+      tags: [claim]
+      summary: Get claim layout
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim layout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimLayout"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/inventories:
+    get:
+      operationId: getClaimInventories
+      tags: [claim]
+      summary: Get claim inventories
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim inventories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClaimInventory"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/construction:
+    get:
+      operationId: getClaimConstruction
+      tags: [claim]
+      summary: Get claim construction projects
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim construction
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConstructionProject"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/recruitment:
+    get:
+      operationId: getClaimRecruitment
+      tags: [claim]
+      summary: Get claim recruitment info
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim recruitment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimRecruitment"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/research:
+    get:
+      operationId: getClaimResearch
+      tags: [claim]
+      summary: Get claim research
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Claim research
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimResearch"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/productions:
+    get:
+      operationId: getClaimProductions
+      tags: [claim]
+      summary: Get active production / crafting jobs for a claim
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Active production jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductionJob"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/market/listings:
+    get:
+      operationId: getClaimMarketListings
+      tags: [claim]
+      summary: Get claim market listings
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Market listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MarketListing"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/crafts:
+    get:
+      operationId: getClaimCrafts
+      tags: [crafts]
+      summary: Get active crafts for a claim
+      parameters:
+        - name: claimEntityId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: completed
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Active crafts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CraftOrder"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims/{claimId}/players:
+    get:
+      operationId: getClaimPlayers
+      tags: [claims]
+      summary: Get online status and session info for all claim members
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Player status list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClaimPlayerStatus"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bitjita/claims:
+    get:
+      operationId: getRegionClaims
+      tags: [claims]
+      summary: Get claims in a region
+      parameters:
+        - name: regionId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            default: tier
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            default: desc
+      responses:
+        "200":
+          description: Region claims
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RegionClaim"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    ClaimDetail:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        claimId:
+          type: ["string", "null"]
+        regionId:
+          type: ["string", "null"]
+        regionName:
+          type: ["string", "null"]
+        tier:
+          type: ["integer", "null"]
+        ownerUsername:
+          type: ["string", "null"]
+        ownerEntityId:
+          type: ["string", "null"]
+        locationX:
+          type: ["number", "null"]
+        locationZ:
+          type: ["number", "null"]
+        tileCount:
+          type: ["integer", "null"]
+        supplies:
+          type: ["number", "null"]
+        suppliesMax:
+          type: ["number", "null"]
+        suppliesRunOutAt:
+          type: ["string", "null"]
+        treasury:
+          type: ["number", "null"]
+        upkeepCost:
+          type: ["number", "null"]
+        tileCost:
+          type: ["number", "null"]
+        buildingMaintenance:
+          type: ["number", "null"]
+        currentResearch:
+          type: ["string", "null"]
+        researchProgress:
+          type: ["number", "null"]
+        memberCount:
+          type: ["integer", "null"]
+        citizenCount:
+          type: ["integer", "null"]
+        buildingCount:
+          type: ["integer", "null"]
+        activeConstruction:
+          type: ["integer", "null"]
+        marketListingCount:
+          type: ["integer", "null"]
+        createdAt:
+          type: ["string", "null"]
+        updatedAt:
+          type: ["string", "null"]
+      additionalProperties: {}
+
+    ClaimMember:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        username:
+          type: ["string", "null"]
+        lastLogin:
+          type: ["string", "null"]
+        memberSince:
+          type: ["string", "null"]
+        createdAt:
+          type: ["string", "null"]
+        updatedAt:
+          type: ["string", "null"]
+        inventoryPermission:
+          type: ["integer", "null"]
+        buildPermission:
+          type: ["integer", "null"]
+        officerPermission:
+          type: ["boolean", "null"]
+        coOwnerPermission:
+          type: ["boolean", "null"]
+      additionalProperties: {}
+
+    ClaimCitizen:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        username:
+          type: ["string", "null"]
+        skills:
+          type: ["object", "null"]
+          additionalProperties: {}
+        totalXp:
+          type: ["number", "null"]
+        highestSkillLevel:
+          type: ["number", "null"]
+        totalSkillLevel:
+          type: ["number", "null"]
+      additionalProperties: {}
+
+    ClaimBuilding:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        nickname:
+          type: ["string", "null"]
+        descriptionId:
+          type: ["string", "null"]
+        tier:
+          type: ["integer", "null"]
+        level:
+          type: ["integer", "null"]
+        functions:
+          type: ["array", "null"]
+          items:
+            type: string
+        craftingSlots:
+          type: ["integer", "null"]
+        refiningSlots:
+          type: ["integer", "null"]
+        storageSlots:
+          type: ["integer", "null"]
+        cargoSlots:
+          type: ["integer", "null"]
+        housingSlots:
+          type: ["integer", "null"]
+        tradeOrders:
+          type: ["integer", "null"]
+        terraformCapable:
+          type: ["boolean", "null"]
+        buffIds:
+          type: ["array", "null"]
+          items:
+            type: string
+        locationX:
+          type: ["number", "null"]
+        locationZ:
+          type: ["number", "null"]
+      additionalProperties: {}
+
+    ClaimLayout:
+      type: object
+      properties:
+        tiles:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: {}
+        buildings:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: {}
+        width:
+          type: ["integer", "null"]
+        height:
+          type: ["integer", "null"]
+      additionalProperties: {}
+
+    ClaimInventory:
+      type: object
+      properties:
+        buildingEntityId:
+          type: ["string", "null"]
+        buildingName:
+          type: ["string", "null"]
+        items:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/InventoryItem"
+        locked:
+          type: ["boolean", "null"]
+      additionalProperties: {}
+
+    InventoryItem:
+      type: object
+      properties:
+        name:
+          type: ["string", "null"]
+        quantity:
+          type: ["number", "null"]
+        volume:
+          type: ["number", "null"]
+        tier:
+          type: ["integer", "null"]
+        rarity:
+          type: ["string", "null"]
+        tag:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        isCargo:
+          type: ["boolean", "null"]
+      additionalProperties: {}
+
+    ConstructionProject:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        buildingEntityId:
+          type: ["string", "null"]
+        buildingName:
+          type: ["string", "null"]
+        progress:
+          type: ["number", "null"]
+        requiredMaterials:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: {}
+        startedAt:
+          type: ["string", "null"]
+        updatedAt:
+          type: ["string", "null"]
+      additionalProperties: {}
+
+    ClaimRecruitment:
+      type: object
+      properties:
+        isRecruiting:
+          type: ["boolean", "null"]
+        description:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+      additionalProperties: {}
+
+    ClaimResearch:
+      type: object
+      properties:
+        researched:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: {}
+        available:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: {}
+        current:
+          type: ["object", "null"]
+          additionalProperties: {}
+        startedAt:
+          type: ["string", "null"]
+        progress:
+          type: ["number", "null"]
+      additionalProperties: {}
+
+    MarketListing:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        itemName:
+          type: ["string", "null"]
+        tier:
+          type: ["integer", "null"]
+        rarity:
+          type: ["string", "null"]
+        price:
+          type: ["number", "null"]
+        quantity:
+          type: ["number", "null"]
+        orderType:
+          type: ["string", "null"]
+        ownerUsername:
+          type: ["string", "null"]
+        isCargo:
+          type: ["boolean", "null"]
+        updatedAt:
+          type: ["string", "null"]
+      additionalProperties: {}
+
+    ProductionJob:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        buildingEntityId:
+          type: ["string", "null"]
+        buildingName:
+          type: ["string", "null"]
+        ownerEntityId:
+          type: ["string", "null"]
+        ownerUsername:
+          type: ["string", "null"]
+        itemName:
+          type: ["string", "null"]
+        craftCount:
+          type: ["integer", "null"]
+        progressActions:
+          type: ["integer", "null"]
+        totalActions:
+          type: ["integer", "null"]
+        progressFraction:
+          type: ["number", "null"]
+        lockExpiration:
+          type: ["string", "null"]
+        skillId:
+          type: ["integer", "null"]
+        skillLevel:
+          type: ["integer", "null"]
+        recipeId:
+          type: ["integer", "null"]
+      additionalProperties: {}
+
+    CraftOrder:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        buildingEntityId:
+          type: ["string", "null"]
+        itemName:
+          type: ["string", "null"]
+        quantity:
+          type: ["number", "null"]
+        progress:
+          type: ["number", "null"]
+        completed:
+          type: ["boolean", "null"]
+        startedAt:
+          type: ["string", "null"]
+        updatedAt:
+          type: ["string", "null"]
+      additionalProperties: {}
+
+    ClaimPlayerStatus:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        username:
+          type: ["string", "null"]
+        signedIn:
+          type: ["boolean", "null"]
+        signInTimestamp:
+          type: ["string", "null"]
+        sessionSeconds:
+          type: ["number", "null"]
+        timePlayed:
+          type: ["number", "null"]
+        lastLogin:
+          type: ["string", "null"]
+        locationX:
+          type: ["number", "null"]
+        locationZ:
+          type: ["number", "null"]
+      additionalProperties: {}
+
+    RegionClaim:
+      type: object
+      properties:
+        entityId:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        tier:
+          type: ["integer", "null"]
+        supplies:
+          type: ["number", "null"]
+        treasury:
+          type: ["number", "null"]
+        tileCount:
+          type: ["integer", "null"]
+        learnedCount:
+          type: ["integer", "null"]
+        ownerUsername:
+          type: ["string", "null"]
+        regionId:
+          type: ["string", "null"]
+        locationX:
+          type: ["number", "null"]
+        locationZ:
+          type: ["number", "null"]
+      additionalProperties: {}
