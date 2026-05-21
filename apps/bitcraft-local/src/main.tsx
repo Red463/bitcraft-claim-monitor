@@ -316,36 +316,91 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
 }
 
 function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel) => void }) {
-  const { claim, members, buildings, market } = data;
+  const { claim, members, buildings, market, construction, crafts, research } = data;
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
   const suppliesPerDay = toNumber(claim.tileCost) * toNumber(claim.numTiles);
   const runOut = claim.suppliesRunOut ? new Date(toNumber(claim.suppliesRunOut)).toLocaleString() : "Unknown";
+  const onlineCount = data.players.filter((player) => player.signedIn).length;
+  const activeCrafts = crafts.filter((job) => {
+    const progress = toNumber(job.progress);
+    const total = toNumber(job.totalActionsRequired);
+    return total > 0 && progress > 0 && progress < total;
+  }).length;
+  const activeProjects = construction.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
+  const researched = research.filter((item) => item.isResearched).length;
+  const supplyDays = suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
+  const treasuryDays = upkeep > 0 ? treasury / upkeep : 0;
+  const supplyPct = Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
+  const treasuryPct = Math.max(4, Math.min(100, treasuryDays ? (Math.min(treasuryDays, 14) / 14) * 100 : 0));
+  const health = supplies < 2000 || (upkeep > 0 && treasury < upkeep * 7) ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
+  const attention = [
+    supplies < 2000 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatNumber(supplies)} supplies remaining`, panel: "inventory" as ActivePanel } : null,
+    upkeep > 0 && treasury < upkeep * 7 ? { icon: <CircleDollarSign />, title: "Treasury runway", body: `${formatNumber(treasuryDays, 1)} days at current upkeep`, panel: "market" as ActivePanel } : null,
+    activeProjects ? { icon: <Hammer />, title: "Construction active", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel } : null,
+    crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} working, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
+    !market.length ? { icon: <ShoppingCart />, title: "No market listings", body: "No current settlement market activity", panel: "market" as ActivePanel } : null,
+  ].filter(Boolean) as Array<{ icon: React.ReactNode; title: string; body: string; panel: ActivePanel }>;
   return (
     <div className="panel">
-      <Header title={`${claim.name ?? "Claim"} Command Center`}>
-        Tier {claim.tier ?? "?"} settlement in {claim.regionName ?? "Unknown region"} - Owner {claim.ownerPlayerUsername ?? "Unknown"}
-      </Header>
-      <div className="stat-grid">
-        <Stat label="Supplies" value={formatNumber(supplies)} icon={<Box />} warn={supplies < 2000} />
-        <Stat label="Treasury" value={`${formatNumber(treasury)}g`} icon={<CircleDollarSign />} warn={upkeep > 0 && treasury < upkeep * 7} />
-        <Stat label="Upkeep" value={`${upkeep.toFixed(2)}g/day`} icon={<Shield />} />
-        <Stat label="Tiles" value={formatNumber(claim.numTiles)} icon={<Hammer />} />
-        <Stat label="Members" value={members.length} icon={<Users />} onClick={() => onNavigate("members")} />
-        <Stat label="Buildings" value={buildings.length} icon={<Building2 />} onClick={() => onNavigate("buildings")} />
-        <Stat label="Market Listings" value={market.length} icon={<Package />} onClick={() => onNavigate("market")} />
-        <Stat label="Supplies Run Out" value={runOut} icon={<Activity />} warn={supplies < 2000} />
+      <section className="overview-hero">
+        <div>
+          <span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span>
+          <h2>{claim.name ?? "Claim"} Command Center</h2>
+          <p>Tier {claim.tier ?? "?"} settlement in {claim.regionName ?? "Unknown region"} - Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
+        </div>
+        <div className="hero-metrics">
+          <button onClick={() => onNavigate("members")}><strong>{onlineCount}</strong><span>Online</span></button>
+          <button onClick={() => onNavigate("buildings")}><strong>{buildings.length}</strong><span>Buildings</span></button>
+          <button onClick={() => onNavigate("market")}><strong>{market.length}</strong><span>Market</span></button>
+        </div>
+      </section>
+
+      <div className="ops-grid">
+        <section className="ops-card">
+          <header><Box /><span>Supply Runway</span><strong>{supplyDays ? `${formatNumber(supplyDays, 1)}d` : "Unknown"}</strong></header>
+          <div className="progress"><div style={{ width: `${supplyPct}%` }} /></div>
+          <Info label="Current stock" value={formatNumber(supplies)} />
+          <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
+          <Info label="Runs out" value={runOut} />
+        </section>
+        <section className="ops-card">
+          <header><CircleDollarSign /><span>Treasury Runway</span><strong>{upkeep ? `${formatNumber(treasuryDays, 1)}d` : "No upkeep"}</strong></header>
+          <div className="progress"><div style={{ width: `${treasuryPct}%` }} /></div>
+          <Info label="Treasury" value={`${formatNumber(treasury)}g`} />
+          <Info label="Upkeep" value={`${formatNumber(upkeep, 2)}g/day`} />
+          <Info label="Tiles" value={formatNumber(claim.numTiles)} />
+        </section>
+        <section className="ops-card">
+          <header><Factory /><span>Work Queue</span><strong>{activeCrafts + activeProjects}</strong></header>
+          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active / {crafts.length} jobs</strong></button>
+          <button className="ops-link" onClick={() => onNavigate("construction")}><span>Construction</span><strong>{activeProjects} projects</strong></button>
+          <button className="ops-link" onClick={() => onNavigate("research")}><span>Research</span><strong>{researched} complete</strong></button>
+        </section>
       </div>
-      <div className="detail-grid">
-        {[
-          ["Entity ID", claim.entityId],
-          ["Region", `${claim.regionName ?? "Unknown"} (${claim.regionId ?? "?"})`],
-          ["Empire", claim.empireName ?? "None"],
-          ["Location", `${claim.locationX ?? "?"}, ${claim.locationZ ?? "?"}`],
-          ["Upkeep", `${formatNumber(upkeep, 2)}g/day`],
-          ["Tile Cost", `${formatNumber(suppliesPerDay, 2)} supplies per day`],
-        ].map(([label, value]) => <Info key={label} label={label} value={value} />)}
+
+      <div className="overview-layout">
+        <section className="attention-panel">
+          <h3><AlertTriangle size={17} /> What Needs Attention</h3>
+          {attention.length ? attention.map((item) => (
+            <button key={item.title} onClick={() => onNavigate(item.panel)}>
+              <span>{item.icon}</span>
+              <strong>{item.title}</strong>
+              <small>{item.body}</small>
+            </button>
+          )) : <p className="legend">No urgent settlement issues detected from the current snapshot.</p>}
+        </section>
+        <section className="detail-grid overview-details">
+          {[
+            ["Entity ID", claim.entityId],
+            ["Region", `${claim.regionName ?? "Unknown"} (${claim.regionId ?? "?"})`],
+            ["Empire", claim.empireName ?? "None"],
+            ["Location", `${claim.locationX ?? "?"}, ${claim.locationZ ?? "?"}`],
+            ["Members", `${members.length} total`],
+            ["Market Listings", market.length],
+          ].map(([label, value]) => <Info key={label} label={label} value={value} />)}
+        </section>
       </div>
     </div>
   );
