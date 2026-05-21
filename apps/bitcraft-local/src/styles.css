@@ -31,7 +31,7 @@ h1, h2, h3 { font-family: Rajdhani, sans-serif; letter-spacing: 0; margin: 0; }
 .brand h1 { font-size: 16px; text-transform: uppercase; line-height: 1; }
 .brand span { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; margin-top: 3px; }
 nav { padding: 14px 10px; display: grid; gap: 3px; }
-nav button, .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+nav button, .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
 nav button:hover, .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
 nav button.active { color: var(--gold); background: var(--gold-dim); border-color: rgba(240,198,79,.38); }
 .refresh-status { margin: auto 12px 14px; padding: 11px 12px; border: 1px solid var(--border); background: var(--panel-2); border-radius: 8px; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
@@ -224,6 +224,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .player-pills button { display: inline-flex; align-items: center; gap: 6px; }
 .player-pills .online-dot { margin: 0; width: 7px; height: 7px; }
 .map-frame { width: 100%; min-height: 620px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.sync-panel { min-height: 100vh; grid-template-rows: auto minmax(720px, 1fr); }
+.sync-frame { width: 100%; min-height: 720px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .activity-list { display: grid; gap: 8px; }
 .activity-list div, .activity-list p { margin: 0; padding: 12px 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 7px; color: var(--muted); }
 .activity-list div { display: grid; gap: 4px; }

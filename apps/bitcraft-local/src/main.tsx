@@ -32,6 +32,7 @@ import {
   Save,
   Search,
   Shield,
+  Share2,
   ShoppingBag,
   ShoppingCart,
   Star,
@@ -45,6 +46,7 @@ import {
 import "./styles.css";
 
 const DEFAULT_CLAIM_ID = "1369094286777412590";
+const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
@@ -65,6 +67,7 @@ const NAV = [
   ["market", "Market", CircleDollarSign],
   ["empire", "Region", Globe2],
   ["map", "Map", MapIcon],
+  ["sync", "Sync", Share2],
   ["activity", "Activity", Activity],
   ["admin", "Admin", KeyRound],
 ] as const;
@@ -1280,12 +1283,25 @@ function DataTable({ rows, columns }: { rows: AnyRecord[]; columns: Array<[strin
   );
 }
 
-function AdminPanel({ claimId, theme, onSettingsSaved }: { claimId: string; theme: typeof DEFAULT_THEME; onSettingsSaved: (settings: { claimId: string; theme: typeof DEFAULT_THEME }) => void }) {
+function SyncPanel({ syncUrl }: { syncUrl: string }) {
+  return (
+    <div className="panel sync-panel">
+      <div className="split-header">
+        <Header title="Sync">Embedded BitCraft Sync materials and goals board</Header>
+        <a className="toolbar-button" href={syncUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open Full Page</a>
+      </div>
+      <iframe className="sync-frame" src={syncUrl} title="BitCraft Sync" />
+    </div>
+  );
+}
+
+function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME; onSettingsSaved: (settings: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME }) => void }) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [password, setPassword] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [nextClaimId, setNextClaimId] = React.useState(claimId);
+  const [nextSyncUrl, setNextSyncUrl] = React.useState(syncUrl);
   const [nextTheme, setNextTheme] = React.useState<typeof DEFAULT_THEME>(theme);
   const [tables, setTables] = React.useState<Array<{ name: string; rows: number }>>([]);
   const [selectedTable, setSelectedTable] = React.useState("");
@@ -1320,7 +1336,7 @@ function AdminPanel({ claimId, theme, onSettingsSaved }: { claimId: string; them
   }
 
   React.useEffect(() => { refreshAuth(); }, []);
-  React.useEffect(() => { setNextClaimId(claimId); setNextTheme(theme); }, [claimId, theme]);
+  React.useEffect(() => { setNextClaimId(claimId); setNextSyncUrl(syncUrl); setNextTheme(theme); }, [claimId, syncUrl, theme]);
   React.useEffect(() => { if (auth?.authenticated) applyTheme(nextTheme); }, [auth?.authenticated, nextTheme]);
   React.useEffect(() => { if (auth?.authenticated) refreshTables(); }, [auth?.authenticated]);
   React.useEffect(() => {
@@ -1344,7 +1360,7 @@ function AdminPanel({ claimId, theme, onSettingsSaved }: { claimId: string; them
   async function saveSettings() {
     setMessage(null);
     try {
-      const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify({ claimId: nextClaimId, theme: nextTheme }) });
+      const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify({ claimId: nextClaimId, syncUrl: nextSyncUrl, theme: nextTheme }) });
       onSettingsSaved(result);
       setMessage("Settings saved.");
     } catch (error) {
@@ -1392,6 +1408,7 @@ function AdminPanel({ claimId, theme, onSettingsSaved }: { claimId: string; them
         <section className="form-card">
           <h3><Shield size={17} /> Settlement</h3>
           <label className="field"><span>Settlement ID</span><input value={nextClaimId} onChange={(event) => setNextClaimId(event.target.value)} /></label>
+          <label className="field"><span>BitCraft Sync URL</span><input value={nextSyncUrl} onChange={(event) => setNextSyncUrl(event.target.value)} placeholder={DEFAULT_SYNC_URL} /></label>
           <button className="toolbar-button" onClick={saveSettings}><Save size={15} /> Save Settings</button>
         </section>
         <section className="form-card">
@@ -1417,6 +1434,7 @@ function AdminPanel({ claimId, theme, onSettingsSaved }: { claimId: string; them
 function App() {
   const [active, setActive] = React.useState<(typeof NAV)[number][0]>("overview");
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
+  const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
@@ -1433,6 +1451,7 @@ function App() {
       .then((config) => {
         if (!config) return;
         setClaimId(config.claimId ?? DEFAULT_CLAIM_ID);
+        setSyncUrl(config.syncUrl ?? DEFAULT_SYNC_URL);
         setTheme({ ...DEFAULT_THEME, ...(config.theme ?? {}) });
       })
       .catch(() => undefined);
@@ -1485,8 +1504,9 @@ function App() {
     market: <Market data={data} history={localHistory.market} />,
     empire: <Region data={data} />,
     map: <MapPanel data={data} />,
+    sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} error={localHistory.error} />,
-    admin: <AdminPanel claimId={claimId} theme={theme} onSettingsSaved={(settings) => { setClaimId(settings.claimId); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel claimId={claimId} syncUrl={syncUrl} theme={theme} onSettingsSaved={(settings) => { setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
   return (

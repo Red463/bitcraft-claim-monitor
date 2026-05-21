@@ -100,6 +100,7 @@ ensureColumn("market_events", "item_type", "TEXT");
 ensureColumn("market_events", "trade_id", "TEXT");
 
 const defaultClaimId = "1369094286777412590";
+const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 const defaultTheme = {
   bg: "#0c0d10",
   sidebar: "#06070a",
@@ -114,6 +115,7 @@ const defaultTheme = {
 };
 const now = new Date().toISOString();
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("claim_id", defaultClaimId, now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("bitcraft_sync_url", defaultSyncUrl, now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
 
 const statements = {
@@ -228,8 +230,18 @@ function getSettings() {
   const theme = JSON.parse(statements.getSetting.get("theme_json")?.value ?? JSON.stringify(defaultTheme));
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
+    syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
     theme,
   };
+}
+
+function validSyncUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === "bitcraftsync.app";
+  } catch {
+    return false;
+  }
 }
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
@@ -590,10 +602,13 @@ const server = createServer(async (req, res) => {
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
         const body = await readJson(req);
         const nextClaimId = String(body.claimId ?? "").trim();
+        const nextSyncUrl = String(body.syncUrl ?? defaultSyncUrl).trim();
         if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
+        if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
         const updatedAt = new Date().toISOString();
         statements.upsertSetting.run("claim_id", nextClaimId, updatedAt);
+        statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
         return send(res, 200, getSettings());
       }
