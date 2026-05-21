@@ -1514,7 +1514,11 @@ function App() {
       <aside>
         <div className="brand"><Shield /><div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
         <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><Icon size={16} />{label}</button>)}</nav>
-        <div className="refresh-status"><RefreshCw size={14} /> <span>Auto updates every 30s{lastUpdated ? <small>Last {lastUpdated.toLocaleTimeString()}</small> : null}</span></div>
+        <div className="refresh-status" title="Data refreshes automatically every 30 seconds">
+          <span className="refresh-dot" />
+          <span>Updated</span>
+          <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
+        </div>
       </aside>
       <main>
         {state.loading && !state.data ? <div className="loading">Loading BitJita data...</div> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : panels[active]}

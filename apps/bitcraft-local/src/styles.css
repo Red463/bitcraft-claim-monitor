@@ -34,10 +34,9 @@ nav { padding: 14px 10px; display: grid; gap: 3px; }
 nav button, .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
 nav button:hover, .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
 nav button.active { color: var(--gold); background: var(--gold-dim); border-color: rgba(240,198,79,.38); }
-.refresh-status { margin: auto 12px 14px; padding: 11px 12px; border: 1px solid var(--border); background: var(--panel-2); border-radius: 8px; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
-.refresh-status svg { color: var(--gold); }
-.refresh-status span { display: grid; gap: 2px; }
-.refresh-status small { color: #7f8797; }
+.refresh-status { margin: auto 18px 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); display: grid; grid-template-columns: 8px auto 1fr; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.refresh-status time { justify-self: end; color: var(--text); font-family: "JetBrains Mono", monospace; font-size: 11px; text-transform: none; }
+.refresh-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--good); box-shadow: 0 0 0 3px rgba(78,226,138,.12); }
 main { min-width: 0; max-height: 100vh; overflow: auto; }
 .panel { padding: 26px; display: grid; gap: 20px; }
 .section-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
