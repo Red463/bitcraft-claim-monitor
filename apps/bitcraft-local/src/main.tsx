@@ -490,14 +490,16 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const topMember = sorted[0] ? getName(sorted[0]) : "-";
   const focusRows = [...citizens].sort((a, b) => getSkill(b, focusSkill) - getSkill(a, focusSkill)).slice(0, 5);
   const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusSkill), 0) / citizens.length : 0;
-  const focus50 = citizens.filter((c) => getSkill(c, focusSkill) >= 50).length;
-  const focus75 = citizens.filter((c) => getSkill(c, focusSkill) >= 75).length;
+  const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusSkill))), 0);
+  const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 5).length;
+  const focusT8 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 8).length;
   const coverage = SKILL_IDS.map((id) => {
     const levels = citizens.map((c) => getSkill(c, id));
     const max = Math.max(...levels, 0);
     const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
-    const specialists = levels.filter((level) => level >= 75).length;
-    return { id, name: SKILL_NAMES[id], max, avg, specialists };
+    const tier = skillTier(max);
+    const specialists = levels.filter((level) => skillTier(level) >= 8).length;
+    return { id, name: SKILL_NAMES[id], max, avg, tier, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
@@ -520,8 +522,9 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
           <div className="focus-metrics">
             <Info label="Average level" value={formatNumber(focusAverage, 1)} />
-            <Info label="Level 50+" value={`${focus50} members`} />
-            <Info label="Level 75+" value={`${focus75} members`} />
+            <Info label="Best tier" value={focusTier ? `T${focusTier}` : "-"} />
+            <Info label="T5+" value={`${focusT5} members`} />
+            <Info label="T8+" value={`${focusT8} members`} />
           </div>
           <div className="focus-list">
             {focusRows.map((citizen) => {
@@ -536,8 +539,8 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             {coverage.slice(0, 8).map((skill) => (
               <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
                 <span>{skill.name}</span>
-                <b>Max {skill.max}</b>
-                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at 75+</small>
+                <b>{skill.tier ? `T${skill.tier}` : "-"} / Lv {skill.max}</b>
+                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T8+</small>
               </button>
             ))}
           </div>
@@ -577,7 +580,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
                   <td className="numeric best">{getHighest(citizen)}</td>
                   {SKILL_IDS.map((id) => {
                     const level = getSkill(citizen, id);
-                    return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${SKILL_NAMES[id]}: Lv ${level}`}>{level > 0 ? level : "-"}</td>;
+                    return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${SKILL_NAMES[id]}: Lv ${level} (${skillTierLabel(level)})`}>{level > 0 ? level : "-"}</td>;
                   })}
                 </tr>
               );
@@ -590,13 +593,13 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <td className="numeric best">{settlementBest}</td>
               {SKILL_IDS.map((id) => {
                 const max = Math.max(...citizens.map((c) => getSkill(c, id)), 0);
-                return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)}>{max > 0 ? max : "-"}</td>;
+                return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)} title={`${SKILL_NAMES[id]} max: Lv ${max} (${skillTierLabel(max)})`}>{max > 0 ? max : "-"}</td>;
               })}
             </tr>
           </tfoot>
         </table>
       </div>
-      <p className="legend">Skill level: <span className="lvl0">0</span> <span className="lvl1">1-24</span> <span className="lvl2">25-49</span> <span className="lvl3">50-74</span> <span className="lvl4">75-100</span> - Click any column to sort</p>
+      <p className="legend">Skill tiers: <span className="lvl0">0</span> <span className="lvl1">T1-T2</span> <span className="lvl2">T3-T5</span> <span className="lvl3">T6-T8</span> <span className="lvl4">T9-T10</span> - cells show exact level, hover for tier</p>
     </div>
   );
 }
@@ -607,17 +610,31 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function skillStyle(level: number): React.CSSProperties {
   if (level <= 0) return {};
-  const t = Math.min(1, level / 100);
+  const t = Math.min(1, skillTier(level) / 10);
   if (t < 0.25) return { backgroundColor: `rgba(51,65,85,${0.15 + t * 0.6})` };
   if (t < 0.6) return { backgroundColor: `rgba(120,53,15,${0.1 + t * 0.4})` };
   return { backgroundColor: `rgba(180,83,9,${0.2 + t * 0.45})` };
 }
 
+function skillTier(level: number): number {
+  if (level <= 0) return 0;
+  return Math.min(10, Math.max(1, Math.floor(level / 10) + 1));
+}
+
+function skillTierLabel(level: number): string {
+  const tier = skillTier(level);
+  if (!tier) return "No tier";
+  const low = tier === 1 ? 0 : (tier - 1) * 10;
+  const high = tier === 10 ? 100 : tier * 10 - 1;
+  return `T${tier} (${low}-${high})`;
+}
+
 function levelClass(level: number): string {
-  if (level <= 0) return "lvl0";
-  if (level < 25) return "lvl1";
-  if (level < 50) return "lvl2";
-  if (level < 75) return "lvl3";
+  const tier = skillTier(level);
+  if (tier <= 0) return "lvl0";
+  if (tier <= 2) return "lvl1";
+  if (tier <= 5) return "lvl2";
+  if (tier <= 8) return "lvl3";
   return "lvl4";
 }
 
