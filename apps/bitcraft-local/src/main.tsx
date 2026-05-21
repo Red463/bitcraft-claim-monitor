@@ -328,7 +328,8 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
     const total = toNumber(job.totalActionsRequired);
     return total > 0 && progress > 0 && progress < total;
   }).length;
-  const activeProjects = construction.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
+  const constructionProjects = Array.isArray(construction) ? construction : (construction.projects ?? []);
+  const activeProjects = constructionProjects.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
   const researched = research.filter((item) => item.isResearched).length;
   const supplyDays = suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
   const treasuryDays = upkeep > 0 ? treasury / upkeep : 0;
