@@ -835,7 +835,17 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = React.useState("All");
   const [rarity, setRarity] = React.useState("All");
-  const all = data.market;
+  const [memberFilter, setMemberFilter] = React.useState("All");
+  const memberOptions = React.useMemo(() => {
+    const names = [
+      ...data.members.map((member) => member.username ?? member.playerUsername ?? member.name),
+      ...data.market.map((listing) => listing.ownerUsername ?? listing.owner ?? listing.ownerName),
+      ...(history?.events ?? []).map((event: AnyRecord) => event.owner),
+    ].filter(Boolean).map(String);
+    return unique(names).sort((a, b) => a.localeCompare(b));
+  }, [data.members, data.market, history?.events]);
+  const ownerMatches = React.useCallback((owner: unknown) => memberFilter === "All" || String(owner ?? "").toLowerCase() === memberFilter.toLowerCase(), [memberFilter]);
+  const all = data.market.filter((listing) => ownerMatches(listing.ownerUsername ?? listing.owner ?? listing.ownerName));
   const sellOrders = all.filter((m) => String(m.side ?? m.orderType ?? "sell").toLowerCase().includes("sell"));
   const buyOrders = all.filter((m) => String(m.side ?? m.orderType ?? "").toLowerCase().includes("buy"));
   const current = tab === "sell" ? (sellOrders.length ? sellOrders : all) : buyOrders;
@@ -848,15 +858,26 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
     return true;
   });
   const highest = [...all].sort((a, b) => toNumber(b.price) * toNumber(b.quantity || 1) - toNumber(a.price) * toNumber(a.quantity || 1)).slice(0, 3);
-  const events = history?.events ?? [];
-  const topItems = history?.topItems ?? [];
-  const daily = history?.daily ?? [];
-  const totals = history?.totals ?? {};
-  const pending = history?.pending ?? [];
+  const events = (history?.events ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
+  const saleEvents = events.filter((event: AnyRecord) => ["sale", "partial_sale"].includes(String(event.event_type)));
+  const topItems = buildMarketTopItems(saleEvents);
+  const daily = buildMarketDaily(saleEvents);
+  const totals = buildMarketTotals(events);
+  const pending = (history?.pending ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
+  const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
   return (
     <div className="panel">
-      <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} confirmed sales tracked locally</Header>
+      <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} confirmed sales tracked locally for {filterLabel}</Header>
+      <div className="toolbar-row">
+        <label className="inline-field">
+          <span>Member</span>
+          <select className="select-control" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
+            <option>All</option>
+            {memberOptions.map((name) => <option key={name}>{name}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="tabs primary-tabs">
         <button className={view === "live" ? "active" : ""} onClick={() => setView("live")}><ShoppingCart size={15} /> Live Listings</button>
         <button className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><TrendingUp size={15} /> Analytics</button>
@@ -913,7 +934,7 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
       ) : (
         <>
       <div className="metric-grid">
-        <MiniStat icon={<ShoppingCart />} label="Total Listings" value={all.length} />
+        <MiniStat icon={<ShoppingCart />} label="Visible Listings" value={all.length} />
         <MiniStat icon={<TrendingDown />} label="Sell Orders" value={sellOrders.length || all.length} />
         <MiniStat icon={<TrendingUp />} label="Buy Orders" value={buyOrders.length} />
         <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? `${formatNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1))}g` : "-"} />
@@ -938,6 +959,49 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
       )}
     </div>
   );
+}
+
+function buildMarketTotals(events: AnyRecord[]) {
+  return events.reduce((acc, event) => {
+    const type = String(event.event_type ?? "");
+    if (type === "new_listing") acc.newListings += 1;
+    if (type === "sale" || type === "partial_sale") {
+      acc.confirmedSales += 1;
+      acc.trackedValue += toNumber(event.total_value ?? event.totalValue);
+    }
+    if (type === "removed_or_cancelled" || type === "sold_or_removed") acc.removedOrCancelled += 1;
+    if (type === "partial_quantity_drop") acc.unconfirmedQuantityDrops += 1;
+    return acc;
+  }, { newListings: 0, confirmedSales: 0, removedOrCancelled: 0, unconfirmedQuantityDrops: 0, trackedValue: 0 });
+}
+
+function buildMarketTopItems(events: AnyRecord[]) {
+  const grouped = new Map<string, { itemName: string; soldCount: number; totalValue: number; totalPrice: number; lastSoldAt: string }>();
+  for (const event of events) {
+    const itemName = String(event.item_name ?? event.itemName ?? "Unknown Item");
+    const current = grouped.get(itemName) ?? { itemName, soldCount: 0, totalValue: 0, totalPrice: 0, lastSoldAt: "" };
+    current.soldCount += 1;
+    current.totalValue += toNumber(event.total_value ?? event.totalValue);
+    current.totalPrice += toNumber(event.price);
+    current.lastSoldAt = String(current.lastSoldAt && current.lastSoldAt > String(event.occurred_at) ? current.lastSoldAt : event.occurred_at ?? "");
+    grouped.set(itemName, current);
+  }
+  return [...grouped.values()]
+    .map((item) => ({ ...item, avgPrice: item.soldCount ? item.totalPrice / item.soldCount : 0 }))
+    .sort((a, b) => b.soldCount - a.soldCount || b.totalValue - a.totalValue)
+    .slice(0, 20);
+}
+
+function buildMarketDaily(events: AnyRecord[]) {
+  const grouped = new Map<string, { day: string; soldCount: number; totalValue: number }>();
+  for (const event of events) {
+    const day = String(event.occurred_at ?? event.occurredAt ?? "").slice(0, 10) || "Unknown";
+    const current = grouped.get(day) ?? { day, soldCount: 0, totalValue: 0 };
+    current.soldCount += 1;
+    current.totalValue += toNumber(event.total_value ?? event.totalValue);
+    grouped.set(day, current);
+  }
+  return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
 }
 
 function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null } }) {
