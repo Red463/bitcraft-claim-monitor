@@ -48,6 +48,8 @@ main { min-width: 0; max-height: 100vh; overflow: auto; }
 .toolbar-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
 .inline-field { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .inline-field span { text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+.mini-action { min-height: 28px; border: 1px solid rgba(240,198,79,.42); border-radius: 6px; background: rgba(240,198,79,.1); color: var(--gold); padding: 0 9px; cursor: pointer; font-size: 12px; }
+.mini-action:hover { border-color: rgba(240,198,79,.72); background: rgba(240,198,79,.16); }
 .loading, .error { margin: 26px; padding: 18px; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; }
 .error { border-color: rgba(239,100,97,.5); color: #ffaba8; }
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }

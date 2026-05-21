@@ -829,13 +829,14 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   return <div className="panel"><Header title="Research & Technology">{researched.length} researched - {available.length} available to unlock</Header><div className="two-col"><section><h3><CheckCircle2 size={17} /> Researched ({researched.length})</h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available ({available.length})</h3>{available.map((item) => card(item, false))}</section></div></div>;
 }
 
-function Market({ data, history }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null }) {
+function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; onHistoryChanged: () => void }) {
   const [q, setQ] = React.useState("");
   const [view, setView] = React.useState<"live" | "analytics">("live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = React.useState("All");
   const [rarity, setRarity] = React.useState("All");
   const [memberFilter, setMemberFilter] = React.useState("All");
+  const [resolveMessage, setResolveMessage] = React.useState<string | null>(null);
   const memberOptions = React.useMemo(() => {
     const names = [
       ...data.members.map((member) => member.username ?? member.playerUsername ?? member.name),
@@ -866,6 +867,22 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
   const pending = (history?.pending ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
+  async function markCancelled(event: AnyRecord) {
+    setResolveMessage(null);
+    try {
+      const response = await fetch(`${LOCAL_API}/market/event/resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: event.id, claimId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      setResolveMessage("Marked as cancelled.");
+      onHistoryChanged();
+    } catch (error) {
+      setResolveMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
   return (
     <div className="panel">
       <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} confirmed sales tracked locally for {filterLabel}</Header>
@@ -910,7 +927,8 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
           </div>
           {pending.length ? (
             <section className="warning-section">
-              <h3><AlertTriangle size={17} /> Pending Confirmation ({pending.length})</h3>
+              <h3><AlertTriangle size={17} /> Unconfirmed Quantity Drops ({pending.length})</h3>
+              {resolveMessage ? <p className="legend">{resolveMessage}</p> : null}
               <DataTable rows={pending} columns={[
                 ["When", r => dateLabel(r.occurred_at)],
                 ["Status", r => String(r.event_type).replaceAll("_", " ")],
@@ -918,6 +936,7 @@ function Market({ data, history }: { data: ReturnType<typeof normalizeData>; his
                 ["Qty", r => formatNumber(r.quantity)],
                 ["Price", r => `${formatNumber(r.price)}g`],
                 ["Owner", r => r.owner ?? "-"],
+                ["Action", r => <button className="mini-action" onClick={() => markCancelled(r)}>Mark Cancelled</button>],
               ]} />
             </section>
           ) : null}
@@ -969,7 +988,7 @@ function buildMarketTotals(events: AnyRecord[]) {
       acc.confirmedSales += 1;
       acc.trackedValue += toNumber(event.total_value ?? event.totalValue);
     }
-    if (type === "removed_or_cancelled" || type === "sold_or_removed") acc.removedOrCancelled += 1;
+    if (type === "removed_or_cancelled" || type === "sold_or_removed" || type === "quantity_cancelled") acc.removedOrCancelled += 1;
     if (type === "partial_quantity_drop") acc.unconfirmedQuantityDrops += 1;
     return acc;
   }, { newListings: 0, confirmedSales: 0, removedOrCancelled: 0, unconfirmedQuantityDrops: 0, trackedValue: 0 });
@@ -1565,7 +1584,7 @@ function App() {
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} onHistoryChanged={() => setHistoryRefreshToken((x) => x + 1)} />,
     empire: <Region data={data} />,
     map: <MapPanel data={data} />,
     sync: <SyncPanel syncUrl={syncUrl} />,

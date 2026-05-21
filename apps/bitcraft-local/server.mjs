@@ -154,12 +154,13 @@ const statements = {
   pendingMarketEvents: db.prepare(`
     SELECT * FROM market_events
     WHERE claim_id = ?
-      AND event_type IN ('removed_or_cancelled', 'partial_quantity_drop')
+      AND event_type = 'partial_quantity_drop'
       AND trade_id IS NULL
     ORDER BY occurred_at DESC
     LIMIT 50
   `),
   confirmMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, trade_id = ?, raw_json = ? WHERE id = ?"),
+  resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
   insertActivity: db.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
     VALUES (?, ?, ?, ?, ?)
@@ -544,11 +545,32 @@ function marketHistory(claimId, limit) {
   `).get(claimId);
   const pending = db.prepare(`
     SELECT * FROM market_events
-    WHERE claim_id = ? AND event_type IN ('removed_or_cancelled', 'partial_quantity_drop') AND trade_id IS NULL
+    WHERE claim_id = ? AND event_type = 'partial_quantity_drop' AND trade_id IS NULL
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(claimId);
   return { events, topItems, daily, totals, pending };
+}
+
+function resolveMarketEvent(body) {
+  const id = Number(body.id);
+  const claimId = String(body.claimId ?? "");
+  if (!id || !claimId) throw new Error("Missing market event id or claim id");
+  const event = db.prepare("SELECT * FROM market_events WHERE id = ? AND claim_id = ?").get(id, claimId);
+  if (!event) throw new Error("Market event not found");
+  if (event.event_type !== "partial_quantity_drop") throw new Error("Only partial quantity drops can be manually resolved");
+  const raw = JSON.stringify({ resolvedAs: "quantity_cancelled", resolvedAt: new Date().toISOString(), previous: safeJson(event.raw_json) });
+  statements.resolveMarketEvent.run("quantity_cancelled", raw, id, claimId);
+  addActivity(claimId, "market_quantity_cancelled", `Marked cancelled: ${event.item_name} x${toNumber(event.quantity).toLocaleString()} at ${toNumber(event.price).toLocaleString()}g`, new Date().toISOString(), { id, itemName: event.item_name, quantity: event.quantity, price: event.price, owner: event.owner });
+  return { ok: true };
+}
+
+function safeJson(value) {
+  try {
+    return JSON.parse(value ?? "{}");
+  } catch {
+    return {};
+  }
 }
 
 async function readJson(req) {
@@ -621,6 +643,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") return send(res, 200, await recordSnapshot(await readJson(req)));
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100)));
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
+      return send(res, 200, resolveMarketEvent(await readJson(req)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
       const claimId = url.searchParams.get("claimId") ?? "";
