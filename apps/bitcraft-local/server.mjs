@@ -134,7 +134,7 @@ const statements = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `),
   listingByKey: db.prepare("SELECT * FROM market_listings WHERE listing_key = ?"),
-  activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),
+  activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),
   upsertListing: db.prepare(`
     INSERT INTO market_listings (listing_key, claim_id, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, first_seen, last_seen, status, sold_at, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
@@ -578,6 +578,7 @@ async function collectServerSnapshot() {
 }
 
 function marketHistory(claimId, limit) {
+  const liveListings = statements.activeListings.all(claimId);
   const events = db.prepare("SELECT * FROM market_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const topItems = db.prepare(`
@@ -612,7 +613,7 @@ function marketHistory(claimId, limit) {
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(claimId);
-  return { events, topItems, daily, totals, pending };
+  return { liveListings, events, topItems, daily, totals, pending };
 }
 
 function resolveMarketEvent(body) {

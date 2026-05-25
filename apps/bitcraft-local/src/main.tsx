@@ -254,6 +254,18 @@ function timeAgo(value: unknown): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function listingTrackingKey(listing: AnyRecord): string {
+  return String(listing.entityId ?? listing.id ?? listing.marketListingId ?? listing.listingId ?? "");
+}
+
+function liveDaysSince(value: unknown): string {
+  if (!value) return "-";
+  const elapsed = Date.now() - new Date(String(value)).getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 0) return "-";
+  const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
+  return days === 0 ? "<1 day" : `${days} day${days === 1 ? "" : "s"}`;
+}
+
 function formatDuration(seconds: unknown): string {
   const total = toNumber(seconds);
   const h = Math.floor(total / 3600);
@@ -1031,6 +1043,11 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   }, [data.members, data.market, history?.events]);
   const ownerMatches = React.useCallback((owner: unknown) => memberFilter === "All" || String(owner ?? "").toLowerCase() === memberFilter.toLowerCase(), [memberFilter]);
   const all = data.market.filter((listing) => ownerMatches(listing.ownerUsername ?? listing.owner ?? listing.ownerName));
+  const trackedLiveListings = React.useMemo(
+    () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
+    [history?.liveListings],
+  );
+  const listingFirstSeen = (listing: AnyRecord) => trackedLiveListings.get(listingTrackingKey(listing))?.first_seen;
   const sellOrders = all.filter((m) => String(m.side ?? m.orderType ?? "sell").toLowerCase().includes("sell"));
   const buyOrders = all.filter((m) => String(m.side ?? m.orderType ?? "").toLowerCase().includes("buy"));
   const current = tab === "sell" ? (sellOrders.length ? sellOrders : all) : buyOrders;
@@ -1149,6 +1166,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
         <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
         <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}><option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}</select>
       </div>
+      <p className="legend">Listed time is when this monitor first observed the listing. Listings already active when tracking began will show the tracking start time.</p>
       <DataTable rows={rows} columns={[
         ["Item", r => r.itemName ?? "Unknown"],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
@@ -1157,6 +1175,8 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
         ["Tier", r => (r.itemTier ?? r.tier) ? `T${r.itemTier ?? r.tier}` : "-"],
         ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <span className={`role-badge ${getRarityClass(r.itemRarityStr ?? r.rarity)}`}>{r.itemRarityStr ?? r.rarity}</span> : "-"],
         ["Owner", r => r.ownerUsername ?? "-"],
+        ["Listed", r => listingFirstSeen(r) ? dateLabel(listingFirstSeen(r)) : "-"],
+        ["Live", r => liveDaysSince(listingFirstSeen(r))],
       ]} />
         </>
       )}
