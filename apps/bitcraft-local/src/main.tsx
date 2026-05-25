@@ -233,19 +233,32 @@ function formatCompact(value: unknown): string {
   return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(toNumber(value));
 }
 
+function parseDateValue(value: unknown): Date | null {
+  if (!value) return null;
+  const text = String(value);
+  if (!/^\d+$/.test(text)) {
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const numeric = Number(text);
+  const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
+  const date = new Date(millis);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function dateLabel(value: unknown): string {
   if (!value) return "Never";
-  const text = String(value);
-  const date = /^\d+$/.test(text) ? new Date(Number(text) * (text.length > 10 ? 1 : 1000)) : new Date(text);
-  return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
+  const date = parseDateValue(value);
+  if (!date) return String(value);
+  return date.toLocaleString();
 }
 
 function timeAgo(value: unknown): string {
   if (!value) return "Never";
-  const text = String(value);
-  const date = /^\d+$/.test(text) ? new Date(Number(text) * (text.length > 10 ? 1 : 1000)) : new Date(text);
+  const date = parseDateValue(value);
+  if (!date) return String(value);
   const diff = Date.now() - date.getTime();
-  if (!Number.isFinite(diff)) return text;
+  if (!Number.isFinite(diff)) return String(value);
   const minutes = Math.max(0, Math.round(diff / 60000));
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -259,11 +272,20 @@ function listingTrackingKey(listing: AnyRecord): string {
 }
 
 function liveDaysSince(value: unknown): string {
-  if (!value) return "-";
-  const elapsed = Date.now() - new Date(String(value)).getTime();
+  const date = parseDateValue(value);
+  if (!date) return "-";
+  const elapsed = Date.now() - date.getTime();
   if (!Number.isFinite(elapsed) || elapsed < 0) return "-";
   const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
   return days === 0 ? "<1 day" : `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/*
+ * BitJita active market listings expose their original listing time as
+ * `timestamp`; persisted first-seen time is used for older/fallback payloads.
+ */
+function listingDate(listing: AnyRecord, firstSeen: unknown): unknown {
+  return listing.timestamp ?? firstSeen;
 }
 
 function formatDuration(seconds: unknown): string {
@@ -1047,7 +1069,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
     () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
     [history?.liveListings],
   );
-  const listingFirstSeen = (listing: AnyRecord) => trackedLiveListings.get(listingTrackingKey(listing))?.first_seen;
+  const listingListedAt = (listing: AnyRecord) => listingDate(listing, trackedLiveListings.get(listingTrackingKey(listing))?.first_seen);
   const sellOrders = all.filter((m) => String(m.side ?? m.orderType ?? "sell").toLowerCase().includes("sell"));
   const buyOrders = all.filter((m) => String(m.side ?? m.orderType ?? "").toLowerCase().includes("buy"));
   const current = tab === "sell" ? (sellOrders.length ? sellOrders : all) : buyOrders;
@@ -1166,7 +1188,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
         <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
         <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}><option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}</select>
       </div>
-      <p className="legend">Listed time is when this monitor first observed the listing. Listings already active when tracking began will show the tracking start time.</p>
+      <p className="legend">Listed time uses the BitJita listing timestamp when available; monitor tracking time is used only as a fallback.</p>
       <DataTable rows={rows} columns={[
         ["Item", r => r.itemName ?? "Unknown"],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
@@ -1175,8 +1197,8 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
         ["Tier", r => (r.itemTier ?? r.tier) ? `T${r.itemTier ?? r.tier}` : "-"],
         ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <span className={`role-badge ${getRarityClass(r.itemRarityStr ?? r.rarity)}`}>{r.itemRarityStr ?? r.rarity}</span> : "-"],
         ["Owner", r => r.ownerUsername ?? "-"],
-        ["Listed", r => listingFirstSeen(r) ? dateLabel(listingFirstSeen(r)) : "-"],
-        ["Live", r => liveDaysSince(listingFirstSeen(r))],
+        ["Listed", r => listingListedAt(r) ? dateLabel(listingListedAt(r)) : "-"],
+        ["Live", r => liveDaysSince(listingListedAt(r))],
       ]} />
         </>
       )}
