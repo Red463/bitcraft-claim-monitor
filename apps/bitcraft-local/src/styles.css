@@ -111,6 +111,9 @@ main { min-width: 0; max-height: 100vh; overflow: auto; }
 .permission-icons svg { width: 16px; height: 16px; color: rgba(137,144,156,.25); }
 .permission-icons svg.enabled { color: var(--gold); }
 .permission-icons svg.enabled.blue { color: #60a5fa; }
+.member-detail, .structure-detail, .item-detail { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 16px; display: grid; gap: 14px; }
+.member-detail h3, .structure-detail h3, .item-detail h3, .subheading { display: flex; align-items: center; gap: 8px; color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 18px; margin: 0; }
+.public-profile-grid section { max-height: 400px; }
 .table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; background: var(--panel); }
 table { width: 100%; border-collapse: collapse; min-width: 780px; }
 th, td { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.055); text-align: left; vertical-align: top; }
@@ -186,6 +189,9 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .work-chips span { border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); border-radius: 999px; padding: 4px 8px; font-size: 11px; }
 .progress-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
 .progress-meta strong { color: var(--gold); }
+.contributors { border-top: 1px solid rgba(255,255,255,.07); padding-top: 9px; display: grid; gap: 5px; }
+.contributors span { color: var(--muted); font-size: 11px; display: block; }
+.contributors span strong { color: var(--text); margin-right: 4px; }
 .progress { height: 7px; border-radius: 999px; background: #0b0f16; border: 1px solid rgba(255,255,255,.06); overflow: hidden; }
 .progress div { height: 100%; background: linear-gradient(90deg, var(--gold), var(--good)); border-radius: inherit; }
 .empty-state { border: 1px solid var(--border); border-radius: 8px; min-height: 170px; display: grid; place-items: center; gap: 10px; color: var(--muted); background: var(--panel); }
@@ -205,6 +211,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .container-card summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .container-card summary small { color: var(--muted); text-align: right; }
 .container-card .table-wrap { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+.item-link { border: 0; background: transparent; color: var(--text); padding: 0; display: grid; text-align: left; cursor: pointer; }
+.item-link:hover strong { color: var(--gold); }
 .muted-line { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .building-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .building-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 12px; display: grid; gap: 9px; min-width: 0; }
@@ -255,7 +263,9 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .research-card svg { width: 16px; height: 16px; color: var(--muted); }
 .research-card.done svg { color: var(--good); }
 .research-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.research-card strong small { display: block; color: var(--muted); font: 400 11px Outfit, sans-serif; }
 .research-card b { color: var(--gold); font-size: 12px; }
+.research-card.current { border-color: rgba(240,198,79,.48); background: var(--gold-dim); }
 .highlight-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .highlight-grid div { border: 1px solid var(--border); background: var(--panel); border-radius: 7px; padding: 11px; display: grid; gap: 4px; }
 .highlight-grid strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

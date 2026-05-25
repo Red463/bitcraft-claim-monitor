@@ -107,6 +107,7 @@ function endpointMap(claimId: string) {
     inventories: `/claims/${claimId}/inventories`,
     construction: `/claims/${claimId}/construction`,
     research: `/claims/${claimId}/research`,
+    recruitment: `/claims/${claimId}/recruitment`,
     market: `/claims/${claimId}/market/listings?limit=200`,
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
     layout: `/claims/${claimId}/layout`,
@@ -141,7 +142,7 @@ function unwrap<T>(payload: any, key: string, fallback: T): T {
   return (payload?.[key] ?? fallback) as T;
 }
 
-function useBitjitaData(refreshToken: number, claimId: string): LoadState<AnyRecord> {
+function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
@@ -153,32 +154,57 @@ function useBitjitaData(refreshToken: number, claimId: string): LoadState<AnyRec
     async function load() {
       setState((prev) => ({ ...prev, loading: true, error: null }));
       try {
+        async function request(path: string) {
+          const response = await fetch(`${API}${path}`, { signal: controller.signal });
+          if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+          return response.json();
+        }
         const entries = await Promise.all(
           Object.entries(endpointMap(claimId)).map(async ([key, path]) => {
-            const response = await fetch(`${API}${path}`, { signal: controller.signal });
-            if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
-            return [key, await response.json()] as const;
+            return [key, await request(path)] as const;
           }),
         );
         const raw = Object.fromEntries(entries);
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
-        const playerResults = await Promise.allSettled(
-          members
-            .filter((member) => member.playerEntityId)
-            .map(async (member) => {
-              const response = await fetch(`${API}/players/${member.playerEntityId}`, { signal: controller.signal });
-              if (!response.ok) throw new Error(`/players/${member.playerEntityId}: HTTP ${response.status}`);
-              const payload = await response.json();
-              return payload.player ?? payload;
-            }),
-        );
+        const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
+        const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
+        const readsMarketDetail = activePanel === "market";
+        const readsStorageDetail = activePanel === "activity";
+        const readsProductionDetail = activePanel === "production";
+        const readsRegionDetail = activePanel === "overview" || activePanel === "empire";
+        const [playerResults, orderHistoryResults, tradeResults, storageResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
+          Promise.allSettled(memberIds.map(async (id) => {
+            const payload = await request(`/players/${id}`);
+            return payload.player ?? payload;
+          })),
+          readsMarketDetail ? Promise.allSettled(memberIds.map((id) => request(`/market/player/${id}/history?limit=200`))) : Promise.resolve([]),
+          readsMarketDetail ? Promise.allSettled(memberIds.map((id) => request(`/market/player/${id}/trades?limit=200`))) : Promise.resolve([]),
+          readsStorageDetail ? Promise.allSettled(memberIds.map((id) => request(`/logs/storage?playerEntityId=${id}&limit=40`))) : Promise.resolve([]),
+          readsProductionDetail ? Promise.allSettled(crafts.filter((craft) => craft.entityId).map(async (craft) => ({
+            craftId: String(craft.entityId),
+            payload: await request(`/crafts/${craft.entityId}/contributions`),
+          }))) : Promise.resolve([]),
+          readsRegionDetail ? request("/regions/status").catch(() => ({ regions: [] })) : Promise.resolve({ regions: [] }),
+          readsRegionDetail ? request(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
+        ]);
         const regionPath = `/claims?regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}&limit=100&sort=supplies&order=desc`;
-        const regionRes = await fetch(`${API}${regionPath}`, { signal: controller.signal });
-        raw.region = regionRes.ok ? await regionRes.json() : { claims: [] };
+        raw.region = await request(regionPath).catch(() => ({ claims: [] }));
         raw.players = playerResults
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => normalizePlayer(result.value));
+        raw.marketApi = {
+          histories: orderHistoryResults.filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled").map((result) => result.value),
+          trades: tradeResults.filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled").flatMap((result) => result.value.trades ?? []),
+        };
+        raw.storageApi = storageResults
+          .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
+          .map((result) => result.value);
+        raw.contributions = Object.fromEntries(contributionResults
+          .filter((result): result is PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }> => result.status === "fulfilled")
+          .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
+        raw.regionStatus = regionPayload;
+        raw.tradeVolume = tradeVolumePayload;
         setState({ loading: false, error: null, data: raw });
       } catch (err) {
         if (!controller.signal.aborted) {
@@ -188,7 +214,7 @@ function useBitjitaData(refreshToken: number, claimId: string): LoadState<AnyRec
     }
     load();
     return () => controller.abort();
-  }, [claimId, refreshToken]);
+  }, [activePanel, claimId, refreshToken]);
 
   return state;
 }
@@ -315,12 +341,18 @@ function normalizeData(raw: AnyRecord | null) {
   const inventories = raw?.inventories ?? {};
   const construction = raw?.construction ?? {};
   const research = unwrap<AnyRecord[]>(raw?.research, "technologies", []);
+  const recruitment = unwrap<AnyRecord[]>(raw?.recruitment, "recruitment", []);
   const market = unwrap<AnyRecord[]>(raw?.market, "listings", []);
   const crafts = unwrap<AnyRecord[]>(raw?.crafts, "craftResults", []);
   const players = unwrap<AnyRecord[]>(raw?.players, "players", []);
   const region = unwrap<AnyRecord[]>(raw?.region, "claims", []);
   const layout = raw?.layout ?? {};
-  return { claim, members, citizens, buildings, inventories, construction, research, market, crafts, players, region, layout };
+  const contributions = raw?.contributions ?? {};
+  const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
+  const storageApi = raw?.storageApi ?? [];
+  const regionStatus = unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []);
+  const tradeVolume = raw?.tradeVolume ?? {};
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, contributions, marketApi, storageApi, regionStatus, tradeVolume };
 }
 
 function Header({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -350,13 +382,15 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
 }
 
 function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel) => void }) {
-  const { claim, members, buildings, market, construction, crafts, research } = data;
+  const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
   const suppliesPerDay = toNumber(claim.tileCost) * toNumber(claim.numTiles);
-  const runOut = claim.suppliesRunOut ? new Date(toNumber(claim.suppliesRunOut)).toLocaleString() : "Unknown";
+  const runOut = claim.suppliesRunOut ? dateLabel(claim.suppliesRunOut) : "Unknown";
   const onlineCount = data.players.filter((player) => player.signedIn).length;
+  const regionStatus = data.regionStatus.find((region) => String(region.regionId) === String(claim.regionId));
+  const marketDay = [...(data.tradeVolume.buckets ?? [])].sort((a: AnyRecord, b: AnyRecord) => String(b.bucket).localeCompare(String(a.bucket)))[0];
   const activeCrafts = crafts.filter((job) => {
     const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
@@ -434,6 +468,9 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
             ["Location", `${claim.locationX ?? "?"}, ${claim.locationZ ?? "?"}`],
             ["Members", `${members.length} total`],
             ["Market Listings", market.length],
+            ["Region Online", regionStatus ? formatNumber(regionStatus.signedInPlayers) : "-"],
+            ["Region Trade / Day", marketDay ? `${formatNumber(marketDay.totalValue)}g` : "-"],
+            ["Recruitment Rules", recruitment.length ? `${recruitment.length} active` : "None"],
           ].map(([label, value]) => <Info key={label} label={label} value={value} />)}
         </section>
       </div>
@@ -447,9 +484,13 @@ function Info({ label, value }: { label: React.ReactNode; value: React.ReactNode
 
 function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [profile, setProfile] = React.useState<AnyRecord | null>(null);
+  const [profileLoading, setProfileLoading] = React.useState(false);
+  const [profileError, setProfileError] = React.useState<string | null>(null);
   const citizenMap = new Map(data.citizens.map((c) => [String(c.userName ?? c.username ?? ""), c]));
   const playerMap = new Map(data.players.map((p) => [String(p.username ?? ""), p]));
-  const merged = data.members.map((member) => {
+  const merged: AnyRecord[] = data.members.map((member: AnyRecord) => {
     const username = member.userName ?? member.username ?? "";
     return {
       ...member,
@@ -460,6 +501,31 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
   });
   const filtered = merged.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
+  const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
+  React.useEffect(() => {
+    if (!selectedId) {
+      setProfile(null);
+      return;
+    }
+    const controller = new AbortController();
+    setProfileLoading(true);
+    setProfileError(null);
+    Promise.all([
+      fetch(`${API}/players/${selectedId}/buffs`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/equipment`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/housing`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/market-collections`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/traveler-tasks`, { signal: controller.signal }).then((response) => response.json()),
+    ]).then(([buffs, equipment, housing, passiveCrafts, collections, tasks]) => {
+      setProfile({ buffs, equipment, housing, passiveCrafts, collections, tasks });
+    }).catch((error) => {
+      if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (!controller.signal.aborted) setProfileLoading(false);
+    });
+    return () => controller.abort();
+  }, [selectedId]);
 
   return (
     <div className="panel">
@@ -480,8 +546,45 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
           ["Skill Lvl", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
+          ["Details", (m) => <button className="mini-action" onClick={() => setSelectedId(String(m.playerEntityId))}>View</button>],
         ]}
       />
+      {selectedMember ? (
+        <section className="member-detail">
+          <div className="split-header">
+            <h3><User size={17} /> {selectedMember.username} Public Profile</h3>
+            <button className="mini-action" onClick={() => setSelectedId(null)}>Close</button>
+          </div>
+          {profileLoading ? <p className="legend">Loading public player data...</p> : profileError ? <p className="error">{profileError}</p> : profile ? (
+            <>
+              <div className="metric-grid">
+                <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs.buffs ?? []).length} />
+                <MiniStat icon={<Shield />} label="Equipped Slots" value={(profile.equipment.equipment ?? []).length} />
+                <MiniStat icon={<Home />} label="Housing" value={(profile.housing ?? []).length} />
+                <MiniStat icon={<ShoppingCart />} label="Collections" value={toNumber(profile.collections.total)} />
+              </div>
+              <div className="two-col public-profile-grid">
+                <section>
+                  <h3><Factory size={17} /> Passive Crafts</h3>
+                  <DataTable rows={(profile.passiveCrafts.craftResults ?? []).slice(0, 8)} columns={[
+                    ["Recipe", (row) => row.recipeName ?? "-"],
+                    ["Status", (row) => row.status ?? "-"],
+                    ["Structure", (row) => row.buildingName ?? "-"],
+                  ]} />
+                </section>
+                <section>
+                  <h3><Star size={17} /> Traveler Tasks</h3>
+                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} columns={[
+                    ["Task", (row) => row.description ?? "-"],
+                    ["Status", (row) => row.completed ? "Complete" : "Open"],
+                    ["Level", (row) => formatNumber(row.levelRequirement)],
+                  ]} />
+                </section>
+              </div>
+            </>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -693,6 +796,8 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [category, setCategory] = React.useState("All");
   const [tier, setTier] = React.useState("All");
   const [sort, setSort] = React.useState("name");
+  const [selectedStructure, setSelectedStructure] = React.useState<AnyRecord | null>(null);
+  const [structureDetail, setStructureDetail] = React.useState<AnyRecord | null>(null);
   const categories = ["All", "Crafting", "Refining", "Storage", "Housing", "Trade", "Core", "Utility", "Decoration"];
   const tiers = ["All", "1", "2", "3", "4", "5"];
   const buildings = data.buildings.map(normalizeBuilding);
@@ -720,6 +825,18 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
     ["Store", sum(buildings, "storageSlots"), buildings.filter((building) => building.storageSlots > 0).length],
     ["Housing", sum(buildings, "housingSlots"), buildings.filter((building) => building.housingSlots > 0).length],
   ];
+  React.useEffect(() => {
+    if (!selectedStructure?.descriptionId) {
+      setStructureDetail(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`${API}/buildings/${selectedStructure.descriptionId}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`structure detail HTTP ${response.status}`)))
+      .then(setStructureDetail)
+      .catch(() => { if (!controller.signal.aborted) setStructureDetail(null); });
+    return () => controller.abort();
+  }, [selectedStructure?.descriptionId]);
 
   return (
     <div className="panel">
@@ -746,6 +863,20 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
       <div className="highlight-grid">
         {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{label}</strong><span>{formatNumber(slots)} slots across {formatNumber(count)} structures</span></div>)}
       </div>
+      {selectedStructure && structureDetail?.building ? (
+        <section className="structure-detail">
+          <div className="split-header">
+            <h3><Home size={17} /> {selectedStructure.name}</h3>
+            <button className="mini-action" onClick={() => setSelectedStructure(null)}>Close</button>
+          </div>
+          <div className="detail-grid">
+            <Info label="Maximum health" value={formatNumber(structureDetail.building.maxHealth)} />
+            <Info label="Maintenance" value={formatNumber(structureDetail.building.maintenance)} />
+            <Info label="Defense level" value={formatNumber(structureDetail.building.defenseLevel)} />
+            <Info label="Construction inputs" value={(structureDetail.itemInfo ?? []).length + (structureDetail.cargoInfo ?? []).length} />
+          </div>
+        </section>
+      ) : null}
       <div className="building-sections">
         {groupedBuildings.map((group) => (
           <section className="building-section" key={group.category}>
@@ -764,6 +895,7 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
                     <Slot icon={<ShoppingBag />} label="trade" value={building.tradeOrders} />
                     {building.terraformCapable ? <Slot icon={<MapIcon />} label="terraform" value={1} /> : null}
                   </div>
+                  {building.descriptionId ? <button className="mini-action" onClick={() => setSelectedStructure(building)}>API Details</button> : null}
                 </article>
               ))}
             </div>
@@ -784,6 +916,7 @@ function normalizeBuilding(building: AnyRecord) {
   const fn = building.functions?.[0] ?? {};
   const normalized = {
     entityId: String(building.entityId ?? building.buildingEntityId ?? building.name),
+    descriptionId: building.buildingDescriptionId ?? building.descriptionId ?? null,
     name: String(building.name ?? building.buildingName ?? "Unknown"),
     nickname: building.nickname ?? building.buildingNickname ?? null,
     tier: inferTierNumber(building),
@@ -856,6 +989,8 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [nonEmptyOnly, setNonEmptyOnly] = React.useState(true);
   const [referenceMaterials, setReferenceMaterials] = React.useState<AnyRecord[]>([]);
   const [referenceError, setReferenceError] = React.useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
+  const [itemDetail, setItemDetail] = React.useState<AnyRecord | null>(null);
   React.useEffect(() => {
     const controller = new AbortController();
     fetch(`${LOCAL_API}/reference/materials`, { signal: controller.signal })
@@ -864,6 +999,19 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       .catch((error) => { if (!controller.signal.aborted) setReferenceError(error instanceof Error ? error.message : String(error)); });
     return () => controller.abort();
   }, []);
+  React.useEffect(() => {
+    if (!selectedItem?.itemId) {
+      setItemDetail(null);
+      return;
+    }
+    const controller = new AbortController();
+    const resource = selectedItem.type === "Cargo" ? "cargo" : "items";
+    fetch(`${API}/${resource}/${selectedItem.itemId}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`item detail HTTP ${response.status}`)))
+      .then(setItemDetail)
+      .catch(() => { if (!controller.signal.aborted) setItemDetail(null); });
+    return () => controller.abort();
+  }, [selectedItem?.itemId, selectedItem?.type]);
   const itemLookup = new Map([...(data.inventories.items ?? []), ...(data.inventories.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const containers = ((data.inventories.buildings ?? []) as AnyRecord[]).map((building) => {
     const items = (building.inventory ?? []).map((slot: AnyRecord, index: number) => {
@@ -954,6 +1102,25 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
           )) : <p className="legend">No tracked recipe materials found in storage.</p>}
         </div>
       </section>
+      {selectedItem && itemDetail ? (
+        <section className="item-detail">
+          <div className="split-header">
+            <h3><Package size={17} /> {selectedItem.name}</h3>
+            <button className="mini-action" onClick={() => setSelectedItem(null)}>Close</button>
+          </div>
+          <div className="metric-grid">
+            <MiniStat icon={<Factory />} label="Crafting Recipes" value={(itemDetail.craftingRecipes ?? []).length} />
+            <MiniStat icon={<Wrench />} label="Used In Recipes" value={(itemDetail.recipesUsingItem ?? []).length} />
+            <MiniStat icon={<TrendingUp />} label="Related Skills" value={(itemDetail.relatedSkills ?? []).length} />
+            <MiniStat icon={<CircleDollarSign />} label="Market Data" value={itemDetail.marketStats ? "Available" : "None"} />
+          </div>
+          <div className="highlight-grid">
+            {[...(itemDetail.craftingRecipes ?? []), ...(itemDetail.recipesUsingItem ?? [])].slice(0, 6).map((recipe: AnyRecord) => (
+              <div key={recipe.id ?? recipe.name}><strong>{recipe.name ?? "Recipe"}</strong><span>{recipe.buildingName ?? "No station listed"}</span></div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <div className="toolbar-row">
         <SearchBox value={q} onChange={setQ} placeholder="Search inventory" />
         <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" />
@@ -982,7 +1149,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
                 <small>{container.items.length} stacks - {formatNumber(quantity)} items - {formatCompact(volume)} volume</small>
               </summary>
               <DataTable rows={container.items} columns={[
-                ["Item", (r) => <span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span>],
+                ["Item", (r) => <button className="item-link" onClick={() => setSelectedItem(r)}><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? `T${r.tier}` : "-"],
                 ["Rarity", (r) => r.rarity ? <span className={`role-badge ${getRarityClass(r.rarity)}`}>{r.rarity}</span> : "-"],
@@ -998,13 +1165,21 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
 }
 function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
   const itemLookup = new Map([...(data.construction.items ?? []), ...(data.construction.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
+  const storedTotals = new Map<string, number>();
+  for (const building of data.inventories.buildings ?? []) {
+    for (const slot of building.inventory ?? []) {
+      const contents = slot.contents ?? {};
+      const key = String(contents.item_id ?? "");
+      if (key) storedTotals.set(key, (storedTotals.get(key) ?? 0) + toNumber(contents.quantity));
+    }
+  }
   const projects: AnyRecord[] = (data.construction.projects ?? []).map((project: AnyRecord) => ({
     ...project,
     name: project.recipeName ?? project.buildingName ?? project.entityId,
     materials: [...(project.items ?? []), ...(project.cargos ?? [])].map((mat: AnyRecord) => ({
       name: itemLookup.get(String(mat.item_id))?.name ?? `Item #${mat.item_id}`,
       required: toNumber(mat.quantity),
-      available: 0,
+      available: storedTotals.get(String(mat.item_id)) ?? 0,
     })),
   }));
   const needed = Object.entries((projects.flatMap((project: AnyRecord) => project.materials) as AnyRecord[]).reduce((acc: Record<string, number>, mat: AnyRecord) => {
@@ -1041,10 +1216,36 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
 }
 
 function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const researched = data.research.filter((item) => item.isResearched);
-  const available = data.research.filter((item) => !item.isResearched);
-  const card = (item: AnyRecord, done: boolean) => <div className={`research-card ${done ? "done" : ""}`} key={item.entityId ?? item.id ?? item.name}><span>{done ? <CheckCircle2 /> : <Circle />}</span><strong>{item.name ?? item.techName ?? item.id ?? "Unknown Technology"}</strong>{item.tier ? <b>T{item.tier}</b> : null}</div>;
-  return <div className="panel"><Header title="Research & Technology">{researched.length} researched - {available.length} available to unlock</Header><div className="two-col"><section><h3><CheckCircle2 size={17} /> Researched ({researched.length})</h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available ({available.length})</h3>{available.map((item) => card(item, false))}</section></div></div>;
+  const [query, setQuery] = React.useState("");
+  const [tier, setTier] = React.useState("All");
+  const currentId = String(data.claim.techResearching ?? "");
+  const matching = data.research.filter((item) => {
+    if (query && !String(item.name ?? "").toLowerCase().includes(query.toLowerCase())) return false;
+    if (tier !== "All" && String(item.tier) !== tier) return false;
+    return true;
+  });
+  const researched = matching.filter((item) => item.isResearched);
+  const available = matching.filter((item) => !item.isResearched);
+  const current = data.research.find((item) => String(item.id ?? item.entityId) === currentId);
+  const tiers = unique(data.research.map((item) => String(item.tier)).filter(Boolean)).sort();
+  const card = (item: AnyRecord, done: boolean) => (
+    <div className={`research-card ${done ? "done" : ""} ${String(item.id ?? item.entityId) === currentId ? "current" : ""}`} key={item.entityId ?? item.id ?? item.name}>
+      <span>{done ? <CheckCircle2 /> : <Circle />}</span>
+      <strong>{item.name ?? item.techName ?? item.id ?? "Unknown Technology"}<small>{item.suppliesCost ? `${formatNumber(item.suppliesCost)} supplies` : ""}</small></strong>
+      {item.tier ? <b>T{item.tier}</b> : null}
+    </div>
+  );
+  return (
+    <div className="panel">
+      <Header title="Research & Technology">{data.research.filter((item) => item.isResearched).length} researched - {data.research.filter((item) => !item.isResearched).length} available to unlock</Header>
+      {current ? <div className="mine-panel"><FlaskConical size={18} /><strong>Researching</strong><span>{current.name} - T{current.tier} - {formatNumber(current.suppliesCost)} supplies</span></div> : null}
+      <div className="toolbar-row">
+        <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
+        <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
+      </div>
+      <div className="two-col"><section><h3><CheckCircle2 size={17} /> Researched ({researched.length})</h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available ({available.length})</h3>{available.map((item) => card(item, false))}</section></div>
+    </div>
+  );
 }
 
 function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; onHistoryChanged: () => void }) {
@@ -1057,7 +1258,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   const [resolveMessage, setResolveMessage] = React.useState<string | null>(null);
   const memberOptions = React.useMemo(() => {
     const names = [
-      ...data.members.map((member) => member.username ?? member.playerUsername ?? member.name),
+      ...data.members.map((member) => member.userName ?? member.username ?? member.playerUsername ?? member.name),
       ...data.market.map((listing) => listing.ownerUsername ?? listing.owner ?? listing.ownerName),
       ...(history?.events ?? []).map((event: AnyRecord) => event.owner),
     ].filter(Boolean).map(String);
@@ -1065,6 +1266,15 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   }, [data.members, data.market, history?.events]);
   const ownerMatches = React.useCallback((owner: unknown) => memberFilter === "All" || String(owner ?? "").toLowerCase() === memberFilter.toLowerCase(), [memberFilter]);
   const all = data.market.filter((listing) => ownerMatches(listing.ownerUsername ?? listing.owner ?? listing.ownerName));
+  const apiOrders = data.marketApi.histories
+    .flatMap((payload: AnyRecord) => [...(payload.sellOrderHistory ?? []), ...(payload.buyOrderHistory ?? [])])
+    .filter((order: AnyRecord) => String(order.claimEntityId) === String(claimId) && ownerMatches(order.ownerUsername));
+  const apiOrderIds = new Set(apiOrders.map((order: AnyRecord) => String(order.entityId)));
+  const apiTrades: AnyRecord[] = [...new Map<string, AnyRecord>((data.marketApi.trades as AnyRecord[])
+    .filter((trade: AnyRecord) => apiOrderIds.has(String(trade.orderEntityId)) && ownerMatches(trade.sellerUsername ?? trade.purchaserUsername))
+    .map((trade: AnyRecord) => [String(trade.id ?? `${trade.orderEntityId}-${trade.timestamp}-${trade.quantity}`), trade])).values()]
+    .sort((a: AnyRecord, b: AnyRecord) => String(b.timestamp ?? b.createdAt).localeCompare(String(a.timestamp ?? a.createdAt)));
+  const apiCompletedOrders = apiOrders.filter((order: AnyRecord) => String(order.status).toUpperCase() === "COMPLETED");
   const trackedLiveListings = React.useMemo(
     () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
     [history?.liveListings],
@@ -1083,10 +1293,24 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   });
   const highest = [...all].sort((a, b) => toNumber(b.price) * toNumber(b.quantity || 1) - toNumber(a.price) * toNumber(a.quantity || 1)).slice(0, 3);
   const events = (history?.events ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
-  const saleEvents = events.filter((event: AnyRecord) => ["sale", "partial_sale"].includes(String(event.event_type)));
+  const saleEvents = apiTrades.map((trade: AnyRecord) => ({
+    itemName: trade.itemName,
+    item_name: trade.itemName,
+    quantity: trade.quantity,
+    price: trade.unitPrice,
+    totalValue: trade.totalPrice,
+    total_value: trade.totalPrice,
+    occurredAt: trade.timestamp ?? trade.createdAt,
+    occurred_at: trade.timestamp ?? trade.createdAt,
+  }));
   const topItems = buildMarketTopItems(saleEvents);
   const daily = buildMarketDaily(saleEvents);
-  const totals = buildMarketTotals(events);
+  const monitoredTotals = buildMarketTotals(events);
+  const totals: ReturnType<typeof buildMarketTotals> = {
+    ...monitoredTotals,
+    confirmedSales: apiTrades.length,
+    trackedValue: apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0),
+  };
   const pending = (history?.pending ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
@@ -1108,7 +1332,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   }
   return (
     <div className="panel">
-      <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} confirmed sales tracked locally for {filterLabel}</Header>
+      <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} API-confirmed trades for {filterLabel}</Header>
       <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
@@ -1125,10 +1349,10 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
       {view === "analytics" ? (
         <>
           <div className="metric-grid">
-            <MiniStat icon={<ShoppingCart />} label="New Listings" value={formatNumber(totals.newListings)} />
-            <MiniStat icon={<TrendingDown />} label="Confirmed Sales" value={formatNumber(totals.confirmedSales)} />
-            <MiniStat icon={<AlertTriangle />} label="Removed/Unknown" value={formatNumber(toNumber(totals.removedOrCancelled) + toNumber(totals.unconfirmedQuantityDrops))} />
-            <MiniStat icon={<CircleDollarSign />} label="Confirmed Value" value={`${formatNumber(totals.trackedValue)}g`} />
+            <MiniStat icon={<ShoppingCart />} label="Monitor Listings" value={formatNumber(totals.newListings)} />
+            <MiniStat icon={<TrendingDown />} label="API Trades" value={formatNumber(totals.confirmedSales)} />
+            <MiniStat icon={<CheckCircle2 />} label="Completed Orders" value={formatNumber(apiCompletedOrders.length)} />
+            <MiniStat icon={<CircleDollarSign />} label="API Trade Value" value={`${formatNumber(totals.trackedValue)}g`} />
           </div>
           <div className="two-col market-analytics">
             <section>
@@ -1138,16 +1362,28 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
                 ["Sales", r => formatNumber(r.soldCount)],
                 ["Confirmed Value", r => `${formatNumber(r.totalValue)}g`],
                 ["Avg Price", r => `${formatNumber(r.avgPrice)}g`],
-                ["Last Seen", r => dateLabel(r.lastSoldAt)],
+                ["Last Trade", r => dateLabel(r.lastSoldAt)],
               ]} />
             </section>
             <section>
               <h3><TrendingUp size={17} /> Sales Trend</h3>
               <div className="bar-panel compact-bars">
-                {daily.length ? daily.map((row: AnyRecord) => <div className="bar-row" key={row.day}><span>{row.day}</span><div><i style={{ width: `${(toNumber(row.totalValue) / maxDailyValue) * 100}%` }} /></div><b>{formatNumber(row.soldCount)} / {formatNumber(row.totalValue)}g</b></div>) : <p className="legend">History will build as the app refreshes.</p>}
+                {daily.length ? daily.map((row: AnyRecord) => <div className="bar-row" key={row.day}><span>{row.day}</span><div><i style={{ width: `${(toNumber(row.totalValue) / maxDailyValue) * 100}%` }} /></div><b>{formatNumber(row.soldCount)} / {formatNumber(row.totalValue)}g</b></div>) : <p className="legend">No API-confirmed trades found for this filter.</p>}
               </div>
             </section>
           </div>
+          <section>
+            <h3><CheckCircle2 size={17} /> Confirmed Trades From BitJita</h3>
+            <DataTable rows={apiTrades} columns={[
+              ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
+              ["Item", r => r.itemName ?? "-"],
+              ["Qty", r => formatNumber(r.quantity)],
+              ["Unit Price", r => `${formatNumber(r.unitPrice)}g`],
+              ["Value", r => `${formatNumber(r.totalPrice)}g`],
+              ["Seller", r => r.sellerUsername ?? "-"],
+              ["Buyer", r => r.purchaserUsername ?? r.buyerUsername ?? "-"],
+            ]} />
+          </section>
           {pending.length ? (
             <section className="warning-section">
               <h3><AlertTriangle size={17} /> Unconfirmed Quantity Drops ({pending.length})</h3>
@@ -1163,6 +1399,7 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
               ]} />
             </section>
           ) : null}
+          <h3 className="subheading">Monitor Changes</h3>
           <DataTable rows={events} columns={[
             ["When", r => dateLabel(r.occurred_at ?? r.occurredAt)],
             ["Event", r => String(r.event_type ?? "").replaceAll("_", " ")],
@@ -1240,7 +1477,9 @@ function buildMarketTopItems(events: AnyRecord[]) {
 function buildMarketDaily(events: AnyRecord[]) {
   const grouped = new Map<string, { day: string; soldCount: number; totalValue: number }>();
   for (const event of events) {
-    const day = String(event.occurred_at ?? event.occurredAt ?? "").slice(0, 10) || "Unknown";
+    const occurredAt = event.occurred_at ?? event.occurredAt;
+    const parsed = parseDateValue(occurredAt);
+    const day = parsed ? parsed.toISOString().slice(0, 10) : String(occurredAt ?? "").slice(0, 10) || "Unknown";
     const current = grouped.get(day) ?? { day, soldCount: 0, totalValue: 0 };
     current.soldCount += 1;
     current.totalValue += toNumber(event.total_value ?? event.totalValue);
@@ -1295,6 +1534,7 @@ function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?:
           const isWorking = total > 0 && progress > 0 && progress < total;
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Working" : isDone ? "Ready" : "Queued";
+          const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""}`} key={job.entityId ?? index}>
               <header>
@@ -1311,6 +1551,14 @@ function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?:
                 <div className="progress-meta"><span>Progress</span><span>{formatNumber(progress)} / {formatNumber(total)} actions</span></div>
                 <div className="progress"><div style={{ width: `${pct}%` }} /></div>
                 <div className="progress-meta"><strong>{pct}%</strong><span>{formatNumber(remaining)} remaining</span></div>
+                {contributors.length ? (
+                  <div className="contributors">
+                    <small>Contributors</small>
+                    {contributors.slice(0, 3).map((person) => (
+                      <span key={person.contributorEntityId}><strong>{person.contributorUsername ?? "Unknown"}</strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
+                    ))}
+                  </div>
+                ) : <small>No contributions recorded by the API.</small>}
               </section>
             </article>
           );
@@ -1323,6 +1571,25 @@ function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?:
 function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortKey, setSortKey] = React.useState("tier");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const [claimDetails, setClaimDetails] = React.useState<Record<string, AnyRecord>>({});
+  const regionKey = data.region.map((row) => String(row.entityId)).join(",");
+  React.useEffect(() => {
+    if (!data.region.length) return;
+    const controller = new AbortController();
+    Promise.allSettled(data.region.map(async (row) => {
+      const response = await fetch(`${API}/claims/${row.entityId}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`claim HTTP ${response.status}`);
+      const payload = await response.json();
+      return payload.claim ?? payload;
+    })).then((results) => {
+      if (controller.signal.aborted) return;
+      setClaimDetails(Object.fromEntries(results
+        .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
+        .map((result) => [String(result.value.entityId), result.value])));
+    });
+    return () => controller.abort();
+  }, [regionKey]);
+  const enrich = (row: AnyRecord) => ({ ...row, ...(claimDetails[String(row.entityId)] ?? {}) });
   const sorters: Record<string, (row: AnyRecord) => string | number> = {
     name: (row) => String(row.name ?? ""),
     owner: getOwnerName,
@@ -1331,7 +1598,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     treasury: (row) => toNumber(row.treasury),
     numTiles: (row) => toNumber(row.numTiles),
   };
-  const allRows = [...data.region];
+  const allRows = data.region.map(enrich);
   const rows = [...allRows].sort((a, b) => {
     const aVal = sorters[sortKey]?.(a) ?? 0;
     const bVal = sorters[sortKey]?.(b) ?? 0;
@@ -1351,6 +1618,8 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const avgTier = allRows.length ? allRows.reduce((total, row) => total + toNumber(row.tier), 0) / allRows.length : 0;
   const avgTiles = allRows.length ? allRows.reduce((total, row) => total + toNumber(row.numTiles), 0) / allRows.length : 0;
   const totalTreasury = allRows.reduce((total, row) => total + toNumber(row.treasury), 0);
+  const liveStatus = data.regionStatus.find((region) => String(region.regionId) === String(data.claim.regionId));
+  const tradeSummary = data.tradeVolume.overall ?? {};
   const myRankRow = allRows.find((row) => String(row.entityId) === String(data.claim.entityId));
   const nearbyRows = myRankRow ? [...allRows]
     .filter((row) => String(row.entityId) !== String(data.claim.entityId))
@@ -1386,9 +1655,14 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       ) : null}
       <div className="metric-grid">
         <MiniStat icon={<Globe2 />} label="Settlements" value={allRows.length} />
-        <MiniStat icon={<Crown />} label="Average Tier" value={avgTier.toFixed(1)} />
-        <MiniStat icon={<Hammer />} label="Average Tiles" value={formatNumber(avgTiles)} />
+        <MiniStat icon={<Users />} label="Players Online" value={liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} />
+        <MiniStat icon={<ShoppingCart />} label="Regional Trades" value={formatNumber(tradeSummary.totalTrades)} />
         <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={`${formatNumber(totalTreasury)}g`} />
+      </div>
+      <div className="highlight-grid">
+        <div><strong>Average Tier</strong><span>{avgTier.toFixed(1)} across known settlements</span></div>
+        <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
+        <div><strong>Regional Trade Value</strong><span>{formatNumber(tradeSummary.totalValue)}g in selected API window</span></div>
       </div>
       <div className="bar-panel">
         <h3>Top Supplies</h3>
@@ -1464,6 +1738,7 @@ function sanitizeActivityLog(items: unknown): string[] {
 
 const ACTIVITY_FILTERS = [
   ["all", "All"],
+  ["storage", "Storage"],
   ["treasury", "Treasury"],
   ["supplies", "Supplies"],
   ["market", "Market"],
@@ -1478,6 +1753,7 @@ function signedDelta(after: unknown, before: unknown, suffix = ""): string {
 }
 
 function activitySummary(item: AnyRecord): string {
+  if (item.event_type === "storage") return item.summary ?? "-";
   let metadata: AnyRecord = {};
   try {
     metadata = JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
@@ -1494,19 +1770,40 @@ function activitySummary(item: AnyRecord): string {
   return item.summary ?? "-";
 }
 
-function ActivityPanel({ activity, error }: { activity: AnyRecord[]; error: string | null }) {
+function storageActivity(storageApi: AnyRecord[]): AnyRecord[] {
+  const uniqueLogs = new Map<string, AnyRecord>();
+  for (const payload of storageApi) {
+    const catalogs = new Map<string, AnyRecord>([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
+    for (const log of payload.logs ?? []) {
+      const event = log.data ?? {};
+      const item = catalogs.get(String(event.item_id));
+      const action = String(event.type ?? "storage").replaceAll("_", " ");
+      uniqueLogs.set(String(log.id), {
+        id: `storage-${log.id}`,
+        event_type: "storage",
+        occurred_at: log.timestamp,
+        summary: `${log.subjectName ?? "Member"}: ${action} ${formatNumber(event.quantity)} ${item?.name ?? `item #${event.item_id ?? "?"}`} - ${log.building?.buildingName ?? "storage"}`,
+      });
+    }
+  }
+  return [...uniqueLogs.values()].sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
+}
+
+function ActivityPanel({ activity, storageApi, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; error: string | null }) {
   const [filter, setFilter] = React.useState<(typeof ACTIVITY_FILTERS)[number][0]>("all");
   const [compact, setCompact] = React.useState(true);
-  const baseFiltered = filter === "all" ? activity : activity.filter((item) => String(item.event_type ?? "").includes(filter));
+  const storage = storageActivity(storageApi);
+  const combined = [...activity, ...storage].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
+  const baseFiltered = filter === "all" ? combined : combined.filter((item) => String(item.event_type ?? "").includes(filter));
   const filtered = compact ? compactActivity(baseFiltered) : baseFiltered;
   return (
     <div className="panel">
-      <Header title="Activity">Persistent local history from the SQLite database</Header>
+      <Header title="Activity">Settlement changes saved locally plus public API storage movement history</Header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
       <div className="toolbar-row">
         <Segmented options={ACTIVITY_FILTERS.map(([, label]) => label)} value={ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1] ?? "All"} onChange={(label) => setFilter(ACTIVITY_FILTERS.find(([, itemLabel]) => itemLabel === label)?.[0] ?? "all")} label="Filter" />
         <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Compact treasury</label>
-        <span>{filtered.length} of {activity.length} events</span>
+        <span>{filtered.length} of {combined.length} events - {storage.length} storage events from API</span>
       </div>
       <div className="activity-list">
         {filtered.length ? filtered.map((item) => (
@@ -1514,7 +1811,7 @@ function ActivityPanel({ activity, error }: { activity: AnyRecord[]; error: stri
             <strong>{dateLabel(item.occurred_at ?? item.occurredAt)}</strong>
             <span>{activitySummary(item)}</span>
           </div>
-        )) : <p>{activity.length ? "No activity matches this filter." : "No activity has been recorded yet. Keep the local dev server running and history will build on each refresh."}</p>}
+        )) : <p>{combined.length ? "No activity matches this filter." : "No activity has been returned yet."}</p>}
       </div>
     </div>
   );
@@ -1751,7 +2048,7 @@ function App() {
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
-  const state = useBitjitaData(refreshToken, claimId);
+  const state = useBitjitaData(refreshToken, claimId, active);
   const data = React.useMemo(() => {
     const normalized = normalizeData(state.data);
     return { ...normalized, raw: state.data };
@@ -1817,7 +2114,7 @@ function App() {
     empire: <Region data={data} />,
     map: <MapPanel data={data} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
-    activity: <ActivityPanel activity={localHistory.activity} error={localHistory.error} />,
+    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} error={localHistory.error} />,
     admin: <AdminPanel claimId={claimId} syncUrl={syncUrl} theme={theme} onSettingsSaved={(settings) => { setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
