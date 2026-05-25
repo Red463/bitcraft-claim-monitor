@@ -11,6 +11,8 @@ const distDir = path.join(root, "dist");
 const isProduction = process.env.NODE_ENV === "production";
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
+const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING === "true" || (isProduction && process.env.ENABLE_SERVER_POLLING !== "false");
+const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 mkdirSync(dataDir, { recursive: true });
 
@@ -242,6 +244,15 @@ function getSettings() {
     theme,
   };
 }
+
+const pollStatus = {
+  enabled: serverPollingEnabled,
+  intervalMs: snapshotIntervalMs,
+  running: false,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastError: null,
+};
 
 function validSyncUrl(value) {
   try {
@@ -526,6 +537,46 @@ async function recordSnapshot(payload) {
   }
 }
 
+async function fetchBitjita(pathname) {
+  const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
+  return response.json();
+}
+
+async function collectServerSnapshot() {
+  if (!serverPollingEnabled || pollStatus.running) return;
+  pollStatus.running = true;
+  pollStatus.lastAttemptAt = new Date().toISOString();
+  try {
+    const { claimId } = getSettings();
+    const [claimPayload, membersPayload, buildingsPayload, market] = await Promise.all([
+      fetchBitjita(`/claims/${claimId}`),
+      fetchBitjita(`/claims/${claimId}/members`),
+      fetchBitjita(`/claims/${claimId}/buildings`),
+      fetchBitjita(`/claims/${claimId}/market/listings?limit=200`),
+    ]);
+    const claim = claimPayload.claim ?? claimPayload;
+    const members = unwrap(membersPayload, "members", []);
+    const buildings = unwrap(buildingsPayload, "buildings", []);
+    await recordSnapshot({
+      claimId,
+      claim,
+      membersCount: members.length,
+      buildingsCount: buildings.length,
+      market,
+      source: "server_poll",
+    });
+    pollStatus.lastSuccessAt = new Date().toISOString();
+    pollStatus.lastError = null;
+  } catch (error) {
+    pollStatus.lastError = error instanceof Error ? error.message : String(error);
+    console.error(`BitCraft snapshot poll failed: ${pollStatus.lastError}`);
+  } finally {
+    pollStatus.running = false;
+  }
+}
+
 function marketHistory(claimId, limit) {
   const events = db.prepare("SELECT * FROM market_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
@@ -716,7 +767,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true });
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
@@ -766,7 +817,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
-      if (isProduction && !requireAdmin(req, res)) return;
+      if (serverPollingEnabled) return send(res, 202, { ok: true, recorded: false, source: "server_poll" });
       return send(res, 200, await recordSnapshot(await readJson(req)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
@@ -796,4 +847,9 @@ const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430)
 const host = process.env.APP_HOST ?? "127.0.0.1";
 server.listen(port, host, () => {
   console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
+  if (serverPollingEnabled) {
+    console.log(`Server snapshot polling enabled every ${snapshotIntervalMs / 1000} seconds`);
+    collectServerSnapshot();
+    setInterval(collectServerSnapshot, snapshotIntervalMs);
+  }
 });

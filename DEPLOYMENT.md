@@ -7,7 +7,7 @@ This guide is for the Hostworld Ubuntu VPS configuration with no control panel. 
 - systemd to keep the app running after restarts
 - SQLite data stored outside the Git checkout at `/var/lib/bitcraft-claim-monitor`
 
-The app server now serves the compiled frontend, the local history/admin API, and the restricted BitJita API proxy. Caddy only exposes it securely through your domain.
+The app server now serves the compiled frontend, the local history/admin API, and the restricted BitJita API proxy. In production it records settlement, market, and activity snapshots from BitJita every 30 seconds, even when no browser is open. Caddy only exposes it securely through your domain.
 
 ## Before You Begin
 
@@ -107,7 +107,7 @@ systemctl status bitcraft-claim-monitor
 curl http://127.0.0.1:18430/api/local/health
 ```
 
-The final command should return `{"ok":true}`.
+The final command should return JSON containing `"ok":true` and polling status. Within about 30 seconds, `polling.lastSuccessAt` should contain a timestamp.
 
 ## 6. Publish the Website With HTTPS
 
@@ -129,7 +129,7 @@ rm /etc/bitcraft-claim-monitor.env
 systemctl restart bitcraft-claim-monitor
 ```
 
-On a production installation, market/activity history is written only while an admin session is signed in to the app. This prevents public visitors from fabricating database history or resolving market events.
+On a production installation, market/activity history is collected by the server every 30 seconds. Visitors do not write snapshots, and manually resolving uncertain market events remains an admin-only action.
 
 ## Updating the App
 
@@ -145,6 +145,8 @@ systemctl status bitcraft-claim-monitor
 ```
 
 The database is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace your history or admin configuration.
+
+A new VPS begins with a new database. It cannot show sales or activity from before it began collecting snapshots unless you copy an existing database to the server. Existing live listings are stored as the initial baseline; market sale analytics begin filling as tracked listings subsequently change or sell.
 
 ## Database Backups
 
