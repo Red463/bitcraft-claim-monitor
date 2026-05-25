@@ -1248,22 +1248,20 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; onHistoryChanged: () => void }) {
+function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
   const [q, setQ] = React.useState("");
   const [view, setView] = React.useState<"live" | "analytics">("live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = React.useState("All");
   const [rarity, setRarity] = React.useState("All");
   const [memberFilter, setMemberFilter] = React.useState("All");
-  const [resolveMessage, setResolveMessage] = React.useState<string | null>(null);
   const memberOptions = React.useMemo(() => {
     const names = [
       ...data.members.map((member) => member.userName ?? member.username ?? member.playerUsername ?? member.name),
       ...data.market.map((listing) => listing.ownerUsername ?? listing.owner ?? listing.ownerName),
-      ...(history?.events ?? []).map((event: AnyRecord) => event.owner),
     ].filter(Boolean).map(String);
     return unique(names).sort((a, b) => a.localeCompare(b));
-  }, [data.members, data.market, history?.events]);
+  }, [data.members, data.market]);
   const ownerMatches = React.useCallback((owner: unknown) => memberFilter === "All" || String(owner ?? "").toLowerCase() === memberFilter.toLowerCase(), [memberFilter]);
   const all = data.market.filter((listing) => ownerMatches(listing.ownerUsername ?? listing.owner ?? listing.ownerName));
   const apiOrders = data.marketApi.histories
@@ -1274,7 +1272,6 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
     .filter((trade: AnyRecord) => apiOrderIds.has(String(trade.orderEntityId)) && ownerMatches(trade.sellerUsername ?? trade.purchaserUsername))
     .map((trade: AnyRecord) => [String(trade.id ?? `${trade.orderEntityId}-${trade.timestamp}-${trade.quantity}`), trade])).values()]
     .sort((a: AnyRecord, b: AnyRecord) => String(b.timestamp ?? b.createdAt).localeCompare(String(a.timestamp ?? a.createdAt)));
-  const apiCompletedOrders = apiOrders.filter((order: AnyRecord) => String(order.status).toUpperCase() === "COMPLETED");
   const trackedLiveListings = React.useMemo(
     () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
     [history?.liveListings],
@@ -1292,7 +1289,6 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
     return true;
   });
   const highest = [...all].sort((a, b) => toNumber(b.price) * toNumber(b.quantity || 1) - toNumber(a.price) * toNumber(a.quantity || 1)).slice(0, 3);
-  const events = (history?.events ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
   const saleEvents = apiTrades.map((trade: AnyRecord) => ({
     itemName: trade.itemName,
     item_name: trade.itemName,
@@ -1305,34 +1301,15 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   }));
   const topItems = buildMarketTopItems(saleEvents);
   const daily = buildMarketDaily(saleEvents);
-  const monitoredTotals = buildMarketTotals(events);
-  const totals: ReturnType<typeof buildMarketTotals> = {
-    ...monitoredTotals,
-    confirmedSales: apiTrades.length,
-    trackedValue: apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0),
-  };
-  const pending = (history?.pending ?? []).filter((event: AnyRecord) => ownerMatches(event.owner));
+  const confirmedRevenue = apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0);
+  const unitsSold = apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0);
+  const averageSaleValue = apiTrades.length ? confirmedRevenue / apiTrades.length : 0;
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
+  const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
-  async function markCancelled(event: AnyRecord) {
-    setResolveMessage(null);
-    try {
-      const response = await fetch(`${LOCAL_API}/market/event/resolve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: event.id, claimId }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-      setResolveMessage("Marked as cancelled.");
-      onHistoryChanged();
-    } catch (error) {
-      setResolveMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
   return (
     <div className="panel">
-      <Header title="Market">{all.length} live listings - {formatNumber(totals.confirmedSales)} API-confirmed trades for {filterLabel}</Header>
+      <Header title="Market">{all.length} live listings - {formatNumber(apiTrades.length)} confirmed sale{apiTrades.length === 1 ? "" : "s"} for {filterLabel}</Header>
       <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
@@ -1349,31 +1326,42 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
       {view === "analytics" ? (
         <>
           <div className="metric-grid">
-            <MiniStat icon={<ShoppingCart />} label="Monitor Listings" value={formatNumber(totals.newListings)} />
-            <MiniStat icon={<TrendingDown />} label="API Trades" value={formatNumber(totals.confirmedSales)} />
-            <MiniStat icon={<CheckCircle2 />} label="Completed Orders" value={formatNumber(apiCompletedOrders.length)} />
-            <MiniStat icon={<CircleDollarSign />} label="API Trade Value" value={`${formatNumber(totals.trackedValue)}g`} />
+            <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(apiTrades.length)} />
+            <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
+            <MiniStat icon={<CircleDollarSign />} label="Sales Revenue" value={`${formatNumber(confirmedRevenue)}g`} />
+            <MiniStat icon={<TrendingUp />} label="Average Sale Value" value={`${formatNumber(averageSaleValue)}g`} />
           </div>
           <div className="two-col market-analytics">
             <section>
-              <h3><Star size={17} /> What Moves Most</h3>
+              <h3><Star size={17} /> Best Sellers</h3>
+              <p className="legend">Ranked by units sold in API-confirmed sales.</p>
               <DataTable rows={topItems} columns={[
                 ["Item", r => r.itemName],
-                ["Sales", r => formatNumber(r.soldCount)],
-                ["Confirmed Value", r => `${formatNumber(r.totalValue)}g`],
-                ["Avg Price", r => `${formatNumber(r.avgPrice)}g`],
+                ["Units Sold", r => formatNumber(r.unitsSold)],
+                ["Sales", r => formatNumber(r.salesCount)],
+                ["Revenue", r => `${formatNumber(r.totalValue)}g`],
+                ["Avg Unit Price", r => `${formatNumber(r.avgUnitPrice)}g`],
                 ["Last Trade", r => dateLabel(r.lastSoldAt)],
               ]} />
             </section>
             <section>
-              <h3><TrendingUp size={17} /> Sales Trend</h3>
-              <div className="bar-panel compact-bars">
-                {daily.length ? daily.map((row: AnyRecord) => <div className="bar-row" key={row.day}><span>{row.day}</span><div><i style={{ width: `${(toNumber(row.totalValue) / maxDailyValue) * 100}%` }} /></div><b>{formatNumber(row.soldCount)} / {formatNumber(row.totalValue)}g</b></div>) : <p className="legend">No API-confirmed trades found for this filter.</p>}
+              <h3><TrendingUp size={17} /> Revenue By Day</h3>
+              <p className="legend">{trendRange}. Confirmed sales only; bar length represents revenue.</p>
+              <div className="daily-sales">
+                {daily.length ? daily.map((row: AnyRecord) => (
+                  <div className="daily-sale-row" key={row.day}>
+                    <span>{formatMarketDay(row.day)}</span>
+                    <div className="daily-sale-bar"><i style={{ width: `${(toNumber(row.totalValue) / maxDailyValue) * 100}%` }} /></div>
+                    <strong>{formatNumber(row.totalValue)}g</strong>
+                    <small>{formatNumber(row.salesCount)} sale{row.salesCount === 1 ? "" : "s"} - {formatNumber(row.unitsSold)} units</small>
+                  </div>
+                )) : <p className="legend">No API-confirmed sales found for this selection.</p>}
               </div>
             </section>
           </div>
           <section>
-            <h3><CheckCircle2 size={17} /> Confirmed Trades From BitJita</h3>
+            <h3><CheckCircle2 size={17} /> Recent Confirmed Sales</h3>
+            <p className="legend">Individual sales returned by BitJita for orders listed by the selected settlement member(s).</p>
             <DataTable rows={apiTrades} columns={[
               ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
               ["Item", r => r.itemName ?? "-"],
@@ -1384,31 +1372,6 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
               ["Buyer", r => r.purchaserUsername ?? r.buyerUsername ?? "-"],
             ]} />
           </section>
-          {pending.length ? (
-            <section className="warning-section">
-              <h3><AlertTriangle size={17} /> Unconfirmed Quantity Drops ({pending.length})</h3>
-              {resolveMessage ? <p className="legend">{resolveMessage}</p> : null}
-              <DataTable rows={pending} columns={[
-                ["When", r => dateLabel(r.occurred_at)],
-                ["Status", r => String(r.event_type).replaceAll("_", " ")],
-                ["Item", r => r.item_name],
-                ["Qty", r => formatNumber(r.quantity)],
-                ["Price", r => `${formatNumber(r.price)}g`],
-                ["Owner", r => r.owner ?? "-"],
-                ["Action", r => <button className="mini-action" onClick={() => markCancelled(r)}>Mark Cancelled</button>],
-              ]} />
-            </section>
-          ) : null}
-          <h3 className="subheading">Monitor Changes</h3>
-          <DataTable rows={events} columns={[
-            ["When", r => dateLabel(r.occurred_at ?? r.occurredAt)],
-            ["Event", r => String(r.event_type ?? "").replaceAll("_", " ")],
-            ["Item", r => r.item_name ?? r.itemName],
-            ["Qty", r => formatNumber(r.quantity)],
-            ["Price", r => `${formatNumber(r.price)}g`],
-            ["Value", r => `${formatNumber(r.total_value ?? r.totalValue)}g`],
-            ["Owner", r => r.owner ?? "-"],
-          ]} />
         </>
       ) : (
         <>
@@ -1443,49 +1406,42 @@ function Market({ data, history, claimId, onHistoryChanged }: { data: ReturnType
   );
 }
 
-function buildMarketTotals(events: AnyRecord[]) {
-  return events.reduce((acc, event) => {
-    const type = String(event.event_type ?? "");
-    if (type === "new_listing") acc.newListings += 1;
-    if (type === "sale" || type === "partial_sale") {
-      acc.confirmedSales += 1;
-      acc.trackedValue += toNumber(event.total_value ?? event.totalValue);
-    }
-    if (type === "removed_or_cancelled" || type === "sold_or_removed" || type === "quantity_cancelled") acc.removedOrCancelled += 1;
-    if (type === "partial_quantity_drop") acc.unconfirmedQuantityDrops += 1;
-    return acc;
-  }, { newListings: 0, confirmedSales: 0, removedOrCancelled: 0, unconfirmedQuantityDrops: 0, trackedValue: 0 });
-}
-
 function buildMarketTopItems(events: AnyRecord[]) {
-  const grouped = new Map<string, { itemName: string; soldCount: number; totalValue: number; totalPrice: number; lastSoldAt: string }>();
+  const grouped = new Map<string, { itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();
   for (const event of events) {
     const itemName = String(event.item_name ?? event.itemName ?? "Unknown Item");
-    const current = grouped.get(itemName) ?? { itemName, soldCount: 0, totalValue: 0, totalPrice: 0, lastSoldAt: "" };
-    current.soldCount += 1;
+    const current = grouped.get(itemName) ?? { itemName, salesCount: 0, unitsSold: 0, totalValue: 0, lastSoldAt: "" };
+    current.salesCount += 1;
+    current.unitsSold += toNumber(event.quantity);
     current.totalValue += toNumber(event.total_value ?? event.totalValue);
-    current.totalPrice += toNumber(event.price);
     current.lastSoldAt = String(current.lastSoldAt && current.lastSoldAt > String(event.occurred_at) ? current.lastSoldAt : event.occurred_at ?? "");
     grouped.set(itemName, current);
   }
   return [...grouped.values()]
-    .map((item) => ({ ...item, avgPrice: item.soldCount ? item.totalPrice / item.soldCount : 0 }))
-    .sort((a, b) => b.soldCount - a.soldCount || b.totalValue - a.totalValue)
+    .map((item) => ({ ...item, avgUnitPrice: item.unitsSold ? item.totalValue / item.unitsSold : 0 }))
+    .sort((a, b) => b.unitsSold - a.unitsSold || b.totalValue - a.totalValue)
     .slice(0, 20);
 }
 
 function buildMarketDaily(events: AnyRecord[]) {
-  const grouped = new Map<string, { day: string; soldCount: number; totalValue: number }>();
+  const grouped = new Map<string, { day: string; salesCount: number; unitsSold: number; totalValue: number }>();
   for (const event of events) {
     const occurredAt = event.occurred_at ?? event.occurredAt;
     const parsed = parseDateValue(occurredAt);
     const day = parsed ? parsed.toISOString().slice(0, 10) : String(occurredAt ?? "").slice(0, 10) || "Unknown";
-    const current = grouped.get(day) ?? { day, soldCount: 0, totalValue: 0 };
-    current.soldCount += 1;
+    const current = grouped.get(day) ?? { day, salesCount: 0, unitsSold: 0, totalValue: 0 };
+    current.salesCount += 1;
+    current.unitsSold += toNumber(event.quantity);
     current.totalValue += toNumber(event.total_value ?? event.totalValue);
     grouped.set(day, current);
   }
   return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
+}
+
+function formatMarketDay(value: string): string {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
 function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null } }) {
@@ -2110,7 +2066,7 @@ function App() {
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} onHistoryChanged={() => setHistoryRefreshToken((x) => x + 1)} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} />,
     empire: <Region data={data} />,
     map: <MapPanel data={data} />,
     sync: <SyncPanel syncUrl={syncUrl} />,

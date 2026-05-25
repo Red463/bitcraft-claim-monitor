@@ -112,7 +112,7 @@ main { min-width: 0; max-height: 100vh; overflow: auto; }
 .permission-icons svg.enabled { color: var(--gold); }
 .permission-icons svg.enabled.blue { color: #60a5fa; }
 .member-detail, .structure-detail, .item-detail { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 16px; display: grid; gap: 14px; }
-.member-detail h3, .structure-detail h3, .item-detail h3, .subheading { display: flex; align-items: center; gap: 8px; color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 18px; margin: 0; }
+.member-detail h3, .structure-detail h3, .item-detail h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 18px; margin: 0; }
 .public-profile-grid section { max-height: 400px; }
 .table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; background: var(--panel); }
 table { width: 100%; border-collapse: collapse; min-width: 780px; }
@@ -280,6 +280,13 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .bar-row i { display: block; height: 100%; background: #475569; }
 .bar-row i.mine { background: var(--gold); }
 .bar-row b { text-align: right; color: var(--text); }
+.daily-sales { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 13px; display: grid; gap: 12px; }
+.daily-sale-row { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; }
+.daily-sale-row > span { color: var(--text); font-size: 12px; font-weight: 500; }
+.daily-sale-row > strong { color: var(--text); font-family: "JetBrains Mono", monospace; font-size: 12px; text-align: right; }
+.daily-sale-row > small { grid-column: 2 / 4; color: var(--muted); font-size: 11px; }
+.daily-sale-bar { height: 12px; border-radius: 99px; background: #0b0f16; overflow: hidden; }
+.daily-sale-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--gold), var(--good)); }
 .mine-panel { border: 1px solid rgba(240,198,79,.48); background: var(--gold-dim); border-radius: 8px; padding: 13px 15px; display: grid; grid-template-columns: 22px auto 1fr; align-items: center; gap: 10px; }
 .mine-panel svg, .mine-panel strong { color: var(--gold); }
 .mine-panel span { color: var(--text); }
@@ -320,4 +327,5 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .split-header { display: grid; }
   .bar-row { grid-template-columns: 1fr; }
+  .daily-sale-row { grid-template-columns: 60px minmax(0, 1fr) auto; }
 }
