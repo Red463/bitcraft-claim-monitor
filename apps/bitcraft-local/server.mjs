@@ -1,11 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(root, "dist");
+const isProduction = process.env.NODE_ENV === "production";
+const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
+const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 mkdirSync(dataDir, { recursive: true });
 
@@ -294,20 +299,25 @@ function createSession(userId) {
   statements.insertSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
   return {
     token,
-    cookie: `bitcraft_admin_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
+    cookie: `bitcraft_admin_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
   };
 }
 
 function clearSession(req) {
   const token = parseCookies(req).bitcraft_admin_session;
   if (token) statements.deleteSession.run(tokenHash(token));
-  return "bitcraft_admin_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0";
+  return `bitcraft_admin_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
 }
 
 function adminStatus(req) {
   const setupRequired = toNumber(statements.adminCount.get()?.count) === 0;
   const user = getSessionUser(req);
-  return { setupRequired, authenticated: Boolean(user), user: user ? { id: user.id, username: user.username } : null };
+  return {
+    setupRequired,
+    setupKeyRequired: isProduction && setupRequired,
+    authenticated: Boolean(user),
+    user: user ? { id: user.id, username: user.username } : null,
+  };
 }
 
 function tableNames() {
@@ -649,15 +659,72 @@ function send(res, status, body, headers = {}) {
   res.end(json);
 }
 
+function mimeType(filePath) {
+  const types = {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+  };
+  return types[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+}
+
+async function serveBuiltFrontend(url, method, res) {
+  if (!serveFrontend || !["GET", "HEAD"].includes(method ?? "")) return false;
+  const pathname = decodeURIComponent(url.pathname);
+  const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
+  const assetPath = path.resolve(distDir, requestedPath);
+  const isDistPath = assetPath === distDir || assetPath.startsWith(`${distDir}${path.sep}`);
+  const candidate = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile() ? assetPath : path.join(distDir, "index.html");
+  if (!existsSync(candidate)) {
+    send(res, 503, { error: "Frontend build is missing. Run the production build before starting the server." });
+    return true;
+  }
+  const content = await readFile(candidate);
+  res.writeHead(200, {
+    "content-type": mimeType(candidate),
+    "cache-control": candidate.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+  });
+  if (method === "HEAD") return res.end();
+  res.end(content);
+  return true;
+}
+
+async function proxyBitjita(url, res) {
+  const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
+  upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
+  upstream.search = url.search;
+  const response = await fetch(upstream, {
+    headers: { accept: "application/json" },
+  });
+  const body = Buffer.from(await response.arrayBuffer());
+  res.writeHead(response.status, {
+    "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
+    "cache-control": response.headers.get("cache-control") ?? "no-cache",
+  });
+  res.end(body);
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (req.method === "OPTIONS") return send(res, 204, {});
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true });
+    if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
       const body = await readJson(req);
+      if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
+      if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
       const password = String(body.password ?? "");
       if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
@@ -698,11 +765,15 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { table, rows: readTable(table, url.searchParams.get("limit") ?? 100) });
       }
     }
-    if (req.method === "POST" && url.pathname === "/api/local/snapshot") return send(res, 200, await recordSnapshot(await readJson(req)));
+    if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
+      if (isProduction && !requireAdmin(req, res)) return;
+      return send(res, 200, await recordSnapshot(await readJson(req)));
+    }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100)));
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
+      if (isProduction && !requireAdmin(req, res)) return;
       return send(res, 200, resolveMarketEvent(await readJson(req)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
@@ -714,13 +785,15 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/reference/materials") {
       return send(res, 200, await recipeRelevantMaterials());
     }
+    if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
     send(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-const port = Number(process.env.LOCAL_API_PORT ?? 18430);
-server.listen(port, "127.0.0.1", () => {
-  console.log(`BitCraft local database API listening on http://127.0.0.1:${port}`);
+const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430);
+const host = process.env.APP_HOST ?? "127.0.0.1";
+server.listen(port, host, () => {
+  console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
 });

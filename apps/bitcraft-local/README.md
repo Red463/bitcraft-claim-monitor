@@ -23,3 +23,12 @@ Persistent history is stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`
 The Admin page is protected by a local server-side session. On first run, open Admin and create the initial password. The password is stored as a salted scrypt hash in SQLite, and the browser receives an HttpOnly session cookie.
 
 For isolated testing, set `BITCRAFT_LOCAL_DATA_DIR` before running the dev server to point at a different database directory.
+
+For hosting on an Ubuntu VPS, see [`DEPLOYMENT.md`](../../DEPLOYMENT.md). The production build is served by the Node application:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+NODE_ENV=production ADMIN_SETUP_KEY=choose-a-one-time-key BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor corepack pnpm --filter @workspace/bitcraft-local run start
+```
+
+Use the one-time setup key when creating the first production admin, then restart the process without that variable. The full systemd and Caddy procedure is in the deployment guide.

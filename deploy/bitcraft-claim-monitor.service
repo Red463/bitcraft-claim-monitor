@@ -1,0 +1,27 @@
+[Unit]
+Description=BitCraft Claim Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bitcraft
+Group=bitcraft
+WorkingDirectory=/opt/bitcraft-claim-monitor/apps/bitcraft-local
+Environment=NODE_ENV=production
+Environment=APP_HOST=127.0.0.1
+Environment=APP_PORT=18430
+Environment=BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor
+EnvironmentFile=-/etc/bitcraft-claim-monitor.env
+ExecStart=/usr/bin/node /opt/bitcraft-claim-monitor/apps/bitcraft-local/server.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bitcraft-claim-monitor
+
+[Install]
+WantedBy=multi-user.target

@@ -1566,6 +1566,7 @@ function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: str
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [password, setPassword] = React.useState("");
+  const [setupKey, setSetupKey] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [nextClaimId, setNextClaimId] = React.useState(claimId);
   const [nextSyncUrl, setNextSyncUrl] = React.useState(syncUrl);
@@ -1616,9 +1617,10 @@ function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: str
     setMessage(null);
     try {
       const route = auth?.setupRequired ? "/admin/setup" : "/admin/login";
-      const result = await api(route, { method: "POST", body: JSON.stringify({ password }) });
+      const result = await api(route, { method: "POST", body: JSON.stringify({ password, setupKey }) });
       setAuth({ setupRequired: false, authenticated: true, user: result.user });
       setPassword("");
+      setSetupKey("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
@@ -1656,6 +1658,7 @@ function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: str
       <div className="panel">
         <Header title="Admin">{auth?.setupRequired ? "Create the first local admin password" : "Sign in to manage local settings and database tools"}</Header>
         <form className="form-card" onSubmit={submitAuth}>
+          {auth?.setupKeyRequired ? <label className="field"><span>Server Setup Key</span><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} autoComplete="one-time-code" /></label> : null}
           <label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} autoComplete={auth?.setupRequired ? "new-password" : "current-password"} /></label>
           <button className="toolbar-button" type="submit"><KeyRound size={15} /> {auth?.setupRequired ? "Create Admin" : "Sign In"}</button>
           {message ? <p className="legend">{message}</p> : null}

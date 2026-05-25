@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "node dev.mjs",
     "dev:web": "vite --host 0.0.0.0",
     "dev:db": "node server.mjs",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "start": "node server.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
