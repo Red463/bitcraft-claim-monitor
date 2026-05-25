@@ -108,8 +108,6 @@ ensureColumn("market_events", "trade_id", "TEXT");
 
 const defaultClaimId = "1369094286777412590";
 const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
-const bitcraftSyncVersion = "250";
-let referenceMaterialsCache = null;
 const defaultTheme = {
   bg: "#0c0d10",
   sidebar: "#06070a",
@@ -637,62 +635,6 @@ function safeJson(value) {
   }
 }
 
-async function recipeRelevantMaterials() {
-  if (referenceMaterialsCache && Date.now() - referenceMaterialsCache.loadedAt < 60 * 60 * 1000) {
-    return referenceMaterialsCache.payload;
-  }
-  const origin = process.env.BITCRAFT_SYNC_ORIGIN ?? "https://bitcraftsync.app";
-  const [itemResponse, recipesResponse] = await Promise.all([
-    fetch(`${origin}/item.json?v=${bitcraftSyncVersion}`),
-    fetch(`${origin}/recipes.json?v=${bitcraftSyncVersion}`),
-  ]);
-  if (!itemResponse.ok) throw new Error(`item.json HTTP ${itemResponse.status}`);
-  if (!recipesResponse.ok) throw new Error(`recipes.json HTTP ${recipesResponse.status}`);
-  const [items, recipes] = await Promise.all([itemResponse.json(), recipesResponse.json()]);
-  const itemMap = new Map(items.map((item) => [String(item.id), item]));
-  const materialTerms = [
-    "plank", "brick", "leather", "hide", "ingot", "bar", "ore", "stone", "rock", "log", "wood", "stripped",
-    "cloth", "fabric", "textile", "fiber", "flax", "cotton", "thread", "coal", "charcoal", "fuel", "clay",
-    "limestone", "sand", "resin", "oil", "nail", "beam", "board", "treated", "untreated",
-  ];
-  const usage = new Map();
-  for (const recipe of recipes) {
-    const outputNames = (recipe.op ?? [])
-      .map((output) => itemMap.get(String(output["i.id"]))?.n)
-      .filter(Boolean)
-      .slice(0, 3);
-    for (const input of [...(recipe.ir ?? []), ...(recipe.cr ?? [])]) {
-      const itemId = input["i.id"];
-      if (itemId == null) continue;
-      const key = String(itemId);
-      const item = itemMap.get(key);
-      if (!item) continue;
-      const name = String(item.n ?? "");
-      const haystack = name.toLowerCase();
-      if (!materialTerms.some((term) => haystack.includes(term))) continue;
-      const current = usage.get(key) ?? { itemId: key, name, tier: item.ti ?? null, usedInRecipes: 0, totalInputQuantity: 0, examples: new Map() };
-      current.usedInRecipes += 1;
-      current.totalInputQuantity += toNumber(input.q);
-      for (const outputName of outputNames) current.examples.set(outputName, (current.examples.get(outputName) ?? 0) + 1);
-      usage.set(key, current);
-    }
-  }
-  const materials = [...usage.values()]
-    .map((material) => ({
-      itemId: material.itemId,
-      name: material.name,
-      tier: material.tier,
-      usedInRecipes: material.usedInRecipes,
-      totalInputQuantity: material.totalInputQuantity,
-      examples: [...material.examples.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name]) => name),
-    }))
-    .sort((a, b) => b.usedInRecipes - a.usedInRecipes || b.totalInputQuantity - a.totalInputQuantity)
-    .slice(0, 160);
-  const payload = { source: "bitcraftsync", version: bitcraftSyncVersion, loadedAt: new Date().toISOString(), materials };
-  referenceMaterialsCache = { loadedAt: Date.now(), payload };
-  return payload;
-}
-
 async function readJson(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -833,9 +775,6 @@ const server = createServer(async (req, res) => {
       const limit = Number(url.searchParams.get("limit") ?? 200);
       const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit);
       return send(res, 200, { events });
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/reference/materials") {
-      return send(res, 200, await recipeRelevantMaterials());
     }
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });

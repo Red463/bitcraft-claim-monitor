@@ -255,10 +255,6 @@ function formatNumber(value: unknown, maximumFractionDigits = 0): string {
   return toNumber(value).toLocaleString(undefined, { maximumFractionDigits });
 }
 
-function formatCompact(value: unknown): string {
-  return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(toNumber(value));
-}
-
 function parseDateValue(value: unknown): Date | null {
   if (!value) return null;
   const text = String(value);
@@ -967,16 +963,12 @@ function Segmented({ options, value, onChange, label }: { options: string[]; val
   );
 }
 
-const MATERIAL_WATCHLIST = [
-  { label: "Planks", terms: ["plank"] },
-  { label: "Bricks", terms: ["brick"] },
-  { label: "Leather", terms: ["leather", "hide"] },
-  { label: "Ingots", terms: ["ingot", "bar"] },
-  { label: "Stone", terms: ["stone", "rock"] },
-  { label: "Logs", terms: ["log", "wood"] },
-  { label: "Cloth", terms: ["cloth", "fabric", "textile"] },
-  { label: "Fiber", terms: ["fiber", "flax", "cotton"] },
-  { label: "Fuel", terms: ["fuel", "charcoal", "coal"] },
+const CORE_MATERIAL_GROUPS = [
+  { label: "Ingots", matcher: /(?:ingot|ore piece|ore concentrate)$/i },
+  { label: "Planks", matcher: /(?:plank|stripped wood|wood log)$/i },
+  { label: "Bricks", matcher: /(?:brick|clay lump)$/i },
+  { label: "Leather", matcher: /(?:leather|hide)$/i },
+  { label: "Cloth", matcher: /(?:cloth|textile|cloth strip|spool of thread|plant fiber|plant fibre|cotton|flax)$/i },
 ] as const;
 
 function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
@@ -987,18 +979,8 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [rarity, setRarity] = React.useState("All");
   const [buildingFilter, setBuildingFilter] = React.useState("All");
   const [nonEmptyOnly, setNonEmptyOnly] = React.useState(true);
-  const [referenceMaterials, setReferenceMaterials] = React.useState<AnyRecord[]>([]);
-  const [referenceError, setReferenceError] = React.useState<string | null>(null);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [itemDetail, setItemDetail] = React.useState<AnyRecord | null>(null);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${LOCAL_API}/reference/materials`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`materials HTTP ${response.status}`)))
-      .then((payload) => { setReferenceMaterials(payload.materials ?? []); setReferenceError(null); })
-      .catch((error) => { if (!controller.signal.aborted) setReferenceError(error instanceof Error ? error.message : String(error)); });
-    return () => controller.abort();
-  }, []);
   React.useEffect(() => {
     if (!selectedItem?.itemId) {
       setItemDetail(null);
@@ -1027,7 +1009,6 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
         tier: lookup.tier,
         rarity: lookup.rarityStr,
         tag: lookup.tag,
-        volume: slot.volume != null ? Number(slot.volume) / 1000 : null,
       };
     });
     return {
@@ -1038,24 +1019,21 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     };
   });
   const allRows = containers.flatMap((container) => container.items);
-  const materialSource: AnyRecord[] = referenceMaterials.length ? referenceMaterials : MATERIAL_WATCHLIST.map((group) => ({ ...group }));
-  const materialSummary: AnyRecord[] = materialSource.map((group): AnyRecord => {
-    const matches = allRows.filter((row: AnyRecord) => {
-      if (group.itemId && row.itemId === String(group.itemId)) return true;
-      const haystack = `${row.name ?? ""} ${row.tag ?? ""}`.toLowerCase();
-      return (group.terms ?? [group.name ?? group.label]).some((term: string) => haystack.includes(String(term).toLowerCase()));
-    });
+  const materialSummary: AnyRecord[] = CORE_MATERIAL_GROUPS.map((group): AnyRecord => {
+    const matches = allRows.filter((row: AnyRecord) => group.matcher.test(String(row.name ?? "")));
     const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
     const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
-    const topItems = (Object.entries(matches.reduce((acc: Record<string, number>, row: AnyRecord) => {
-      const name = String(row.name ?? "Unknown");
-      acc[name] = (acc[name] ?? 0) + toNumber(row.quantity);
+    const tierBreakdown = (Object.entries(matches.reduce((acc: Record<string, number>, row: AnyRecord) => {
+      const tierLabel = toNumber(row.tier) > 0 ? `T${toNumber(row.tier)}` : "Other";
+      acc[tierLabel] = (acc[tierLabel] ?? 0) + toNumber(row.quantity);
       return acc;
-    }, {})) as Array<[string, number]>).sort((a, b) => b[1] - a[1]).slice(0, 2);
-    return { ...group, label: group.label ?? group.name, quantity, containerCount, topItems };
-  }).filter((group: AnyRecord) => group.quantity > 0)
-    .sort((a: AnyRecord, b: AnyRecord) => toNumber(b.usedInRecipes) - toNumber(a.usedInRecipes) || toNumber(b.quantity) - toNumber(a.quantity))
-    .slice(0, 18);
+    }, {})) as Array<[string, number]>).sort((a, b) => {
+      if (a[0] === "Other") return 1;
+      if (b[0] === "Other") return -1;
+      return toNumber(a[0].slice(1)) - toNumber(b[0].slice(1));
+    });
+    return { label: group.label, quantity, containerCount, tierBreakdown };
+  });
   const filteredContainers = containers.map((container) => ({
     ...container,
     items: container.items.filter((row: AnyRecord) => {
@@ -1076,30 +1054,34 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const tiers = unique(allRows.map((row: AnyRecord) => String(row.tier)).filter((value: string) => value && value !== "undefined" && value !== "-1" && value !== "0"));
   const rarities = unique(allRows.map((row: AnyRecord) => String(row.rarity)).filter((value: string) => value && value !== "undefined" && value !== "Default"));
   const totalItems = rows.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
-  const totalVolume = rows.reduce((total: number, row: AnyRecord) => total + toNumber(row.volume) * toNumber(row.quantity), 0);
+  const occupiedContainers = containers.filter((container) => container.items.length > 0).length;
   return (
     <div className="panel">
       <Header title="Inventory & Storage">{containers.length} containers - {rows.length} visible stacks</Header>
       <div className="metric-grid">
         <MiniStat icon={<Package />} label="Total Items" value={formatNumber(totalItems)} />
         <MiniStat icon={<Box />} label="Unique Items" value={unique(rows.map((row: AnyRecord) => String(row.name))).length} />
-        <MiniStat icon={<Package />} label="Total Volume" value={formatCompact(totalVolume)} />
+        <MiniStat icon={<Package />} label="Occupied Containers" value={occupiedContainers} />
         <MiniStat icon={<Building2 />} label="Containers" value={containers.length} />
       </div>
       <section className="material-watch">
         <div className="split-header">
-          <h3><Package size={17} /> Recipe-Relevant Materials</h3>
-          <p className="legend">{referenceError ? "Using fallback material groups." : "Ranked from BitCraft Sync recipe inputs."} Totals are across all containers.</p>
+          <h3><Package size={17} /> Core Materials</h3>
+          <p className="legend">Includes refined materials and their stored raw forms across all containers.</p>
         </div>
         <div className="material-watch-grid">
-          {materialSummary.length ? materialSummary.map((group) => (
+          {materialSummary.map((group) => (
             <article className={`material-card ${group.quantity ? "" : "empty"}`} key={group.label}>
-              <span>{group.tier && toNumber(group.tier) > 0 ? `T${group.tier} ` : ""}{group.label}</span>
+              <span>{group.label}</span>
               <strong>{formatNumber(group.quantity)}</strong>
-              <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None found"}{group.usedInRecipes ? ` - ${formatNumber(group.usedInRecipes)} recipes` : ""}</small>
-              {group.examples?.length ? <em>Used for {group.examples.slice(0, 2).join(" / ")}</em> : group.topItems.length ? <em>{group.topItems.map(([name, qty]: [string, number]) => `${name} ${formatNumber(qty)}`).join(" / ")}</em> : null}
+              <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None stored"}</small>
+              {group.tierBreakdown.length ? (
+                <div className="material-tier-list">
+                  {group.tierBreakdown.map(([tierLabel, qty]: [string, number]) => <div key={tierLabel}><b>{tierLabel}</b><em>{formatNumber(qty)}</em></div>)}
+                </div>
+              ) : null}
             </article>
-          )) : <p className="legend">No tracked recipe materials found in storage.</p>}
+          ))}
         </div>
       </section>
       {selectedItem && itemDetail ? (
@@ -1141,12 +1123,11 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       <div className="container-list">
         {filteredContainers.map((container) => {
           const quantity = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.quantity), 0);
-          const volume = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.volume) * toNumber(item.quantity), 0);
           return (
             <details className="container-card" key={container.id} open={filteredContainers.length <= 4}>
               <summary>
                 <span><Package size={16} /> <strong>{container.name}</strong>{container.locked ? <Lock size={13} /> : null}</span>
-                <small>{container.items.length} stacks - {formatNumber(quantity)} items - {formatCompact(volume)} volume</small>
+                <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
               </summary>
               <DataTable rows={container.items} columns={[
                 ["Item", (r) => <button className="item-link" onClick={() => setSelectedItem(r)}><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</button>],
@@ -1154,7 +1135,6 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
                 ["Tier", (r) => r.tier ? `T${r.tier}` : "-"],
                 ["Rarity", (r) => r.rarity ? <span className={`role-badge ${getRarityClass(r.rarity)}`}>{r.rarity}</span> : "-"],
                 ["Type", (r) => r.type],
-                ["Volume", (r) => r.volume != null ? formatCompact(toNumber(r.volume) * toNumber(r.quantity)) : "-"],
               ]} />
             </details>
           );
@@ -1444,7 +1424,86 @@ function formatMarketDay(value: string): string {
   return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null } }) {
+function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: number; monitoredRegionId: string }) {
+  const [skillId, setSkillId] = React.useState("3");
+  const [regionId, setRegionId] = React.useState(monitoredRegionId || "All");
+  const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
+  React.useEffect(() => {
+    setRegionId(monitoredRegionId || "All");
+  }, [monitoredRegionId]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setState({ data: null, loading: true, error: null });
+    const skillQuery = skillId === "All" ? "" : `&skillId=${encodeURIComponent(skillId)}`;
+    fetch(`${API}/crafts?completed=false${skillQuery}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`crafts HTTP ${response.status}`)))
+      .then((payload) => setState({ data: payload, error: null, loading: false }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setState((previous) => ({ ...previous, error: error instanceof Error ? error.message : String(error), loading: false }));
+      });
+    return () => controller.abort();
+  }, [skillId, refreshToken]);
+  const jobs: AnyRecord[] = state.data?.craftResults ?? [];
+  const itemLookup = new Map([...(state.data?.items ?? []), ...(state.data?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
+  const publicJobs: AnyRecord[] = jobs.filter((job) => job.isPublic === true && !job.completed).map((job): AnyRecord => {
+    const progress = toNumber(job.progress);
+    const total = toNumber(job.totalActionsRequired);
+    const remaining = Math.max(0, total - progress);
+    const requiredSkillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
+    const experience = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === requiredSkillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+    const item = itemLookup.get(String(job.craftedItem?.[0]?.item_id));
+    return {
+      ...job,
+      output: item?.name ?? `Recipe #${job.recipeId ?? "?"}`,
+      remaining,
+      experience,
+      availableXp: remaining * experience,
+      requiredSkillId,
+      requiredSkillName: SKILL_NAMES[requiredSkillId] ?? `Skill ${requiredSkillId}`,
+      minimumLevel: toNumber(job.levelRequirements?.find((requirement: AnyRecord) => toNumber(requirement.skill_id) === requiredSkillId)?.level ?? job.levelRequirements?.[0]?.level),
+    };
+  }).filter((job) => job.remaining > 0);
+  const regions = unique([...publicJobs.map((job) => String(job.regionId)).filter(Boolean), ...(monitoredRegionId ? [monitoredRegionId] : [])]).sort((a, b) => toNumber(a) - toNumber(b));
+  const filteredJobs = publicJobs
+    .filter((job) => regionId === "All" || String(job.regionId) === regionId)
+    .sort((a, b) => b.remaining - a.remaining);
+  const visibleJobs = filteredJobs.slice(0, 100);
+  const skillName = skillId === "All" ? "All Skills" : SKILL_NAMES[toNumber(skillId)] ?? "Selected skill";
+  return (
+    <section className="public-craft-finder">
+      <div className="split-header">
+        <Header title="Public Crafts">
+          {state.loading ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}
+        </Header>
+        <div className="toolbar-row">
+          <label className="inline-field"><span>Skill</span>
+            <select className="select-control" value={skillId} onChange={(event) => setSkillId(event.target.value)}>
+              <option value="All">All Skills</option>
+              {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
+            </select>
+          </label>
+          <label className="inline-field"><span>Region</span>
+            <select className="select-control" value={regionId} onChange={(event) => setRegionId(event.target.value)}>
+              <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+      {state.error ? <div className="error">Failed to load public crafts: {state.error}</div> : null}
+      {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
+      {visibleJobs.length ? <DataTable rows={visibleJobs} columns={[
+        ["Craft", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
+        ["Settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong><small className="muted-line">R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</small></>],
+        ["Required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
+        ["Remaining Actions", (job) => formatNumber(job.remaining)],
+        ["XP Available", (job) => formatNumber(job.availableXp)],
+        ["Owner", (job) => job.ownerUsername ?? "-"],
+      ]} /> : null}
+    </section>
+  );
+}
+
+function Production({ data, refreshToken }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number }) {
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const jobs = [...data.crafts].sort((a, b) => {
     const aTotal = toNumber(a.totalActionsRequired);
@@ -1520,6 +1579,7 @@ function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?:
           );
         })}
       </div>
+      <PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} />
     </div>
   );
 }
@@ -2061,7 +2121,7 @@ function App() {
     overview: <Overview data={data} onNavigate={setActive} />,
     members: <Members data={data} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} />,
+    production: <Production data={data} refreshToken={refreshToken} />,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,

@@ -194,6 +194,9 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .contributors span strong { color: var(--text); margin-right: 4px; }
 .progress { height: 7px; border-radius: 999px; background: #0b0f16; border: 1px solid rgba(255,255,255,.06); overflow: hidden; }
 .progress div { height: 100%; background: linear-gradient(90deg, var(--gold), var(--good)); border-radius: inherit; }
+.public-craft-finder { margin-top: 6px; padding-top: 20px; border-top: 1px solid var(--border); display: grid; gap: 14px; }
+.public-craft-finder .table-wrap table { min-width: 960px; }
+.public-craft-finder td:nth-child(4), .public-craft-finder td:nth-child(5) { font-family: "JetBrains Mono", monospace; }
 .empty-state { border: 1px solid var(--border); border-radius: 8px; min-height: 170px; display: grid; place-items: center; gap: 10px; color: var(--muted); background: var(--panel); }
 .empty-state svg { width: 40px; height: 40px; opacity: .3; }
 .select-control { height: 38px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); padding: 0 10px; }
@@ -249,13 +252,16 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .material-grid span { color: var(--muted); font-size: 11px; }
 .material-watch { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
 .material-watch h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
-.material-watch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.material-watch-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .material-card { border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: var(--panel-2); padding: 12px; display: grid; gap: 4px; min-width: 0; }
 .material-card.empty { opacity: .62; }
 .material-card span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .material-card strong { color: var(--text); font-family: Rajdhani, sans-serif; font-size: 25px; line-height: 1; }
 .material-card small { color: var(--muted); font-size: 11px; }
 .material-card em { color: var(--gold); font-style: normal; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.material-tier-list { border-top: 1px solid rgba(255,255,255,.07); margin-top: 6px; padding-top: 6px; display: grid; gap: 4px; }
+.material-tier-list div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.material-tier-list b { color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 500; }
 .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .two-col section { display: grid; gap: 8px; align-content: start; max-height: 640px; overflow: auto; }
 .research-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); padding: 10px; }
