@@ -491,14 +491,14 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const focusRows = [...citizens].sort((a, b) => getSkill(b, focusSkill) - getSkill(a, focusSkill)).slice(0, 5);
   const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusSkill), 0) / citizens.length : 0;
   const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusSkill))), 0);
+  const focusT3 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 3).length;
   const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 5).length;
-  const focusT8 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 8).length;
   const coverage = SKILL_IDS.map((id) => {
     const levels = citizens.map((c) => getSkill(c, id));
     const max = Math.max(...levels, 0);
     const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
     const tier = skillTier(max);
-    const specialists = levels.filter((level) => skillTier(level) >= 8).length;
+    const specialists = levels.filter((level) => skillTier(level) >= 5).length;
     return { id, name: SKILL_NAMES[id], max, avg, tier, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
@@ -523,8 +523,8 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <div className="focus-metrics">
             <Info label="Average level" value={formatNumber(focusAverage, 1)} />
             <Info label="Best tier" value={focusTier ? `T${focusTier}` : "-"} />
+            <Info label="T3+" value={`${focusT3} members`} />
             <Info label="T5+" value={`${focusT5} members`} />
-            <Info label="T8+" value={`${focusT8} members`} />
           </div>
           <div className="focus-list">
             {focusRows.map((citizen) => {
@@ -540,7 +540,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
                 <span>{skill.name}</span>
                 <b>{skill.tier ? `T${skill.tier}` : "-"} / Lv {skill.max}</b>
-                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T8+</small>
+                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T5+</small>
               </button>
             ))}
           </div>
