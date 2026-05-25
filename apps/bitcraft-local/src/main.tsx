@@ -820,6 +820,16 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [rarity, setRarity] = React.useState("All");
   const [buildingFilter, setBuildingFilter] = React.useState("All");
   const [nonEmptyOnly, setNonEmptyOnly] = React.useState(true);
+  const [referenceMaterials, setReferenceMaterials] = React.useState<AnyRecord[]>([]);
+  const [referenceError, setReferenceError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${LOCAL_API}/reference/materials`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`materials HTTP ${response.status}`)))
+      .then((payload) => { setReferenceMaterials(payload.materials ?? []); setReferenceError(null); })
+      .catch((error) => { if (!controller.signal.aborted) setReferenceError(error instanceof Error ? error.message : String(error)); });
+    return () => controller.abort();
+  }, []);
   const itemLookup = new Map([...(data.inventories.items ?? []), ...(data.inventories.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const containers = ((data.inventories.buildings ?? []) as AnyRecord[]).map((building) => {
     const items = (building.inventory ?? []).map((slot: AnyRecord, index: number) => {
@@ -828,6 +838,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       return {
         id: `${building.entityId}-${contents.item_id}-${slot.slot ?? index}`,
         building: building.buildingNickname ?? building.buildingName,
+        itemId: contents.item_id == null ? null : String(contents.item_id),
         name: lookup.name ?? `Item #${contents.item_id ?? "?"}`,
         quantity: contents.quantity,
         type: contents.item_type === "cargo" ? "Cargo" : "Item",
@@ -845,10 +856,12 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     };
   });
   const allRows = containers.flatMap((container) => container.items);
-  const materialSummary = MATERIAL_WATCHLIST.map((group) => {
+  const materialSource: AnyRecord[] = referenceMaterials.length ? referenceMaterials : MATERIAL_WATCHLIST.map((group) => ({ ...group }));
+  const materialSummary: AnyRecord[] = materialSource.map((group): AnyRecord => {
     const matches = allRows.filter((row: AnyRecord) => {
+      if (group.itemId && row.itemId === String(group.itemId)) return true;
       const haystack = `${row.name ?? ""} ${row.tag ?? ""}`.toLowerCase();
-      return group.terms.some((term) => haystack.includes(term));
+      return (group.terms ?? [group.name ?? group.label]).some((term: string) => haystack.includes(String(term).toLowerCase()));
     });
     const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
     const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
@@ -857,8 +870,10 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       acc[name] = (acc[name] ?? 0) + toNumber(row.quantity);
       return acc;
     }, {})) as Array<[string, number]>).sort((a, b) => b[1] - a[1]).slice(0, 2);
-    return { ...group, quantity, containerCount, topItems };
-  });
+    return { ...group, label: group.label ?? group.name, quantity, containerCount, topItems };
+  }).filter((group: AnyRecord) => group.quantity > 0)
+    .sort((a: AnyRecord, b: AnyRecord) => toNumber(b.usedInRecipes) - toNumber(a.usedInRecipes) || toNumber(b.quantity) - toNumber(a.quantity))
+    .slice(0, 18);
   const filteredContainers = containers.map((container) => ({
     ...container,
     items: container.items.filter((row: AnyRecord) => {
@@ -891,18 +906,18 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       </div>
       <section className="material-watch">
         <div className="split-header">
-          <h3><Package size={17} /> Important Materials</h3>
-          <p className="legend">Totals across all containers, unaffected by filters.</p>
+          <h3><Package size={17} /> Recipe-Relevant Materials</h3>
+          <p className="legend">{referenceError ? "Using fallback material groups." : "Ranked from BitCraft Sync recipe inputs."} Totals are across all containers.</p>
         </div>
         <div className="material-watch-grid">
-          {materialSummary.map((group) => (
+          {materialSummary.length ? materialSummary.map((group) => (
             <article className={`material-card ${group.quantity ? "" : "empty"}`} key={group.label}>
-              <span>{group.label}</span>
+              <span>{group.tier && toNumber(group.tier) > 0 ? `T${group.tier} ` : ""}{group.label}</span>
               <strong>{formatNumber(group.quantity)}</strong>
-              <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None found"}</small>
-              {group.topItems.length ? <em>{group.topItems.map(([name, qty]) => `${name} ${formatNumber(qty)}`).join(" / ")}</em> : null}
+              <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None found"}{group.usedInRecipes ? ` - ${formatNumber(group.usedInRecipes)} recipes` : ""}</small>
+              {group.examples?.length ? <em>Used for {group.examples.slice(0, 2).join(" / ")}</em> : group.topItems.length ? <em>{group.topItems.map(([name, qty]: [string, number]) => `${name} ${formatNumber(qty)}`).join(" / ")}</em> : null}
             </article>
-          ))}
+          )) : <p className="legend">No tracked recipe materials found in storage.</p>}
         </div>
       </section>
       <div className="toolbar-row">
