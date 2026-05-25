@@ -62,7 +62,7 @@ const NAV = [
   ["production", "Production", Factory],
   ["inventory", "Inventory", Package],
   ["construction", "Construction", Hammer],
-  ["buildings", "Buildings", Home],
+  ["buildings", "Structures", Home],
   ["research", "Research", FlaskConical],
   ["market", "Market", CircleDollarSign],
   ["empire", "Region", Globe2],
@@ -353,7 +353,7 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
         </div>
         <div className="hero-metrics">
           <button onClick={() => onNavigate("members")}><strong>{onlineCount}</strong><span>Online</span></button>
-          <button onClick={() => onNavigate("buildings")}><strong>{buildings.length}</strong><span>Buildings</span></button>
+          <button onClick={() => onNavigate("buildings")}><strong>{buildings.length}</strong><span>Structures</span></button>
           <button onClick={() => onNavigate("market")}><strong>{market.length}</strong><span>Market</span></button>
         </div>
       </section>
@@ -689,9 +689,9 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
 
   return (
     <div className="panel">
-      <Header title="Buildings & Stations">{buildings.length} structures - {filtered.length} shown</Header>
+      <Header title="Structures">{buildings.length} structures - {filtered.length} shown</Header>
       <div className="metric-grid">
-        <MiniStat icon={<Wrench />} label="Buildings" value={buildings.length} />
+        <MiniStat icon={<Wrench />} label="Structures" value={buildings.length} />
         <MiniStat icon={<Hammer />} label="Crafting" value={sum(buildings, "craftingSlots")} />
         <MiniStat icon={<Flame />} label="Refining" value={sum(buildings, "refiningSlots")} />
         <MiniStat icon={<Package />} label="Storage" value={sum(buildings, "storageSlots")} />
@@ -699,7 +699,7 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<ShoppingBag />} label="Trade" value={sum(buildings, "tradeOrders")} />
       </div>
       <div className="toolbar-row">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search buildings" />
+        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search structures" />
         <Segmented options={categories} value={category} onChange={setCategory} />
         <Segmented options={tiers} value={tier} onChange={setTier} label="Tier" />
         <select className="select-control" value={sort} onChange={(event) => setSort(event.target.value)}>
@@ -710,7 +710,7 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
         </select>
       </div>
       <div className="highlight-grid">
-        {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{label}</strong><span>{formatNumber(slots)} slots across {formatNumber(count)} buildings</span></div>)}
+        {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{label}</strong><span>{formatNumber(slots)} slots across {formatNumber(count)} structures</span></div>)}
       </div>
       <div className="building-sections">
         {groupedBuildings.map((group) => (
@@ -1256,7 +1256,7 @@ function Production({ data }: { data: ReturnType<typeof normalizeData> & { raw?:
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={16} /><strong>{job.buildingName ?? "Unknown Building"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
+                <div><Factory size={16} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
@@ -1426,7 +1426,7 @@ const ACTIVITY_FILTERS = [
   ["supplies", "Supplies"],
   ["market", "Market"],
   ["members", "Members"],
-  ["buildings", "Buildings"],
+  ["buildings", "Structures"],
 ] as const;
 
 function signedDelta(after: unknown, before: unknown, suffix = ""): string {
@@ -1446,7 +1446,7 @@ function activitySummary(item: AnyRecord): string {
     if (item.event_type === "treasury") return `${signedDelta(metadata.after, metadata.before, "g")} to treasury`;
     if (item.event_type === "supplies") return `${signedDelta(metadata.after, metadata.before)} supplies`;
     if (item.event_type === "members") return `${signedDelta(metadata.after, metadata.before)} members`;
-    if (item.event_type === "buildings") return `${signedDelta(metadata.after, metadata.before)} buildings`;
+    if (item.event_type === "buildings") return `${signedDelta(metadata.after, metadata.before)} structures`;
     if (item.event_type === "market") return `${signedDelta(metadata.after, metadata.before)} market listings`;
   }
   return item.summary ?? "-";
