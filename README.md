@@ -22,10 +22,10 @@ The command-center view for the monitored settlement:
 
 - Settlement tier, region, owner, member count, structure count, and market listing count.
 - Online member count and shortcuts into Members, Structures, and Market.
-- Supply runway using current supplies and supplies-per-day cost.
-- Treasury runway using current treasury and upkeep.
+- Supply runway using the API run-out timestamp and the current hourly/daily supply upkeep.
+- Treasury balance alongside the current supply upkeep and claimed tile count.
 - Work queue summaries for production, construction, and research.
-- Attention prompts for low supplies, limited treasury runway, active projects, and market state.
+- Attention prompts for low supplies, active projects, and market state.
 
 ### Members
 
@@ -34,7 +34,8 @@ The public settlement roster and member detail view:
 - Online/offline state and session or last-login information.
 - Settlement roles and build/inventory permissions.
 - Total skill level.
-- Public member drill-down data including buffs, equipment, housing, passive crafts, market collections, and traveler tasks when returned by the API.
+- Public member drill-down data including Toolbelt profession tools, currently equipped gear, buffs, housing, passive crafts, market collections, and traveler tasks when returned by the API.
+- Selecting a member from the roster sets the Production eligibility filter; the selector on the Production page can switch or clear it at any time.
 
 ### Skills
 
@@ -55,7 +56,9 @@ Production is split into settlement jobs and global public opportunities.
 **Settlement production**
 
 - Current crafts at settlement structures.
-- Effort applied, effort to craft, and XP remaining where supplied by the API.
+- Output tier badges, effort applied, effort to craft, total XP, and XP remaining where supplied by the API.
+- Configurable sorting, defaulting to highest tier first.
+- Optional selected-member highlighting based on public skill levels and matching profession tools held in that member's public Toolbelt inventory; tool tier is displayed, while tool power determines effort contributed per action.
 - Recent contributor records.
 - Activity status based on contribution recency:
   - `Active now`: a contribution was received within the last five minutes.

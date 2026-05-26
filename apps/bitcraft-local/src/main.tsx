@@ -138,10 +138,88 @@ const SKILL_NAMES: Record<number, string> = {
 
 const SKILL_IDS = Object.keys(SKILL_NAMES).map(Number).sort((a, b) => a - b);
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
+const TIER_COLORS: Record<number, string> = {
+  1: "#838e9e",
+  2: "#be6327",
+  3: "#00f630",
+  4: "#2d6bff",
+  5: "#a349af",
+  6: "#d12234",
+  7: "#c09015",
+  8: "#5ae2e2",
+  9: "#1f1f1f",
+  10: "#deffff",
+};
+const TOOL_TAG_BY_TYPE: Record<number, string> = {
+  1: "Forester Tool",
+  2: "Carpenter Tool",
+  3: "Mason Tool",
+  4: "Miner Tool",
+  5: "Blacksmith Tool",
+  6: "Leatherworker Tool",
+  7: "Hunter Tool",
+  8: "Tailor Tool",
+  9: "Farmer Tool",
+  10: "Fisher Tool",
+  11: "Cook Tool",
+  12: "Forager Tool",
+  13: "Scholar Tool",
+  14: "Tool",
+};
 
 function unwrap<T>(payload: any, key: string, fallback: T): T {
   if (Array.isArray(payload)) return payload as T;
   return (payload?.[key] ?? fallback) as T;
+}
+
+function usePersistedState<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = React.useState<T>(() => {
+    try {
+      const saved = window.localStorage.getItem(`claim-monitor.${key}`);
+      return saved == null ? initialValue : JSON.parse(saved) as T;
+    } catch {
+      return initialValue;
+    }
+  });
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(`claim-monitor.${key}`, JSON.stringify(value));
+    } catch {
+      // Storage can be blocked without affecting the dashboard.
+    }
+  }, [key, value]);
+  return [value, setValue];
+}
+
+function hasPersistedState(key: string): boolean {
+  try {
+    return window.localStorage.getItem(`claim-monitor.${key}`) != null;
+  } catch {
+    return false;
+  }
+}
+
+function catalogEntries(catalog: unknown): AnyRecord[] {
+  if (Array.isArray(catalog)) return catalog;
+  return Object.entries(catalog ?? {}).map(([id, item]) => ({ id, ...(item as AnyRecord) }));
+}
+
+function playerInventoryItems(payload: AnyRecord | null | undefined, inventoryName?: string): AnyRecord[] {
+  const lookup = new Map(catalogEntries(payload?.items).map((item) => [String(item.id), item]));
+  return (payload?.inventories ?? [])
+    .filter((inventory: AnyRecord) => !inventoryName || inventory.inventoryName === inventoryName)
+    .flatMap((inventory: AnyRecord) => (inventory.pockets ?? inventory.inventory ?? []).flatMap((slot: AnyRecord) => {
+      const contents = slot.contents ?? {};
+      const itemId = contents.itemId ?? contents.item_id;
+      const itemType = contents.itemType ?? contents.item_type;
+      if (itemId == null || itemType === 1 || itemType === "cargo") return [];
+      const item = lookup.get(String(itemId));
+      return item ? [{ ...item, quantity: toNumber(contents.quantity), inventoryName: inventory.inventoryName ?? "Inventory" }] : [];
+    }));
+}
+
+function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[] {
+  return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
 }
 
 function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
@@ -319,6 +397,17 @@ function formatDuration(seconds: unknown): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function formatEquipmentSlot(value: unknown): string {
+  return String(value ?? "equipment").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDaysAndHours(days: number): string {
+  if (!Number.isFinite(days) || days <= 0) return "Unknown";
+  const wholeDays = Math.floor(days);
+  const hours = Math.floor((days - wholeDays) * 24);
+  return wholeDays > 0 ? `${wholeDays}d ${hours}h` : `${hours}h`;
+}
+
 function normalizePlayer(player: AnyRecord): AnyRecord {
   const signInTs = toNumber(player.signInTimestamp);
   const now = Math.floor(Date.now() / 1000);
@@ -384,8 +473,9 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
-  const suppliesPerDay = toNumber(claim.tileCost) * toNumber(claim.numTiles);
+  const suppliesPerDay = (upkeep || toNumber(claim.tileCost) * toNumber(claim.numTiles)) * 24;
   const runOut = claim.suppliesRunOut ? dateLabel(claim.suppliesRunOut) : "Unknown";
+  const runOutDate = parseDateValue(claim.suppliesRunOut);
   const onlineCount = data.players.filter((player) => player.signedIn).length;
   const regionStatus = data.regionStatus.find((region) => String(region.regionId) === String(claim.regionId));
   const marketDay = [...(data.tradeVolume.buckets ?? [])].sort((a: AnyRecord, b: AnyRecord) => String(b.bucket).localeCompare(String(a.bucket)))[0];
@@ -397,14 +487,13 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
   const constructionProjects = Array.isArray(construction) ? construction : (construction.projects ?? []);
   const activeProjects = constructionProjects.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
   const researched = research.filter((item) => item.isResearched).length;
-  const supplyDays = suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
-  const treasuryDays = upkeep > 0 ? treasury / upkeep : 0;
+  const supplyDays = runOutDate && runOutDate.getTime() > Date.now()
+    ? (runOutDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+    : suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
   const supplyPct = Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
-  const treasuryPct = Math.max(4, Math.min(100, treasuryDays ? (Math.min(treasuryDays, 14) / 14) * 100 : 0));
-  const health = supplies < 2000 || (upkeep > 0 && treasury < upkeep * 7) ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
+  const health = supplies < 2000 ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
   const attention = [
     supplies < 2000 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatNumber(supplies)} supplies remaining`, panel: "inventory" as ActivePanel } : null,
-    upkeep > 0 && treasury < upkeep * 7 ? { icon: <CircleDollarSign />, title: "Treasury runway", body: `${formatNumber(treasuryDays, 1)} days at current upkeep`, panel: "market" as ActivePanel } : null,
     activeProjects ? { icon: <Hammer />, title: "Construction active", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel } : null,
     crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} working, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
     !market.length ? { icon: <ShoppingCart />, title: "No market listings", body: "No current settlement market activity", panel: "market" as ActivePanel } : null,
@@ -415,7 +504,7 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
         <div>
           <span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span>
           <h2>{claim.name ?? "Claim"} Command Center</h2>
-          <p>Tier {claim.tier ?? "?"} settlement in {claim.regionName ?? "Unknown region"} - Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
+          <p><TierBadge tier={claim.tier} /> settlement in {claim.regionName ?? "Unknown region"} - Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
         </div>
         <div className="hero-metrics">
           <button onClick={() => onNavigate("members")}><strong>{onlineCount}</strong><span>Online</span></button>
@@ -426,17 +515,16 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
 
       <div className="ops-grid">
         <section className="ops-card">
-          <header><Box /><span>Supply Runway</span><strong>{supplyDays ? `${formatNumber(supplyDays, 1)}d` : "Unknown"}</strong></header>
+          <header><Box /><span>Supply Runway</span><strong>{formatDaysAndHours(supplyDays)}</strong></header>
           <div className="progress"><div style={{ width: `${supplyPct}%` }} /></div>
           <Info label="Current stock" value={formatNumber(supplies)} />
           <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
           <Info label="Runs out" value={runOut} />
         </section>
         <section className="ops-card">
-          <header><CircleDollarSign /><span>Treasury Runway</span><strong>{upkeep ? `${formatNumber(treasuryDays, 1)}d` : "No upkeep"}</strong></header>
-          <div className="progress"><div style={{ width: `${treasuryPct}%` }} /></div>
-          <Info label="Treasury" value={`${formatNumber(treasury)}g`} />
-          <Info label="Upkeep" value={`${formatNumber(upkeep, 2)}g/day`} />
+          <header><CircleDollarSign /><span>Treasury</span><strong>{formatNumber(treasury)}g</strong></header>
+          <Info label="Supply upkeep per hour" value={formatNumber(upkeep, 2)} />
+          <Info label="Supply upkeep per day" value={formatNumber(suppliesPerDay, 2)} />
           <Info label="Tiles" value={formatNumber(claim.numTiles)} />
         </section>
         <section className="ops-card">
@@ -480,7 +568,13 @@ function Info({ label, value }: { label: React.ReactNode; value: React.ReactNode
   return <div className="info-row"><span>{label}</span><strong>{value ?? "-"}</strong></div>;
 }
 
-function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
+function TierBadge({ tier }: { tier: unknown }) {
+  const value = toNumber(tier);
+  if (value < 1 || value > 10) return <span>-</span>;
+  return <span className={`tier-badge tier-${value}`}>T{value}</span>;
+}
+
+function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData>; selectedMemberId: string; onSelectMember: (id: string) => void }) {
   const [searchTerm, setSearchTerm] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [profile, setProfile] = React.useState<AnyRecord | null>(null);
@@ -511,12 +605,13 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
     Promise.all([
       fetch(`${API}/players/${selectedId}/buffs`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/equipment`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/inventories`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/housing`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/market-collections`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/traveler-tasks`, { signal: controller.signal }).then((response) => response.json()),
-    ]).then(([buffs, equipment, housing, passiveCrafts, collections, tasks]) => {
-      setProfile({ buffs, equipment, housing, passiveCrafts, collections, tasks });
+    ]).then(([buffs, equipment, inventories, housing, passiveCrafts, collections, tasks]) => {
+      setProfile({ buffs, equipment, inventories, housing, passiveCrafts, collections, tasks });
     }).catch((error) => {
       if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : String(error));
     }).finally(() => {
@@ -544,23 +639,54 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
           ["Skill Lvl", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-          ["Details", (m) => <button className="mini-action" onClick={() => setSelectedId(String(m.playerEntityId))}>View</button>],
+          ["Details", (m) => <button className="mini-action" onClick={() => { setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); }}>View</button>],
         ]}
       />
       {selectedMember ? (
         <section className="member-detail">
           <div className="split-header">
             <h3><User size={17} /> {selectedMember.username} Public Profile</h3>
-            <button className="mini-action" onClick={() => setSelectedId(null)}>Close</button>
+            <div className="profile-actions">
+              <button className={`mini-action ${selectedMemberId === selectedId ? "active" : ""}`} onClick={() => onSelectMember(selectedMemberId === selectedId ? "All" : String(selectedMember.playerEntityId))}><Factory size={13} /> {selectedMemberId === selectedId ? "Clear Production Filter" : "Use for Production"}</button>
+              <button className="mini-action" onClick={() => setSelectedId(null)}>Close</button>
+            </div>
           </div>
           {profileLoading ? <p className="legend">Loading public player data...</p> : profileError ? <p className="error">{profileError}</p> : profile ? (
             <>
               <div className="metric-grid">
                 <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs.buffs ?? []).length} />
-                <MiniStat icon={<Shield />} label="Equipped Slots" value={(profile.equipment.equipment ?? []).length} />
+                <MiniStat icon={<Wrench />} label="Toolbelt Tools" value={playerToolbeltTools(profile.inventories).length} />
+                <MiniStat icon={<Shield />} label="Equipped Gear" value={(profile.equipment.equipment ?? []).filter((slot: AnyRecord) => slot.item).length} />
                 <MiniStat icon={<Home />} label="Housing" value={(profile.housing ?? []).length} />
-                <MiniStat icon={<ShoppingCart />} label="Collections" value={toNumber(profile.collections.total)} />
               </div>
+              <section className="equipment-panel">
+                <h3><Wrench size={17} /> Toolbelt Tools</h3>
+                <div className="equipment-grid">
+                  {playerToolbeltTools(profile.inventories).map((item: AnyRecord) => (
+                    <article className="equipment-card" key={item.id}>
+                      <small>{item.inventoryName}</small>
+                      <div><strong>{item.name}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}</div>
+                      <span>{item.tag ?? "Tool"}{item.quantity > 1 ? ` - ${formatNumber(item.quantity)} held` : ""}</span>
+                      {item.toolPower ? <p>Power {formatNumber(item.toolPower)} - removes {formatNumber(item.toolPower)} effort per action</p> : null}
+                    </article>
+                  ))}
+                </div>
+                {playerToolbeltTools(profile.inventories).length === 0 ? <p className="legend">No profession tools in this member's public Toolbelt inventory.</p> : null}
+              </section>
+              <section className="equipment-panel">
+                <h3><Shield size={17} /> Equipped Gear</h3>
+                <div className="equipment-grid">
+                  {(profile.equipment.equipment ?? []).filter((slot: AnyRecord) => slot.item).map((slot: AnyRecord) => (
+                    <article className="equipment-card" key={slot.primary}>
+                      <small>{formatEquipmentSlot(slot.primary)}</small>
+                      <div><strong>{slot.item.name}</strong>{slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}</div>
+                      <span>{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? ` - ${slot.item.rarityString}` : ""}</span>
+                      {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
+                    </article>
+                  ))}
+                </div>
+                {(profile.equipment.equipment ?? []).every((slot: AnyRecord) => !slot.item) ? <p className="legend">No equipped gear reported by the API.</p> : null}
+              </section>
               <div className="two-col public-profile-grid">
                 <section>
                   <h3><Factory size={17} /> Passive Crafts</h3>
@@ -590,9 +716,9 @@ function Members({ data }: { data: ReturnType<typeof normalizeData> }) {
 function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   type SortKey = "name" | "total" | "highest" | number;
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [focusSkill, setFocusSkill] = React.useState<number>(SKILL_IDS[0]);
-  const [sortKey, setSortKey] = React.useState<SortKey>("total");
-  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", SKILL_IDS[0]);
+  const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
+  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
   const citizens = data.citizens;
   const getName = (c: AnyRecord) => c.userName ?? c.username ?? "Unknown";
   const getSkill = (c: AnyRecord, id: number) => toNumber(c.skills?.[String(id)]);
@@ -657,7 +783,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
           <div className="focus-metrics">
             <Info label="Average level" value={formatNumber(focusAverage, 1)} />
-            <Info label="Best tier" value={focusTier ? `T${focusTier}` : "-"} />
+            <Info label="Best tier" value={focusTier ? <TierBadge tier={focusTier} /> : "-"} />
             <Info label="T3+" value={`${focusT3} members`} />
             <Info label="T5+" value={`${focusT5} members`} />
           </div>
@@ -674,7 +800,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             {coverage.slice(0, 8).map((skill) => (
               <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
                 <span>{skill.name}</span>
-                <b>{skill.tier ? `T${skill.tier}` : "-"} / Lv {skill.max}</b>
+                <b>{skill.tier ? <><TierBadge tier={skill.tier} /> <span>/ Lv {skill.max}</span></> : "-"}</b>
                 <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T5+</small>
               </button>
             ))}
@@ -734,7 +860,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </tfoot>
         </table>
       </div>
-      <p className="legend">Skill tiers: <span className="lvl0">0</span> <span className="lvl1">T1 1-19</span> <span className="lvl2">T2-T5</span> <span className="lvl3">T6-T8</span> <span className="lvl4">T9-T10</span> - cells show exact level, hover for tier</p>
+      <p className="legend tier-legend">Skill tiers: <span className="lvl0">0</span> {Object.keys(TIER_COLORS).map((tier) => <TierBadge key={tier} tier={tier} />)} - cells show exact level, hover for tier</p>
     </div>
   );
 }
@@ -744,11 +870,11 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
 }
 
 function skillStyle(level: number): React.CSSProperties {
-  if (level <= 0) return {};
-  const t = Math.min(1, skillTier(level) / 10);
-  if (t < 0.25) return { backgroundColor: `rgba(51,65,85,${0.15 + t * 0.6})` };
-  if (t < 0.6) return { backgroundColor: `rgba(120,53,15,${0.1 + t * 0.4})` };
-  return { backgroundColor: `rgba(180,83,9,${0.2 + t * 0.45})` };
+  const tier = skillTier(level);
+  const color = TIER_COLORS[tier];
+  if (!color) return {};
+  const textColor = tier === 9 ? "#c7c7c7" : tier === 10 ? "#deffff" : color;
+  return { backgroundColor: `${color}${tier === 9 ? "55" : "25"}`, color: textColor };
 }
 
 function skillTier(level: number): number {
@@ -791,9 +917,9 @@ function getRarityClass(rarity: unknown): string {
 
 function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [category, setCategory] = React.useState("All");
-  const [tier, setTier] = React.useState("All");
-  const [sort, setSort] = React.useState("name");
+  const [category, setCategory] = usePersistedState("structures.category", "All");
+  const [tier, setTier] = usePersistedState("structures.tier", "All");
+  const [sort, setSort] = usePersistedState("structures.sort", "name");
   const [selectedStructure, setSelectedStructure] = React.useState<AnyRecord | null>(null);
   const [structureDetail, setStructureDetail] = React.useState<AnyRecord | null>(null);
   const categories = ["All", "Crafting", "Refining", "Storage", "Housing", "Trade", "Core", "Utility", "Decoration"];
@@ -882,7 +1008,7 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
             <div className="building-grid">
               {group.buildings.map((building) => (
                 <article className="building-card" key={building.entityId}>
-                  <header><strong>{building.name}</strong>{building.tier ? <b>T{building.tier}</b> : null}</header>
+                  <header><strong>{building.name}</strong>{building.tier ? <TierBadge tier={building.tier} /> : null}</header>
                   {building.nickname ? <p>"{building.nickname}"</p> : null}
                   <div className="slot-row">
                     <Slot icon={<Hammer />} label="craft" value={building.craftingSlots} />
@@ -906,7 +1032,7 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
 
 function inferTierNumber(item: AnyRecord): number | null {
   const icon = String(item.iconAssetName ?? "");
-  const match = icon.match(/T(\d)/i);
+  const match = icon.match(/T(10|[1-9])/i);
   return match ? Number(match[1]) : item.tier ? Number(item.tier) : null;
 }
 
@@ -976,11 +1102,11 @@ const CORE_MATERIAL_GROUPS = [
 function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [q, setQ] = React.useState("");
   const [containerQ, setContainerQ] = React.useState("");
-  const [type, setType] = React.useState("All");
-  const [tier, setTier] = React.useState("All");
-  const [rarity, setRarity] = React.useState("All");
-  const [buildingFilter, setBuildingFilter] = React.useState("All");
-  const [nonEmptyOnly, setNonEmptyOnly] = React.useState(true);
+  const [type, setType] = usePersistedState("inventory.type", "All");
+  const [tier, setTier] = usePersistedState("inventory.tier", "All");
+  const [rarity, setRarity] = usePersistedState("inventory.rarity", "All");
+  const [buildingFilter, setBuildingFilter] = usePersistedState("inventory.container", "All");
+  const [nonEmptyOnly, setNonEmptyOnly] = usePersistedState("inventory.non-empty", true);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [itemDetail, setItemDetail] = React.useState<AnyRecord | null>(null);
   React.useEffect(() => {
@@ -1079,7 +1205,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
               <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None stored"}</small>
               {group.tierBreakdown.length ? (
                 <div className="material-tier-list">
-                  {group.tierBreakdown.map(([tierLabel, qty]: [string, number]) => <div key={tierLabel}><b>{tierLabel}</b><em>{formatNumber(qty)}</em></div>)}
+                  {group.tierBreakdown.map(([tierLabel, qty]: [string, number]) => <div key={tierLabel}>{tierLabel === "Other" ? <b>{tierLabel}</b> : <TierBadge tier={tierLabel.slice(1)} />}<em>{formatNumber(qty)}</em></div>)}
                 </div>
               ) : null}
             </article>
@@ -1134,7 +1260,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
               <DataTable rows={container.items} columns={[
                 ["Item", (r) => <button className="item-link" onClick={() => setSelectedItem(r)}><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
-                ["Tier", (r) => r.tier ? `T${r.tier}` : "-"],
+                ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],
                 ["Rarity", (r) => r.rarity ? <span className={`role-badge ${getRarityClass(r.rarity)}`}>{r.rarity}</span> : "-"],
                 ["Type", (r) => r.type],
               ]} />
@@ -1199,7 +1325,7 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
 
 function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [query, setQuery] = React.useState("");
-  const [tier, setTier] = React.useState("All");
+  const [tier, setTier] = usePersistedState("research.tier", "All");
   const currentId = String(data.claim.techResearching ?? "");
   const matching = data.research.filter((item) => {
     if (query && !String(item.name ?? "").toLowerCase().includes(query.toLowerCase())) return false;
@@ -1214,13 +1340,13 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
     <div className={`research-card ${done ? "done" : ""} ${String(item.id ?? item.entityId) === currentId ? "current" : ""}`} key={item.entityId ?? item.id ?? item.name}>
       <span>{done ? <CheckCircle2 /> : <Circle />}</span>
       <strong>{item.name ?? item.techName ?? item.id ?? "Unknown Technology"}<small>{item.suppliesCost ? `${formatNumber(item.suppliesCost)} supplies` : ""}</small></strong>
-      {item.tier ? <b>T{item.tier}</b> : null}
+      {item.tier ? <TierBadge tier={item.tier} /> : null}
     </div>
   );
   return (
     <div className="panel">
       <Header title="Research & Technology">{data.research.filter((item) => item.isResearched).length} researched - {data.research.filter((item) => !item.isResearched).length} available to unlock</Header>
-      {current ? <div className="mine-panel"><FlaskConical size={18} /><strong>Researching</strong><span>{current.name} - T{current.tier} - {formatNumber(current.suppliesCost)} supplies</span></div> : null}
+      {current ? <div className="mine-panel"><FlaskConical size={18} /><strong>Researching</strong><span>{current.name} <TierBadge tier={current.tier} /> {formatNumber(current.suppliesCost)} supplies</span></div> : null}
       <div className="toolbar-row">
         <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
         <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
@@ -1234,9 +1360,9 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
   const [q, setQ] = React.useState("");
   const [view, setView] = React.useState<"live" | "analytics">("live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
-  const [tier, setTier] = React.useState("All");
-  const [rarity, setRarity] = React.useState("All");
-  const [memberFilter, setMemberFilter] = React.useState("All");
+  const [tier, setTier] = usePersistedState("market.tier", "All");
+  const [rarity, setRarity] = usePersistedState("market.rarity", "All");
+  const [memberFilter, setMemberFilter] = usePersistedState("market.member", "All");
   const memberOptions = React.useMemo(() => {
     const names = [
       ...data.members.map((member) => member.userName ?? member.username ?? member.playerUsername ?? member.name),
@@ -1376,7 +1502,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
         ["Qty", r => formatNumber(r.quantity)],
         ["Price", r => `${formatNumber(r.price)}g`],
-        ["Tier", r => (r.itemTier ?? r.tier) ? `T${r.itemTier ?? r.tier}` : "-"],
+        ["Tier", r => (r.itemTier ?? r.tier) ? <TierBadge tier={r.itemTier ?? r.tier} /> : "-"],
         ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <span className={`role-badge ${getRarityClass(r.itemRarityStr ?? r.rarity)}`}>{r.itemRarityStr ?? r.rarity}</span> : "-"],
         ["Owner", r => r.ownerUsername ?? "-"],
         ["Listed", r => listingListedAt(r) ? dateLabel(listingListedAt(r)) : "-"],
@@ -1427,12 +1553,16 @@ function formatMarketDay(value: string): string {
 }
 
 function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
-  const [skillId, setSkillId] = React.useState("3");
-  const [regionId, setRegionId] = React.useState(monitoredRegionId || "All");
+  const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
+  const [regionId, setRegionId] = usePersistedState("public-crafts.region", monitoredRegionId || "All");
+  const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   React.useEffect(() => {
-    setRegionId(monitoredRegionId || "All");
-  }, [monitoredRegionId]);
+    if (!hasSavedRegion.current && monitoredRegionId && regionId === "All") {
+      hasSavedRegion.current = true;
+      setRegionId(monitoredRegionId);
+    }
+  }, [monitoredRegionId, regionId, setRegionId]);
   React.useEffect(() => {
     const controller = new AbortController();
     setState((previous) => ({ ...previous, loading: true, error: null }));
@@ -1457,6 +1587,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { ref
     return {
       ...job,
       output: item?.name ?? `Recipe #${job.recipeId ?? "?"}`,
+      tier: item?.tier ?? job.tier,
       remaining,
       experience,
       availableXp: remaining * experience,
@@ -1495,6 +1626,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { ref
       {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
       {visibleJobs.length ? <DataTable rows={visibleJobs} columns={[
         ["Craft", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
+        ["Tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
         ["Settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) })}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
         ["Required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
         ["Effort to Craft", (job) => formatNumber(job.remaining)],
@@ -1516,16 +1648,83 @@ function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
   });
 }
 
-function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+function Production({ data, refreshToken, selectedMemberId, onSelectMember, onShowMap }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+  type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
+  const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
+  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
+  const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
+  const [toolbeltError, setToolbeltError] = React.useState(false);
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
+  const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
+  const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === String(selectedMember.userName ?? selectedMember.username)) ?? null : null;
+  React.useEffect(() => {
+    if (!selectedMember?.playerEntityId) {
+      setToolbeltTools(null);
+      setToolbeltError(false);
+      return;
+    }
+    const controller = new AbortController();
+    setToolbeltTools(null);
+    setToolbeltError(false);
+    fetch(`${API}/players/${selectedMember.playerEntityId}/inventories`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`inventories HTTP ${response.status}`)))
+      .then((payload) => setToolbeltTools(playerToolbeltTools(payload)))
+      .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
+    return () => controller.abort();
+  }, [selectedMember?.playerEntityId, refreshToken]);
+  function metrics(job: AnyRecord) {
+    const item = itemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
+    const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
+    const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+    const total = toNumber(job.totalActionsRequired);
+    const progress = toNumber(job.progress);
+    const remaining = Math.max(0, total - progress);
+    return {
+      item,
+      skillId,
+      experiencePerEffort,
+      total,
+      progress,
+      remaining,
+      tier: toNumber(item.tier ?? job.tier),
+      totalXp: total * experiencePerEffort,
+      remainingXp: remaining * experiencePerEffort,
+      completion: total > 0 ? progress / total : 0,
+      name: String(item.name ?? job.recipeName ?? ""),
+    };
+  }
+  function eligibility(job: AnyRecord) {
+    if (!selectedMember) return null;
+    const requirement = job.levelRequirements?.[0] ?? {};
+    const requiredLevel = toNumber(requirement.level);
+    const skillId = toNumber(requirement.skill_id);
+    const skillName = SKILL_NAMES[skillId] ?? "Required skill";
+    const memberLevel = toNumber(selectedCitizen?.skills?.[String(skillId)]);
+    const skillOk = memberLevel >= requiredLevel;
+    const toolRequirement = job.toolRequirements?.[0];
+    const expectedTool = toolRequirement ? TOOL_TAG_BY_TYPE[toNumber(toolRequirement.tool_type)] : null;
+    const ownedTool = !toolRequirement ? null : (toolbeltTools ?? []).find((item) => {
+      return toNumber(item.toolType) === toNumber(toolRequirement.tool_type) ||
+        String(item.tags ?? item.tag ?? "") === expectedTool;
+    });
+    if (!skillOk) return { ok: false, text: `Needs ${skillName} Lv ${requiredLevel} (has ${memberLevel})` };
+    if (toolbeltError) return { ok: false, pending: true, text: "Toolbelt unavailable" };
+    if (toolRequirement && toolbeltTools == null) return { ok: false, pending: true, text: "Checking Toolbelt..." };
+    if (toolRequirement && !ownedTool) return { ok: false, text: `Needs ${expectedTool ?? "required tool"} in Toolbelt` };
+    return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}${ownedTool ? ` - ${ownedTool.name} (${formatNumber(ownedTool.toolPower)} power)` : ""}` };
+  }
   const jobs = [...data.crafts].sort((a, b) => {
-    const aTotal = toNumber(a.totalActionsRequired);
-    const bTotal = toNumber(b.totalActionsRequired);
-    const aPct = aTotal > 0 ? toNumber(a.progress) / aTotal : 0;
-    const bPct = bTotal > 0 ? toNumber(b.progress) / bTotal : 0;
-    const aActive = aPct < 1 && hasRecentCraftContribution(data.contributions[String(a.entityId)] ?? []) ? 1 : 0;
-    const bActive = bPct < 1 && hasRecentCraftContribution(data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
-    return bActive - aActive || bPct - aPct;
+    const aMetrics = metrics(a);
+    const bMetrics = metrics(b);
+    const aValue = sortKey === "remainingEffort" ? aMetrics.remaining : aMetrics[sortKey];
+    const bValue = sortKey === "remainingEffort" ? bMetrics.remaining : bMetrics[sortKey];
+    const comparison = sortKey === "name"
+      ? String(aValue).localeCompare(String(bValue))
+      : toNumber(aValue) - toNumber(bValue);
+    if (comparison !== 0) return sortDir === "asc" ? comparison : -comparison;
+    const aActive = hasRecentCraftContribution(data.contributions[String(a.entityId)] ?? []) ? 1 : 0;
+    const bActive = hasRecentCraftContribution(data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
+    return bActive - aActive || bMetrics.completion - aMetrics.completion;
   });
   const crafterCounts = data.crafts.reduce<Record<string, number>>((acc, job) => {
     const name = String(job.ownerUsername ?? "Unknown");
@@ -1547,39 +1746,56 @@ function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof
           {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={13} /> <strong>{name}</strong> {count} job{count === 1 ? "" : "s"}</span>)}
         </div>
       </div>
+      <div className="toolbar-row production-controls">
+        <label className="inline-field"><span>Member</span>
+          <select className="select-control" value={selectedMemberId} onChange={(event) => onSelectMember(event.target.value)}>
+            <option value="All">All members</option>
+            {data.members.map((member: AnyRecord) => <option key={member.playerEntityId} value={String(member.playerEntityId)}>{member.userName ?? member.username}</option>)}
+          </select>
+        </label>
+        <label className="inline-field"><span>Sort by</span>
+          <select className="select-control" value={sortKey} onChange={(event) => setSortKey(event.target.value as ProductionSortKey)}>
+            <option value="tier">Tier</option>
+            <option value="totalXp">Total XP</option>
+            <option value="remainingXp">XP Remaining</option>
+            <option value="remainingEffort">Effort Remaining</option>
+            <option value="completion">Completion</option>
+            <option value="name">Item Name</option>
+          </select>
+        </label>
+        <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+      </div>
+      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong>{selectedMember.userName ?? selectedMember.username}</strong><small>Requires skill level and the correct Toolbelt tool. Tool power controls effort per action; tool tier does not block a craft.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
           const first = job.craftedItem?.[0] ?? {};
-          const item = itemLookup.get(String(first.item_id));
-          const skillId = toNumber(job.levelRequirements?.[0]?.skill_id);
+          const { item, skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier } = metrics(job);
           const skillName = SKILL_NAMES[skillId] ?? job.levelRequirements?.[0]?.skillName ?? (skillId ? `Skill ${skillId}` : null);
-          const progress = toNumber(job.progress);
-          const total = toNumber(job.totalActionsRequired);
           const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
-          const remaining = Math.max(0, total - progress);
-          const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
-          const remainingXp = remaining * experiencePerEffort;
           const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
           const isWorking = total > progress && hasRecentCraftContribution(contributors);
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Active now" : isDone ? "Ready" : progress > 0 ? "Paused" : "Queued";
+          const eligibilityStatus = eligibility(job);
           return (
-            <article className={`production-card ${isWorking ? "active-work" : ""}`} key={job.entityId ?? index}>
+            <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
                 <div><Factory size={16} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
-                <h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>
-                {!item?.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
+                <div className="craft-title"><h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
+                {!item.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
                   <span>{formatNumber(job.craftCount)} craft{toNumber(job.craftCount) === 1 ? "" : "s"}</span>
                   <span>{formatNumber(remaining)} effort to craft</span>
+                  {experiencePerEffort ? <span>{formatNumber(totalXp)} total XP</span> : null}
                 </div>
                 <div className="progress-meta"><span>Effort applied</span><span>{formatNumber(progress)} / {formatNumber(total)}</span></div>
                 <div className="progress"><div style={{ width: `${pct}%` }} /></div>
                 <div className="progress-meta"><strong>{pct}%</strong><span>{experiencePerEffort ? `${formatNumber(remainingXp)} XP remaining` : "XP not provided"}</span></div>
+                {eligibilityStatus ? <div className={`eligibility-pill ${eligibilityStatus.ok ? "eligible" : eligibilityStatus.pending ? "pending" : "blocked"}`}>{eligibilityStatus.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{eligibilityStatus.text}</div> : null}
                 {contributors.length ? (
                   <div className="contributors">
                     <small>Contributors</small>
@@ -1599,8 +1815,8 @@ function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof
 }
 
 function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const [sortKey, setSortKey] = React.useState("tier");
-  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const [sortKey, setSortKey] = usePersistedState("region.sort", "tier");
+  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction", "desc");
   const [claimDetails, setClaimDetails] = React.useState<Record<string, AnyRecord>>({});
   const regionKey = data.region.map((row) => String(row.entityId)).join(",");
   React.useEffect(() => {
@@ -1667,7 +1883,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     ["#", "rank", (_r, i) => i + 1],
     ["Claim", "name", (r) => <span className={String(r.entityId) === String(data.claim.entityId) ? "mine-text" : ""}>{String(r.entityId) === String(data.claim.entityId) ? <Crown size={13} /> : null}{r.name}</span>],
     ["Owner", "owner", (r) => getOwnerName(r)],
-    ["Tier", "tier", (r) => r.tier],
+    ["Tier", "tier", (r) => <TierBadge tier={r.tier} />],
     ["Supplies", "supplies", (r) => formatNumber(r.supplies)],
     ["Treasury", "treasury", (r) => `${formatNumber(r.treasury)}g`],
     ["Tiles", "numTiles", (r) => formatNumber(r.numTiles)],
@@ -1698,10 +1914,10 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
         <h3>Top Supplies</h3>
         {chartRows.map((row) => <div className="bar-row" key={row.entityId}><span>{row.name}</span><div><i style={{ width: `${(toNumber(row.supplies) / maxSupplies) * 100}%` }} className={String(row.entityId) === String(data.claim.entityId) ? "mine" : ""} /></div><b>{formatNumber(row.supplies)}</b></div>)}
       </div>
-      {myRankRow ? <div className="mine-panel"><Crown size={18} /><strong>{myRankRow.name}</strong><span>T{myRankRow.tier} - {formatNumber(myRankRow.supplies)} supplies - {formatNumber(myRankRow.treasury)}g treasury - {formatNumber(myRankRow.numTiles)} tiles</span></div> : null}
+      {myRankRow ? <div className="mine-panel"><Crown size={18} /><strong>{myRankRow.name}</strong><span><TierBadge tier={myRankRow.tier} /> {formatNumber(myRankRow.supplies)} supplies - {formatNumber(myRankRow.treasury)}g treasury - {formatNumber(myRankRow.numTiles)} tiles</span></div> : null}
       {nearbyRows.length ? (
         <div className="highlight-grid">
-          {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span>{getOwnerName(row)} - T{row.tier} - {formatNumber(row.supplies)} supplies</span></div>)}
+          {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span>{getOwnerName(row)} <TierBadge tier={row.tier} /> {formatNumber(row.supplies)} supplies</span></div>)}
         </div>
       ) : null}
       <div className="table-wrap">
@@ -2107,12 +2323,14 @@ function App() {
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
   const [mapFocus, setMapFocus] = React.useState<MapFocus>(null);
+  const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const state = useBitjitaData(refreshToken, claimId, active);
   const data = React.useMemo(() => {
     const normalized = normalizeData(state.data);
     return { ...normalized, raw: state.data };
   }, [state.data]);
   const localHistory = useLocalHistory(historyRefreshToken, claimId);
+  const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
@@ -2138,6 +2356,9 @@ function App() {
   React.useEffect(() => {
     if (state.data) setLastUpdated(new Date());
   }, [state.data]);
+  React.useEffect(() => {
+    if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
+  }, [selectedMemberId, selectedProductionMember, state.data]);
   React.useEffect(() => {
     if (!state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -2166,9 +2387,9 @@ function App() {
 
   const panels: Record<string, React.ReactNode> = {
     overview: <Overview data={data} onNavigate={setActive} />,
-    members: <Members data={data} />,
+    members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} />,
+    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} />,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
