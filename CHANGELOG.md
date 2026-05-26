@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1-beta.1 - 2026-05-26
+
+### Fixed
+
+- Price Finder recent trades now display buyers returned by BitJita's live price-history payload under `buyerUsername`, while retaining support for `purchaserUsername`.
+
 ## 0.6.0-beta.1 - 2026-05-26
 
 ### Added

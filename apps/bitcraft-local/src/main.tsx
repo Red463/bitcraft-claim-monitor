@@ -1984,7 +1984,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
               ["Quantity", row => formatNumber(row.quantity)],
               ["Value", row => `${formatNumber(row.totalPrice ?? row.total_value ?? toNumber(row.quantity) * toNumber(row.unitPrice))}g`],
               ["Seller", row => row.sellerUsername ?? "-"],
-              ["Buyer", row => row.purchaserUsername ?? "-"],
+              ["Buyer", row => row.purchaserUsername ?? row.buyerUsername ?? "-"],
             ]} />
           </section>
         </>
