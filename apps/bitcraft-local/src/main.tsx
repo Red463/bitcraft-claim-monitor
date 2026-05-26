@@ -1505,6 +1505,17 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { ref
   );
 }
 
+const ACTIVE_CRAFT_WINDOW_MS = 5 * 60 * 1000;
+
+function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
+  return contributors.some((person) => {
+    const lastContribution = parseDateValue(person.lastContributedAt);
+    if (!lastContribution) return false;
+    const age = Date.now() - lastContribution.getTime();
+    return age >= -60 * 1000 && age <= ACTIVE_CRAFT_WINDOW_MS;
+  });
+}
+
 function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const jobs = [...data.crafts].sort((a, b) => {
@@ -1512,8 +1523,8 @@ function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof
     const bTotal = toNumber(b.totalActionsRequired);
     const aPct = aTotal > 0 ? toNumber(a.progress) / aTotal : 0;
     const bPct = bTotal > 0 ? toNumber(b.progress) / bTotal : 0;
-    const aActive = aPct > 0 && aPct < 1 ? 1 : 0;
-    const bActive = bPct > 0 && bPct < 1 ? 1 : 0;
+    const aActive = aPct < 1 && hasRecentCraftContribution(data.contributions[String(a.entityId)] ?? []) ? 1 : 0;
+    const bActive = bPct < 1 && hasRecentCraftContribution(data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
     return bActive - aActive || bPct - aPct;
   });
   const crafterCounts = data.crafts.reduce<Record<string, number>>((acc, job) => {
@@ -1522,16 +1533,15 @@ function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof
     return acc;
   }, {});
   const activeJobs = jobs.filter((job) => {
-    const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
-    return total > 0 && progress > 0 && progress < total;
+    return total > toNumber(job.progress) && hasRecentCraftContribution(data.contributions[String(job.entityId)] ?? []);
   }).length;
 
   return (
     <div className="panel">
       <div className="split-header">
         <Header title="Active Production">
-          {data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} being worked now - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}
+          {data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active in the last 5m - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}
         </Header>
         <div className="crafter-pills">
           {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={13} /> <strong>{name}</strong> {count} job{count === 1 ? "" : "s"}</span>)}
@@ -1550,10 +1560,10 @@ function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof
           const remaining = Math.max(0, total - progress);
           const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
           const remainingXp = remaining * experiencePerEffort;
-          const isWorking = total > 0 && progress > 0 && progress < total;
-          const isDone = total > 0 && progress >= total;
-          const status = isWorking ? "Working" : isDone ? "Ready" : "Queued";
           const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
+          const isWorking = total > progress && hasRecentCraftContribution(contributors);
+          const isDone = total > 0 && progress >= total;
+          const status = isWorking ? "Active now" : isDone ? "Ready" : progress > 0 ? "Paused" : "Queued";
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""}`} key={job.entityId ?? index}>
               <header>
