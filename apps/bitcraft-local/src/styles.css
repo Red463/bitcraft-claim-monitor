@@ -37,8 +37,12 @@ nav button.active { color: var(--gold); background: var(--gold-dim); border-colo
 .refresh-status { margin: auto 18px 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); display: grid; grid-template-columns: 8px auto 1fr; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .refresh-status time { justify-self: end; color: var(--text); font-family: "JetBrains Mono", monospace; font-size: 11px; text-transform: none; }
 .refresh-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--good); box-shadow: 0 0 0 3px rgba(78,226,138,.12); }
-main { min-width: 0; max-height: 100vh; overflow: auto; }
+main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-direction: column; }
 .panel { padding: 26px; display: grid; gap: 20px; }
+.app-footer { margin-top: auto; min-height: 56px; border-top: 1px solid var(--border); padding: 16px 26px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.app-footer div { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.app-footer a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+.app-footer a:hover { color: var(--gold); }
 .section-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .section-header h2 { color: var(--gold); font-size: 27px; }
 .section-header p { color: var(--muted); margin: 4px 0 0; }
@@ -197,6 +201,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .public-craft-finder { margin-top: 6px; padding-top: 20px; border-top: 1px solid var(--border); display: grid; gap: 14px; }
 .public-craft-finder .table-wrap table { min-width: 960px; }
 .public-craft-finder td:nth-child(4), .public-craft-finder td:nth-child(5) { font-family: "JetBrains Mono", monospace; }
+.map-location-link { margin-top: 3px; border: 0; background: transparent; color: var(--gold); padding: 0; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 11px; }
+.map-location-link:hover { text-decoration: underline; }
 .empty-state { border: 1px solid var(--border); border-radius: 8px; min-height: 170px; display: grid; place-items: center; gap: 10px; color: var(--muted); background: var(--panel); }
 .empty-state svg { width: 40px; height: 40px; opacity: .3; }
 .select-control { height: 38px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); padding: 0 10px; }
@@ -300,11 +306,17 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .mine-text { color: var(--gold); display: inline-flex; align-items: center; gap: 6px; }
 .sort-button { border: 0; background: transparent; color: inherit; padding: 0; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; text-transform: inherit; font: inherit; }
 .sort-button:disabled { cursor: default; }
-.full-height { min-height: 100vh; grid-template-rows: auto auto auto minmax(520px, 1fr); }
+.full-height { min-height: calc(100vh - 57px); grid-template-rows: auto auto auto minmax(520px, 1fr); }
+.map-panel.full-height.has-focus { grid-template-rows: auto auto auto auto minmax(520px, 1fr); }
 .player-pills { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
 .player-pills button { display: inline-flex; align-items: center; gap: 6px; }
 .player-pills .online-dot { margin: 0; width: 7px; height: 7px; }
 .map-frame { width: 100%; min-height: 620px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.map-focus { min-height: 54px; border: 1px solid rgba(240,198,79,.42); border-radius: 8px; background: var(--gold-dim); padding: 9px 12px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.map-focus svg, .map-focus strong { color: var(--gold); }
+.map-focus div { min-width: 0; display: grid; gap: 2px; }
+.map-focus strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-focus span { color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 11px; }
 .sync-panel { min-height: 100vh; grid-template-rows: auto minmax(720px, 1fr); }
 .sync-frame { width: 100%; min-height: 720px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .activity-list { display: grid; gap: 8px; }

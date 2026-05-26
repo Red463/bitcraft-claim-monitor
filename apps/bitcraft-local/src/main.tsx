@@ -54,6 +54,7 @@ type AnyRecord = Record<string, any>;
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
 type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; error: string | null; refreshToken: number };
+type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 
 const NAV = [
   ["overview", "Overview", Shield],
@@ -136,6 +137,7 @@ const SKILL_NAMES: Record<number, string> = {
 };
 
 const SKILL_IDS = Object.keys(SKILL_NAMES).map(Number).sort((a, b) => a - b);
+const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 
 function unwrap<T>(payload: any, key: string, fallback: T): T {
   if (Array.isArray(payload)) return payload as T;
@@ -152,7 +154,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      setState((prev) => ({ ...prev, loading: true, error: null }));
+      setState((prev) => prev.data ? prev : { ...prev, loading: true, error: null });
       try {
         async function request(path: string) {
           const response = await fetch(`${API}${path}`, { signal: controller.signal });
@@ -205,7 +207,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
         raw.regionStatus = regionPayload;
         raw.tradeVolume = tradeVolumePayload;
-        setState({ loading: false, error: null, data: raw });
+        React.startTransition(() => setState({ loading: false, error: null, data: raw }));
       } catch (err) {
         if (!controller.signal.aborted) {
           setState((prev) => ({ loading: false, error: err instanceof Error ? err.message : String(err), data: prev.data }));
@@ -1424,7 +1426,7 @@ function formatMarketDay(value: string): string {
   return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: number; monitoredRegionId: string }) {
+function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   const [skillId, setSkillId] = React.useState("3");
   const [regionId, setRegionId] = React.useState(monitoredRegionId || "All");
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
@@ -1433,7 +1435,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: 
   }, [monitoredRegionId]);
   React.useEffect(() => {
     const controller = new AbortController();
-    setState({ data: null, loading: true, error: null });
+    setState((previous) => ({ ...previous, loading: true, error: null }));
     const skillQuery = skillId === "All" ? "" : `&skillId=${encodeURIComponent(skillId)}`;
     fetch(`${API}/crafts?completed=false${skillQuery}`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`crafts HTTP ${response.status}`)))
@@ -1473,7 +1475,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: 
     <section className="public-craft-finder">
       <div className="split-header">
         <Header title="Public Crafts">
-          {state.loading ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}
+          {state.loading && !state.data ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}
         </Header>
         <div className="toolbar-row">
           <label className="inline-field"><span>Skill</span>
@@ -1493,9 +1495,9 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: 
       {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
       {visibleJobs.length ? <DataTable rows={visibleJobs} columns={[
         ["Craft", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
-        ["Settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong><small className="muted-line">R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</small></>],
+        ["Settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) })}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
         ["Required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
-        ["Remaining Actions", (job) => formatNumber(job.remaining)],
+        ["Effort to Craft", (job) => formatNumber(job.remaining)],
         ["XP Available", (job) => formatNumber(job.availableXp)],
         ["Owner", (job) => job.ownerUsername ?? "-"],
       ]} /> : null}
@@ -1503,7 +1505,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId }: { refreshToken: 
   );
 }
 
-function Production({ data, refreshToken }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number }) {
+function Production({ data, refreshToken, onShowMap }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const jobs = [...data.crafts].sort((a, b) => {
     const aTotal = toNumber(a.totalActionsRequired);
@@ -1546,6 +1548,8 @@ function Production({ data, refreshToken }: { data: ReturnType<typeof normalizeD
           const total = toNumber(job.totalActionsRequired);
           const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
           const remaining = Math.max(0, total - progress);
+          const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+          const remainingXp = remaining * experiencePerEffort;
           const isWorking = total > 0 && progress > 0 && progress < total;
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Working" : isDone ? "Ready" : "Queued";
@@ -1561,11 +1565,11 @@ function Production({ data, refreshToken }: { data: ReturnType<typeof normalizeD
                 {!item?.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
                   <span>{formatNumber(job.craftCount)} craft{toNumber(job.craftCount) === 1 ? "" : "s"}</span>
-                  <span>{formatNumber(remaining)} actions left</span>
+                  <span>{formatNumber(remaining)} effort to craft</span>
                 </div>
-                <div className="progress-meta"><span>Progress</span><span>{formatNumber(progress)} / {formatNumber(total)} actions</span></div>
+                <div className="progress-meta"><span>Effort applied</span><span>{formatNumber(progress)} / {formatNumber(total)}</span></div>
                 <div className="progress"><div style={{ width: `${pct}%` }} /></div>
-                <div className="progress-meta"><strong>{pct}%</strong><span>{formatNumber(remaining)} remaining</span></div>
+                <div className="progress-meta"><strong>{pct}%</strong><span>{experiencePerEffort ? `${formatNumber(remainingXp)} XP remaining` : "XP not provided"}</span></div>
                 {contributors.length ? (
                   <div className="contributors">
                     <small>Contributors</small>
@@ -1579,7 +1583,7 @@ function Production({ data, refreshToken }: { data: ReturnType<typeof normalizeD
           );
         })}
       </div>
-      <PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} />
+      <PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} onShowMap={onShowMap} />
     </div>
   );
 }
@@ -1704,7 +1708,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function MapPanel({ data }: { data: ReturnType<typeof normalizeData> }) {
+function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selected, setSelected] = React.useState<Set<string> | null>(null);
   const roster = data.players;
   const defaultSelection = React.useMemo(() => {
@@ -1712,7 +1716,27 @@ function MapPanel({ data }: { data: ReturnType<typeof normalizeData> }) {
     return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
   }, [roster]);
   const current = selected ?? defaultSelection;
-  const mapUrl = current.size ? `https://bitcraftmap.com/?playerId=${[...current].join(",")}` : "https://bitcraftmap.com/";
+  const playerQuery = current.size ? `?playerId=${[...current].join(",")}` : "";
+  const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
+    name: data.claim.name ?? "Monitored settlement",
+    locationX: toNumber(data.claim.locationX),
+    locationZ: toNumber(data.claim.locationZ),
+  } : null;
+  const mapMarker = focus ?? defaultFocus;
+  const waypoint = mapMarker ? {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      properties: {
+        popupText: mapMarker.name,
+        iconName: "waypoint",
+        turnLayerOn: MAP_DEFAULT_LAYERS,
+        ...(focus ? { flyTo: [focus.locationZ, focus.locationX], zoomTo: 2 } : { noPan: true }),
+      },
+      geometry: { type: "Point", coordinates: [mapMarker.locationX, mapMarker.locationZ] },
+    }],
+  } : null;
+  const mapUrl = `https://bitcraftmap.com/${playerQuery}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev ?? defaultSelection);
@@ -1726,12 +1750,19 @@ function MapPanel({ data }: { data: ReturnType<typeof normalizeData> }) {
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
   return (
-    <div className="panel map-panel full-height">
+    <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
       <div className="split-header">
         <Header title="World Map">Live player tracking via bitcraftmap.com</Header>
         <a className="toolbar-button" href={mapUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
       </div>
       <p className="online-summary"><strong>{onlineCount} online</strong> - {roster.length} members total</p>
+      {focus ? (
+        <div className="map-focus">
+          <MapPin size={17} />
+          <div><strong>{focus.name}</strong><span>{focus.locationX}, {focus.locationZ}</span></div>
+          <button className="mini-action" onClick={onClearFocus}>Clear</button>
+        </div>
+      ) : null}
       <div className="player-pills">
         <button className={current.size === roster.length ? "active" : ""} onClick={toggleAll}>All</button>
         {roster.map((player) => {
@@ -2058,12 +2089,14 @@ function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: str
 
 function App() {
   const [active, setActive] = React.useState<(typeof NAV)[number][0]>("overview");
+  const mainRef = React.useRef<HTMLElement | null>(null);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
+  const [mapFocus, setMapFocus] = React.useState<MapFocus>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
   const data = React.useMemo(() => {
     const normalized = normalizeData(state.data);
@@ -2084,6 +2117,10 @@ function App() {
   React.useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+  React.useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }, [active]);
   React.useEffect(() => {
     const timer = window.setInterval(() => setRefreshToken((x) => x + 1), 30000);
     return () => window.clearInterval(timer);
@@ -2121,14 +2158,14 @@ function App() {
     overview: <Overview data={data} onNavigate={setActive} />,
     members: <Members data={data} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} />,
+    production: <Production data={data} refreshToken={refreshToken} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} />,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
     research: <Research data={data} />,
     market: <Market data={data} history={localHistory.market} claimId={claimId} />,
     empire: <Region data={data} />,
-    map: <MapPanel data={data} />,
+    map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} error={localHistory.error} />,
     admin: <AdminPanel claimId={claimId} syncUrl={syncUrl} theme={theme} onSettingsSaved={(settings) => { setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
@@ -2145,8 +2182,17 @@ function App() {
           <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
         </div>
       </aside>
-      <main>
+      <main ref={mainRef}>
         {state.loading && !state.data ? <div className="loading">Loading BitJita data...</div> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : panels[active]}
+        <footer className="app-footer">
+          <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
+          <div>
+            <a href="https://github.com/Red463/bitcraft-claim-monitor" target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
+            <a href="https://github.com/Red463/bitcraft-claim-monitor/issues" target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
+            <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>
+            <a href="https://bitcraftmap.com/" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitCraft Map</a>
+          </div>
+        </footer>
       </main>
     </div>
   );
