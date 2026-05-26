@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.0-beta.1 - 2026-05-26
+
+### Added
+
+- Overview watchlist for core materials, Price Finder items, and production crafts.
+- Notification inbox retaining recent market and production alerts, with links back to the relevant page.
+- Keyboard quick navigation (`Ctrl+K` or `/`) for pages, Price Finder, and settlement members.
+- Compact/comfortable data density control for repeat monitoring work.
+- Shareable URL state for current pages, Market context and Public Craft Finder filters.
+
+### Changed
+
+- Background refreshes now show a discreet refresh state and highlight changed dashboard values without replacing loaded views.
+- Initial loading uses dashboard-shaped skeletons, with short page/modal transitions and more responsive table/row hover states.
+- Active production jobs now have animated effort progress cues and can be pinned to Overview.
+- Table controls and headers remain accessible while reviewing longer data sets.
+
+## 0.5.0-beta.1 - 2026-05-26
+
+### Added
+
+- Market `Price Finder` tab with smart item search against the BitJita catalogue.
+- Region-selectable pricing analysis, defaulting to the monitored settlement region with options for all regions or a specific region.
+- Completed-trade price summaries for the last 24 hours, 7 days, and 30 days, plus recent trade evidence and total volume.
+- Suggested whole-gold listing price based on the most recent available BitJita completed-trade average.
+
+### Changed
+
+- Price Finder now provides a populated region dropdown rather than requiring users to enter region IDs.
+- The last visited page and Market tab are restored after refreshing the app.
+
 ## 0.4.0-beta.1 - 2026-05-26
 
 ### Added

@@ -7,12 +7,14 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bed,
+  Bell,
   Box,
   Building2,
   CheckCircle2,
   Circle,
   CircleDollarSign,
   CircleHelp,
+  Command,
   Crown,
   Database,
   Download,
@@ -31,6 +33,8 @@ import {
   MapPin,
   Package,
   Palette,
+  Pin,
+  PinOff,
   RefreshCw,
   Save,
   Search,
@@ -66,7 +70,8 @@ type ActivePanel = (typeof NAV)[number][0];
 type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; error: string | null; refreshToken: number };
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
-type ToastNotice = { id: string; title: string; body: string; kind: ToastKind };
+type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
+type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AppSettings = {
   claimId: string;
@@ -240,6 +245,20 @@ function hasPersistedState(key: string): boolean {
   }
 }
 
+function urlPanel(): ActivePanel | null {
+  const panel = new URLSearchParams(window.location.search).get("page");
+  return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
+}
+
+function updateQueryState(values: Record<string, string | null>) {
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries(values)) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function catalogEntries(catalog: unknown): AnyRecord[] {
   if (Array.isArray(catalog)) return catalog;
   return Object.entries(catalog ?? {}).map(([id, item]) => ({ id, ...(item as AnyRecord) }));
@@ -279,7 +298,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      setState((prev) => prev.data ? prev : { ...prev, loading: true, error: null });
+      setState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         async function request(path: string) {
           const response = await fetch(`${API}${path}`, { signal: controller.signal });
@@ -557,7 +576,7 @@ function Stat({ label, value, icon, warn, onClick }: { label: string; value: Rea
     <Comp className={`stat ${warn ? "warn" : ""} ${onClick ? "clickable-stat" : ""}`} onClick={onClick}>
       <div className="stat-icon">{icon}</div>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong><LiveValue value={value} /></strong>
     </Comp>
   );
 }
@@ -566,7 +585,7 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
   return <button className="toolbar-button" onClick={onClick}>{children}</button>;
 }
 
-function Overview({ data, onNavigate, logo }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel) => void; logo?: BrandingAsset }) {
+function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
@@ -605,17 +624,17 @@ function Overview({ data, onNavigate, logo }: { data: ReturnType<typeof normaliz
           <p><TierBadge tier={claim.tier} /> {claim.regionName ?? "Unknown region"} <span className="metadata-divider" /> Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
         </div>
         <div className="hero-metrics">
-          <button onClick={() => onNavigate("members")}><strong>{onlineCount}</strong><span>Online</span></button>
-          <button onClick={() => onNavigate("buildings")}><strong>{buildings.length}</strong><span>Structures</span></button>
-          <button onClick={() => onNavigate("market")}><strong>{market.length}</strong><span>Market</span></button>
+          <button onClick={() => onNavigate("members")}><strong><LiveValue value={onlineCount} /></strong><span>Online</span></button>
+          <button onClick={() => onNavigate("buildings")}><strong><LiveValue value={buildings.length} /></strong><span>Structures</span></button>
+          <button onClick={() => onNavigate("market")}><strong><LiveValue value={market.length} /></strong><span>Market</span></button>
         </div>
       </section>
 
       <div className="overview-pulse">
-        <div><span>Members</span><strong>{members.length}</strong><small>{onlineCount} online now</small></div>
-        <div><span>Supply Status</span><strong>{formatDaysAndHours(supplyDays)}</strong><small>{formatNumber(supplies)} stored</small></div>
-        <div><span>Work in Progress</span><strong>{activeCrafts + activeProjects}</strong><small>{activeCrafts} crafts / {activeProjects} builds</small></div>
-        <div><span>Market Presence</span><strong>{market.length}</strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
+        <div><span>Members</span><strong><LiveValue value={members.length} /></strong><small>{onlineCount} online now</small></div>
+        <div><span>Supply Status</span><strong><LiveValue value={formatDaysAndHours(supplyDays)} /></strong><small>{formatNumber(supplies)} stored</small></div>
+        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts / {activeProjects} builds</small></div>
+        <div><span>Market Presence</span><strong><LiveValue value={market.length} /></strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
       </div>
 
       <div className="ops-grid">
@@ -626,7 +645,7 @@ function Overview({ data, onNavigate, logo }: { data: ReturnType<typeof normaliz
           <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
           <Info label="Runs out" value={runOut} />
         </section>
-        <section className="ops-card">
+        <section className="ops-card" title="Runway uses current supplies and the claim upkeep rate returned by BitJita.">
           <header><CircleDollarSign /><span>Treasury</span><strong>{formatNumber(treasury)}g</strong></header>
           <Info label="Supply upkeep per hour" value={formatNumber(upkeep, 2)} />
           <Info label="Supply upkeep per day" value={formatNumber(suppliesPerDay, 2)} />
@@ -665,18 +684,119 @@ function Overview({ data, onNavigate, logo }: { data: ReturnType<typeof normaliz
           ].map(([label, value]) => <Info key={label} label={label} value={value} />)}
         </section>
       </div>
+      <WatchlistPanel data={data} watches={watches} onToggleWatch={onToggleWatch} onNavigate={onNavigate} />
     </div>
   );
 }
 
 function Info({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
-  return <div className="info-row"><span>{label}</span><strong>{value ?? "-"}</strong></div>;
+  return <div className="info-row"><span>{label}</span><strong><LiveValue value={value ?? "-"} /></strong></div>;
+}
+
+function LiveValue({ value }: { value: React.ReactNode }) {
+  const signature = String(value);
+  const previous = React.useRef(signature);
+  const [changed, setChanged] = React.useState<"" | "increased" | "decreased">("");
+  const [visible, setVisible] = React.useState<React.ReactNode>(value);
+  React.useEffect(() => {
+    if (previous.current === signature) {
+      setVisible(value);
+      return;
+    }
+    const priorSignature = previous.current;
+    previous.current = signature;
+    const numeric = (entry: string) => {
+      const match = entry.match(/^([\d,]+(?:\.\d+)?)(g)?$/);
+      return match ? { amount: Number(match[1].replaceAll(",", "")), decimals: match[1].includes(".") ? match[1].split(".")[1].length : 0, suffix: match[2] ?? "" } : null;
+    };
+    const previousValue = numeric(priorSignature);
+    const nextValue = numeric(signature);
+    setChanged(previousValue && nextValue && nextValue.amount < previousValue.amount ? "decreased" : "increased");
+    const timer = window.setTimeout(() => setChanged(""), 900);
+    let frame = 0;
+    if (previousValue && nextValue && previousValue.amount !== nextValue.amount) {
+      const start = performance.now();
+      const run = (time: number) => {
+        const progress = Math.min(1, (time - start) / 380);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const amount = previousValue.amount + (nextValue.amount - previousValue.amount) * eased;
+        setVisible(`${formatNumber(amount, nextValue.decimals)}${nextValue.suffix}`);
+        if (progress < 1) frame = window.requestAnimationFrame(run);
+        else setVisible(value);
+      };
+      frame = window.requestAnimationFrame(run);
+    } else setVisible(value);
+    return () => {
+      window.clearTimeout(timer);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [signature, value]);
+  return <span className={`live-value ${changed}`}>{visible}</span>;
 }
 
 function TierBadge({ tier }: { tier: unknown }) {
   const value = toNumber(tier);
   if (value < 1 || value > 10) return <span>-</span>;
   return <span className={`tier-badge tier-${value}`}>T{value}</span>;
+}
+
+function WatchlistPanel({ data, watches, onToggleWatch, onNavigate }: { data: ReturnType<typeof normalizeData>; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+  const [marketValues, setMarketValues] = React.useState<Record<string, AnyRecord>>({});
+  const materials = CORE_MATERIAL_GROUPS.map((group) => {
+    const itemLookup = new Map([...(data.inventories.items ?? []), ...(data.inventories.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
+    const quantity = (data.inventories.buildings ?? []).flatMap((building: AnyRecord) => building.inventory ?? []).reduce((total: number, slot: AnyRecord) => {
+      const item = itemLookup.get(String(slot.contents?.item_id)) ?? {};
+      return group.matcher(item) ? total + toNumber(slot.contents?.quantity) : total;
+    }, 0);
+    return { group, quantity };
+  });
+  React.useEffect(() => {
+    const selected = watches.filter((watch) => watch.type === "market" && watch.itemId);
+    if (!selected.length) return;
+    const controller = new AbortController();
+    Promise.all(selected.map(async (watch) => {
+      const type = watch.itemType === 1 ? "cargo" : "items";
+      const response = await fetch(`${API}/market/${type}/${watch.itemId}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(data.claim.regionId ?? "19"))}`, { signal: controller.signal });
+      return [watch.id, response.ok ? await response.json() : null] as const;
+    })).then((values) => setMarketValues(Object.fromEntries(values))).catch(() => undefined);
+    return () => controller.abort();
+  }, [data.claim.regionId, watches]);
+  const isWatched = (id: string) => watches.some((watch) => watch.id === id);
+  return (
+    <section className="watchlist-panel">
+      <div className="split-header">
+        <h3><Pin size={17} /> Watchlist</h3>
+        <div className="watch-add">
+          {materials.map(({ group }) => {
+            const watch = { id: `material-${group.label}`, type: "material" as const, label: group.label };
+            return <button key={group.label} className={isWatched(watch.id) ? "active" : ""} onClick={() => onToggleWatch(watch)} title={`${isWatched(watch.id) ? "Remove" : "Pin"} ${group.label}`}>{group.label}</button>;
+          })}
+        </div>
+      </div>
+      {!watches.length ? <p className="legend">Pin a core material here or pin a market item in Price Finder to monitor it from Overview.</p> : (
+        <div className="watch-grid">
+          {watches.map((watch) => {
+            const material = materials.find((entry) => `material-${entry.group.label}` === watch.id);
+            const price = marketValues[watch.id]?.priceStats?.avg24h ?? marketValues[watch.id]?.priceStats?.avg7d;
+            return (
+              <article key={watch.id}>
+                <button className="watch-remove" onClick={() => onToggleWatch(watch)} title="Remove from watchlist"><PinOff size={13} /></button>
+                <span>{watch.type === "market" ? "Market price" : watch.type === "craft" ? "Production" : "Inventory"}</span>
+                <strong>{watch.label}</strong>
+                <b>{watch.type === "material" ? formatNumber(material?.quantity ?? 0) : watch.type === "market" ? (price == null ? "No recent sales" : `${formatNumber(Math.round(price))}g avg`) : "Tracked craft"}</b>
+                <button className="watch-link" onClick={() => {
+                  if (watch.type === "market") {
+                    updateQueryState({ item: watch.itemId ?? null, itemName: watch.label, itemType: String(watch.itemType ?? 0), region: String(data.claim.regionId ?? "19") });
+                    onNavigate("market", "pricing");
+                  } else onNavigate(watch.type === "craft" ? "production" : "inventory");
+                }}>View</button>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData>; selectedMemberId: string; onSelectMember: (id: string) => void }) {
@@ -1003,8 +1123,8 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  return <div className="mini-stat"><div>{icon}</div><span>{label}</span><strong>{value}</strong></div>;
+function MiniStat({ icon, label, value, title }: { icon: React.ReactNode; label: string; value: React.ReactNode; title?: string }) {
+  return <div className="mini-stat" title={title}><div>{icon}</div><span>{label}</span><strong><LiveValue value={value} /></strong></div>;
 }
 
 function skillStyle(level: number): React.CSSProperties {
@@ -1509,14 +1629,22 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
+function Market({ data, history, claimId, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const [q, setQ] = React.useState("");
-  const [view, setView] = React.useState<"live" | "analytics">("live");
+  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing">("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = usePersistedState("market.tier", "All");
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
   const [memberFilter, setMemberFilter] = usePersistedState("market.member", "All");
   const [memberHistory, setMemberHistory] = React.useState<AnyRecord | null>(null);
+  React.useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
+  }, [setView]);
+  const selectView = (next: "live" | "analytics" | "pricing") => {
+    setView(next);
+    updateQueryState({ page: "market", tab: next });
+  };
   const memberOptions = React.useMemo(() => {
     const names = [
       ...data.members.map((member) => member.userName ?? member.username ?? member.playerUsername ?? member.name),
@@ -1592,8 +1720,8 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
   return (
     <div className="panel">
-      <Header title="Market">{all.length} live listings - {formatNumber(confirmedSales)} confirmed sale{confirmedSales === 1 ? "" : "s"} for {filterLabel}</Header>
-      <div className="toolbar-row">
+      <Header title="Market">{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : `${all.length} live listings - ${formatNumber(confirmedSales)} confirmed sale${confirmedSales === 1 ? "" : "s"} for ${filterLabel}`}</Header>
+      {view !== "pricing" ? <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
           <select className="select-control" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
@@ -1601,12 +1729,15 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
             {memberOptions.map((name) => <option key={name}>{name}</option>)}
           </select>
         </label>
-      </div>
+      </div> : null}
       <div className="tabs primary-tabs">
-        <button className={view === "live" ? "active" : ""} onClick={() => setView("live")}><ShoppingCart size={15} /> Live Listings</button>
-        <button className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><TrendingUp size={15} /> Analytics</button>
+        <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
+        <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
+        <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
       </div>
-      {view === "analytics" ? (
+      {view === "pricing" ? (
+        <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} watches={watches} onToggleWatch={onToggleWatch} />
+      ) : view === "analytics" ? (
         <>
           <p className="legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
           <div className="metric-grid">
@@ -1690,6 +1821,178 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
   );
 }
 
+function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredRegionId: string; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+  const defaultRegion = monitoredRegionId || "19";
+  const [query, setQuery] = React.useState("");
+  const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
+  const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
+  const [regionChoice, setRegionChoice] = usePersistedState("market.price.region", defaultRegion);
+  const [customRegion] = usePersistedState("market.price.customRegion", defaultRegion);
+  const [availableRegions, setAvailableRegions] = React.useState<AnyRecord[]>([]);
+  const [priceState, setPriceState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
+  const activeRegion = regionChoice === "All" ? "" : regionChoice;
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const itemId = params.get("item");
+    const itemName = params.get("itemName");
+    const itemType = params.get("itemType");
+    const region = params.get("region");
+    if (itemId && itemName) {
+      setSelectedItem({ id: itemId, name: itemName, itemType: toNumber(itemType) });
+      setQuery(itemName);
+    }
+    if (region) setRegionChoice(region === "all" ? "All" : region);
+  }, [setRegionChoice]);
+
+  React.useEffect(() => {
+    if (regionChoice !== "Custom") return;
+    setRegionChoice(/^\d+$/.test(customRegion.trim()) ? customRegion.trim() : defaultRegion);
+  }, [customRegion, defaultRegion, regionChoice, setRegionChoice]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/regions/status`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`regions HTTP ${response.status}`)))
+      .then((payload) => setAvailableRegions(payload.regions ?? []))
+      .catch(() => {
+        if (!controller.signal.aborted) setAvailableRegions([]);
+      });
+    return () => controller.abort();
+  }, []);
+
+  React.useEffect(() => {
+    if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
+      setSuggestions([]);
+      setSearchState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearchState("loading");
+      fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
+        .then((payload) => {
+          setSuggestions((payload.data?.items ?? []).slice(0, 8));
+          setSearchState("idle");
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setSuggestions([]);
+            setSearchState("error");
+          }
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, selectedItem?.name]);
+
+  React.useEffect(() => {
+    if (!selectedItem || regionChoice === "Custom") {
+      setPriceState({ data: null, error: null, loading: false });
+      return;
+    }
+    const controller = new AbortController();
+    const type = toNumber(selectedItem.itemType) === 1 ? "cargo" : "items";
+    const regionParam = activeRegion ? `&regionId=${encodeURIComponent(activeRegion)}` : "";
+    setPriceState((current) => ({ ...current, error: null, loading: true }));
+    fetch(`${API}/market/${type}/${selectedItem.id}/price-history?bucket=1%20day&limit=30${regionParam}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`price history HTTP ${response.status}`)))
+      .then((payload) => setPriceState({ data: payload, error: null, loading: false }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setPriceState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+      });
+    return () => controller.abort();
+  }, [selectedItem, activeRegion, regionChoice]);
+
+  function chooseItem(item: AnyRecord) {
+    setSelectedItem(item);
+    setQuery(String(item.name));
+    setSuggestions([]);
+    updateQueryState({ item: String(item.id), itemName: String(item.name), itemType: String(item.itemType ?? 0), region: activeRegion || "all" });
+  }
+
+  const stats = priceState.data?.priceStats ?? {};
+  const suggestedWindow = stats.avg24h != null ? "Last 24 Hours" : stats.avg7d != null ? "Last 7 Days" : stats.avg30d != null ? "Last 30 Days" : "";
+  const suggestedAverage = stats.avg24h ?? stats.avg7d ?? stats.avg30d;
+  const suggestedPrice = suggestedAverage == null ? null : Math.max(1, Math.round(toNumber(suggestedAverage)));
+  const recentTrades: AnyRecord[] = priceState.data?.recentTrades ?? [];
+  const regionLabel = activeRegion ? `R${activeRegion}` : "All Regions";
+  const regionIds = unique([
+    defaultRegion,
+    regionChoice !== "All" && regionChoice !== "Custom" ? regionChoice : "",
+    ...availableRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
+  const selectedWatch = selectedItem ? { id: `market-${selectedItem.itemType ?? 0}-${selectedItem.id}`, type: "market" as const, label: String(selectedItem.name), itemId: String(selectedItem.id), itemType: toNumber(selectedItem.itemType), tier: toNumber(selectedItem.tier) } : null;
+  const pinned = selectedWatch ? watches.some((watch) => watch.id === selectedWatch.id) : false;
+
+  return (
+    <section className="price-finder">
+      <div className="price-finder-controls">
+        <label className="field price-item-search">
+          <span>Item</span>
+          <div className="suggestion-anchor">
+            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
+            {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
+              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+                <strong>{item.name}</strong>
+                {item.tier ? <TierBadge tier={item.tier} /> : null}
+                <small>{item.rarityStr ?? item.tag ?? ""}</small>
+              </button>
+            ))}</div> : null}
+          </div>
+          {searchState === "loading" ? <small className="legend">Finding market items...</small> : null}
+          {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
+        </label>
+        <label className="field">
+          <span>Region</span>
+          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); }}>
+            {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
+            <option value="All">All Regions</option>
+          </select>
+        </label>
+      </div>
+      {!selectedItem ? <div className="empty-state price-empty"><CircleDollarSign />Choose an item to examine completed trade pricing.</div> : null}
+      {selectedItem && priceState.loading && !priceState.data ? <div className="loading">Loading price history for {selectedItem.name}...</div> : null}
+      {priceState.error ? <div className="error">Unable to load price history: {priceState.error}</div> : null}
+      {selectedItem && priceState.data ? (
+        <>
+            <div className="price-finder-heading">
+              <div><h3>{selectedItem.name}</h3><span>{regionLabel} market trade history</span></div>
+              <div className="price-recommendation">
+              <span>Suggested List Price</span>
+              <strong>{suggestedPrice == null ? "-" : `${formatNumber(suggestedPrice)}g`}</strong>
+                <small>{suggestedWindow ? `Based on ${suggestedWindow.toLowerCase()} average` : "No completed trades in this selection"}</small>
+              </div>
+              {selectedWatch ? <button className={`pin-action ${pinned ? "active" : ""}`} onClick={() => onToggleWatch(selectedWatch)} title={pinned ? "Remove from Overview watchlist" : "Pin to Overview watchlist"}>{pinned ? <PinOff size={14} /> : <Pin size={14} />}{pinned ? "Pinned" : "Pin"}</button> : null}
+            </div>
+            <div className="metric-grid">
+              <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
+            <MiniStat icon={<TrendingUp />} label="Last 7 Days" value={stats.avg7d == null ? "-" : `${formatNumber(Math.round(stats.avg7d))}g`} />
+            <MiniStat icon={<CircleDollarSign />} label="Last 30 Days" value={stats.avg30d == null ? "-" : `${formatNumber(Math.round(stats.avg30d))}g`} />
+            <MiniStat icon={<ShoppingCart />} label="Trade Volume" value={formatNumber(stats.totalVolume)} />
+          </div>
+          <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
+          <section>
+            <h3><ShoppingBag size={17} /> Recent Trades <small>{formatNumber(stats.totalTrades)} total trades</small></h3>
+            <DataTable rows={recentTrades.slice(0, 15)} columns={[
+              ["When", row => dateLabel(row.timestamp ?? row.createdAt)],
+              ["Unit Price", row => `${formatNumber(row.unitPrice ?? row.price)}g`],
+              ["Quantity", row => formatNumber(row.quantity)],
+              ["Value", row => `${formatNumber(row.totalPrice ?? row.total_value ?? toNumber(row.quantity) * toNumber(row.unitPrice))}g`],
+              ["Seller", row => row.sellerUsername ?? "-"],
+              ["Buyer", row => row.purchaserUsername ?? "-"],
+            ]} />
+          </section>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function buildMarketTopItems(events: AnyRecord[]) {
   const grouped = new Map<string, { itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();
   for (const event of events) {
@@ -1736,6 +2039,11 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("public-crafts.direction", "desc");
   const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("skill")) setSkillId(params.get("skill")!);
+    if (params.get("region")) setRegionId(params.get("region")!);
+  }, [setRegionId, setSkillId]);
   React.useEffect(() => {
     const preferredRegion = defaultRegionId || monitoredRegionId;
     if (!hasSavedRegion.current && preferredRegion && regionId === "All") {
@@ -1822,13 +2130,13 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
         </Header>
         <div className="toolbar-row">
           <label className="inline-field"><span>Skill</span>
-            <select className="select-control" value={skillId} onChange={(event) => setSkillId(event.target.value)}>
+            <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); }}>
               <option value="All">All Skills</option>
               {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
             </select>
           </label>
           <label className="inline-field"><span>Region</span>
-            <select className="select-control" value={regionId} onChange={(event) => setRegionId(event.target.value)}>
+            <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); }}>
               <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
             </select>
           </label>
@@ -1836,7 +2144,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
       </div>
       {state.error ? <div className="error">Failed to load public crafts: {state.error}</div> : null}
       {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
-      {visibleJobs.length ? <div className="table-wrap"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
+      {visibleJobs.length ? <div className="table-wrap"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr className="data-row" key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
     </section>
   );
 }
@@ -1910,7 +2218,7 @@ function SettlementPassiveCrafts({ members, refreshToken }: { members: AnyRecord
   );
 }
 
-function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
+function Production({ data, refreshToken, selectedMemberId, onSelectMember, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
@@ -2049,11 +2357,13 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Active now" : isDone ? "Ready" : progress > 0 ? "Paused" : "Queued";
           const eligibilityStatus = eligibility(job);
+          const craftWatch = { id: `craft-${String(job.entityId ?? index)}`, type: "craft" as const, label: String(item?.name ?? job.recipeName ?? "Production craft") };
+          const craftPinned = watches.some((watch) => watch.id === craftWatch.id);
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
                 <div><Factory size={16} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
-                <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
+                <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
                 <div className="craft-title"><h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
@@ -2064,7 +2374,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
                   {experiencePerEffort ? <span>{formatNumber(totalXp)} total XP</span> : null}
                 </div>
                 <div className="progress-meta"><span>Effort applied</span><span>{formatNumber(progress)} / {formatNumber(total)}</span></div>
-                <div className="progress"><div style={{ width: `${pct}%` }} /></div>
+                <div className={`progress ${isWorking ? "is-moving" : ""}`}><div style={{ width: `${pct}%` }} /></div>
                 <div className="progress-meta"><strong>{pct}%</strong><span>{experiencePerEffort ? `${formatNumber(remainingXp)} XP remaining` : "XP not provided"}</span></div>
                 {eligibilityStatus ? <div className={`eligibility-pill ${eligibilityStatus.ok ? "eligible" : eligibilityStatus.pending ? "pending" : "blocked"}`}>{eligibilityStatus.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{eligibilityStatus.text}</div> : null}
                 {contributors.length ? (
@@ -2322,8 +2632,8 @@ function storageActivity(storageApi: AnyRecord[]): AnyRecord[] {
 }
 
 function ActivityPanel({ activity, storageApi, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; error: string | null }) {
-  const [filter, setFilter] = React.useState<(typeof ACTIVITY_FILTERS)[number][0]>("all");
-  const [compact, setCompact] = React.useState(true);
+  const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
+  const [compact, setCompact] = usePersistedState("activity.compact", true);
   const storage = storageActivity(storageApi);
   const combined = [...activity, ...storage].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
   const baseFiltered = filter === "all" ? combined : combined.filter((item) => String(item.event_type ?? "").includes(filter));
@@ -2421,6 +2731,55 @@ function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss:
   );
 }
 
+function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices: ToastNotice[]; onClose: () => void; onOpenNotice: (notice: ToastNotice) => void }) {
+  return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <aside className="notice-drawer" role="dialog" aria-modal="true" aria-label="Recent notifications" onClick={(event) => event.stopPropagation()}>
+        <header><h2><Bell size={18} /> Notifications</h2><button onClick={onClose} aria-label="Close notifications"><X size={16} /></button></header>
+        {notices.length ? <div className="notice-list">{notices.map((notice) => (
+          <button key={notice.id} className={notice.read ? "" : "unread"} onClick={() => onOpenNotice(notice)}>
+            <span>{notice.kind === "market" ? <ShoppingCart size={15} /> : <Factory size={15} />}</span>
+            <strong>{notice.title}</strong>
+            <small>{notice.body}</small>
+            <time>{notice.occurredAt ? timeAgo(notice.occurredAt) : ""}</time>
+          </button>
+        ))}</div> : <p className="legend">Notifications for sales, listings and production will appear here.</p>}
+      </aside>
+    </div>
+  );
+}
+
+function CommandPalette({ data, onClose, onNavigate, onSelectMember }: { data: ReturnType<typeof normalizeData>; onClose: () => void; onNavigate: (panel: ActivePanel, marketTab?: string) => void; onSelectMember: (id: string) => void }) {
+  const [query, setQuery] = React.useState("");
+  const q = query.toLowerCase().trim();
+  const commands = [
+    ...NAV.map(([id, label, Icon]) => ({ key: `page-${id}`, label, description: "Open page", icon: <Icon size={15} />, run: () => onNavigate(id) })),
+    { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, run: () => onNavigate("market", "pricing") },
+    ...data.members.map((member: AnyRecord) => ({
+      key: `member-${member.playerEntityId}`,
+      label: String(member.userName ?? member.username ?? "Member"),
+      description: "Open member details",
+      icon: <User size={15} />,
+      run: () => { onSelectMember(String(member.playerEntityId)); onNavigate("members"); },
+    })),
+  ].filter((command) => !q || `${command.label} ${command.description}`.toLowerCase().includes(q)).slice(0, 12);
+  React.useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [onClose]);
+  return (
+    <div className="command-overlay" onClick={onClose}>
+      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Quick navigation" onClick={(event) => event.stopPropagation()}>
+        <label><Search size={17} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Navigate or find a member..." /></label>
+        <div>{commands.map((command) => <button key={command.key} onClick={() => { command.run(); onClose(); }}>{command.icon}<strong>{command.label}</strong><span>{command.description}</span></button>)}</div>
+      </section>
+    </div>
+  );
+}
+
 function HelpCenter({ version, onClose }: { version: string; onClose: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -2473,11 +2832,15 @@ function DataTable({ rows, columns, onRowClick, rowClassName }: { rows: AnyRecor
       <table>
         <thead><tr>{columns.map(([label]) => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>
-          {rows.length ? rows.map((row, index) => <tr className={rowClassName?.(row)} key={row.entityId ?? row.id ?? index} onClick={onRowClick ? () => onRowClick(row) : undefined}>{columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
+          {rows.length ? rows.map((row, index) => <tr className={`data-row ${rowClassName?.(row) ?? ""}`} key={row.entityId ?? row.id ?? index} onClick={onRowClick ? () => onRowClick(row) : undefined}>{columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
         </tbody>
       </table>
     </div>
   );
+}
+
+function AppSkeleton() {
+  return <div className="panel app-skeleton"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
 }
 
 function SyncPanel({ syncUrl }: { syncUrl: string }) {
@@ -2794,9 +3157,10 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
 }
 
 function App() {
-  const [active, setActive] = React.useState<(typeof NAV)[number][0]>("overview");
+  const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "overview");
   const mainRef = React.useRef<HTMLElement | null>(null);
   const defaultPageAppliedRef = React.useRef(false);
+  const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
@@ -2807,7 +3171,12 @@ function App() {
   const [mapFocus, setMapFocus] = React.useState<MapFocus>(null);
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
+  const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
+  const [watches, setWatches] = usePersistedState<WatchEntry[]>("overview.watchlist", []);
+  const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [noticeOpen, setNoticeOpen] = React.useState(false);
+  const [commandOpen, setCommandOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
   const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
   const activityNoticeClaimRef = React.useRef(claimId);
@@ -2825,18 +3194,59 @@ function App() {
     toastTimersRef.current.delete(id);
     setToasts((current) => current.filter((notice) => notice.id !== id));
   }, []);
+  const navigate = React.useCallback((panel: ActivePanel, marketTab?: string) => {
+    setActive(panel);
+    updateQueryState({
+      page: panel,
+      tab: panel === "market" ? marketTab ?? null : null,
+      item: panel === "market" ? new URLSearchParams(window.location.search).get("item") : null,
+      itemName: panel === "market" ? new URLSearchParams(window.location.search).get("itemName") : null,
+      itemType: panel === "market" ? new URLSearchParams(window.location.search).get("itemType") : null,
+      region: panel === "market" ? new URLSearchParams(window.location.search).get("region") : null,
+    });
+  }, [setActive]);
+  const toggleWatch = React.useCallback((watch: WatchEntry) => {
+    setWatches((current) => current.some((entry) => entry.id === watch.id) ? current.filter((entry) => entry.id !== watch.id) : [...current, watch].slice(-12));
+  }, [setWatches]);
   const pushToast = React.useCallback((title: string, body: string, kind: ToastKind) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setToasts((current) => [...current, { id, title, body, kind }].slice(-4));
+    const notice: ToastNotice = { id, title, body, kind, occurredAt: new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production" };
+    setToasts((current) => [...current, notice].slice(-4));
+    setNotificationLog((current) => [notice, ...current].slice(0, 80));
     const timer = window.setTimeout(() => {
       toastTimersRef.current.delete(id);
       setToasts((current) => current.filter((notice) => notice.id !== id));
     }, 7000);
     toastTimersRef.current.set(id, timer);
-  }, []);
+  }, [setNotificationLog]);
   React.useEffect(() => () => {
     for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
     toastTimersRef.current.clear();
+  }, []);
+  React.useEffect(() => {
+    const requested = urlPanel();
+    if (requested) setActive(requested);
+    function restoreFromHistory() {
+      const panel = urlPanel();
+      if (panel) setActive(panel);
+    }
+    window.addEventListener("popstate", restoreFromHistory);
+    return () => window.removeEventListener("popstate", restoreFromHistory);
+  }, [setActive]);
+  React.useEffect(() => {
+    function openCommands(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isEditing = Boolean(target?.closest("input, textarea, select, [contenteditable='true']"));
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen(true);
+      } else if (event.key === "/" && !isEditing) {
+        event.preventDefault();
+        setCommandOpen(true);
+      }
+    }
+    window.addEventListener("keydown", openCommands);
+    return () => window.removeEventListener("keydown", openCommands);
   }, []);
   React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
@@ -2848,7 +3258,7 @@ function App() {
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);
         setTheme(next.theme);
-        if (!defaultPageAppliedRef.current && next.defaultPage !== "admin") {
+        if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
         }
@@ -2952,16 +3362,16 @@ function App() {
   }, [appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    overview: <Overview data={data} onNavigate={setActive} logo={appSettings.branding.logo} />,
+    overview: <Overview data={data} onNavigate={navigate} logo={appSettings.branding.logo} watches={watches} onToggleWatch={toggleWatch} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
-    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} /></div>,
+    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
+    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map"); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} watches={watches} onToggleWatch={toggleWatch} />,
     empire: <Region data={data} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
@@ -2970,18 +3380,23 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell density-${density}`}>
       <aside>
         <div className="brand">{appSettings.branding.logo ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" /> : <Shield />}<div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
-        <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><Icon size={16} />{label}</button>)}</nav>
+        <button className="command-launch" onClick={() => setCommandOpen(true)}><Search size={15} /><span>Quick find</span><kbd>Ctrl K</kbd></button>
+        <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => navigate(id)}><Icon size={16} />{label}</button>)}</nav>
+        <div className="sidebar-tools">
+          <button onClick={() => setDensity(density === "compact" ? "comfortable" : "compact")} title="Change table density"><Command size={14} /> {density === "compact" ? "Comfortable View" : "Compact View"}</button>
+          <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }}><Bell size={14} /> Updates{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
+        </div>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
-          <span className="refresh-dot" />
-          <span>Updated</span>
+          <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
+          <span>{state.loading && state.data ? "Refreshing" : "Updated"}</span>
           <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
         </div>
       </aside>
       <main ref={mainRef}>
-        {state.loading && !state.data ? <div className="loading">Loading BitJita data...</div> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : panels[active]}
+        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{panels[active]}</div>}
         <footer className="app-footer">
           <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
           <div>
@@ -2994,6 +3409,8 @@ function App() {
       </main>
       <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
       <ToastStack notices={toasts} onDismiss={dismissToast} />
+      {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
+      {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} /> : null}
     </div>
   );

@@ -132,6 +132,23 @@ The app uses `Structures` terminology because BitCraft data may classify contain
 
 Sales analytics use completed BitJita sell trades only after completed order history identifies the monitored settlement as the listing claim. Trade fills are retained in the local database by trade ID. The first successful collection backfills available completed orders from this market for current settlement members, and later tracked sales continue to be recorded. Live Listings remains scoped to the monitored settlement and follows paginated BitJita responses so active listings outside the first page are not closed incorrectly.
 
+**Price Finder**
+
+- Type-ahead item lookup across the BitJita market catalogue.
+- Region dropdown defaulting to the monitored settlement's region, with all-region and available-region options.
+- BitJita completed-trade average prices over 24 hours, 7 days and 30 days.
+- Suggested list price based on the most recent available average, alongside recent trades and volume for judgement.
+- Pin useful market items to the Overview watchlist.
+
+### Monitoring Experience
+
+- Browser refresh restores the current page and applicable Market or Public Craft Finder context.
+- `Ctrl+K` or `/` opens quick navigation for pages, Price Finder and settlement members.
+- Overview watchlist pins finished core materials, market items and production crafts for regular checks.
+- Notification inbox retains recent market and production alerts after toast messages disappear.
+- Compact/comfortable density modes make long tables easier to scan on different displays.
+- Background updates preserve visible page content and briefly highlight changing figures.
+
 ### Region
 
 - Regional settlement ranking table with sortable columns.
