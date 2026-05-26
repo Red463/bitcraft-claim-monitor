@@ -174,7 +174,8 @@ The configured board URL can be changed through Admin.
 ### Activity
 
 - Locally recorded settlement changes over time.
-- Public API storage movement events.
+- Public API storage movement events limited to known containers belonging to the monitored settlement.
+- Deployable storage, including carts, wagons, boats and similar mobile containers, is excluded.
 - Filters for storage, treasury, supplies, market, members, and structures.
 - Optional compact view to reduce repeated low-signal entries.
 

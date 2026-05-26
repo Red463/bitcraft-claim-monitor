@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2-beta.1 - 2026-05-26
+
+### Fixed
+
+- Activity storage movements are now loaded from the monitored settlement's known storage structures rather than each member's global storage history.
+- Storage activity excludes deployable containers such as carts, wagons, boats, ships and goats.
+
 ## 0.6.1-beta.1 - 2026-05-26
 
 ### Fixed

@@ -322,6 +322,11 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
+        const settlementStorageBuildings: AnyRecord[] = raw.inventories?.buildings ?? [];
+        const storageBuildingIds = settlementStorageBuildings
+          .filter((building) => !isDeployableStorage(building))
+          .map((building) => String(building.entityId ?? ""))
+          .filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsStorageDetail = activePanel === "activity";
         const readsProductionDetail = activePanel === "production";
@@ -331,7 +336,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
             const payload = await request(`/players/${id}`);
             return payload.player ?? payload;
           })),
-          readsStorageDetail ? Promise.allSettled(memberIds.map((id) => request(`/logs/storage?playerEntityId=${id}&limit=40`))) : Promise.resolve([]),
+          readsStorageDetail ? Promise.allSettled(storageBuildingIds.map((id) => request(`/logs/storage?buildingEntityId=${id}&limit=40`))) : Promise.resolve([]),
           readsProductionDetail ? Promise.allSettled(crafts.filter((craft) => craft.entityId).map(async (craft) => ({
             craftId: String(craft.entityId),
             payload: await request(`/crafts/${craft.entityId}/contributions`),
@@ -2612,11 +2617,25 @@ function activitySummary(item: AnyRecord): string {
   return item.summary ?? "-";
 }
 
-function storageActivity(storageApi: AnyRecord[]): AnyRecord[] {
+const DEPLOYABLE_STORAGE_NAME = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
+
+function isDeployableStorage(building: AnyRecord | null | undefined): boolean {
+  return DEPLOYABLE_STORAGE_NAME.test(String(building?.buildingName ?? building?.name ?? ""));
+}
+
+function storageActivity(storageApi: AnyRecord[], inventories: AnyRecord): AnyRecord[] {
+  const validBuildingIds = new Set(
+    (inventories.buildings ?? [])
+      .filter((building: AnyRecord) => !isDeployableStorage(building))
+      .map((building: AnyRecord) => String(building.entityId ?? ""))
+      .filter(Boolean),
+  );
   const uniqueLogs = new Map<string, AnyRecord>();
   for (const payload of storageApi) {
     const catalogs = new Map<string, AnyRecord>([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
     for (const log of payload.logs ?? []) {
+      const buildingId = String(log.buildingEntityId ?? log.building?.entityId ?? "");
+      if (!validBuildingIds.has(buildingId) || isDeployableStorage(log.building)) continue;
       const event = log.data ?? {};
       const item = catalogs.get(String(event.item_id));
       const action = String(event.type ?? "storage").replaceAll("_", " ");
@@ -2631,16 +2650,16 @@ function storageActivity(storageApi: AnyRecord[]): AnyRecord[] {
   return [...uniqueLogs.values()].sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
 }
 
-function ActivityPanel({ activity, storageApi, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; error: string | null }) {
+function ActivityPanel({ activity, storageApi, inventories, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; inventories: AnyRecord; error: string | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [compact, setCompact] = usePersistedState("activity.compact", true);
-  const storage = storageActivity(storageApi);
+  const storage = storageActivity(storageApi, inventories);
   const combined = [...activity, ...storage].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
   const baseFiltered = filter === "all" ? combined : combined.filter((item) => String(item.event_type ?? "").includes(filter));
   const filtered = compact ? compactActivity(baseFiltered) : baseFiltered;
   return (
     <div className="panel">
-      <Header title="Activity">Settlement changes saved locally plus public API storage movement history</Header>
+      <Header title="Activity">Settlement changes saved locally plus storage movement in settlement-owned containers</Header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
       <div className="toolbar-row">
         <Segmented options={ACTIVITY_FILTERS.map(([, label]) => label)} value={ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1] ?? "All"} onChange={(label) => setFilter(ACTIVITY_FILTERS.find(([, itemLabel]) => itemLabel === label)?.[0] ?? "all")} label="Filter" />
@@ -3375,7 +3394,7 @@ function App() {
     empire: <Region data={data} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
-    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} error={localHistory.error} />,
+    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} inventories={data.inventories} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
