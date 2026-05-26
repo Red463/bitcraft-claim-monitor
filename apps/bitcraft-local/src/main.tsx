@@ -15,6 +15,7 @@ import {
   CircleHelp,
   Crown,
   Database,
+  Download,
   ExternalLink,
   Factory,
   FlaskConical,
@@ -25,6 +26,7 @@ import {
   KeyRound,
   Lock,
   LogOut,
+  HardDrive,
   Map as MapIcon,
   MapPin,
   Package,
@@ -32,6 +34,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Server,
   Shield,
   Share2,
   ShoppingBag,
@@ -40,8 +43,10 @@ import {
   Swords,
   TrendingDown,
   TrendingUp,
+  Upload,
   Users,
   User,
+  UserPlus,
   Wrench,
   X,
 } from "lucide-react";
@@ -62,6 +67,18 @@ type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; erro
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind };
+type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
+type AppSettings = {
+  claimId: string;
+  syncUrl: string;
+  theme: typeof DEFAULT_THEME;
+  refreshSeconds: number;
+  defaultPage: ActivePanel;
+  defaultRegion: string;
+  toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
+  branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
+  snapshotRetentionDays: number;
+};
 
 const NAV = [
   ["overview", "Overview", Shield],
@@ -92,6 +109,18 @@ const DEFAULT_THEME = {
   gold: "#f0c64f",
   good: "#4ee28a",
   danger: "#ef6461",
+};
+
+const DEFAULT_SETTINGS: AppSettings = {
+  claimId: DEFAULT_CLAIM_ID,
+  syncUrl: DEFAULT_SYNC_URL,
+  theme: DEFAULT_THEME,
+  refreshSeconds: 30,
+  defaultPage: "overview",
+  defaultRegion: "",
+  toastSettings: { marketListings: true, marketSales: true, production: true },
+  branding: {},
+  snapshotRetentionDays: 365,
 };
 
 const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
@@ -521,7 +550,7 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
   return <button className="toolbar-button" onClick={onClick}>{children}</button>;
 }
 
-function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel) => void }) {
+function Overview({ data, onNavigate, logo }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel) => void; logo?: BrandingAsset }) {
   const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
@@ -556,7 +585,7 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
       <section className="overview-hero">
         <div>
           <span className="overview-kicker">Settlement Command Center</span>
-          <div className="overview-title"><h2>{claim.name ?? "Claim"}</h2><span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span></div>
+          <div className="overview-title">{logo ? <img className="overview-logo" src={`${logo.url}?v=${encodeURIComponent(logo.updatedAt)}`} alt="" /> : null}<h2>{claim.name ?? "Claim"}</h2><span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span></div>
           <p><TierBadge tier={claim.tier} /> {claim.regionName ?? "Unknown region"} <span className="metadata-divider" /> Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
         </div>
         <div className="hero-metrics">
@@ -1660,20 +1689,21 @@ function formatMarketDay(value: string): string {
   return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
-  const [regionId, setRegionId] = usePersistedState("public-crafts.region", monitoredRegionId || "All");
+  const [regionId, setRegionId] = usePersistedState("public-crafts.region", defaultRegionId || monitoredRegionId || "All");
   const [sortKey, setSortKey] = usePersistedState<PublicCraftSortKey>("public-crafts.sort", "remaining");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("public-crafts.direction", "desc");
   const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   React.useEffect(() => {
-    if (!hasSavedRegion.current && monitoredRegionId && regionId === "All") {
+    const preferredRegion = defaultRegionId || monitoredRegionId;
+    if (!hasSavedRegion.current && preferredRegion && regionId === "All") {
       hasSavedRegion.current = true;
-      setRegionId(monitoredRegionId);
+      setRegionId(preferredRegion);
     }
-  }, [monitoredRegionId, regionId, setRegionId]);
+  }, [defaultRegionId, monitoredRegionId, regionId, setRegionId]);
   React.useEffect(() => {
     const controller = new AbortController();
     setState((previous) => ({ ...previous, loading: true, error: null }));
@@ -2442,7 +2472,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME; onSettingsSaved: (settings: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME }) => void }) {
+function LegacyAdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME; onSettingsSaved: (settings: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME }) => void }) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [password, setPassword] = React.useState("");
@@ -2581,9 +2611,309 @@ function AdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: str
   );
 }
 
+type AdminTab = "status" | "configuration" | "theme" | "database" | "users" | "audit" | "backups";
+
+function bytesLabel(value: unknown) {
+  const bytes = toNumber(value);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSettingsSaved: (settings: AppSettings) => void }) {
+  const [auth, setAuth] = React.useState<AnyRecord | null>(null);
+  const [authLoading, setAuthLoading] = React.useState(true);
+  const [username, setUsername] = React.useState("admin");
+  const [password, setPassword] = React.useState("");
+  const [setupKey, setSetupKey] = React.useState("");
+  const [tab, setTab] = React.useState<AdminTab>("status");
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState<AppSettings>(settings);
+  const [status, setStatus] = React.useState<AnyRecord | null>(null);
+  const [diagnostics, setDiagnostics] = React.useState<AnyRecord[]>([]);
+  const [tables, setTables] = React.useState<AnyRecord[]>([]);
+  const [selectedTable, setSelectedTable] = React.useState("");
+  const [tableResult, setTableResult] = React.useState<AnyRecord>({ rows: [], columns: [], total: 0, offset: 0, limit: 50 });
+  const [tableSearch, setTableSearch] = React.useState("");
+  const [tableOffset, setTableOffset] = React.useState(0);
+  const [users, setUsers] = React.useState<AnyRecord[]>([]);
+  const [newUser, setNewUser] = React.useState({ username: "", password: "" });
+  const [resetUser, setResetUser] = React.useState("");
+  const [resetPassword, setResetPassword] = React.useState("");
+  const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
+  const [backups, setBackups] = React.useState<AnyRecord[]>([]);
+
+  async function api(path: string, options: RequestInit = {}) {
+    const response = await fetch(`${LOCAL_API}${path}`, {
+      ...options,
+      headers: { "content-type": "application/json", ...(options.headers ?? {}) },
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+    return body;
+  }
+
+  async function run(task: () => Promise<void>, success?: string) {
+    setMessage(null);
+    try {
+      await task();
+      if (success) setMessage(success);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function refreshStatus() {
+    setStatus(await api("/admin/status"));
+  }
+
+  async function refreshTables() {
+    const result = await api("/admin/tables");
+    setTables(result.tables ?? []);
+    setSelectedTable((current) => current || result.tables?.[0]?.name || "");
+  }
+
+  async function refreshUsers() {
+    setUsers((await api("/admin/users")).users ?? []);
+  }
+
+  async function refreshAudit() {
+    setAuditData(await api("/admin/audit?limit=100"));
+  }
+
+  async function refreshBackups() {
+    setBackups((await api("/admin/backups")).backups ?? []);
+  }
+
+  React.useEffect(() => {
+    api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
+  }, []);
+  React.useEffect(() => setDraft(settings), [settings]);
+  React.useEffect(() => {
+    if (tab === "theme" && auth?.authenticated) applyTheme(draft.theme);
+    return () => { if (tab === "theme") applyTheme(settings.theme); };
+  }, [auth?.authenticated, draft.theme, settings.theme, tab]);
+  React.useEffect(() => {
+    if (!auth?.authenticated) return;
+    run(async () => {
+      if (tab === "status") await refreshStatus();
+      if (tab === "database") await refreshTables();
+      if (tab === "users") await refreshUsers();
+      if (tab === "audit") await refreshAudit();
+      if (tab === "backups") await refreshBackups();
+    });
+  }, [auth?.authenticated, tab]);
+  React.useEffect(() => {
+    if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
+    const timer = window.setTimeout(() => {
+      run(async () => setTableResult(await api(`/admin/table?name=${encodeURIComponent(selectedTable)}&limit=50&offset=${tableOffset}&search=${encodeURIComponent(tableSearch)}`)));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [auth?.authenticated, selectedTable, tableOffset, tableSearch, tab]);
+
+  async function submitAuth(event: React.FormEvent) {
+    event.preventDefault();
+    await run(async () => {
+      const route = auth?.setupRequired ? "/admin/setup" : "/admin/login";
+      const result = await api(route, { method: "POST", body: JSON.stringify({ username, password, setupKey }) });
+      setAuth({ setupRequired: false, authenticated: true, user: result.user });
+      setPassword("");
+      setSetupKey("");
+    });
+  }
+
+  async function saveSettings() {
+    await run(async () => {
+      const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify(draft) });
+      setDraft(result);
+      onSettingsSaved(result);
+    }, "Settings saved and applied.");
+  }
+
+  function updateDraft<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function uploadBrand(type: "logo" | "favicon", file?: File) {
+    if (!file) return;
+    if (file.size > 1024 * 1024) return setMessage("Image must be smaller than 1 MB.");
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Unable to read image"));
+      reader.readAsDataURL(file);
+    });
+    await run(async () => {
+      const result = await api("/admin/branding", { method: "POST", body: JSON.stringify({ type, dataUrl }) });
+      const next = { ...draft, branding: result.branding };
+      setDraft(next);
+      onSettingsSaved(next);
+    }, `${type === "logo" ? "Logo" : "Favicon"} uploaded.`);
+  }
+
+  async function removeBrand(type: "logo" | "favicon") {
+    await run(async () => {
+      const result = await api(`/admin/branding?type=${type}`, { method: "DELETE" });
+      const next = { ...draft, branding: result.branding };
+      setDraft(next);
+      onSettingsSaved(next);
+    }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
+  }
+
+  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
+  const themePresets: Array<[string, typeof DEFAULT_THEME]> = [
+    ["Default", DEFAULT_THEME],
+    ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
+    ["Ember", { ...DEFAULT_THEME, bg: "#120c0a", sidebar: "#090705", panel: "#211815", panel2: "#17110f", border: "#50382d", gold: "#f5aa45", good: "#55db96" }],
+  ];
+
+  if (authLoading) return <div className="panel"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
+  if (!auth?.authenticated) {
+    return (
+      <div className="panel admin-login">
+        <Header title="Admin">{auth?.setupRequired ? "Create the first administrator account" : "Sign in to manage this installation"}</Header>
+        <form className="form-card" onSubmit={submitAuth}>
+          <label className="field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
+          {auth?.setupKeyRequired ? <label className="field"><span>Server Setup Key</span><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} autoComplete="one-time-code" /></label> : null}
+          <label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} autoComplete={auth?.setupRequired ? "new-password" : "current-password"} /></label>
+          <button className="toolbar-button primary" type="submit"><KeyRound size={15} /> {auth?.setupRequired ? "Create Administrator" : "Sign In"}</button>
+          {message ? <p className="legend">{message}</p> : null}
+        </form>
+      </div>
+    );
+  }
+
+  const tableRows: AnyRecord[] = tableResult.rows ?? [];
+  const tableColumns = (tableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
+  return (
+    <div className="panel admin-console">
+      <div className="split-header">
+        <Header title="Admin Console">Configuration and operational controls for this installation</Header>
+        <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+      </div>
+      <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>
+      {message ? <div className="admin-message">{message}</div> : null}
+
+      {tab === "status" ? (
+        <div className="admin-section">
+          <div className="metric-grid admin-metrics">
+            <Stat icon={<Server />} label="Environment" value={status?.environment ?? "-"} />
+            <Stat icon={<Database />} label="Database" value={bytesLabel(status?.databaseSize)} />
+            <Stat icon={<Save />} label="Snapshots" value={formatNumber(status?.counts?.snapshots)} />
+            <Stat icon={<CircleDollarSign />} label="Market Events" value={formatNumber(status?.counts?.market_events)} />
+            <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
+          </div>
+          <section className="form-card">
+            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh</button><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/poll", { method: "POST", body: "{}" }); await refreshStatus(); }, "Collection run completed.")}><RefreshCw size={15} /> Collect Now</button></div></div>
+            <div className="status-detail">
+              <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
+              <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
+              <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
+              <Info label="Data directory" value={status?.databasePath ?? "-"} />
+            </div>
+          </section>
+          <section className="form-card">
+            <div className="split-header"><h3><Activity size={17} /> BitJita Endpoint Check</h3><button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics")).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button></div>
+            {diagnostics.length ? <div className="diagnostics">{diagnostics.map((check) => <div key={check.label} className={check.ok ? "ok" : "fail"}><strong>{check.label}</strong><span>{check.ok ? `${check.durationMs} ms` : check.error}</span></div>)}</div> : <p className="legend">Run checks to confirm which public data sources are responding.</p>}
+          </section>
+        </div>
+      ) : null}
+
+      {tab === "configuration" ? (
+        <div className="admin-grid">
+          <section className="form-card">
+            <h3><Shield size={17} /> Settlement Defaults</h3>
+            <label className="field"><span>Settlement ID</span><input value={draft.claimId} onChange={(event) => updateDraft("claimId", event.target.value)} /></label>
+            <label className="field"><span>BitCraft Sync URL</span><input value={draft.syncUrl} onChange={(event) => updateDraft("syncUrl", event.target.value)} /></label>
+            <label className="field"><span>Default opening page</span><select value={draft.defaultPage} onChange={(event) => updateDraft("defaultPage", event.target.value as ActivePanel)}>{NAV.filter(([id]) => id !== "admin").map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+            <label className="field"><span>Public Crafts default region ID</span><input value={draft.defaultRegion} onChange={(event) => updateDraft("defaultRegion", event.target.value)} placeholder="Use settlement region" /></label>
+            <label className="field"><span>Browser refresh interval (seconds)</span><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /></label>
+            <label className="field"><span>Snapshot retention (days)</span><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /></label>
+            <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
+          </section>
+          <div className="admin-section">
+            <section className="form-card">
+              <h3><Activity size={17} /> Notifications</h3>
+              {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => <label className="toggle-row" key={key}><input type="checkbox" checked={draft.toastSettings[key]} onChange={(event) => updateDraft("toastSettings", { ...draft.toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>)}
+            </section>
+            <section className="form-card">
+              <h3><Upload size={17} /> Branding</h3>
+              {(["logo", "favicon"] as const).map((type) => {
+                const asset = draft.branding?.[type];
+                return <div className="brand-upload" key={type}><div>{asset ? <img src={`${asset.url}?v=${encodeURIComponent(asset.updatedAt)}`} alt="" /> : <Shield size={25} />}<strong>{type === "logo" ? "Overview Logo" : "Browser Favicon"}</strong></div><label className="toolbar-button"><Upload size={14} /> Upload<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => uploadBrand(type, event.target.files?.[0])} /></label>{asset ? <button className="toolbar-button" onClick={() => removeBrand(type)}><X size={14} /> Remove</button> : null}</div>;
+              })}
+              <p className="legend">PNG, JPG or WebP up to 1 MB. The logo is shown on Overview and the favicon is used by the browser tab.</p>
+            </section>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "theme" ? (
+        <section className="form-card admin-theme">
+          <div className="split-header"><h3><Palette size={17} /> Theme Editor</h3><div className="toolbar">{themePresets.map(([label, preset]) => <button className="toolbar-button" key={label} onClick={() => updateDraft("theme", preset)}>{label}</button>)}</div></div>
+          <div className="theme-grid">{THEME_FIELDS.map(([key, label]) => <label className="color-field" key={key}><span>{label}</span><input type="color" value={draft.theme[key]} onChange={(event) => updateDraft("theme", { ...draft.theme, [key]: event.target.value })} /></label>)}</div>
+          <div className="toolbar"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Theme</button><button className="toolbar-button" onClick={() => updateDraft("theme", settings.theme)}><RefreshCw size={15} /> Revert Preview</button></div>
+        </section>
+      ) : null}
+
+      {tab === "database" ? (
+        <section className="form-card database-browser">
+          <div className="split-header"><h3><Database size={17} /> Database Browser</h3><select className="select-control" value={selectedTable} onChange={(event) => { setSelectedTable(event.target.value); setTableOffset(0); }}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select></div>
+          <div className="database-toolbar"><SearchBox value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Filter table records" /><a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> CSV</a><a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> JSON</a></div>
+          {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); return value.length > 90 ? `${value.slice(0, 90)}...` : value; }])} /> : <p className="legend">No records returned.</p>}
+          <div className="pager"><span>{formatNumber(tableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= tableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
+        </section>
+      ) : null}
+
+      {tab === "users" ? (
+        <div className="admin-grid">
+          <section className="form-card">
+            <h3><UserPlus size={17} /> Add Administrator</h3>
+            <label className="field"><span>Username</span><input value={newUser.username} onChange={(event) => setNewUser({ ...newUser, username: event.target.value })} /></label>
+            <label className="field"><span>Initial password</span><input type="password" minLength={12} value={newUser.password} onChange={(event) => setNewUser({ ...newUser, password: event.target.value })} /></label>
+            <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ username: "", password: "" }); await refreshUsers(); }, "Administrator created.")}><UserPlus size={15} /> Create Account</button>
+            <h3><KeyRound size={17} /> Reset Password</h3>
+            <label className="field"><span>Administrator</span><select value={resetUser} onChange={(event) => setResetUser(event.target.value)}><option value="">Select user</option>{users.map((entry) => <option value={entry.id} key={entry.id}>{entry.username}</option>)}</select></label>
+            <label className="field"><span>New password</span><input type="password" minLength={12} value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
+            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
+          </section>
+          <section className="form-card">
+            <h3><Users size={17} /> Administrators</h3>
+            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><div className="toolbar"><button className="toolbar-button" onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
+          </section>
+        </div>
+      ) : null}
+
+      {tab === "audit" ? (
+        <div className="admin-grid audit-grid">
+          <section className="form-card"><h3><Activity size={17} /> Admin Actions</h3><div className="audit-list">{auditData.auditLog.map((entry: AnyRecord) => <div key={entry.id}><strong>{entry.action}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)}</span></div>)}</div></section>
+          <section className="form-card"><h3><Lock size={17} /> Sign-in History</h3><div className="audit-list">{auditData.logins.map((entry: AnyRecord) => <div key={entry.id} className={entry.successful ? "" : "failed"}><strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)} | {entry.remote_address ?? "-"}</span></div>)}</div></section>
+        </div>
+      ) : null}
+
+      {tab === "backups" ? (
+        <div className="admin-section">
+          <section className="form-card">
+            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.")}><Save size={15} /> Create Backup</button></div>
+            <p className="legend">Backups are SQLite copies stored on the server. Restoration is intentionally performed on the VPS while the service is stopped.</p>
+            <div className="backup-list">{backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>)}</div>
+          </section>
+          <section className="form-card maintenance-card">
+            <h3><Database size={17} /> Retention Maintenance</h3>
+            <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
+            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function App() {
   const [active, setActive] = React.useState<(typeof NAV)[number][0]>("overview");
   const mainRef = React.useRef<HTMLElement | null>(null);
+  const defaultPageAppliedRef = React.useRef(false);
+  const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
@@ -2629,9 +2959,15 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
         if (!config) return;
-        setClaimId(config.claimId ?? DEFAULT_CLAIM_ID);
-        setSyncUrl(config.syncUrl ?? DEFAULT_SYNC_URL);
-        setTheme({ ...DEFAULT_THEME, ...(config.theme ?? {}) });
+        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {} } as AppSettings;
+        setAppSettings(next);
+        setClaimId(next.claimId);
+        setSyncUrl(next.syncUrl);
+        setTheme(next.theme);
+        if (!defaultPageAppliedRef.current && next.defaultPage !== "admin") {
+          defaultPageAppliedRef.current = true;
+          setActive(next.defaultPage);
+        }
       })
       .catch(() => undefined);
   }, []);
@@ -2643,9 +2979,16 @@ function App() {
     window.scrollTo(0, 0);
   }, [active]);
   React.useEffect(() => {
-    const timer = window.setInterval(() => setRefreshToken((x) => x + 1), 30000);
+    const timer = window.setInterval(() => setRefreshToken((x) => x + 1), appSettings.refreshSeconds * 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [appSettings.refreshSeconds]);
+  React.useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (!link) return;
+    const favicon = appSettings.branding.favicon;
+    link.href = favicon ? `${favicon.url}?v=${encodeURIComponent(favicon.updatedAt)}` : "/favicon.svg";
+    link.type = favicon?.contentType ?? "image/svg+xml";
+  }, [appSettings.branding.favicon]);
   React.useEffect(() => {
     if (state.data) setLastUpdated(new Date());
   }, [state.data]);
@@ -2671,14 +3014,20 @@ function App() {
     for (const id of knownIds) activityNoticeIdsRef.current.add(id);
     for (const event of unseen) {
       const isListing = event.event_type === "market_new_listing";
+      if (isListing && !appSettings.toastSettings.marketListings) continue;
+      if (!isListing && !appSettings.toastSettings.marketSales) continue;
       pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market");
     }
-  }, [claimId, localHistory.activity, localHistory.refreshToken, pushToast]);
+  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast]);
   React.useEffect(() => {
     if (!state.data) return;
     const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
     const previous = craftQueueRef.current;
     if (!previous || previous.claimId !== claimId) {
+      craftQueueRef.current = { claimId, jobs: current };
+      return;
+    }
+    if (!appSettings.toastSettings.production) {
       craftQueueRef.current = { claimId, jobs: current };
       return;
     }
@@ -2691,7 +3040,7 @@ function App() {
       pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
     }
     craftQueueRef.current = { claimId, jobs: current };
-  }, [claimId, data.crafts, data.raw?.crafts, pushToast, state.data]);
+  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data]);
   React.useEffect(() => {
     if (!state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -2719,11 +3068,11 @@ function App() {
   }, [claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    overview: <Overview data={data} onNavigate={setActive} />,
+    overview: <Overview data={data} onNavigate={setActive} logo={appSettings.branding.logo} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
-    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} /></div>,
+    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
@@ -2733,15 +3082,15 @@ function App() {
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} error={localHistory.error} />,
-    admin: <AdminPanel claimId={claimId} syncUrl={syncUrl} theme={theme} onSettingsSaved={(settings) => { setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
   return (
     <div className="app-shell">
       <aside>
-        <div className="brand"><Shield /><div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
+        <div className="brand">{appSettings.branding.logo ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" /> : <Shield />}<div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
         <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><Icon size={16} />{label}</button>)}</nav>
-        <div className="refresh-status" title="Data refreshes automatically every 30 seconds">
+        <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
           <span className="refresh-dot" />
           <span>Updated</span>
           <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>

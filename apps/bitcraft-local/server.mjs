@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,9 +14,15 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING === "true" || (isProduction && process.env.ENABLE_SERVER_POLLING !== "false");
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
+const appVersion = "0.3.0-beta.1";
+const brandingDir = path.join(dataDir, "branding");
+const backupDir = path.join(dataDir, "backups");
 mkdirSync(dataDir, { recursive: true });
+mkdirSync(brandingDir, { recursive: true });
+mkdirSync(backupDir, { recursive: true });
 
-const db = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"));
+const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
+const db = new DatabaseSync(databasePath);
 db.exec(`
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS snapshots (
@@ -89,6 +95,21 @@ db.exec(`
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS admin_login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    successful INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    remote_address TEXT
+  );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
 `);
@@ -105,6 +126,8 @@ ensureColumn("market_events", "owner_entity_id", "TEXT");
 ensureColumn("market_events", "item_id", "TEXT");
 ensureColumn("market_events", "item_type", "TEXT");
 ensureColumn("market_events", "trade_id", "TEXT");
+ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("admin_users", "last_login_at", "TEXT");
 
 const defaultClaimId = "1369094286777412590";
 const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
@@ -124,6 +147,12 @@ const now = new Date().toISOString();
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("claim_id", defaultClaimId, now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("bitcraft_sync_url", defaultSyncUrl, now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("refresh_seconds", "30", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "overview", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_region", "", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
 
 const statements = {
   latestSnapshot: db.prepare("SELECT * FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
@@ -178,17 +207,24 @@ const statements = {
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
-  adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ?"),
+  adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminBySession: db.prepare(`
     SELECT admin_users.id, admin_users.username
     FROM admin_sessions
     JOIN admin_users ON admin_users.id = admin_sessions.user_id
-    WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ?
+    WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ? AND admin_users.active = 1
   `),
   insertAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, created_at) VALUES (?, ?, ?)"),
+  updatePassword: db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?"),
+  updateAdminActive: db.prepare("UPDATE admin_users SET active = ? WHERE id = ?"),
+  updateLastLogin: db.prepare("UPDATE admin_users SET last_login_at = ? WHERE id = ?"),
   insertSession: db.prepare("INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
   deleteSession: db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?"),
+  deleteUserSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ?"),
+  deleteOtherSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ? AND token_hash <> ?"),
   deleteExpiredSessions: db.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?"),
+  insertAudit: db.prepare("INSERT INTO admin_audit_log (user_id, username, action, details_json, occurred_at) VALUES (?, ?, ?, ?, ?)"),
+  insertLoginEvent: db.prepare("INSERT INTO admin_login_events (username, successful, occurred_at, remote_address) VALUES (?, ?, ?, ?)"),
 };
 
 function toNumber(value) {
@@ -235,11 +271,19 @@ function normalizeListing(row) {
 }
 
 function getSettings() {
-  const theme = JSON.parse(statements.getSetting.get("theme_json")?.value ?? JSON.stringify(defaultTheme));
+  const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
+  const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
+  const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
-    theme,
+    theme: { ...defaultTheme, ...theme },
+    refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
+    defaultPage: statements.getSetting.get("default_page")?.value ?? "overview",
+    defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
+    toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
+    branding,
+    snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
   };
 }
 
@@ -259,6 +303,10 @@ function validSyncUrl(value) {
   } catch {
     return false;
   }
+}
+
+function validPage(value) {
+  return ["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "buildings", "research", "market", "empire", "map", "sync", "activity"].includes(value);
 }
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
@@ -301,6 +349,42 @@ function requireAdmin(req, res) {
   return user;
 }
 
+function audit(user, action, details = {}) {
+  statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
+}
+
+const loginAttempts = new Map();
+
+function requestAddress(req) {
+  return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+}
+
+function loginAttemptKey(req, username) {
+  return `${requestAddress(req)}|${String(username).toLowerCase()}`;
+}
+
+function loginBlocked(key) {
+  const record = loginAttempts.get(key);
+  if (!record || Date.now() - record.firstAt > 15 * 60 * 1000) {
+    loginAttempts.delete(key);
+    return false;
+  }
+  return record.count >= 5;
+}
+
+function failedLogin(key) {
+  const existing = loginAttempts.get(key);
+  if (!existing || Date.now() - existing.firstAt > 15 * 60 * 1000) {
+    loginAttempts.set(key, { count: 1, firstAt: Date.now() });
+  } else {
+    existing.count += 1;
+  }
+}
+
+function validAdminUsername(username) {
+  return /^[A-Za-z0-9_-]{3,32}$/.test(username);
+}
+
 function createSession(userId) {
   const token = randomBytes(32).toString("base64url");
   const createdAt = new Date();
@@ -333,15 +417,52 @@ function tableNames() {
   return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name);
 }
 
-function tableInfo() {
-  return tableNames().map((name) => ({ name, rows: db.prepare(`SELECT COUNT(*) AS count FROM "${name.replaceAll('"', '""')}"`).get().count }));
+function tableColumns(name) {
+  if (!new Set(tableNames()).has(name)) throw new Error("Unknown table");
+  return db.prepare(`PRAGMA table_info("${name.replaceAll('"', '""')}")`).all().map((row) => String(row.name));
 }
 
-function readTable(name, limit) {
+function tableInfo() {
+  return tableNames().map((name) => {
+    const safeName = name.replaceAll('"', '""');
+    const columns = tableColumns(name);
+    const timeColumn = ["occurred_at", "captured_at", "updated_at", "created_at"].find((column) => columns.includes(column));
+    const latest = timeColumn ? db.prepare(`SELECT MAX("${timeColumn}") AS latest FROM "${safeName}"`).get()?.latest ?? null : null;
+    return { name, rows: db.prepare(`SELECT COUNT(*) AS count FROM "${safeName}"`).get().count, latest };
+  });
+}
+
+function tableQuery(name, params, exporting = false) {
   const allowed = new Set(tableNames());
   if (!allowed.has(name)) throw new Error("Unknown table");
-  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-  return db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}" LIMIT ?`).all(safeLimit);
+  const columns = tableColumns(name);
+  const safeName = name.replaceAll('"', '""');
+  const search = String(params.search ?? "").trim();
+  const dateFrom = String(params.dateFrom ?? "").trim();
+  const dateTo = String(params.dateTo ?? "").trim();
+  const orderBy = columns.includes(String(params.sort ?? "")) ? String(params.sort) : columns.includes("id") ? "id" : columns[0];
+  const direction = String(params.direction ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
+  const timeColumn = ["occurred_at", "captured_at", "updated_at", "created_at"].find((column) => columns.includes(column));
+  const clauses = [];
+  const values = [];
+  if (search) {
+    clauses.push(`(${columns.map((column) => `CAST("${column.replaceAll('"', '""')}" AS TEXT) LIKE ?`).join(" OR ")})`);
+    values.push(...columns.map(() => `%${search}%`));
+  }
+  if (dateFrom && timeColumn) {
+    clauses.push(`"${timeColumn}" >= ?`);
+    values.push(dateFrom);
+  }
+  if (dateTo && timeColumn) {
+    clauses.push(`"${timeColumn}" <= ?`);
+    values.push(`${dateTo}T23:59:59.999Z`);
+  }
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM "${safeName}"${where}`).get(...values).count;
+  const limit = exporting ? Math.min(Math.max(Number(params.limit) || 10000, 1), 50000) : Math.min(Math.max(Number(params.limit) || 50, 1), 200);
+  const offset = exporting ? 0 : Math.max(Number(params.offset) || 0, 0);
+  const rows = db.prepare(`SELECT * FROM "${safeName}"${where} ORDER BY "${orderBy.replaceAll('"', '""')}" ${direction} LIMIT ? OFFSET ?`).all(...values, limit, offset);
+  return { table: name, columns, rows, total, limit, offset, timeColumn };
 }
 
 function addActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
@@ -542,8 +663,8 @@ async function fetchBitjita(pathname) {
   return response.json();
 }
 
-async function collectServerSnapshot() {
-  if (!serverPollingEnabled || pollStatus.running) return;
+async function collectServerSnapshot(force = false) {
+  if ((!serverPollingEnabled && !force) || pollStatus.running) return;
   pollStatus.running = true;
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
@@ -627,17 +748,135 @@ function resolveMarketEvent(body) {
   return { ok: true };
 }
 
-function safeJson(value) {
+function safeJson(value, fallback = {}) {
   try {
-    return JSON.parse(value ?? "{}");
+    return JSON.parse(value ?? JSON.stringify(fallback));
   } catch {
-    return {};
+    return fallback;
   }
+}
+
+function databaseStatus() {
+  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "activity_events"].map((table) => [
+    table,
+    toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
+  ]));
+  return {
+    version: appVersion,
+    environment: isProduction ? "production" : "development",
+    databasePath,
+    databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
+    counts,
+    polling: pollStatus,
+    settings: getSettings(),
+  };
+}
+
+async function apiDiagnostics() {
+  const { claimId } = getSettings();
+  const checks = [
+    ["Settlement", `/claims/${claimId}`],
+    ["Members", `/claims/${claimId}/members`],
+    ["Structures", `/claims/${claimId}/buildings`],
+    ["Inventory", `/claims/${claimId}/inventories`],
+    ["Market", `/claims/${claimId}/market/listings?limit=5`],
+    ["Production", `/crafts?claimEntityId=${claimId}&completed=false`],
+  ];
+  return Promise.all(checks.map(async ([label, endpoint]) => {
+    const started = Date.now();
+    try {
+      await fetchBitjita(endpoint);
+      return { label, endpoint, ok: true, durationMs: Date.now() - started, checkedAt: new Date().toISOString() };
+    } catch (error) {
+      return { label, endpoint, ok: false, durationMs: Date.now() - started, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
+    }
+  }));
+}
+
+function csvValue(value) {
+  const text = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function sendText(res, status, text, contentType, headers = {}) {
+  res.writeHead(status, { "content-type": contentType, "cache-control": "no-store", ...headers });
+  res.end(text);
+}
+
+function sendBinary(res, status, content, contentType, headers = {}) {
+  res.writeHead(status, { "content-type": contentType, "cache-control": "no-cache", ...headers });
+  res.end(content);
+}
+
+const brandingFormats = {
+  "image/png": { extension: ".png", contentType: "image/png" },
+  "image/jpeg": { extension: ".jpg", contentType: "image/jpeg" },
+  "image/webp": { extension: ".webp", contentType: "image/webp" },
+};
+
+function validImageBytes(contentType, bytes) {
+  if (contentType === "image/png") return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (contentType === "image/jpeg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (contentType === "image/webp") return bytes.length >= 12 && bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
+  return false;
+}
+
+async function saveBrandingAsset(type, dataUrl) {
+  if (!["logo", "favicon"].includes(type)) throw new Error("Unknown branding asset type");
+  const match = String(dataUrl ?? "").match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match || !brandingFormats[match[1]]) throw new Error("Use a PNG, JPG or WebP image");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 1024 * 1024) throw new Error("Image must be smaller than 1 MB");
+  if (!validImageBytes(match[1], bytes)) throw new Error("Image content does not match its declared file type");
+  const format = brandingFormats[match[1]];
+  const fileName = `${type}${format.extension}`;
+  for (const possible of Object.values(brandingFormats).map((candidate) => path.join(brandingDir, `${type}${candidate.extension}`))) {
+    if (possible !== path.join(brandingDir, fileName) && existsSync(possible)) unlinkSync(possible);
+  }
+  await writeFile(path.join(brandingDir, fileName), bytes);
+  const current = getSettings().branding;
+  const branding = {
+    ...current,
+    [type]: { fileName, contentType: format.contentType, updatedAt: new Date().toISOString(), url: `/api/local/branding/${type}` },
+  };
+  statements.upsertSetting.run("branding_json", JSON.stringify(branding), new Date().toISOString());
+  return branding;
+}
+
+function brandingAsset(type) {
+  const asset = getSettings().branding?.[type];
+  if (!asset?.fileName) return null;
+  const filePath = path.join(brandingDir, path.basename(asset.fileName));
+  if (!existsSync(filePath)) return null;
+  return { ...asset, filePath };
+}
+
+function backupNames() {
+  return existsSync(backupDir) ? readdirSync(backupDir)
+    .filter((name) => /^bitcraft-local-\d{4}-\d{2}-\d{2}T[\d-]+Z\.sqlite$/.test(name))
+    .map((name) => {
+      const info = statSync(path.join(backupDir, name));
+      return { name, size: info.size, createdAt: info.mtime.toISOString() };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
+}
+
+function createBackup() {
+  const name = `bitcraft-local-${new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z")}.sqlite`;
+  const filePath = path.join(backupDir, name);
+  db.exec(`VACUUM INTO '${filePath.replaceAll("'", "''")}'`);
+  const info = statSync(filePath);
+  return { name, size: info.size, createdAt: info.mtime.toISOString() };
 }
 
 async function readJson(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > 1500000) throw new Error("Request body is too large");
+    chunks.push(chunk);
+  }
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
@@ -646,7 +885,7 @@ function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     "content-type": "application/json",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "content-type",
     ...headers,
   });
@@ -713,32 +952,66 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
+      const type = url.pathname.slice("/api/local/branding/".length);
+      const asset = brandingAsset(type);
+      if (!asset) return send(res, 404, { error: "Brand asset not configured" });
+      return sendBinary(res, 200, await readFile(asset.filePath), asset.contentType);
+    }
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
       const body = await readJson(req);
       if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
       if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
+      const username = String(body.username ?? "admin").trim();
+      if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
       const password = String(body.password ?? "");
       if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run("admin", hashPassword(password), createdAt);
+      const result = statements.insertAdmin.run(username, hashPassword(password), createdAt);
+      statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
+      audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
       const session = createSession(result.lastInsertRowid);
       return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
       const body = await readJson(req);
-      const user = statements.adminByUsername.get("admin");
-      if (!user || !verifyPassword(String(body.password ?? ""), user.password_hash)) return send(res, 401, { error: "Invalid password" });
+      const username = String(body.username ?? "admin").trim();
+      const attemptKey = loginAttemptKey(req, username);
+      if (loginBlocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
+      const user = statements.adminByUsername.get(username);
+      const successful = Boolean(user && verifyPassword(String(body.password ?? ""), user.password_hash));
+      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
+      if (!successful) {
+        failedLogin(attemptKey);
+        return send(res, 401, { error: "Invalid username or password" });
+      }
+      loginAttempts.delete(attemptKey);
+      statements.updateLastLogin.run(new Date().toISOString(), user.id);
+      audit(user, "admin.login");
       const session = createSession(user.id);
       return send(res, 200, { authenticated: true, user: { id: user.id, username: user.username } }, { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/logout") {
+      const user = getSessionUser(req);
+      if (user) audit(user, "admin.logout");
       return send(res, 200, { ok: true }, { "set-cookie": clearSession(req) });
     }
     if (url.pathname.startsWith("/api/local/admin/")) {
       const user = requireAdmin(req, res);
       if (!user) return;
+      if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
+      if (req.method === "POST" && url.pathname === "/api/local/admin/poll") {
+        await collectServerSnapshot(true);
+        audit(user, "data.poll");
+        return send(res, 200, databaseStatus());
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/diagnostics") {
+        const checks = await apiDiagnostics();
+        audit(user, "diagnostics.run", { failures: checks.filter((check) => !check.ok).length });
+        return send(res, 200, { checks });
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
         const body = await readJson(req);
@@ -746,17 +1019,154 @@ const server = createServer(async (req, res) => {
         const nextSyncUrl = String(body.syncUrl ?? defaultSyncUrl).trim();
         if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
         if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
+        const refreshSeconds = Number(body.refreshSeconds ?? 30);
+        if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Refresh interval must be between 15 and 300 seconds" });
+        const defaultPage = String(body.defaultPage ?? "overview");
+        if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
+        const defaultRegion = String(body.defaultRegion ?? "").trim();
+        if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
+        const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
+        if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
+        const toastSettings = {
+          marketListings: body.toastSettings?.marketListings !== false,
+          marketSales: body.toastSettings?.marketSales !== false,
+          production: body.toastSettings?.production !== false,
+        };
         const updatedAt = new Date().toISOString();
         statements.upsertSetting.run("claim_id", nextClaimId, updatedAt);
         statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
+        statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
+        statements.upsertSetting.run("default_page", defaultPage, updatedAt);
+        statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
+        statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
+        statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays });
         return send(res, 200, getSettings());
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
+        const body = await readJson(req);
+        try {
+          const branding = await saveBrandingAsset(String(body.type ?? ""), String(body.dataUrl ?? ""));
+          audit(user, "branding.upload", { type: body.type });
+          return send(res, 200, { branding });
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      if (req.method === "DELETE" && url.pathname === "/api/local/admin/branding") {
+        const type = String(url.searchParams.get("type") ?? "");
+        if (!["logo", "favicon"].includes(type)) return send(res, 400, { error: "Unknown branding asset type" });
+        const asset = brandingAsset(type);
+        if (asset) unlinkSync(asset.filePath);
+        const branding = { ...getSettings().branding };
+        delete branding[type];
+        statements.upsertSetting.run("branding_json", JSON.stringify(branding), new Date().toISOString());
+        audit(user, "branding.delete", { type });
+        return send(res, 200, { branding });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/users") {
+        const users = db.prepare(`
+          SELECT admin_users.id, admin_users.username, admin_users.active, admin_users.created_at, admin_users.last_login_at,
+                 COUNT(admin_sessions.token_hash) AS sessions
+          FROM admin_users LEFT JOIN admin_sessions ON admin_sessions.user_id = admin_users.id AND admin_sessions.expires_at > ?
+          GROUP BY admin_users.id ORDER BY admin_users.username
+        `).all(new Date().toISOString());
+        return send(res, 200, { users });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/users") {
+        const body = await readJson(req);
+        const username = String(body.username ?? "").trim();
+        const password = String(body.password ?? "");
+        if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
+        if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+        try {
+          const result = statements.insertAdmin.run(username, hashPassword(password), new Date().toISOString());
+          audit(user, "user.create", { id: result.lastInsertRowid, username });
+          return send(res, 201, { ok: true });
+        } catch (error) {
+          if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That username is already in use" });
+          throw error;
+        }
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/user/password") {
+        const body = await readJson(req);
+        const userId = Number(body.userId);
+        const password = String(body.password ?? "");
+        if (!userId || password.length < 12) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
+        const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Admin user not found" });
+        statements.updatePassword.run(hashPassword(password), userId);
+        statements.deleteUserSessions.run(userId);
+        audit(user, "user.password_reset", { id: target.id, username: target.username });
+        return send(res, 200, { ok: true, signedOut: userId === user.id });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/user/status") {
+        const body = await readJson(req);
+        const userId = Number(body.userId);
+        const active = Boolean(body.active);
+        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
+        const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Admin user not found" });
+        statements.updateAdminActive.run(active ? 1 : 0, userId);
+        if (!active) statements.deleteUserSessions.run(userId);
+        audit(user, "user.status", { id: target.id, username: target.username, active });
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/sessions/clear") {
+        const body = await readJson(req);
+        const userId = Number(body.userId ?? user.id);
+        if (userId === user.id) {
+          const token = parseCookies(req).bitcraft_admin_session;
+          if (token) statements.deleteOtherSessions.run(user.id, tokenHash(token));
+        } else {
+          statements.deleteUserSessions.run(userId);
+        }
+        audit(user, "sessions.clear", { userId });
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/audit") {
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 100), 1), 500);
+        const auditLog = db.prepare("SELECT * FROM admin_audit_log ORDER BY occurred_at DESC, id DESC LIMIT ?").all(limit);
+        const logins = db.prepare("SELECT * FROM admin_login_events ORDER BY occurred_at DESC, id DESC LIMIT ?").all(Math.min(limit, 100));
+        return send(res, 200, { auditLog, logins });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/tables") return send(res, 200, { tables: tableInfo() });
       if (req.method === "GET" && url.pathname === "/api/local/admin/table") {
         const table = url.searchParams.get("name") ?? "";
-        return send(res, 200, { table, rows: readTable(table, url.searchParams.get("limit") ?? 100) });
+        return send(res, 200, tableQuery(table, Object.fromEntries(url.searchParams.entries())));
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/export") {
+        const name = url.searchParams.get("name") ?? "";
+        const format = url.searchParams.get("format") === "json" ? "json" : "csv";
+        const result = tableQuery(name, Object.fromEntries(url.searchParams.entries()), true);
+        audit(user, "database.export", { table: name, format, rows: result.rows.length });
+        if (format === "json") {
+          return sendText(res, 200, JSON.stringify(result.rows, null, 2), "application/json; charset=utf-8", { "content-disposition": `attachment; filename="${name}.json"` });
+        }
+        const csv = [result.columns.map(csvValue).join(","), ...result.rows.map((row) => result.columns.map((column) => csvValue(row[column])).join(","))].join("\n");
+        return sendText(res, 200, csv, "text/csv; charset=utf-8", { "content-disposition": `attachment; filename="${name}.csv"` });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/backups") return send(res, 200, { backups: backupNames() });
+      if (req.method === "POST" && url.pathname === "/api/local/admin/backups") {
+        const backup = createBackup();
+        audit(user, "backup.create", backup);
+        return send(res, 201, { backup });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/backup") {
+        const name = path.basename(String(url.searchParams.get("name") ?? ""));
+        const backup = backupNames().find((entry) => entry.name === name);
+        if (!backup) return send(res, 404, { error: "Backup not found" });
+        audit(user, "backup.download", { name });
+        return sendBinary(res, 200, await readFile(path.join(backupDir, name)), "application/vnd.sqlite3", { "content-disposition": `attachment; filename="${name}"` });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/maintenance/prune") {
+        const retentionDays = getSettings().snapshotRetentionDays;
+        const before = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+        const result = db.prepare("DELETE FROM snapshots WHERE captured_at < ?").run(before);
+        audit(user, "maintenance.prune", { retentionDays, removed: result.changes });
+        return send(res, 200, { removed: result.changes, before });
       }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {

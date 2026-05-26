@@ -144,13 +144,15 @@ systemctl restart bitcraft-claim-monitor
 systemctl status bitcraft-claim-monitor
 ```
 
-The database is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace your history or admin configuration.
+Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace history, admin configuration, uploaded branding or admin-created backups.
 
 A new VPS begins with a new database. It cannot show sales or activity from before it began collecting snapshots unless you copy an existing database to the server. Existing live listings are stored as the initial baseline; market sale analytics begin filling as tracked listings subsequently change or sell.
 
 ## Database Backups
 
 Hostworld weekly VPS backups are useful, but keep a separate SQLite backup because this database records market and activity history.
+
+The Admin console can create and download timestamped SQLite backups. These are written to `/var/lib/bitcraft-claim-monitor/backups`. Uploaded logos and favicons are stored in `/var/lib/bitcraft-claim-monitor/branding`; include that directory in any full-server backup if you use custom branding.
 
 Create a protected backup directory:
 

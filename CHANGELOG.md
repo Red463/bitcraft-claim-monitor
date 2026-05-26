@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0-beta.1 - 2026-05-26
+
+### Added
+
+- Operational admin console with status, endpoint diagnostics, configuration, theme, database, user, audit and backup tabs.
+- Validated logo and favicon uploads stored in the persistent data directory; the logo appears in the dashboard identity and Overview, and the favicon updates the browser tab.
+- Multiple administrator accounts, account activation controls, password resets and session invalidation tools.
+- Audit records for administrative actions and recorded sign-in attempts.
+- Filtered SQLite table browsing, CSV/JSON exports, server-side backup creation/download and snapshot retention cleanup.
+- Configuration controls for default page, Public Craft Finder region, browser refresh interval, snapshot retention and toast notification categories.
+
+### Security
+
+- Added per-address and username login throttling after repeated failed sign-in attempts.
+- Branding uploads are limited to authenticated administrators, supported image types and a 1 MB size cap.
+
 ## 0.2.0-beta.1 - 2026-05-26
 
 ### Added

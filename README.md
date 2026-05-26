@@ -9,14 +9,14 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 ## What It Does
 
 - Displays live public data for a selected BitCraft settlement.
-- Refreshes live views automatically every 30 seconds without clearing visible content during background refreshes.
+- Refreshes live views automatically at a configurable interval without clearing visible content during background refreshes.
 - Records market listings, market events, activity events, and snapshots in a local SQLite database.
 - Provides confirmed sales analytics using BitJita trade data.
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
 - Embeds the settlement's BitCraft Sync board for material planning and shared goals.
-- Provides a protected local admin area for application configuration, theme editing, and database inspection.
+- Provides a protected admin console for configuration, branding, theme editing, diagnostics, account management, audit history, database inspection, exports and backups.
 
 ## Application Pages
 
@@ -169,14 +169,21 @@ Admin features:
 
 - Select which settlement/claim ID the dashboard monitors.
 - Configure the embedded BitCraft Sync URL.
-- Customize the application colour theme.
-- Inspect local SQLite tables and stored data during testing.
+- Choose the default opening page, Public Craft Finder region, refresh interval, notification categories and snapshot retention window.
+- Customize the application colour theme with live preview and presets.
+- Upload a logo shown in the app and a favicon shown in the browser tab.
+- Review server collection health and run public BitJita endpoint diagnostics.
+- Inspect, search and export local SQLite tables during testing.
+- Create and download database backups, and prune expired snapshots without deleting market/activity history.
+- Manage multiple administrator accounts, sessions and passwords.
+- Review administrator actions and sign-in attempts.
 
 Authentication behavior:
 
-- The first account is the single local `admin` user.
+- The first administrator is created from the Admin page; additional administrators can then be created there.
 - Passwords are stored as salted `scrypt` hashes.
 - Login sessions use an `HttpOnly`, `SameSite=Lax` cookie.
+- Repeated failed logins are temporarily throttled.
 - In production, first-time admin creation requires the server-side `ADMIN_SETUP_KEY`.
 
 ## Data Sources And Persistence
@@ -207,7 +214,9 @@ It records:
 | `activity_events` | Settlement activity history |
 | `admin_users` | Local admin credentials |
 | `admin_sessions` | Authenticated sessions |
-| `app_settings` | Settlement, Sync, and theme configuration |
+| `app_settings` | Settlement, Sync, display, branding and collection configuration |
+| `admin_audit_log` | Administrative changes and operations |
+| `admin_login_events` | Successful and failed sign-in records |
 
 Development default:
 
@@ -222,6 +231,7 @@ Production default configured by the deployment service:
 ```
 
 In production, the server polls and records snapshots every 30 seconds even when nobody has the website open.
+Uploaded branding is stored under `branding/` and administrator-created SQLite backups under `backups/` inside the same data directory.
 
 ## Tech Stack
 
