@@ -11,7 +11,7 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 - Displays live public data for a selected BitCraft settlement.
 - Refreshes live views automatically at a configurable interval without clearing visible content during background refreshes.
 - Records market listings, market events, activity events, and snapshots in a local SQLite database.
-- Provides confirmed sales analytics using BitJita trade data.
+- Provides retained confirmed-sales analytics using BitJita trade data, with settlement-member filtering.
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
@@ -130,7 +130,7 @@ The app uses `Structures` terminology because BitCraft data may classify contain
 - Revenue by day.
 - Recent individual confirmed sales.
 
-Sales analytics intentionally use confirmed BitJita trade history instead of attempting to treat every disappeared listing as a sale. A listing that disappears without a confirmed trade may have been removed or cancelled.
+Sales analytics intentionally use confirmed BitJita trade history retained in the local database instead of treating every disappeared listing as a sale. Market collection follows paginated BitJita listing responses so active listings outside the first page are not closed incorrectly. A listing that disappears without a confirmed trade may have been removed or cancelled.
 
 ### Region
 
@@ -183,8 +183,10 @@ Authentication behavior:
 - The first administrator is created from the Admin page; additional administrators can then be created there.
 - Passwords are stored as salted `scrypt` hashes.
 - Login sessions use an `HttpOnly`, `SameSite=Lax` cookie.
+- Administrator changes require a session-bound request token and same-origin request validation.
 - Repeated failed logins are temporarily throttled.
 - In production, first-time admin creation requires the server-side `ADMIN_SETUP_KEY`.
+- Production history collection is server-owned; public browsers cannot submit snapshots.
 
 ## Data Sources And Persistence
 
@@ -306,6 +308,7 @@ Supported application server environment variables:
 | `PORT` | Development Vite frontend port | `18428` |
 | `BITCRAFT_LOCAL_DATA_DIR` | SQLite storage directory | `apps/bitcraft-local/data` |
 | `BITJITA_API_ORIGIN` | Alternate BitJita upstream origin | `https://bitjita.com` |
+| `BITJITA_APP_IDENTIFIER` | Identifier sent with upstream BitJita requests | project GitHub identifier |
 | `ADMIN_SETUP_KEY` | One-time key required to create the first production admin | unset |
 | `ENABLE_SERVER_POLLING` | Override server-side snapshot polling | enabled in production |
 | `SNAPSHOT_INTERVAL_MS` | Polling interval, minimum 10 seconds | `30000` |

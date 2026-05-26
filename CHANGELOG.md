@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1-beta.1 - 2026-05-26
+
+### Fixed
+
+- Market collection now retrieves every listing page before reconciling closures, preventing listings beyond the first API page from being incorrectly marked removed.
+- Market analytics now aggregate confirmed sales from retained database history, including when filtering by settlement member.
+- Sale confirmation handles split fills of a listing instead of requiring one trade to cover the complete removed quantity, and does not reuse earlier fills for later drops.
+- Snapshot writes are serialized and keep BitJita network requests outside the SQLite transaction.
+- Region ranking collection now uses paginated, cached server-side enrichment with bounded detail lookups rather than repeated browser fan-out.
+
+### Security
+
+- Administrator-changing requests now require a same-origin session request token, and production rejects browser-submitted snapshots.
+- Password hashing no longer blocks the Node event loop, and session lookup uses SHA-256 token hashes. Existing signed-in sessions expire after this update and administrators must sign in again.
+- Admin status no longer exposes the host filesystem path of persistent storage.
+
+### Maintenance
+
+- Removed the obsolete legacy admin panel implementation.
+- Added regression tests for market pagination, production snapshot protection, and administrator cross-origin request rejection.
+- Added baseline security response headers to the Caddy deployment example.
+
 ## 0.3.0-beta.1 - 2026-05-26
 
 ### Added

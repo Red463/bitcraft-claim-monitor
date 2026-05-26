@@ -148,6 +148,8 @@ Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so u
 
 A new VPS begins with a new database. It cannot show sales or activity from before it began collecting snapshots unless you copy an existing database to the server. Existing live listings are stored as the initial baseline; market sale analytics begin filling as tracked listings subsequently change or sell.
 
+After upgrading to `0.3.1-beta.1`, existing browser admin sessions expire because the server session lookup hash was changed. Sign in again on the Admin page; stored accounts and data are unchanged.
+
 ## Database Backups
 
 Hostworld weekly VPS backups are useful, but keep a separate SQLite backup because this database records market and activity history.

@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +15,8 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING === "true" || (isProduction && process.env.ENABLE_SERVER_POLLING !== "false");
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.3.0-beta.1";
+const appVersion = "0.3.1-beta.1";
+const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 mkdirSync(dataDir, { recursive: true });
@@ -284,6 +286,7 @@ function getSettings() {
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
+    browserSnapshotsEnabled: !isProduction,
   };
 }
 
@@ -309,21 +312,23 @@ function validPage(value) {
   return ["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "buildings", "research", "market", "empire", "map", "sync", "activity"].includes(value);
 }
 
-function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  const hash = scryptSync(password, salt, 64).toString("hex");
+const scryptAsync = promisify(scrypt);
+
+async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
+  const hash = Buffer.from(await scryptAsync(password, salt, 64)).toString("hex");
   return `scrypt:${salt}:${hash}`;
 }
 
-function verifyPassword(password, stored) {
+async function verifyPassword(password, stored) {
   const [scheme, salt, expected] = String(stored).split(":");
   if (scheme !== "scrypt" || !salt || !expected) return false;
-  const actual = scryptSync(password, salt, 64);
+  const actual = Buffer.from(await scryptAsync(password, salt, 64));
   const expectedBuffer = Buffer.from(expected, "hex");
   return expectedBuffer.length === actual.length && timingSafeEqual(actual, expectedBuffer);
 }
 
 function tokenHash(token) {
-  return scryptSync(token, "bitcraft-local-session", 64).toString("hex");
+  return createHash("sha256").update(String(token)).digest("hex");
 }
 
 function parseCookies(req) {
@@ -354,6 +359,9 @@ function audit(user, action, details = {}) {
 }
 
 const loginAttempts = new Map();
+const upstreamCache = new Map();
+const regionCache = new Map();
+const claimDetailCache = new Map();
 
 function requestAddress(req) {
   return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
@@ -385,6 +393,39 @@ function validAdminUsername(username) {
   return /^[A-Za-z0-9_-]{3,32}$/.test(username);
 }
 
+function sameOriginRequest(req) {
+  const origin = String(req.headers.origin ?? "").trim();
+  if (!origin) return true;
+  try {
+    const originUrl = new URL(origin);
+    const host = String(req.headers.host ?? "");
+    if (originUrl.host === host) return true;
+    return !isProduction && ["127.0.0.1", "localhost"].includes(originUrl.hostname) && /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+function csrfToken(req) {
+  const token = parseCookies(req).bitcraft_admin_session;
+  return token ? createHash("sha256").update(`csrf:${token}`).digest("base64url") : null;
+}
+
+function requireAdminMutation(req, res, user) {
+  if (!["POST", "PUT", "DELETE"].includes(req.method ?? "")) return true;
+  if (!sameOriginRequest(req)) {
+    send(res, 403, { error: "Cross-origin administrator mutation rejected" });
+    return false;
+  }
+  const expected = csrfToken(req);
+  const actual = String(req.headers["x-csrf-token"] ?? "");
+  if (!expected || actual.length !== expected.length || !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) {
+    send(res, 403, { error: "Invalid administrator request token" });
+    return false;
+  }
+  return Boolean(user);
+}
+
 function createSession(userId) {
   const token = randomBytes(32).toString("base64url");
   const createdAt = new Date();
@@ -410,6 +451,7 @@ function adminStatus(req) {
     setupKeyRequired: isProduction && setupRequired,
     authenticated: Boolean(user),
     user: user ? { id: user.id, username: user.username } : null,
+    csrfToken: user ? csrfToken(req) : null,
   };
 }
 
@@ -483,24 +525,49 @@ function tradeMatchesListing(trade, listing) {
   return sameItem && sameSeller;
 }
 
+function usedTradeIdsForListing(listingKey) {
+  const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
+  return new Set(rows.flatMap((row) => String(row.trade_id).split(",")).filter(Boolean));
+}
+
 async function findConfirmedTrade(listing, minQuantity = 1) {
   if (!listing.ownerEntityId) return null;
-  const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api/market/player/${listing.ownerEntityId}/trades`);
-  url.searchParams.set("type", "sell");
-  url.searchParams.set("limit", "50");
-  url.searchParams.set("orderEntityId", listing.key);
   try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const payload = await response.json();
-    const trades = unwrap(payload, "trades", []);
-    return trades.find((trade) => tradeMatchesListing(trade, listing) && toNumber(trade.quantity) >= minQuantity) ?? null;
+    const usedTradeIds = usedTradeIdsForListing(listing.key);
+    const matches = [];
+    let offset = 0;
+    while (offset < 1000) {
+      const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api/market/player/${listing.ownerEntityId}/trades`);
+      url.searchParams.set("type", "sell");
+      url.searchParams.set("limit", "200");
+      url.searchParams.set("offset", String(offset));
+      url.searchParams.set("orderEntityId", listing.key);
+      const response = await fetch(url, { headers: { accept: "application/json", "x-app-identifier": appIdentifier } });
+      if (!response.ok) return null;
+      const trades = unwrap(await response.json(), "trades", []);
+      matches.push(...trades.filter((trade) => tradeMatchesListing(trade, listing) && (!trade.id || !usedTradeIds.has(String(trade.id)))));
+      const matchedQuantity = matches.reduce((total, trade) => total + toNumber(trade.quantity), 0);
+      if (matchedQuantity >= minQuantity) {
+        const totalPrice = matches.reduce((total, trade) => total + toNumber(trade.totalPrice ?? trade.total_price ?? toNumber(trade.quantity) * toNumber(trade.price ?? trade.unitPrice)), 0);
+        return {
+          ...matches[0],
+          id: matches.map((trade) => trade.id).filter(Boolean).join(","),
+          quantity: matchedQuantity,
+          totalPrice,
+          matchedTrades: matches,
+        };
+      }
+      if (trades.length < 200) break;
+      offset += trades.length;
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-async function reconcilePendingMarketEvents(claimId, now) {
+async function findPendingMarketConfirmations(claimId) {
+  const confirmations = [];
   for (const event of statements.pendingMarketEvents.all(claimId)) {
     let raw = {};
     try {
@@ -525,6 +592,13 @@ async function reconcilePendingMarketEvents(claimId, now) {
     };
     const trade = await findConfirmedTrade(listing, listing.quantity);
     if (!trade) continue;
+    confirmations.push({ event, listing, trade });
+  }
+  return confirmations;
+}
+
+function applyPendingMarketConfirmations(claimId, now, confirmations) {
+  for (const { event, listing, trade } of confirmations) {
     const nextType = event.event_type === "partial_quantity_drop" ? "partial_sale" : "sale";
     statements.confirmMarketEvent.run(nextType, trade.id ?? null, JSON.stringify(trade), event.id);
     addActivity(claimId, "market_sale_confirmed", `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, { ...listing, tradeId: trade.id ?? null });
@@ -566,6 +640,41 @@ async function recordSnapshot(payload) {
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
   const previous = statements.latestSnapshot.get(claimId);
+  const normalizedListings = market.map(normalizeListing);
+  const seen = new Set(normalizedListings.map((listing) => listing.key));
+  const existingListings = new Map(normalizedListings.map((listing) => [listing.key, statements.listingByKey.get(listing.key)]));
+  const partialCandidates = normalizedListings
+    .map((listing) => ({ listing, existing: existingListings.get(listing.key) }))
+    .filter(({ listing, existing }) => existing && listing.quantity < toNumber(existing.quantity))
+    .map(({ listing, existing }) => ({ listing, soldQuantity: toNumber(existing.quantity) - listing.quantity }));
+  const closedCandidates = statements.activeListings.all(claimId).filter((active) => !seen.has(active.listing_key)).map((active) => {
+    const raw = safeJson(active.raw_json);
+    return {
+      active,
+      listing: {
+        key: active.listing_key,
+        itemName: active.item_name,
+        side: active.side ?? "sell",
+        owner: active.owner,
+        ownerEntityId: active.owner_entity_id ?? raw.ownerEntityId,
+        itemId: active.item_id ?? raw.itemId,
+        itemType: active.item_type ?? raw.itemType,
+        quantity: toNumber(active.quantity),
+        price: toNumber(active.price),
+        totalValue: toNumber(active.total_value),
+        tier: active.tier,
+        rarity: active.rarity,
+        raw,
+      },
+    };
+  });
+  const [partialChecks, closedChecks, pendingConfirmations] = await Promise.all([
+    Promise.all(partialCandidates.map(async ({ listing, soldQuantity }) => ({ listing, soldQuantity, trade: await findConfirmedTrade(listing, soldQuantity) }))),
+    Promise.all(closedCandidates.map(async ({ active, listing }) => ({ active, listing, trade: await findConfirmedTrade(listing, listing.quantity) }))),
+    findPendingMarketConfirmations(claimId),
+  ]);
+  const partialResults = new Map(partialChecks.map((result) => [result.listing.key, result]));
+  const closedResults = new Map(closedChecks.map((result) => [result.listing.key, result]));
 
   db.exec("BEGIN");
   try {
@@ -586,10 +695,8 @@ async function recordSnapshot(payload) {
       addActivity(claimId, "baseline", "Baseline snapshot saved", now, { membersCount, buildingsCount, marketCount });
     }
 
-    const seen = new Set();
-    for (const listing of market.map(normalizeListing)) {
-      seen.add(listing.key);
-      const existing = statements.listingByKey.get(listing.key);
+    for (const listing of normalizedListings) {
+      const existing = existingListings.get(listing.key);
       statements.upsertListing.run(
         listing.key,
         claimId,
@@ -612,41 +719,23 @@ async function recordSnapshot(payload) {
         addMarketEvent(claimId, "new_listing", listing, now);
         addActivity(claimId, "market_new_listing", `New market listing: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, listing);
       } else if (listing.quantity < toNumber(existing.quantity)) {
-        const soldQuantity = toNumber(existing.quantity) - listing.quantity;
-        const trade = await findConfirmedTrade(listing, soldQuantity);
+        const { soldQuantity, trade } = partialResults.get(listing.key);
         const partial = { ...listing, quantity: soldQuantity, totalValue: soldQuantity * listing.price, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
         addMarketEvent(claimId, trade ? "partial_sale" : "partial_quantity_drop", partial, now);
         addActivity(claimId, trade ? "market_sale" : "market_quantity_drop", `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, partial);
       }
     }
 
-    for (const active of statements.activeListings.all(claimId)) {
-      if (seen.has(active.listing_key)) continue;
-      const raw = JSON.parse(active.raw_json ?? "{}");
-      const listing = {
-        key: active.listing_key,
-        itemName: active.item_name,
-        side: active.side ?? "sell",
-        owner: active.owner,
-        ownerEntityId: active.owner_entity_id ?? raw.ownerEntityId,
-        itemId: active.item_id ?? raw.itemId,
-        itemType: active.item_type ?? raw.itemType,
-        quantity: toNumber(active.quantity),
-        price: toNumber(active.price),
-        totalValue: toNumber(active.total_value),
-        tier: active.tier,
-        rarity: active.rarity,
-        raw,
-      };
-      const trade = await findConfirmedTrade(listing, listing.quantity);
+    for (const { active, listing } of closedCandidates) {
+      const trade = closedResults.get(listing.key)?.trade;
       const eventType = trade ? "sale" : "removed_or_cancelled";
-      const closedListing = { ...listing, tradeId: trade?.id ?? null, raw: trade ?? raw };
+      const closedListing = { ...listing, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
       statements.markListingClosed.run(eventType, now, now, active.listing_key);
       addMarketEvent(claimId, eventType, closedListing, now);
       addActivity(claimId, trade ? "market_sale" : "market_removed_or_cancelled", `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, closedListing);
     }
 
-    await reconcilePendingMarketEvents(claimId, now);
+    applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
 
     db.exec("COMMIT");
     return { ok: true, capturedAt: now };
@@ -658,9 +747,73 @@ async function recordSnapshot(payload) {
 
 async function fetchBitjita(pathname) {
   const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-  const response = await fetch(url, { headers: { accept: "application/json" } });
+  const response = await fetch(url, { headers: { accept: "application/json", "x-app-identifier": appIdentifier } });
   if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
   return response.json();
+}
+
+async function fetchAllClaimListings(claimId) {
+  const base = `/claims/${claimId}/market/listings?limit=200`;
+  const first = await fetchBitjita(`${base}&page=1`);
+  const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
+  const pages = totalPages > 1
+    ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => fetchBitjita(`${base}&page=${index + 2}`)))
+    : [];
+  return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
+}
+
+async function mapWithConcurrency(values, concurrency, mapper) {
+  const results = new Array(values.length);
+  let next = 0;
+  async function worker() {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return results;
+}
+
+async function fetchCachedClaimDetail(claimId) {
+  const cached = claimDetailCache.get(String(claimId));
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await fetchBitjita(`/claims/${claimId}`);
+  claimDetailCache.set(String(claimId), { value, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return value;
+}
+
+async function fetchAllRegionClaims(regionId) {
+  const base = `/claims?regionId=${encodeURIComponent(regionId)}&limit=100&sort=supplies&order=desc`;
+  const first = await fetchBitjita(`${base}&page=1`);
+  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
+  const pages = totalPages > 1
+    ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => fetchBitjita(`${base}&page=${index + 2}`)))
+    : [];
+  const claims = [first, ...pages].flatMap((page) => unwrap(page, "claims", []));
+  const details = await mapWithConcurrency(claims, 8, async (claim) => {
+    try {
+      return await fetchCachedClaimDetail(claim.entityId);
+    } catch {
+      return null;
+    }
+  });
+  return {
+    ...first,
+    claims: claims.map((claim, index) => {
+      const detail = details[index];
+      return detail ? { ...claim, ...(detail.claim ?? detail) } : claim;
+    }),
+  };
+}
+
+let snapshotQueue = Promise.resolve();
+
+function enqueueSnapshot(payload) {
+  const queued = snapshotQueue.then(() => recordSnapshot(payload));
+  snapshotQueue = queued.catch(() => undefined);
+  return queued;
 }
 
 async function collectServerSnapshot(force = false) {
@@ -673,12 +826,12 @@ async function collectServerSnapshot(force = false) {
       fetchBitjita(`/claims/${claimId}`),
       fetchBitjita(`/claims/${claimId}/members`),
       fetchBitjita(`/claims/${claimId}/buildings`),
-      fetchBitjita(`/claims/${claimId}/market/listings?limit=200`),
+      fetchAllClaimListings(claimId),
     ]);
     const claim = claimPayload.claim ?? claimPayload;
     const members = unwrap(membersPayload, "members", []);
     const buildings = unwrap(buildingsPayload, "buildings", []);
-    await recordSnapshot({
+    await enqueueSnapshot({
       claimId,
       claim,
       membersCount: members.length,
@@ -696,42 +849,48 @@ async function collectServerSnapshot(force = false) {
   }
 }
 
-function marketHistory(claimId, limit) {
-  const liveListings = statements.activeListings.all(claimId);
-  const events = db.prepare("SELECT * FROM market_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit)
+function marketHistory(claimId, limit, owner = "") {
+  const selectedOwner = String(owner ?? "").trim();
+  const ownerClause = selectedOwner ? " AND lower(COALESCE(owner, '')) = lower(?)" : "";
+  const args = selectedOwner ? [claimId, selectedOwner] : [claimId];
+  const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const liveListings = db.prepare(`SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'${ownerClause}`).all(...args);
+  const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const topItems = db.prepare(`
-    SELECT item_name AS itemName, COUNT(*) AS soldCount, SUM(total_value) AS totalValue, AVG(price) AS avgPrice, MAX(occurred_at) AS lastSoldAt
+    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_value) AS totalValue,
+      SUM(total_value) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
     FROM market_events
-    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')
+    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')${ownerClause}
     GROUP BY item_name
-    ORDER BY soldCount DESC, totalValue DESC
+    ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
-  `).all(claimId);
+  `).all(...args);
   const daily = db.prepare(`
-    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS soldCount, SUM(total_value) AS totalValue
+    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_value) AS totalValue
     FROM market_events
-    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')
+    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')${ownerClause}
     GROUP BY day
     ORDER BY day DESC
     LIMIT 30
-  `).all(claimId).reverse();
+  `).all(...args).reverse();
   const totals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,
       SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN 1 ELSE 0 END) AS confirmedSales,
+      SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN quantity ELSE 0 END) AS confirmedUnits,
       SUM(CASE WHEN event_type IN ('removed_or_cancelled', 'sold_or_removed') THEN 1 ELSE 0 END) AS removedOrCancelled,
       SUM(CASE WHEN event_type IN ('partial_quantity_drop') THEN 1 ELSE 0 END) AS unconfirmedQuantityDrops,
       SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN total_value ELSE 0 END) AS trackedValue
     FROM market_events
-    WHERE claim_id = ?
-  `).get(claimId);
+    WHERE claim_id = ?${ownerClause}
+  `).get(...args);
   const pending = db.prepare(`
     SELECT * FROM market_events
-    WHERE claim_id = ? AND event_type = 'partial_quantity_drop' AND trade_id IS NULL
+    WHERE claim_id = ? AND event_type = 'partial_quantity_drop' AND trade_id IS NULL${ownerClause}
     ORDER BY occurred_at DESC
     LIMIT 30
-  `).all(claimId);
+  `).all(...args);
   return { liveListings, events, topItems, daily, totals, pending };
 }
 
@@ -764,7 +923,7 @@ function databaseStatus() {
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
-    databasePath,
+    storageLabel: isProduction ? "Production persistent storage" : "Local development storage",
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: pollStatus,
@@ -884,9 +1043,6 @@ function send(res, status, body, headers = {}) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type",
     ...headers,
   });
   res.end(json);
@@ -934,14 +1090,22 @@ async function proxyBitjita(url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
+  const key = upstream.toString();
+  const cached = upstreamCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.writeHead(cached.status, cached.headers);
+    return res.end(cached.body);
+  }
   const response = await fetch(upstream, {
-    headers: { accept: "application/json" },
+    headers: { accept: "application/json", "x-app-identifier": appIdentifier },
   });
   const body = Buffer.from(await response.arrayBuffer());
-  res.writeHead(response.status, {
+  const headers = {
     "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
     "cache-control": response.headers.get("cache-control") ?? "no-cache",
-  });
+  };
+  if (response.ok) upstreamCache.set(key, { status: response.status, headers, body, expiresAt: Date.now() + 10000 });
+  res.writeHead(response.status, headers);
   res.end(body);
 }
 
@@ -952,6 +1116,15 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
+      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
+      if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
+      const cached = regionCache.get(regionId);
+      if (cached && cached.expiresAt > Date.now()) return send(res, 200, cached.value);
+      const value = await fetchAllRegionClaims(regionId);
+      regionCache.set(regionId, { expiresAt: Date.now() + 10 * 60 * 1000, value });
+      return send(res, 200, value);
+    }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
       const type = url.pathname.slice("/api/local/branding/".length);
       const asset = brandingAsset(type);
@@ -960,6 +1133,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
+      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
       const body = await readJson(req);
       if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
@@ -969,19 +1143,20 @@ const server = createServer(async (req, res) => {
       const password = String(body.password ?? "");
       if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run(username, hashPassword(password), createdAt);
+      const result = statements.insertAdmin.run(username, await hashPassword(password), createdAt);
       statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
       audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
       const session = createSession(result.lastInsertRowid);
       return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
+      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req);
       const username = String(body.username ?? "admin").trim();
       const attemptKey = loginAttemptKey(req, username);
       if (loginBlocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
       const user = statements.adminByUsername.get(username);
-      const successful = Boolean(user && verifyPassword(String(body.password ?? ""), user.password_hash));
+      const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
       statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
       if (!successful) {
         failedLogin(attemptKey);
@@ -991,23 +1166,25 @@ const server = createServer(async (req, res) => {
       statements.updateLastLogin.run(new Date().toISOString(), user.id);
       audit(user, "admin.login");
       const session = createSession(user.id);
-      return send(res, 200, { authenticated: true, user: { id: user.id, username: user.username } }, { "set-cookie": session.cookie });
+      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/logout") {
-      const user = getSessionUser(req);
-      if (user) audit(user, "admin.logout");
+      const user = requireAdmin(req, res);
+      if (!user || !requireAdminMutation(req, res, user)) return;
+      audit(user, "admin.logout");
       return send(res, 200, { ok: true }, { "set-cookie": clearSession(req) });
     }
     if (url.pathname.startsWith("/api/local/admin/")) {
       const user = requireAdmin(req, res);
       if (!user) return;
+      if (!requireAdminMutation(req, res, user)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
       if (req.method === "POST" && url.pathname === "/api/local/admin/poll") {
         await collectServerSnapshot(true);
         audit(user, "data.poll");
         return send(res, 200, databaseStatus());
       }
-      if (req.method === "GET" && url.pathname === "/api/local/admin/diagnostics") {
+      if (req.method === "POST" && url.pathname === "/api/local/admin/diagnostics") {
         const checks = await apiDiagnostics();
         audit(user, "diagnostics.run", { failures: checks.filter((check) => !check.ok).length });
         return send(res, 200, { checks });
@@ -1082,7 +1259,7 @@ const server = createServer(async (req, res) => {
         if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
         if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
         try {
-          const result = statements.insertAdmin.run(username, hashPassword(password), new Date().toISOString());
+          const result = statements.insertAdmin.run(username, await hashPassword(password), new Date().toISOString());
           audit(user, "user.create", { id: result.lastInsertRowid, username });
           return send(res, 201, { ok: true });
         } catch (error) {
@@ -1097,7 +1274,7 @@ const server = createServer(async (req, res) => {
         if (!userId || password.length < 12) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
         const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
-        statements.updatePassword.run(hashPassword(password), userId);
+        statements.updatePassword.run(await hashPassword(password), userId);
         statements.deleteUserSessions.run(userId);
         audit(user, "user.password_reset", { id: target.id, username: target.username });
         return send(res, 200, { ok: true, signedOut: userId === user.id });
@@ -1141,7 +1318,6 @@ const server = createServer(async (req, res) => {
         const name = url.searchParams.get("name") ?? "";
         const format = url.searchParams.get("format") === "json" ? "json" : "csv";
         const result = tableQuery(name, Object.fromEntries(url.searchParams.entries()), true);
-        audit(user, "database.export", { table: name, format, rows: result.rows.length });
         if (format === "json") {
           return sendText(res, 200, JSON.stringify(result.rows, null, 2), "application/json; charset=utf-8", { "content-disposition": `attachment; filename="${name}.json"` });
         }
@@ -1158,7 +1334,6 @@ const server = createServer(async (req, res) => {
         const name = path.basename(String(url.searchParams.get("name") ?? ""));
         const backup = backupNames().find((entry) => entry.name === name);
         if (!backup) return send(res, 404, { error: "Backup not found" });
-        audit(user, "backup.download", { name });
         return sendBinary(res, 200, await readFile(path.join(backupDir, name)), "application/vnd.sqlite3", { "content-disposition": `attachment; filename="${name}"` });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/maintenance/prune") {
@@ -1170,14 +1345,17 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
-      if (serverPollingEnabled) return send(res, 202, { ok: true, recorded: false, source: "server_poll" });
-      return send(res, 200, await recordSnapshot(await readJson(req)));
+      if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
+      return send(res, 200, await enqueueSnapshot(await readJson(req)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
-      return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100)));
+      return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
-      if (isProduction && !requireAdmin(req, res)) return;
+      if (isProduction) {
+        const user = requireAdmin(req, res);
+        if (!user || !requireAdminMutation(req, res, user)) return;
+      }
       return send(res, 200, resolveMarketEvent(await readJson(req)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {

@@ -78,6 +78,7 @@ type AppSettings = {
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
+  browserSnapshotsEnabled: boolean;
 };
 
 const NAV = [
@@ -121,6 +122,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
   snapshotRetentionDays: 365,
+  browserSnapshotsEnabled: true,
 };
 
 const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
@@ -284,9 +286,17 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
           if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
           return response.json();
         }
+        async function requestAllMarketListings() {
+          const first = await request(`/claims/${claimId}/market/listings?page=1&limit=200`);
+          const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
+          const remaining = totalPages > 1
+            ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => request(`/claims/${claimId}/market/listings?page=${index + 2}&limit=200`)))
+            : [];
+          return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
+        }
         const entries = await Promise.all(
           Object.entries(endpointMap(claimId)).map(async ([key, path]) => {
-            return [key, await request(path)] as const;
+            return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
           }),
         );
         const raw = Object.fromEntries(entries);
@@ -294,17 +304,14 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsMarketDetail = activePanel === "market";
         const readsStorageDetail = activePanel === "activity";
         const readsProductionDetail = activePanel === "production";
         const readsRegionDetail = activePanel === "overview" || activePanel === "empire";
-        const [playerResults, orderHistoryResults, tradeResults, storageResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
+        const [playerResults, storageResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
           Promise.allSettled(memberIds.map(async (id) => {
             const payload = await request(`/players/${id}`);
             return payload.player ?? payload;
           })),
-          readsMarketDetail ? Promise.allSettled(memberIds.map((id) => request(`/market/player/${id}/history?limit=200`))) : Promise.resolve([]),
-          readsMarketDetail ? Promise.allSettled(memberIds.map((id) => request(`/market/player/${id}/trades?limit=200`))) : Promise.resolve([]),
           readsStorageDetail ? Promise.allSettled(memberIds.map((id) => request(`/logs/storage?playerEntityId=${id}&limit=40`))) : Promise.resolve([]),
           readsProductionDetail ? Promise.allSettled(crafts.filter((craft) => craft.entityId).map(async (craft) => ({
             craftId: String(craft.entityId),
@@ -313,15 +320,15 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
           readsRegionDetail ? request("/regions/status").catch(() => ({ regions: [] })) : Promise.resolve({ regions: [] }),
           readsRegionDetail ? request(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
         ]);
-        const regionPath = `/claims?regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}&limit=100&sort=supplies&order=desc`;
-        raw.region = await request(regionPath).catch(() => ({ claims: [] }));
+        raw.region = readsRegionDetail && claim?.regionId
+          ? await fetch(`${LOCAL_API}/region/claims?regionId=${encodeURIComponent(String(claim.regionId))}`, { signal: controller.signal })
+            .then((response) => response.ok ? response.json() : Promise.reject(new Error(`region claims HTTP ${response.status}`)))
+            .catch(() => ({ claims: [] }))
+          : { claims: [] };
         raw.players = playerResults
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => normalizePlayer(result.value));
-        raw.marketApi = {
-          histories: orderHistoryResults.filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled").map((result) => result.value),
-          trades: tradeResults.filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled").flatMap((result) => result.value.trades ?? []),
-        };
+        raw.marketApi = { histories: [], trades: [] };
         raw.storageApi = storageResults
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => result.value);
@@ -374,6 +381,15 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
 function toNumber(value: unknown): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function safeDisplayJson(value: unknown): AnyRecord {
+  try {
+    const parsed = JSON.parse(String(value ?? "{}"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function formatNumber(value: unknown, maximumFractionDigits = 0): string {
@@ -1500,6 +1516,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
   const [tier, setTier] = usePersistedState("market.tier", "All");
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
   const [memberFilter, setMemberFilter] = usePersistedState("market.member", "All");
+  const [memberHistory, setMemberHistory] = React.useState<AnyRecord | null>(null);
   const memberOptions = React.useMemo(() => {
     const names = [
       ...data.members.map((member) => member.userName ?? member.username ?? member.playerUsername ?? member.name),
@@ -1509,14 +1526,35 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
   }, [data.members, data.market]);
   const ownerMatches = React.useCallback((owner: unknown) => memberFilter === "All" || String(owner ?? "").toLowerCase() === memberFilter.toLowerCase(), [memberFilter]);
   const all = data.market.filter((listing) => ownerMatches(listing.ownerUsername ?? listing.owner ?? listing.ownerName));
-  const apiOrders = data.marketApi.histories
-    .flatMap((payload: AnyRecord) => [...(payload.sellOrderHistory ?? []), ...(payload.buyOrderHistory ?? [])])
-    .filter((order: AnyRecord) => String(order.claimEntityId) === String(claimId) && ownerMatches(order.ownerUsername));
-  const apiOrderIds = new Set(apiOrders.map((order: AnyRecord) => String(order.entityId)));
-  const apiTrades: AnyRecord[] = [...new Map<string, AnyRecord>((data.marketApi.trades as AnyRecord[])
-    .filter((trade: AnyRecord) => apiOrderIds.has(String(trade.orderEntityId)) && ownerMatches(trade.sellerUsername ?? trade.purchaserUsername))
-    .map((trade: AnyRecord) => [String(trade.id ?? `${trade.orderEntityId}-${trade.timestamp}-${trade.quantity}`), trade])).values()]
-    .sort((a: AnyRecord, b: AnyRecord) => String(b.timestamp ?? b.createdAt).localeCompare(String(a.timestamp ?? a.createdAt)));
+  React.useEffect(() => {
+    if (memberFilter === "All") {
+      setMemberHistory(null);
+      return;
+    }
+    const controller = new AbortController();
+    setMemberHistory(null);
+    fetch(`${LOCAL_API}/market/history?claimId=${encodeURIComponent(claimId)}&limit=120&owner=${encodeURIComponent(memberFilter)}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market history HTTP ${response.status}`)))
+      .then((result) => setMemberHistory(result))
+      .catch(() => {
+        if (!controller.signal.aborted) setMemberHistory({ events: [], topItems: [], daily: [], totals: {} });
+      });
+    return () => controller.abort();
+  }, [claimId, memberFilter, history]);
+  const analytics = memberFilter === "All" ? history : memberHistory;
+  const apiTrades: AnyRecord[] = (analytics?.events ?? [])
+    .filter((event: AnyRecord) => ["sale", "partial_sale"].includes(String(event.event_type)))
+    .map((event: AnyRecord) => ({
+      id: event.id,
+      itemName: event.item_name,
+      quantity: event.quantity,
+      unitPrice: event.price,
+      totalPrice: event.total_value,
+      sellerUsername: event.owner,
+      purchaserUsername: safeDisplayJson(event.raw_json)?.purchaserUsername,
+      timestamp: event.occurred_at,
+    }))
+    .sort((a: AnyRecord, b: AnyRecord) => String(b.timestamp).localeCompare(String(a.timestamp)));
   const trackedLiveListings = React.useMemo(
     () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
     [history?.liveListings],
@@ -1544,17 +1582,18 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
     occurredAt: trade.timestamp ?? trade.createdAt,
     occurred_at: trade.timestamp ?? trade.createdAt,
   }));
-  const topItems = buildMarketTopItems(saleEvents);
-  const daily = buildMarketDaily(saleEvents);
-  const confirmedRevenue = apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0);
-  const unitsSold = apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0);
-  const averageSaleValue = apiTrades.length ? confirmedRevenue / apiTrades.length : 0;
+  const topItems = analytics?.topItems ?? buildMarketTopItems(saleEvents);
+  const daily = analytics?.daily ?? buildMarketDaily(saleEvents);
+  const confirmedSales = toNumber(analytics?.totals?.confirmedSales ?? apiTrades.length);
+  const confirmedRevenue = toNumber(analytics?.totals?.trackedValue ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0));
+  const unitsSold = toNumber(analytics?.totals?.confirmedUnits ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0));
+  const averageSaleValue = confirmedSales ? confirmedRevenue / confirmedSales : 0;
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
   return (
     <div className="panel">
-      <Header title="Market">{all.length} live listings - {formatNumber(apiTrades.length)} confirmed sale{apiTrades.length === 1 ? "" : "s"} for {filterLabel}</Header>
+      <Header title="Market">{all.length} live listings - {formatNumber(confirmedSales)} confirmed sale{confirmedSales === 1 ? "" : "s"} for {filterLabel}</Header>
       <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
@@ -1571,7 +1610,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
       {view === "analytics" ? (
         <>
           <div className="metric-grid">
-            <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(apiTrades.length)} />
+            <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
             <MiniStat icon={<CircleDollarSign />} label="Sales Revenue" value={`${formatNumber(confirmedRevenue)}g`} />
             <MiniStat icon={<TrendingUp />} label="Average Sale Value" value={`${formatNumber(averageSaleValue)}g`} />
@@ -1606,7 +1645,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
           </div>
           <section>
             <h3><CheckCircle2 size={17} /> Recent Confirmed Sales</h3>
-            <p className="legend">Individual sales returned by BitJita for orders listed by the selected settlement member(s).</p>
+            <p className="legend">Confirmed sales retained in this monitor's history for the selected settlement member(s).</p>
             <DataTable rows={apiTrades} columns={[
               ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
               ["Item", r => r.itemName ?? "-"],
@@ -2049,25 +2088,6 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
 function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortKey, setSortKey] = usePersistedState("region.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction", "desc");
-  const [claimDetails, setClaimDetails] = React.useState<Record<string, AnyRecord>>({});
-  const regionKey = data.region.map((row) => String(row.entityId)).join(",");
-  React.useEffect(() => {
-    if (!data.region.length) return;
-    const controller = new AbortController();
-    Promise.allSettled(data.region.map(async (row) => {
-      const response = await fetch(`${API}/claims/${row.entityId}`, { signal: controller.signal });
-      if (!response.ok) throw new Error(`claim HTTP ${response.status}`);
-      const payload = await response.json();
-      return payload.claim ?? payload;
-    })).then((results) => {
-      if (controller.signal.aborted) return;
-      setClaimDetails(Object.fromEntries(results
-        .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
-        .map((result) => [String(result.value.entityId), result.value])));
-    });
-    return () => controller.abort();
-  }, [regionKey]);
-  const enrich = (row: AnyRecord) => ({ ...row, ...(claimDetails[String(row.entityId)] ?? {}) });
   const sorters: Record<string, (row: AnyRecord) => string | number> = {
     name: (row) => String(row.name ?? ""),
     owner: getOwnerName,
@@ -2076,7 +2096,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     treasury: (row) => toNumber(row.treasury),
     numTiles: (row) => toNumber(row.numTiles),
   };
-  const allRows = data.region.map(enrich);
+  const allRows = data.region;
   const rows = [...allRows].sort((a, b) => {
     const aVal = sorters[sortKey]?.(a) ?? 0;
     const bVal = sorters[sortKey]?.(b) ?? 0;
@@ -2472,145 +2492,6 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-function LegacyAdminPanel({ claimId, syncUrl, theme, onSettingsSaved }: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME; onSettingsSaved: (settings: { claimId: string; syncUrl: string; theme: typeof DEFAULT_THEME }) => void }) {
-  const [auth, setAuth] = React.useState<AnyRecord | null>(null);
-  const [authLoading, setAuthLoading] = React.useState(true);
-  const [password, setPassword] = React.useState("");
-  const [setupKey, setSetupKey] = React.useState("");
-  const [message, setMessage] = React.useState<string | null>(null);
-  const [nextClaimId, setNextClaimId] = React.useState(claimId);
-  const [nextSyncUrl, setNextSyncUrl] = React.useState(syncUrl);
-  const [nextTheme, setNextTheme] = React.useState<typeof DEFAULT_THEME>(theme);
-  const [tables, setTables] = React.useState<Array<{ name: string; rows: number }>>([]);
-  const [selectedTable, setSelectedTable] = React.useState("");
-  const [tableRows, setTableRows] = React.useState<AnyRecord[]>([]);
-  const [tableSearch, setTableSearch] = React.useState("");
-
-  async function api(path: string, options: RequestInit = {}) {
-    const response = await fetch(`${LOCAL_API}${path}`, {
-      ...options,
-      headers: { "content-type": "application/json", ...(options.headers ?? {}) },
-    });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    return body;
-  }
-
-  async function refreshAuth() {
-    setAuthLoading(true);
-    try {
-      setAuth(await api("/admin/me"));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
-  async function refreshTables() {
-    const result = await api("/admin/tables");
-    setTables(result.tables ?? []);
-    if (!selectedTable && result.tables?.[0]) setSelectedTable(result.tables[0].name);
-  }
-
-  React.useEffect(() => { refreshAuth(); }, []);
-  React.useEffect(() => { setNextClaimId(claimId); setNextSyncUrl(syncUrl); setNextTheme(theme); }, [claimId, syncUrl, theme]);
-  React.useEffect(() => { if (auth?.authenticated) applyTheme(nextTheme); }, [auth?.authenticated, nextTheme]);
-  React.useEffect(() => { if (auth?.authenticated) refreshTables(); }, [auth?.authenticated]);
-  React.useEffect(() => {
-    if (!auth?.authenticated || !selectedTable) return;
-    api(`/admin/table?name=${encodeURIComponent(selectedTable)}&limit=100`).then((result) => setTableRows(result.rows ?? [])).catch((error) => setMessage(error.message));
-  }, [auth?.authenticated, selectedTable]);
-
-  async function submitAuth(event: React.FormEvent) {
-    event.preventDefault();
-    setMessage(null);
-    try {
-      const route = auth?.setupRequired ? "/admin/setup" : "/admin/login";
-      const result = await api(route, { method: "POST", body: JSON.stringify({ password, setupKey }) });
-      setAuth({ setupRequired: false, authenticated: true, user: result.user });
-      setPassword("");
-      setSetupKey("");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function saveSettings() {
-    setMessage(null);
-    try {
-      const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify({ claimId: nextClaimId, syncUrl: nextSyncUrl, theme: nextTheme }) });
-      onSettingsSaved(result);
-      setMessage("Settings saved.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function logout() {
-    await api("/admin/logout", { method: "POST", body: "{}" });
-    setAuth({ setupRequired: false, authenticated: false, user: null });
-  }
-
-  const columns = tableRows[0] ? Object.keys(tableRows[0]).slice(0, 8).map((key) => [key, (row: AnyRecord) => {
-    const value = row[key];
-    return typeof value === "string" && value.length > 120 ? `${value.slice(0, 120)}...` : String(value ?? "-");
-  }] as [string, (row: AnyRecord) => React.ReactNode]) : [];
-  const visibleRows = tableSearch ? tableRows.filter((row) => JSON.stringify(row).toLowerCase().includes(tableSearch.toLowerCase())) : tableRows;
-  const selectedMeta = tables.find((table) => table.name === selectedTable);
-
-  if (authLoading) {
-    return <div className="panel"><Header title="Admin">Checking local admin status</Header><div className="loading">Loading admin session...</div></div>;
-  }
-
-  if (!auth?.authenticated) {
-    return (
-      <div className="panel">
-        <Header title="Admin">{auth?.setupRequired ? "Create the first local admin password" : "Sign in to manage local settings and database tools"}</Header>
-        <form className="form-card" onSubmit={submitAuth}>
-          {auth?.setupKeyRequired ? <label className="field"><span>Server Setup Key</span><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} autoComplete="one-time-code" /></label> : null}
-          <label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} autoComplete={auth?.setupRequired ? "new-password" : "current-password"} /></label>
-          <button className="toolbar-button" type="submit"><KeyRound size={15} /> {auth?.setupRequired ? "Create Admin" : "Sign In"}</button>
-          {message ? <p className="legend">{message}</p> : null}
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div className="panel">
-      <div className="split-header">
-        <Header title="Admin">Settlement, theme, and local database tools</Header>
-        <button className="toolbar-button" onClick={logout}><LogOut size={15} /> Sign out</button>
-      </div>
-      {message ? <div className="loading">{message}</div> : null}
-      <div className="admin-grid">
-        <section className="form-card">
-          <h3><Shield size={17} /> Settlement</h3>
-          <label className="field"><span>Settlement ID</span><input value={nextClaimId} onChange={(event) => setNextClaimId(event.target.value)} /></label>
-          <label className="field"><span>BitCraft Sync URL</span><input value={nextSyncUrl} onChange={(event) => setNextSyncUrl(event.target.value)} placeholder={DEFAULT_SYNC_URL} /></label>
-          <button className="toolbar-button" onClick={saveSettings}><Save size={15} /> Save Settings</button>
-        </section>
-        <section className="form-card">
-          <h3><Palette size={17} /> Theme Editor</h3>
-          <div className="theme-grid">
-            {THEME_FIELDS.map(([key, label]) => <label className="color-field" key={key}><span>{label}</span><input type="color" value={nextTheme[key]} onChange={(event) => setNextTheme((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
-          </div>
-          <button className="toolbar-button" onClick={() => { setNextTheme(DEFAULT_THEME); applyTheme(DEFAULT_THEME); }}><RefreshCw size={15} /> Reset Theme</button>
-        </section>
-      </div>
-      <section className="form-card">
-        <div className="split-header">
-          <h3><Database size={17} /> Database Browser {selectedMeta ? <small>{formatNumber(selectedMeta.rows)} rows</small> : null}</h3>
-          <select className="select-control" value={selectedTable} onChange={(event) => setSelectedTable(event.target.value)}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select>
-        </div>
-        <SearchBox value={tableSearch} onChange={setTableSearch} placeholder="Search table rows" />
-        {columns.length ? <DataTable rows={visibleRows} columns={columns} /> : <p className="legend">Choose a table to inspect rows.</p>}
-      </section>
-    </div>
-  );
-}
-
 type AdminTab = "status" | "configuration" | "theme" | "database" | "users" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
@@ -2644,9 +2525,12 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
 
   async function api(path: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers);
+    headers.set("content-type", "application/json");
+    if (options.method && options.method !== "GET" && auth?.csrfToken) headers.set("x-csrf-token", String(auth.csrfToken));
     const response = await fetch(`${LOCAL_API}${path}`, {
       ...options,
-      headers: { "content-type": "application/json", ...(options.headers ?? {}) },
+      headers,
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -2716,7 +2600,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     await run(async () => {
       const route = auth?.setupRequired ? "/admin/setup" : "/admin/login";
       const result = await api(route, { method: "POST", body: JSON.stringify({ username, password, setupKey }) });
-      setAuth({ setupRequired: false, authenticated: true, user: result.user });
+      setAuth(result);
       setPassword("");
       setSetupKey("");
     });
@@ -2809,11 +2693,11 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
-              <Info label="Data directory" value={status?.databasePath ?? "-"} />
+              <Info label="Storage" value={status?.storageLabel ?? "-"} />
             </div>
           </section>
           <section className="form-card">
-            <div className="split-header"><h3><Activity size={17} /> BitJita Endpoint Check</h3><button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics")).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button></div>
+            <div className="split-header"><h3><Activity size={17} /> BitJita Endpoint Check</h3><button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button></div>
             {diagnostics.length ? <div className="diagnostics">{diagnostics.map((check) => <div key={check.label} className={check.ok ? "ok" : "fail"}><strong>{check.label}</strong><span>{check.ok ? `${check.durationMs} ms` : check.error}</span></div>)}</div> : <p className="legend">Run checks to confirm which public data sources are responding.</p>}
           </section>
         </div>
@@ -2875,7 +2759,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <h3><KeyRound size={17} /> Reset Password</h3>
             <label className="field"><span>Administrator</span><select value={resetUser} onChange={(event) => setResetUser(event.target.value)}><option value="">Select user</option>{users.map((entry) => <option value={entry.id} key={entry.id}>{entry.username}</option>)}</select></label>
             <label className="field"><span>New password</span><input type="password" minLength={12} value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
-            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
+            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
           </section>
           <section className="form-card">
             <h3><Users size={17} /> Administrators</h3>
@@ -3042,7 +2926,7 @@ function App() {
     craftQueueRef.current = { claimId, jobs: current };
   }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data]);
   React.useEffect(() => {
-    if (!state.data || !data.claim?.entityId) return;
+    if (!appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
     async function record() {
       try {
@@ -3065,7 +2949,7 @@ function App() {
     }
     record();
     return () => controller.abort();
-  }, [claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
+  }, [appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
     overview: <Overview data={data} onNavigate={setActive} logo={appSettings.branding.logo} />,

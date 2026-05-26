@@ -22,7 +22,7 @@ Persistent history is stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`
 
 In production, the Node server records snapshots itself every 30 seconds, so market and activity history continues collecting without a browser left open.
 
-The Admin page is protected by a local server-side session. On first run, open Admin and create the initial password. The password is stored as a salted scrypt hash in SQLite, and the browser receives an HttpOnly session cookie.
+The Admin page is protected by a local server-side session. On first run, open Admin and create the initial password. The password is stored as a salted scrypt hash in SQLite, and the browser receives an HttpOnly session cookie. Administrator mutations additionally require a same-origin session token.
 
 For isolated testing, set `BITCRAFT_LOCAL_DATA_DIR` before running the dev server to point at a different database directory.
 

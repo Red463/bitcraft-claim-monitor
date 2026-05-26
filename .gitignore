@@ -42,6 +42,7 @@ dev-server*.log
 
 # local app/runtime data
 apps/bitcraft-local/data/
+apps/bitcraft-local/.test-data-*/
 
 # System Files
 .DS_Store
