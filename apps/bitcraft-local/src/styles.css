@@ -119,7 +119,6 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .online-summary { margin: 8px 0 0; color: var(--muted); }
 .online-summary strong, .online-text { color: var(--good); }
 .toolbar-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
-.panel > .toolbar-row, .production-controls { position: sticky; top: -1px; z-index: 4; padding: 9px 0; background: rgba(12,13,16,.94); backdrop-filter: blur(8px); }
 .inline-field { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .inline-field span { text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
 .mini-action { min-height: 28px; border: 1px solid rgba(240,198,79,.42); border-radius: 6px; background: rgba(240,198,79,.1); color: var(--gold); padding: 0 9px; cursor: pointer; font-size: 12px; }
