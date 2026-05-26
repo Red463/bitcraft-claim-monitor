@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0-beta.1 - 2026-05-26
+
+### Added
+
+- Historical confirmed-sale importing for current members' completed orders at the monitored settlement market, using BitJita order claim identity and completed trade fills.
+- Dedicated `market_trades` persistence keyed by BitJita trade ID, so imported history is retained without duplication across polling runs.
+
+### Changed
+
+- Market Analytics now uses authoritative completed trade records for orders proven to belong to the monitored settlement market rather than importing unrelated member sales.
+- On first successful collection for a member, completed sell orders belonging to this market are backfilled; later verified tracked sales are retained in the same trade history.
+- Admin status now reports retained confirmed trades separately from listing lifecycle events.
+
 ## 0.3.1-beta.1 - 2026-05-26
 
 ### Fixed

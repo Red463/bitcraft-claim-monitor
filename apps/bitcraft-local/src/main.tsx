@@ -1537,13 +1537,12 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market history HTTP ${response.status}`)))
       .then((result) => setMemberHistory(result))
       .catch(() => {
-        if (!controller.signal.aborted) setMemberHistory({ events: [], topItems: [], daily: [], totals: {} });
+        if (!controller.signal.aborted) setMemberHistory({ sales: [], topItems: [], daily: [], totals: {} });
       });
     return () => controller.abort();
   }, [claimId, memberFilter, history]);
   const analytics = memberFilter === "All" ? history : memberHistory;
-  const apiTrades: AnyRecord[] = (analytics?.events ?? [])
-    .filter((event: AnyRecord) => ["sale", "partial_sale"].includes(String(event.event_type)))
+  const apiTrades: AnyRecord[] = (analytics?.sales ?? [])
     .map((event: AnyRecord) => ({
       id: event.id,
       itemName: event.item_name,
@@ -1609,6 +1608,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
       </div>
       {view === "analytics" ? (
         <>
+          <p className="legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
           <div className="metric-grid">
             <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
@@ -1645,7 +1645,7 @@ function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeD
           </div>
           <section>
             <h3><CheckCircle2 size={17} /> Recent Confirmed Sales</h3>
-            <p className="legend">Confirmed sales retained in this monitor's history for the selected settlement member(s).</p>
+            <p className="legend">Imported completed sales retained in this monitor's history for the selected current settlement member(s).</p>
             <DataTable rows={apiTrades} columns={[
               ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
               ["Item", r => r.itemName ?? "-"],
@@ -2684,7 +2684,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <Stat icon={<Server />} label="Environment" value={status?.environment ?? "-"} />
             <Stat icon={<Database />} label="Database" value={bytesLabel(status?.databaseSize)} />
             <Stat icon={<Save />} label="Snapshots" value={formatNumber(status?.counts?.snapshots)} />
-            <Stat icon={<CircleDollarSign />} label="Market Events" value={formatNumber(status?.counts?.market_events)} />
+            <Stat icon={<CircleDollarSign />} label="Confirmed Trades" value={formatNumber(status?.counts?.market_trades)} />
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">

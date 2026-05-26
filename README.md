@@ -10,8 +10,8 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 
 - Displays live public data for a selected BitCraft settlement.
 - Refreshes live views automatically at a configurable interval without clearing visible content during background refreshes.
-- Records market listings, market events, activity events, and snapshots in a local SQLite database.
-- Provides retained confirmed-sales analytics using BitJita trade data, with settlement-member filtering.
+- Records market listings, completed member trades, market events, activity events, and snapshots in a local SQLite database.
+- Imports retained confirmed-sales history from BitJita completed trades, with settlement-member filtering.
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
@@ -130,7 +130,7 @@ The app uses `Structures` terminology because BitCraft data may classify contain
 - Revenue by day.
 - Recent individual confirmed sales.
 
-Sales analytics intentionally use confirmed BitJita trade history retained in the local database instead of treating every disappeared listing as a sale. Market collection follows paginated BitJita listing responses so active listings outside the first page are not closed incorrectly. A listing that disappears without a confirmed trade may have been removed or cancelled.
+Sales analytics use completed BitJita sell trades only after completed order history identifies the monitored settlement as the listing claim. Trade fills are retained in the local database by trade ID. The first successful collection backfills available completed orders from this market for current settlement members, and later tracked sales continue to be recorded. Live Listings remains scoped to the monitored settlement and follows paginated BitJita responses so active listings outside the first page are not closed incorrectly.
 
 ### Region
 
@@ -213,6 +213,7 @@ It records:
 | `snapshots` | Settlement state captured over time |
 | `market_listings` | Currently and previously observed listings |
 | `market_events` | Listing lifecycle and reconciled trade events |
+| `market_trades` | Imported, deduplicated completed sell trades for settlement members |
 | `activity_events` | Settlement activity history |
 | `admin_users` | Local admin credentials |
 | `admin_sessions` | Authenticated sessions |

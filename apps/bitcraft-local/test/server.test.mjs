@@ -57,18 +57,32 @@ test("server collection paginates listings and protects production mutations", a
     { entityId: "listing-2", itemName: "Oak Plank", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 20, itemType: "item", quantity: 8, price: 6, side: "sell" },
   ];
   let currentListings = listings;
-  let trades = [];
+  const historicalTrade = { id: "historic-1", orderEntityId: "historic-order", itemId: 30, itemType: "0", itemName: "Leather", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 5, unitPrice: 10, totalPrice: 50, createdAt: "2026-05-20T12:00:00.000Z" };
+  const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
+  let trades = [historicalTrade];
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === `/api/claims/${claimId}`) return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
-    if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [] });
+    if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
     if (url.pathname === `/api/claims/${claimId}/market/listings`) {
       const page = Number(url.searchParams.get("page"));
       requestedPages.push(page);
       return json(res, { listings: [currentListings[page - 1]], totalPages: 2, page });
     }
-    if (url.pathname === "/api/market/player/player-1/trades") return json(res, { trades });
+    if (url.pathname === "/api/market/player/player-1/history") return json(res, {
+      sellOrderHistory: [
+        { entityId: "historic-order", claimEntityId: claimId, status: "COMPLETED" },
+        { entityId: "foreign-order", claimEntityId: "other-claim", status: "COMPLETED" },
+      ],
+      totalSellOrders: 2,
+    });
+    if (url.pathname === "/api/market/player/player-1/trades") {
+      const orderId = url.searchParams.get("orderEntityId");
+      if (orderId === "historic-order") return json(res, { trades: [historicalTrade] });
+      if (orderId === "foreign-order") return json(res, { trades: [foreignTrade] });
+      return json(res, { trades });
+    }
     return json(res, { error: "not found" }, 404);
   });
   const upstreamPort = await listen(upstream);
@@ -115,9 +129,14 @@ test("server collection paginates listings and protects production mutations", a
     body: "{}",
   });
   assert.equal(poll.status, 200);
+  const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
+  assert.equal(baselineHistory.totals.confirmedSales, 1);
+  assert.equal(baselineHistory.totals.confirmedUnits, 5);
+  assert.equal(baselineHistory.totals.trackedValue, 50);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   trades = [
+    historicalTrade,
     { id: "fill-1", orderEntityId: "listing-1", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
     { id: "fill-2", orderEntityId: "listing-1", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 2, price: 4, totalPrice: 8 },
   ];
@@ -132,10 +151,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(requestedPages.sort(), [1, 1, 2, 2]);
   assert.equal(history.liveListings.length, 2);
   assert.equal(history.totals.newListings, 2);
-  assert.equal(history.totals.confirmedSales, 1);
-  assert.equal(history.totals.confirmedUnits, 3);
-  assert.equal(history.totals.trackedValue, 12);
-  assert.equal(history.topItems[0].unitsSold, 3);
+  assert.equal(history.totals.confirmedSales, 3);
+  assert.equal(history.totals.confirmedUnits, 8);
+  assert.equal(history.totals.trackedValue, 62);
+  assert.equal(history.sales.length, 3);
+  assert.equal(history.topItems.some((item) => item.itemName === "Leather" && item.unitsSold === 5), true);
   assert.equal(history.events.some((event) => event.event_type === "partial_sale"), true);
 
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
@@ -146,7 +166,8 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(thirdPoll.status, 200);
   const afterOldFills = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
-  assert.equal(afterOldFills.totals.confirmedUnits, 3);
+  assert.equal(afterOldFills.totals.confirmedSales, 3);
+  assert.equal(afterOldFills.totals.confirmedUnits, 8);
   assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), true);
 
   const browserSnapshot = await fetch(`${origin}/api/local/snapshot`, {

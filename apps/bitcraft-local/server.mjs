@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING === "true" || (isProduction && process.env.ENABLE_SERVER_POLLING !== "false");
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.3.1-beta.1";
+const appVersion = "0.4.0-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
@@ -71,6 +71,26 @@ db.exec(`
     occurred_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS market_trades (
+    trade_id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    order_entity_id TEXT,
+    seller_entity_id TEXT,
+    seller_username TEXT,
+    purchaser_entity_id TEXT,
+    purchaser_username TEXT,
+    item_id TEXT,
+    item_type TEXT,
+    item_name TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit_price REAL NOT NULL,
+    total_price REAL NOT NULL,
+    tier TEXT,
+    rarity TEXT,
+    occurred_at TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS activity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     claim_id TEXT NOT NULL,
@@ -113,6 +133,7 @@ db.exec(`
     remote_address TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
 `);
 
@@ -199,6 +220,12 @@ const statements = {
   `),
   confirmMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, trade_id = ?, raw_json = ? WHERE id = ?"),
   resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
+  insertMarketTrade: db.prepare(`
+    INSERT OR IGNORE INTO market_trades (
+      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username, purchaser_entity_id, purchaser_username,
+      item_id, item_type, item_name, quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
   insertActivity: db.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
     VALUES (?, ?, ?, ?, ?)
@@ -600,9 +627,38 @@ async function findPendingMarketConfirmations(claimId) {
 function applyPendingMarketConfirmations(claimId, now, confirmations) {
   for (const { event, listing, trade } of confirmations) {
     const nextType = event.event_type === "partial_quantity_drop" ? "partial_sale" : "sale";
+    for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
     statements.confirmMarketEvent.run(nextType, trade.id ?? null, JSON.stringify(trade), event.id);
     addActivity(claimId, "market_sale_confirmed", `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, { ...listing, tradeId: trade.id ?? null });
   }
+}
+
+function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
+  const tradeId = String(trade.id ?? "").trim();
+  if (!tradeId) return 0;
+  const quantity = toNumber(trade.quantity);
+  const unitPrice = toNumber(trade.unitPrice ?? trade.price ?? listing.price);
+  const totalPrice = toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice;
+  return Number(statements.insertMarketTrade.run(
+    tradeId,
+    claimId,
+    trade.orderEntityId == null ? String(listing.key ?? "") || null : String(trade.orderEntityId),
+    trade.sellerEntityId == null ? String(listing.ownerEntityId ?? "") || null : String(trade.sellerEntityId),
+    trade.sellerUsername ?? listing.owner ?? null,
+    trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
+    trade.purchaserUsername ?? null,
+    trade.itemId == null ? (listing.itemId == null ? null : String(listing.itemId)) : String(trade.itemId),
+    trade.itemType == null ? (listing.itemType == null ? null : String(listing.itemType)) : String(trade.itemType),
+    String(trade.itemName ?? listing.itemName ?? "Unknown item"),
+    quantity,
+    unitPrice,
+    totalPrice,
+    trade.itemTier == null ? (listing.tier == null ? null : String(listing.tier)) : String(trade.itemTier),
+    trade.itemRarityStr ?? listing.rarity ?? null,
+    tradeOccurredAt(trade, importedAt),
+    importedAt,
+    JSON.stringify(trade),
+  ).changes);
 }
 
 function addMarketEvent(claimId, eventType, listing, occurredAt) {
@@ -721,6 +777,7 @@ async function recordSnapshot(payload) {
       } else if (listing.quantity < toNumber(existing.quantity)) {
         const { soldQuantity, trade } = partialResults.get(listing.key);
         const partial = { ...listing, quantity: soldQuantity, totalValue: soldQuantity * listing.price, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
+        if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
         addMarketEvent(claimId, trade ? "partial_sale" : "partial_quantity_drop", partial, now);
         addActivity(claimId, trade ? "market_sale" : "market_quantity_drop", `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, partial);
       }
@@ -730,6 +787,7 @@ async function recordSnapshot(payload) {
       const trade = closedResults.get(listing.key)?.trade;
       const eventType = trade ? "sale" : "removed_or_cancelled";
       const closedListing = { ...listing, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
+      if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
       statements.markListingClosed.run(eventType, now, now, active.listing_key);
       addMarketEvent(claimId, eventType, closedListing, now);
       addActivity(claimId, trade ? "market_sale" : "market_removed_or_cancelled", `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, closedListing);
@@ -760,6 +818,76 @@ async function fetchAllClaimListings(claimId) {
     ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => fetchBitjita(`${base}&page=${index + 2}`)))
     : [];
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
+}
+
+function marketTradeBackfillKey(claimId, playerId) {
+  return `market_trade_backfill:${claimId}:${playerId}`;
+}
+
+async function fetchOrderTrades(playerId, orderEntityId) {
+  const trades = [];
+  let offset = 0;
+  while (true) {
+    const payload = await fetchBitjita(`/market/player/${playerId}/trades?type=sell&limit=200&offset=${offset}&orderEntityId=${encodeURIComponent(String(orderEntityId))}`);
+    const page = unwrap(payload, "trades", []);
+    trades.push(...page);
+    if (page.length < 200) break;
+    offset += page.length;
+  }
+  return trades;
+}
+
+async function fetchMemberSettlementSellTrades(claimId, member) {
+  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
+  if (!playerId) return null;
+  const key = marketTradeBackfillKey(claimId, playerId);
+  const isBackfilled = statements.getSetting.get(key)?.value === "complete";
+  const claimOrders = [];
+  let offset = 0;
+  while (true) {
+    const payload = await fetchBitjita(`/market/player/${playerId}/history?type=sell&status=COMPLETED&limit=200&offset=${offset}`);
+    const page = unwrap(payload, "sellOrderHistory", []);
+    claimOrders.push(...page.filter((order) => String(order.claimEntityId ?? "") === String(claimId)));
+    if (isBackfilled || page.length < 200 || offset + page.length >= toNumber(payload.totalSellOrders)) break;
+    offset += page.length;
+  }
+  const tradePages = await mapWithConcurrency(claimOrders, 3, (order) => fetchOrderTrades(playerId, order.entityId));
+  return { key, member, trades: tradePages.flat() };
+}
+
+function tradeOccurredAt(trade, importedAt) {
+  const parsed = new Date(String(trade.createdAt ?? ""));
+  return Number.isNaN(parsed.getTime()) ? importedAt : parsed.toISOString();
+}
+
+async function importMemberSellTrades(claimId, members) {
+  const uniqueMembers = [...new Map(members
+    .filter((member) => member.playerEntityId ?? member.entityId)
+    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+  const imports = await mapWithConcurrency(uniqueMembers, 3, async (member) => {
+    try {
+      return await fetchMemberSettlementSellTrades(claimId, member);
+    } catch (error) {
+      console.warn(`BitCraft market trade import failed for ${member.userName ?? member.playerEntityId}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  });
+  const importedAt = new Date().toISOString();
+  let inserted = 0;
+  db.exec("BEGIN");
+  try {
+    for (const result of imports.filter(Boolean)) {
+      for (const trade of result.trades) {
+        inserted += insertConfirmedMarketTrade(claimId, trade, { owner: result.member.userName ?? result.member.username }, importedAt);
+      }
+      statements.upsertSetting.run(result.key, "complete", importedAt);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return inserted;
 }
 
 async function mapWithConcurrency(values, concurrency, mapper) {
@@ -839,6 +967,7 @@ async function collectServerSnapshot(force = false) {
       market,
       source: "server_poll",
     });
+    await importMemberSellTrades(claimId, members);
     pollStatus.lastSuccessAt = new Date().toISOString();
     pollStatus.lastError = null;
   } catch (error) {
@@ -853,45 +982,58 @@ function marketHistory(claimId, limit, owner = "") {
   const selectedOwner = String(owner ?? "").trim();
   const ownerClause = selectedOwner ? " AND lower(COALESCE(owner, '')) = lower(?)" : "";
   const args = selectedOwner ? [claimId, selectedOwner] : [claimId];
+  const tradeOwnerClause = selectedOwner ? " AND lower(COALESCE(seller_username, '')) = lower(?)" : "";
+  const tradeArgs = selectedOwner ? [claimId, selectedOwner] : [claimId];
   const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const liveListings = db.prepare(`SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'${ownerClause}`).all(...args);
   const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
+  const sales = db.prepare(`
+    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key, item_name, seller_username AS owner,
+      quantity, unit_price AS price, total_price AS total_value, tier, rarity, occurred_at, raw_json
+    FROM market_trades
+    WHERE claim_id = ?${tradeOwnerClause}
+    ORDER BY occurred_at DESC, trade_id DESC
+    LIMIT ?
+  `).all(...tradeArgs, eventLimit);
   const topItems = db.prepare(`
-    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_value) AS totalValue,
-      SUM(total_value) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
-    FROM market_events
-    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')${ownerClause}
+    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
+      SUM(total_price) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
+    FROM market_trades
+    WHERE claim_id = ?${tradeOwnerClause}
     GROUP BY item_name
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
-  `).all(...args);
+  `).all(...tradeArgs);
   const daily = db.prepare(`
-    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_value) AS totalValue
-    FROM market_events
-    WHERE claim_id = ? AND event_type IN ('sale', 'partial_sale')${ownerClause}
+    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
+    FROM market_trades
+    WHERE claim_id = ?${tradeOwnerClause}
     GROUP BY day
     ORDER BY day DESC
     LIMIT 30
-  `).all(...args).reverse();
-  const totals = db.prepare(`
+  `).all(...tradeArgs).reverse();
+  const lifecycleTotals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,
-      SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN 1 ELSE 0 END) AS confirmedSales,
-      SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN quantity ELSE 0 END) AS confirmedUnits,
       SUM(CASE WHEN event_type IN ('removed_or_cancelled', 'sold_or_removed') THEN 1 ELSE 0 END) AS removedOrCancelled,
-      SUM(CASE WHEN event_type IN ('partial_quantity_drop') THEN 1 ELSE 0 END) AS unconfirmedQuantityDrops,
-      SUM(CASE WHEN event_type IN ('sale', 'partial_sale') THEN total_value ELSE 0 END) AS trackedValue
+      SUM(CASE WHEN event_type IN ('partial_quantity_drop') THEN 1 ELSE 0 END) AS unconfirmedQuantityDrops
     FROM market_events
     WHERE claim_id = ?${ownerClause}
   `).get(...args);
+  const tradeTotals = db.prepare(`
+    SELECT COUNT(*) AS confirmedSales, SUM(quantity) AS confirmedUnits, SUM(total_price) AS trackedValue
+    FROM market_trades
+    WHERE claim_id = ?${tradeOwnerClause}
+  `).get(...tradeArgs);
+  const totals = { ...lifecycleTotals, ...tradeTotals };
   const pending = db.prepare(`
     SELECT * FROM market_events
     WHERE claim_id = ? AND event_type = 'partial_quantity_drop' AND trade_id IS NULL${ownerClause}
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(...args);
-  return { liveListings, events, topItems, daily, totals, pending };
+  return { liveListings, events, sales, topItems, daily, totals, pending };
 }
 
 function resolveMarketEvent(body) {
@@ -916,7 +1058,7 @@ function safeJson(value, fallback = {}) {
 }
 
 function databaseStatus() {
-  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "activity_events"].map((table) => [
+  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "market_trades", "activity_events"].map((table) => [
     table,
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
