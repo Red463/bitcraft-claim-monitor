@@ -1,6 +1,8 @@
 # BitCraft Claim Monitor
 
-BitCraft Claim Monitor is a settlement operations dashboard built around the public [BitJita API](https://bitjita.com/docs/api). It combines live settlement information with locally persisted market and activity history, providing one place to check supplies, members, skills, production, storage, research, trade, and regional context.
+BitCraft Claim Monitor is a settlement operations dashboard built around the public [BitJita API](https://bitjita.com/docs/api). It combines live settlement information with locally persisted market and activity history, providing one place to check supplies, members, professions, skills, production, storage, research, trade, and regional context.
+
+The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve.
 
 The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local). The `artifacts/` folders remain from the original Replit export and are not the application used for current development or deployment.
 
@@ -11,6 +13,8 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 - Records market listings, market events, activity events, and snapshots in a local SQLite database.
 - Provides confirmed sales analytics using BitJita trade data.
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
+- Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
+- Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
 - Embeds the settlement's BitCraft Sync board for material planning and shared goals.
 - Provides a protected local admin area for application configuration, theme editing, and database inspection.
 
@@ -33,33 +37,32 @@ The public settlement roster and member detail view:
 
 - Online/offline state and session or last-login information.
 - Settlement roles and build/inventory permissions.
-- Total skill level.
-- Public member drill-down data including Toolbelt profession tools, currently equipped gear, buffs, housing, passive crafts, market collections, and traveler tasks when returned by the API.
+- Total recorded levels across professions and skills.
+- Public member drill-down data including Toolbelt profession tools, currently equipped gear, buffs, housing, grouped passive craft output history, market collections, and quests when returned by the API.
 - Selecting a member from the roster sets the Production eligibility filter; the selector on the Production page can switch or clear it at any time.
 
-### Skills
+### Professions
 
-A settlement-wide skill coverage dashboard:
+A settlement-wide profession coverage dashboard:
 
-- Total settlement level and XP.
-- Highest skill and top-member summaries.
-- Skill focus view with average level, current best tier, and strongest members.
-- Heatmap table of members across all available skills.
-- Sorting by member, total level, highest skill, or a selected skill.
+- Profession-only level totals, highest-profession and top-member summaries.
+- Profession focus view with average level, current best tier, and strongest members.
+- Heatmap table covering the API `Profession` category.
+- Separate Skills summary for the API `Adventure` category: Cooking, Construction, Taming, Slayer, Merchanting and Sailing.
+- Sorting by member, profession total, highest profession, or a selected profession.
 
-BitCraft skill tier display follows the game's level bands: T1 begins at level 0, T2 at level 20, T3 at level 30, and so on; a player is not shown as reaching T6 until level 60.
+BitCraft profession tier display follows the game's level bands: T1 begins at level 0, T2 at level 20, T3 at level 30, and so on; a player is not shown as reaching T6 until level 60.
 
 ### Production
 
-Production is split into settlement jobs and global public opportunities.
-
-**Settlement production**
+Settlement production and member passive output tracking:
 
 - Current crafts at settlement structures.
 - Output tier badges, effort applied, effort to craft, total XP, and XP remaining where supplied by the API.
 - Configurable sorting, defaulting to highest tier first.
-- Optional selected-member highlighting based on public skill levels and matching profession tools held in that member's public Toolbelt inventory; tool tier is displayed, while tool power determines effort contributed per action.
+- Optional selected-member highlighting based on public skill levels and matching profession tools held in that member's public Toolbelt inventory; a tool can complete crafts up to one tier above its own, while tool power determines effort contributed per action.
 - Recent contributor records.
+- Recent passive craft output aggregated from each settlement member's public passive-craft history, with resolved item names, member, structure, quantity, and completion status.
 - Activity status based on contribution recency:
   - `Active now`: a contribution was received within the last five minutes.
   - `Paused`: progress exists, but no recent contribution was recorded.
@@ -68,12 +71,12 @@ Production is split into settlement jobs and global public opportunities.
 
 BitJita does not expose a live "player is holding the craft action now" flag. The five-minute activity window is a practical indicator based on the latest available contribution event.
 
-**Public Crafts**
+### Public Craft Finder
 
 - Public incomplete crafts across the world, intended to help players locate XP-grinding opportunities.
 - Skill filter including `All Skills`.
 - Region filter defaulting to the monitored settlement's region.
-- Results ranked by remaining effort.
+- Sortable results, initially ranked by remaining effort.
 - Settlement, required skill level, available XP, owner, and clickable location.
 - Clicking a location opens the Map page focused on the selected craft destination.
 
@@ -83,12 +86,8 @@ Storage and material visibility across settlement containers:
 
 - Collapsible containers showing their stored item stacks.
 - Filters for item name, container, type, tier, rarity, and building.
-- Core material totals split by tier:
-  - Ingots and ores/concentrates.
-  - Planks and raw wood forms.
-  - Bricks and clay/unfired forms.
-  - Leather and raw hide forms.
-  - Cloth, fibre, thread, and textiles.
+- Finished core material totals split by tier: ingots, planks, bricks, leather, and cloth. Raw ingredients and intermediate forms are excluded.
+- Clickable core-material cards that filter the container list to stored stacks of the selected finished material.
 - Item detail inspection for recipe and related public API data.
 
 Container `volume` is intentionally not displayed: the available API value represents slot/container capacity rather than a meaningful total of occupied material volume.
@@ -111,8 +110,8 @@ The app uses `Structures` terminology because BitCraft data may classify contain
 
 ### Research
 
-- Current technology being researched.
 - Completed and available research lists.
+- The page does not show an active research state because technology unlocks are immediate.
 - Tier and name filtering.
 - Supply cost visibility for available technologies when returned by the API.
 
@@ -146,7 +145,7 @@ An embedded [BitCraft Map](https://bitcraftmap.com/) view:
 
 - Tracks selected settlement members when live player data is available.
 - Enables settlement and road layers by default.
-- Displays a focused waypoint when opened from a Public Crafts location.
+- Displays a focused waypoint when opened from a Public Craft Finder location.
 - Includes a link to open the current map view in a full browser tab.
 
 ### Sync

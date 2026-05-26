@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Circle,
   CircleDollarSign,
+  CircleHelp,
   Crown,
   Database,
   ExternalLink,
@@ -42,25 +43,32 @@ import {
   Users,
   User,
   Wrench,
+  X,
 } from "lucide-react";
+import packageJson from "../package.json";
 import "./styles.css";
 
 const DEFAULT_CLAIM_ID = "1369094286777412590";
 const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
+const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const APP_VERSION = packageJson.version;
 
 type AnyRecord = Record<string, any>;
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
 type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; error: string | null; refreshToken: number };
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
+type ToastKind = "market" | "production";
+type ToastNotice = { id: string; title: string; body: string; kind: ToastKind };
 
 const NAV = [
   ["overview", "Overview", Shield],
   ["members", "Members", Users],
-  ["skills", "Skills", Swords],
+  ["skills", "Professions", Swords],
   ["production", "Production", Factory],
+  ["publiccrafts", "Public Craft Finder", Search],
   ["inventory", "Inventory", Package],
   ["construction", "Construction", Hammer],
   ["buildings", "Structures", Home],
@@ -137,6 +145,8 @@ const SKILL_NAMES: Record<number, string> = {
 };
 
 const SKILL_IDS = Object.keys(SKILL_NAMES).map(Number).sort((a, b) => a - b);
+const PROFESSION_IDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14];
+const ADVENTURE_SKILL_IDS = [13, 15, 17, 18, 19, 21];
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 const TIER_COLORS: Record<number, string> = {
   1: "#838e9e",
@@ -220,6 +230,12 @@ function playerInventoryItems(payload: AnyRecord | null | undefined, inventoryNa
 
 function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[] {
   return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
+}
+
+function craftDisplayName(job: AnyRecord, craftsPayload?: AnyRecord): string {
+  const itemId = String(job.craftedItem?.[0]?.item_id ?? "");
+  const item = [...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].find((candidate: AnyRecord) => String(candidate.id) === itemId);
+  return String(item?.name ?? job.recipeName ?? `${job.buildingName ?? "Settlement"} craft`);
 }
 
 function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
@@ -408,6 +424,43 @@ function formatDaysAndHours(days: number): string {
   return wholeDays > 0 ? `${wholeDays}d ${hours}h` : `${hours}h`;
 }
 
+function summarizePassiveCrafts(payload: AnyRecord): AnyRecord[] {
+  const catalog = new Map(
+    [...(payload.items ?? []), ...(payload.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]),
+  );
+  const summaries = new Map<string, AnyRecord>();
+  for (const craft of payload.craftResults ?? []) {
+    const output = craft.craftedItem?.[0] ?? {};
+    const item = catalog.get(String(output.item_id)) ?? {};
+    const outputName = item.name ?? "crafted item";
+    const recipe = String(craft.recipeName ?? "Craft {0}")
+      .replace(/\s*\{\d+\}/g, ` ${outputName}`)
+      .replace(/\s+/g, " ")
+      .trim();
+    const key = [recipe, craft.buildingName, craft.status, item.id ?? output.item_id].join("|");
+    const current = summaries.get(key);
+    const timestamp = parseDateValue(craft.timestamp)?.getTime() ?? 0;
+    if (current) {
+      current.quantity += toNumber(output.quantity) || 1;
+      if (timestamp > current.sortTimestamp) {
+        current.timestamp = craft.timestamp;
+        current.sortTimestamp = timestamp;
+      }
+      continue;
+    }
+    summaries.set(key, {
+      recipe,
+      status: craft.status ?? "unknown",
+      structure: craft.buildingName ?? "Unknown structure",
+      timestamp: craft.timestamp,
+      sortTimestamp: timestamp,
+      quantity: toNumber(output.quantity) || 1,
+      tier: item.tier,
+    });
+  }
+  return Array.from(summaries.values()).sort((a, b) => b.sortTimestamp - a.sortTimestamp).slice(0, 8);
+}
+
 function normalizePlayer(player: AnyRecord): AnyRecord {
   const signInTs = toNumber(player.signInTimestamp);
   const now = Math.floor(Date.now() / 1000);
@@ -502,9 +555,9 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
     <div className="panel">
       <section className="overview-hero">
         <div>
-          <span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span>
-          <h2>{claim.name ?? "Claim"} Command Center</h2>
-          <p><TierBadge tier={claim.tier} /> settlement in {claim.regionName ?? "Unknown region"} - Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
+          <span className="overview-kicker">Settlement Command Center</span>
+          <div className="overview-title"><h2>{claim.name ?? "Claim"}</h2><span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span></div>
+          <p><TierBadge tier={claim.tier} /> {claim.regionName ?? "Unknown region"} <span className="metadata-divider" /> Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
         </div>
         <div className="hero-metrics">
           <button onClick={() => onNavigate("members")}><strong>{onlineCount}</strong><span>Online</span></button>
@@ -512,6 +565,13 @@ function Overview({ data, onNavigate }: { data: ReturnType<typeof normalizeData>
           <button onClick={() => onNavigate("market")}><strong>{market.length}</strong><span>Market</span></button>
         </div>
       </section>
+
+      <div className="overview-pulse">
+        <div><span>Members</span><strong>{members.length}</strong><small>{onlineCount} online now</small></div>
+        <div><span>Supply Status</span><strong>{formatDaysAndHours(supplyDays)}</strong><small>{formatNumber(supplies)} stored</small></div>
+        <div><span>Work in Progress</span><strong>{activeCrafts + activeProjects}</strong><small>{activeCrafts} crafts / {activeProjects} builds</small></div>
+        <div><span>Market Presence</span><strong>{market.length}</strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
+      </div>
 
       <div className="ops-grid">
         <section className="ops-card">
@@ -619,6 +679,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
     });
     return () => controller.abort();
   }, [selectedId]);
+  const passiveCraftSummaries = profile ? summarizePassiveCrafts(profile.passiveCrafts) : [];
 
   return (
     <div className="panel">
@@ -632,14 +693,16 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
       </div>
       <DataTable
         rows={filtered}
+        onRowClick={(member) => setSelectedId(String(member.playerEntityId))}
+        rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
         columns={[
           ["", (m) => <span className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} title={m.player?.signedIn ? `Online ${formatDuration(m.player.sessionSeconds)}` : "Offline"} />],
           ["Username", (m) => <strong>{m.username}</strong>],
           ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
-          ["Skill Lvl", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
+          ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-          ["Details", (m) => <button className="mini-action" onClick={() => { setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); }}>View</button>],
+          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); }}>View</button>],
         ]}
       />
       {selectedMember ? (
@@ -688,20 +751,33 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                 {(profile.equipment.equipment ?? []).every((slot: AnyRecord) => !slot.item) ? <p className="legend">No equipped gear reported by the API.</p> : null}
               </section>
               <div className="two-col public-profile-grid">
-                <section>
-                  <h3><Factory size={17} /> Passive Crafts</h3>
-                  <DataTable rows={(profile.passiveCrafts.craftResults ?? []).slice(0, 8)} columns={[
-                    ["Recipe", (row) => row.recipeName ?? "-"],
-                    ["Status", (row) => row.status ?? "-"],
-                    ["Structure", (row) => row.buildingName ?? "-"],
-                  ]} />
+                <section className="profile-history-panel">
+                  <div className="profile-section-heading">
+                    <h3><Factory size={17} /> Passive Crafts</h3>
+                    <span>{formatNumber((profile.passiveCrafts.craftResults ?? []).length)} records</span>
+                  </div>
+                  <div className="passive-craft-list">
+                    {passiveCraftSummaries.map((craft) => (
+                      <article className="passive-craft-card" key={`${craft.recipe}-${craft.structure}-${craft.status}`}>
+                        <div>
+                          <strong>{craft.recipe}</strong>
+                          {craft.tier ? <TierBadge tier={craft.tier} /> : null}
+                        </div>
+                        <p>
+                          <span className={`status-pill ${craft.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(craft.status)}</span>
+                          <b>{formatNumber(craft.quantity)} crafted</b>
+                        </p>
+                        <small>{craft.structure} - {timeAgo(craft.timestamp)}</small>
+                      </article>
+                    ))}
+                    {!passiveCraftSummaries.length ? <p className="legend">No passive crafts reported for this member.</p> : null}
+                  </div>
                 </section>
-                <section>
-                  <h3><Star size={17} /> Traveler Tasks</h3>
+                <section className="profile-history-panel">
+                  <h3><Star size={17} /> Quests</h3>
                   <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} columns={[
-                    ["Task", (row) => row.description ?? "-"],
+                    ["Quest", (row) => row.description ?? "-"],
                     ["Status", (row) => row.completed ? "Complete" : "Open"],
-                    ["Level", (row) => formatNumber(row.levelRequirement)],
                   ]} />
                 </section>
               </div>
@@ -716,15 +792,21 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
 function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   type SortKey = "name" | "total" | "highest" | number;
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", SKILL_IDS[0]);
+  const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
   const citizens = data.citizens;
+  const focusedProfession = PROFESSION_IDS.includes(focusSkill) ? focusSkill : PROFESSION_IDS[0];
   const getName = (c: AnyRecord) => c.userName ?? c.username ?? "Unknown";
   const getSkill = (c: AnyRecord, id: number) => toNumber(c.skills?.[String(id)]);
-  const getTotal = (c: AnyRecord) => toNumber(c.totalLevel ?? c.totalSkillLevel);
-  const getHighest = (c: AnyRecord) => toNumber(c.highestLevel ?? c.highestSkillLevel);
-  const getXP = (c: AnyRecord) => toNumber(c.totalXP ?? c.totalXp);
+  const getTotal = (c: AnyRecord) => PROFESSION_IDS.reduce((total, id) => total + getSkill(c, id), 0);
+  const getHighest = (c: AnyRecord) => Math.max(...PROFESSION_IDS.map((id) => getSkill(c, id)), 0);
+  React.useEffect(() => {
+    if (focusSkill !== focusedProfession) setFocusSkill(focusedProfession);
+  }, [focusSkill, focusedProfession, setFocusSkill]);
+  React.useEffect(() => {
+    if (typeof sortKey === "number" && !PROFESSION_IDS.includes(sortKey)) setSortKey("total");
+  }, [sortKey, setSortKey]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((dir) => dir === "desc" ? "asc" : "desc");
@@ -744,17 +826,17 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     return sortDir === "asc" ? va - vb : vb - va;
   });
 
-  const settlementTotalXP = citizens.reduce((sum, c) => sum + getXP(c), 0);
   const settlementTotalLevel = citizens.reduce((sum, c) => sum + getTotal(c), 0);
   const settlementBest = Math.max(...citizens.map(getHighest), 0);
   const averageTotal = citizens.length ? settlementTotalLevel / citizens.length : 0;
-  const topMember = sorted[0] ? getName(sorted[0]) : "-";
-  const focusRows = [...citizens].sort((a, b) => getSkill(b, focusSkill) - getSkill(a, focusSkill)).slice(0, 5);
-  const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusSkill), 0) / citizens.length : 0;
-  const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusSkill))), 0);
-  const focusT3 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 3).length;
-  const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusSkill)) >= 5).length;
-  const coverage = SKILL_IDS.map((id) => {
+  const topMember = [...citizens].sort((a, b) => getTotal(b) - getTotal(a))[0];
+  const topMemberName = topMember ? getName(topMember) : "-";
+  const focusRows = [...citizens].sort((a, b) => getSkill(b, focusedProfession) - getSkill(a, focusedProfession)).slice(0, 5);
+  const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusedProfession), 0) / citizens.length : 0;
+  const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusedProfession))), 0);
+  const focusT3 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 3).length;
+  const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 5).length;
+  const summarizeCoverage = (ids: number[]) => ids.map((id) => {
     const levels = citizens.map((c) => getSkill(c, id));
     const max = Math.max(...levels, 0);
     const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
@@ -762,23 +844,25 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     const specialists = levels.filter((level) => skillTier(level) >= 5).length;
     return { id, name: SKILL_NAMES[id], max, avg, tier, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
+  const coverage = summarizeCoverage(PROFESSION_IDS);
+  const adventureSkills = summarizeCoverage(ADVENTURE_SKILL_IDS);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
     <div className="panel">
-      <Header title="Member Skills">{citizens.length} citizens - {formatNumber(settlementTotalXP)} total XP</Header>
+      <Header title="Member Professions">{citizens.length} citizens - {PROFESSION_IDS.length} professions tracked separately from adventure skills</Header>
       <div className="summary-grid skills-summary">
-        <MiniStat icon={<TrendingUp />} label="Settlement Total Level" value={formatNumber(settlementTotalLevel)} />
-        <MiniStat icon={<Star />} label="Highest Skill" value={settlementBest} />
-        <MiniStat icon={<Activity />} label="Average Total Level" value={formatNumber(averageTotal, 1)} />
-        <MiniStat icon={<Swords />} label="Top Member" value={topMember} />
+        <MiniStat icon={<TrendingUp />} label="Profession Levels" value={formatNumber(settlementTotalLevel)} />
+        <MiniStat icon={<Star />} label="Highest Profession" value={settlementBest} />
+        <MiniStat icon={<Activity />} label="Avg Profession Total" value={formatNumber(averageTotal, 1)} />
+        <MiniStat icon={<Swords />} label="Top Professional" value={topMemberName} />
       </div>
       <div className="skills-dashboard">
         <section className="focus-panel">
           <div className="split-header">
-            <h3><Star size={17} /> Skill Focus</h3>
-            <select className="select-control" value={focusSkill} onChange={(event) => setFocusSkill(Number(event.target.value))}>
-              {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
+            <h3><Star size={17} /> Profession Focus</h3>
+            <select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
+              {PROFESSION_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
             </select>
           </div>
           <div className="focus-metrics">
@@ -789,16 +873,16 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
           <div className="focus-list">
             {focusRows.map((citizen) => {
-              const level = getSkill(citizen, focusSkill);
+              const level = getSkill(citizen, focusedProfession);
               return <div key={citizen.entityId ?? getName(citizen)}><span>{getName(citizen)}</span><strong>Lv {level}</strong></div>;
             })}
           </div>
         </section>
         <section className="coverage-panel">
-          <h3><Swords size={17} /> Skill Coverage</h3>
+          <h3><Swords size={17} /> Profession Coverage</h3>
           <div className="coverage-list">
             {coverage.slice(0, 8).map((skill) => (
-              <button key={skill.id} className={focusSkill === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
+              <button key={skill.id} className={focusedProfession === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
                 <span>{skill.name}</span>
                 <b>{skill.tier ? <><TierBadge tier={skill.tier} /> <span>/ Lv {skill.max}</span></> : "-"}</b>
                 <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T5+</small>
@@ -807,6 +891,21 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
         </section>
       </div>
+      <section className="adventure-skills-panel">
+        <div className="split-header">
+          <h3><Activity size={17} /> Skills</h3>
+          <p className="legend">Adventure skills are tracked separately from professions.</p>
+        </div>
+        <div className="adventure-skill-grid">
+          {adventureSkills.map((skill) => (
+            <article key={skill.id}>
+              <span>{skill.name}</span>
+              <b>{skill.tier ? <TierBadge tier={skill.tier} /> : "-"} <small>Best Lv {skill.max}</small></b>
+              <em>Settlement average {formatNumber(skill.avg, 1)}</em>
+            </article>
+          ))}
+        </div>
+      </section>
       <div className="toolbar-row">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
@@ -815,20 +914,14 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <table className="skill-table">
           <thead>
             <tr>
-              <th className="sticky-col name-spacer" />
-              <th />
-              <th />
-              {SKILL_IDS.map((id) => (
-                <th key={id} className={sortKey === id ? "sorted" : ""} onClick={() => toggleSort(id)} title={SKILL_NAMES[id]}>
-                  <span className="vertical-label">{SKILL_NAMES[id]}</span>
+              <th className="sticky-col clickable" onClick={() => toggleSort("name")}>Member {sortIcon("name")}</th>
+              <th className="clickable numeric summary-header" onClick={() => toggleSort("total")}><span>Total Levels</span>{sortIcon("total")}</th>
+              <th className="clickable numeric summary-header" onClick={() => toggleSort("highest")}><span>Best Level</span>{sortIcon("highest")}</th>
+              {PROFESSION_IDS.map((id) => (
+                <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id)}>
+                  <span>{SKILL_NAMES[id]}</span>{sortIcon(id)}
                 </th>
               ))}
-            </tr>
-            <tr>
-              <th className="sticky-col clickable" onClick={() => toggleSort("name")}>Member {sortIcon("name")}</th>
-              <th className="clickable numeric" onClick={() => toggleSort("total")}>Total {sortIcon("total")}</th>
-              <th className="clickable numeric" onClick={() => toggleSort("highest")}>Best {sortIcon("highest")}</th>
-              {SKILL_IDS.map((id) => <th key={id} className="clickable center" onClick={() => toggleSort(id)}>{sortIcon(id)}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -839,7 +932,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
                   <td className="sticky-col member-cell">{name}</td>
                   <td className="numeric">{formatNumber(getTotal(citizen))}</td>
                   <td className="numeric best">{getHighest(citizen)}</td>
-                  {SKILL_IDS.map((id) => {
+                  {PROFESSION_IDS.map((id) => {
                     const level = getSkill(citizen, id);
                     return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${SKILL_NAMES[id]}: Lv ${level} (${skillTierLabel(level)})`}>{level > 0 ? level : "-"}</td>;
                   })}
@@ -852,7 +945,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <td className="sticky-col member-cell">Settlement Max</td>
               <td className="numeric">-</td>
               <td className="numeric best">{settlementBest}</td>
-              {SKILL_IDS.map((id) => {
+              {PROFESSION_IDS.map((id) => {
                 const max = Math.max(...citizens.map((c) => getSkill(c, id)), 0);
                 return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)} title={`${SKILL_NAMES[id]} max: Lv ${max} (${skillTierLabel(max)})`}>{max > 0 ? max : "-"}</td>;
               })}
@@ -860,7 +953,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </tfoot>
         </table>
       </div>
-      <p className="legend tier-legend">Skill tiers: <span className="lvl0">0</span> {Object.keys(TIER_COLORS).map((tier) => <TierBadge key={tier} tier={tier} />)} - cells show exact level, hover for tier</p>
+      <p className="legend tier-legend">Profession tiers: <span className="lvl0">0</span> {Object.keys(TIER_COLORS).map((tier) => <TierBadge key={tier} tier={tier} />)} - cells show exact level, hover for tier</p>
     </div>
   );
 }
@@ -963,15 +1056,14 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
   }, [selectedStructure?.descriptionId]);
 
   return (
-    <div className="panel">
-      <Header title="Structures">{buildings.length} structures - {filtered.length} shown</Header>
-      <div className="metric-grid">
-        <MiniStat icon={<Wrench />} label="Structures" value={buildings.length} />
-        <MiniStat icon={<Hammer />} label="Crafting" value={sum(buildings, "craftingSlots")} />
-        <MiniStat icon={<Flame />} label="Refining" value={sum(buildings, "refiningSlots")} />
-        <MiniStat icon={<Package />} label="Storage" value={sum(buildings, "storageSlots")} />
-        <MiniStat icon={<Bed />} label="Housing" value={sum(buildings, "housingSlots")} />
-        <MiniStat icon={<ShoppingBag />} label="Trade" value={sum(buildings, "tradeOrders")} />
+    <div className="panel structures-panel">
+      <div className="structure-hero">
+        <Header title="Structures">Settlement capacity and operational stations</Header>
+        <div className="structure-total"><strong>{buildings.length}</strong><span>structures built</span></div>
+      </div>
+      <div className="capacity-strip">
+        {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{formatNumber(slots)}</strong><span>{label} slots</span><small>{formatNumber(count)} structure{toNumber(count) === 1 ? "" : "s"}</small></div>)}
+        <div><strong>{formatNumber(sum(buildings, "tradeOrders"))}</strong><span>Trade slots</span><small>{buildings.filter((building) => building.tradeOrders > 0).length} structures</small></div>
       </div>
       <div className="toolbar-row">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search structures" />
@@ -983,9 +1075,6 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
           <option value="crafting">Crafting Slots</option>
           <option value="storage">Storage Slots</option>
         </select>
-      </div>
-      <div className="highlight-grid">
-        {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{label}</strong><span>{formatNumber(slots)} slots across {formatNumber(count)} structures</span></div>)}
       </div>
       {selectedStructure && structureDetail?.building ? (
         <section className="structure-detail">
@@ -1092,11 +1181,11 @@ function Segmented({ options, value, onChange, label }: { options: string[]; val
 }
 
 const CORE_MATERIAL_GROUPS = [
-  { label: "Ingots", matcher: /(?:ingot|ore piece|ore concentrate)$/i },
-  { label: "Planks", matcher: /(?:plank|stripped wood|wood log)$/i },
-  { label: "Bricks", matcher: /(?:brick|clay lump)$/i },
-  { label: "Leather", matcher: /(?:leather|hide)$/i },
-  { label: "Cloth", matcher: /(?:cloth|textile|cloth strip|spool of thread|plant fiber|plant fibre|cotton|flax)$/i },
+  { label: "Ingots", matcher: (row: AnyRecord) => /^(?:Refined )?Ingot$/i.test(String(row.tag ?? "")) },
+  { label: "Planks", matcher: (row: AnyRecord) => /^(?:Refined )?Plank$/i.test(String(row.tag ?? "")) },
+  { label: "Bricks", matcher: (row: AnyRecord) => /^(?:Refined )?Brick$/i.test(String(row.tag ?? "")) && !/^Unfired /i.test(String(row.name ?? "")) },
+  { label: "Leather", matcher: (row: AnyRecord) => /^(?:Refined )?Leather$/i.test(String(row.tag ?? "")) },
+  { label: "Cloth", matcher: (row: AnyRecord) => /^(?:Refined )?Cloth$/i.test(String(row.tag ?? "")) },
 ] as const;
 
 function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
@@ -1106,6 +1195,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [tier, setTier] = usePersistedState("inventory.tier", "All");
   const [rarity, setRarity] = usePersistedState("inventory.rarity", "All");
   const [buildingFilter, setBuildingFilter] = usePersistedState("inventory.container", "All");
+  const [coreMaterialFilter, setCoreMaterialFilter] = usePersistedState("inventory.core-material", "All");
   const [nonEmptyOnly, setNonEmptyOnly] = usePersistedState("inventory.non-empty", true);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [itemDetail, setItemDetail] = React.useState<AnyRecord | null>(null);
@@ -1148,7 +1238,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   });
   const allRows = containers.flatMap((container) => container.items);
   const materialSummary: AnyRecord[] = CORE_MATERIAL_GROUPS.map((group): AnyRecord => {
-    const matches = allRows.filter((row: AnyRecord) => group.matcher.test(String(row.name ?? "")));
+    const matches = allRows.filter((row: AnyRecord) => group.matcher(row));
     const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
     const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
     const tierBreakdown = (Object.entries(matches.reduce((acc: Record<string, number>, row: AnyRecord) => {
@@ -1162,9 +1252,11 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     });
     return { label: group.label, quantity, containerCount, tierBreakdown };
   });
+  const selectedCoreMaterial = CORE_MATERIAL_GROUPS.find((group) => group.label === coreMaterialFilter);
   const filteredContainers = containers.map((container) => ({
     ...container,
     items: container.items.filter((row: AnyRecord) => {
+      if (selectedCoreMaterial && !selectedCoreMaterial.matcher(row)) return false;
       if (q && !row.name.toLowerCase().includes(q.toLowerCase())) return false;
       if (type !== "All" && row.type !== type) return false;
       if (tier !== "All" && String(row.tier) !== tier) return false;
@@ -1174,6 +1266,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     }),
   })).filter((container) => {
     if (containerQ && !container.name.toLowerCase().includes(containerQ.toLowerCase())) return false;
+    if (selectedCoreMaterial && container.items.length === 0) return false;
     if (nonEmptyOnly && container.items.length === 0) return false;
     return true;
   });
@@ -1195,11 +1288,17 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       <section className="material-watch">
         <div className="split-header">
           <h3><Package size={17} /> Core Materials</h3>
-          <p className="legend">Includes refined materials and their stored raw forms across all containers.</p>
+          <p className="legend">Finished material stock only. Raw ingredients and intermediate inputs are excluded.</p>
         </div>
         <div className="material-watch-grid">
           {materialSummary.map((group) => (
-            <article className={`material-card ${group.quantity ? "" : "empty"}`} key={group.label}>
+            <button
+              type="button"
+              className={`material-card ${group.quantity ? "" : "empty"} ${coreMaterialFilter === group.label ? "active" : ""}`}
+              key={group.label}
+              aria-pressed={coreMaterialFilter === group.label}
+              onClick={() => setCoreMaterialFilter(coreMaterialFilter === group.label ? "All" : group.label)}
+            >
               <span>{group.label}</span>
               <strong>{formatNumber(group.quantity)}</strong>
               <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None stored"}</small>
@@ -1208,7 +1307,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
                   {group.tierBreakdown.map(([tierLabel, qty]: [string, number]) => <div key={tierLabel}>{tierLabel === "Other" ? <b>{tierLabel}</b> : <TierBadge tier={tierLabel.slice(1)} />}<em>{formatNumber(qty)}</em></div>)}
                 </div>
               ) : null}
-            </article>
+            </button>
           ))}
         </div>
       </section>
@@ -1232,6 +1331,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
         </section>
       ) : null}
       <div className="toolbar-row">
+        {selectedCoreMaterial ? <button className="mini-action active" onClick={() => setCoreMaterialFilter("All")}><X size={13} /> {selectedCoreMaterial.label} only</button> : null}
         <SearchBox value={q} onChange={setQ} placeholder="Search inventory" />
         <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" />
         <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
@@ -1249,6 +1349,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
         <label className="check-control"><input type="checkbox" checked={nonEmptyOnly} onChange={(event) => setNonEmptyOnly(event.target.checked)} /> Non-empty only</label>
       </div>
       <div className="container-list">
+        {selectedCoreMaterial && filteredContainers.length === 0 ? <div className="empty-state"><Package />No containers match the {selectedCoreMaterial.label.toLowerCase()} filter.</div> : null}
         {filteredContainers.map((container) => {
           const quantity = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.quantity), 0);
           return (
@@ -1326,7 +1427,6 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
 function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [query, setQuery] = React.useState("");
   const [tier, setTier] = usePersistedState("research.tier", "All");
-  const currentId = String(data.claim.techResearching ?? "");
   const matching = data.research.filter((item) => {
     if (query && !String(item.name ?? "").toLowerCase().includes(query.toLowerCase())) return false;
     if (tier !== "All" && String(item.tier) !== tier) return false;
@@ -1334,24 +1434,32 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   });
   const researched = matching.filter((item) => item.isResearched);
   const available = matching.filter((item) => !item.isResearched);
-  const current = data.research.find((item) => String(item.id ?? item.entityId) === currentId);
   const tiers = unique(data.research.map((item) => String(item.tier)).filter(Boolean)).sort();
+  const totalResearched = data.research.filter((item) => item.isResearched).length;
+  const totalAvailable = data.research.filter((item) => !item.isResearched).length;
+  const completion = data.research.length ? Math.round((totalResearched / data.research.length) * 100) : 0;
   const card = (item: AnyRecord, done: boolean) => (
-    <div className={`research-card ${done ? "done" : ""} ${String(item.id ?? item.entityId) === currentId ? "current" : ""}`} key={item.entityId ?? item.id ?? item.name}>
+    <div className={`research-card ${done ? "done" : ""}`} key={item.entityId ?? item.id ?? item.name}>
       <span>{done ? <CheckCircle2 /> : <Circle />}</span>
       <strong>{item.name ?? item.techName ?? item.id ?? "Unknown Technology"}<small>{item.suppliesCost ? `${formatNumber(item.suppliesCost)} supplies` : ""}</small></strong>
       {item.tier ? <TierBadge tier={item.tier} /> : null}
     </div>
   );
   return (
-    <div className="panel">
-      <Header title="Research & Technology">{data.research.filter((item) => item.isResearched).length} researched - {data.research.filter((item) => !item.isResearched).length} available to unlock</Header>
-      {current ? <div className="mine-panel"><FlaskConical size={18} /><strong>Researching</strong><span>{current.name} <TierBadge tier={current.tier} /> {formatNumber(current.suppliesCost)} supplies</span></div> : null}
+    <div className="panel research-panel">
+      <div className="research-hero">
+        <Header title="Research & Technology">Technology progression and the next available unlocks</Header>
+        <div className="research-completion"><strong>{completion}%</strong><span>complete</span></div>
+      </div>
+      <div className="research-summary">
+        <div><CheckCircle2 /><strong>{totalResearched}</strong><span>Researched</span></div>
+        <div><Lock /><strong>{totalAvailable}</strong><span>Available</span></div>
+      </div>
       <div className="toolbar-row">
         <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
         <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
       </div>
-      <div className="two-col"><section><h3><CheckCircle2 size={17} /> Researched ({researched.length})</h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available ({available.length})</h3>{available.map((item) => card(item, false))}</section></div>
+      <div className="two-col research-lanes"><section><h3><CheckCircle2 size={17} /> Completed Technology <small>{researched.length}</small></h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available Research <small>{available.length}</small></h3>{available.map((item) => card(item, false))}</section></div>
     </div>
   );
 }
@@ -1553,8 +1661,11 @@ function formatMarketDay(value: string): string {
 }
 
 function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+  type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
   const [regionId, setRegionId] = usePersistedState("public-crafts.region", monitoredRegionId || "All");
+  const [sortKey, setSortKey] = usePersistedState<PublicCraftSortKey>("public-crafts.sort", "remaining");
+  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("public-crafts.direction", "desc");
   const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   React.useEffect(() => {
@@ -1599,13 +1710,45 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { ref
   const regions = unique([...publicJobs.map((job) => String(job.regionId)).filter(Boolean), ...(monitoredRegionId ? [monitoredRegionId] : [])]).sort((a, b) => toNumber(a) - toNumber(b));
   const filteredJobs = publicJobs
     .filter((job) => regionId === "All" || String(job.regionId) === regionId)
-    .sort((a, b) => b.remaining - a.remaining);
+    .sort((a, b) => {
+      const values: Record<PublicCraftSortKey, (job: AnyRecord) => string | number> = {
+        output: (job) => String(job.output ?? ""),
+        tier: (job) => toNumber(job.tier),
+        settlement: (job) => String(job.claimName ?? ""),
+        required: (job) => toNumber(job.minimumLevel),
+        remaining: (job) => toNumber(job.remaining),
+        availableXp: (job) => toNumber(job.availableXp),
+        owner: (job) => String(job.ownerUsername ?? ""),
+      };
+      const left = values[sortKey](a);
+      const right = values[sortKey](b);
+      const result = typeof left === "string" || typeof right === "string"
+        ? String(left).localeCompare(String(right))
+        : Number(left) - Number(right);
+      return sortDir === "asc" ? result : -result;
+    });
   const visibleJobs = filteredJobs.slice(0, 100);
   const skillName = skillId === "All" ? "All Skills" : SKILL_NAMES[toNumber(skillId)] ?? "Selected skill";
+  function changeSort(nextKey: PublicCraftSortKey) {
+    if (nextKey === sortKey) setSortDir((current) => current === "asc" ? "desc" : "asc");
+    else {
+      setSortKey(nextKey);
+      setSortDir(["output", "settlement", "owner"].includes(nextKey) ? "asc" : "desc");
+    }
+  }
+  const columns: Array<[string, PublicCraftSortKey, (job: AnyRecord) => React.ReactNode]> = [
+    ["Craft", "output", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
+    ["Tier", "tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
+    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) })}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
+    ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
+    ["Effort to Craft", "remaining", (job) => formatNumber(job.remaining)],
+    ["XP Available", "availableXp", (job) => formatNumber(job.availableXp)],
+    ["Owner", "owner", (job) => job.ownerUsername ?? "-"],
+  ];
   return (
     <section className="public-craft-finder">
       <div className="split-header">
-        <Header title="Public Crafts">
+        <Header title="Public Craft Finder">
           {state.loading && !state.data ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}
         </Header>
         <div className="toolbar-row">
@@ -1624,15 +1767,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, onShowMap }: { ref
       </div>
       {state.error ? <div className="error">Failed to load public crafts: {state.error}</div> : null}
       {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
-      {visibleJobs.length ? <DataTable rows={visibleJobs} columns={[
-        ["Craft", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
-        ["Tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
-        ["Settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) })}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
-        ["Required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
-        ["Effort to Craft", (job) => formatNumber(job.remaining)],
-        ["XP Available", (job) => formatNumber(job.availableXp)],
-        ["Owner", (job) => job.ownerUsername ?? "-"],
-      ]} /> : null}
+      {visibleJobs.length ? <div className="table-wrap"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
     </section>
   );
 }
@@ -1648,12 +1783,71 @@ function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
   });
 }
 
-function Production({ data, refreshToken, selectedMemberId, onSelectMember, onShowMap }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+function SettlementPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
+  const [state, setState] = React.useState<LoadState<AnyRecord[]>>({ data: null, error: null, loading: true });
+  const memberKey = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean).join(",");
+  React.useEffect(() => {
+    if (!memberKey) {
+      setState({ data: [], error: null, loading: false });
+      return;
+    }
+    const controller = new AbortController();
+    setState((previous) => previous.data ? { ...previous, loading: true, error: null } : { data: null, error: null, loading: true });
+    Promise.allSettled(members.filter((member) => member.playerEntityId).map(async (member) => {
+      const response = await fetch(`${API}/players/${member.playerEntityId}/passive-crafts?status=all`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`passive crafts HTTP ${response.status}`);
+      const payload = await response.json();
+      return summarizePassiveCrafts(payload).map((craft): AnyRecord => ({
+        ...craft,
+        memberName: member.userName ?? member.username ?? "Unknown member",
+      }));
+    })).then((results) => {
+      if (controller.signal.aborted) return;
+      const rows = results
+        .flatMap((result) => result.status === "fulfilled" ? result.value : [])
+        .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+        .slice(0, 18);
+      const failures = results.filter((result) => result.status === "rejected").length;
+      setState({
+        data: rows,
+        error: failures ? `${failures} member${failures === 1 ? "" : "s"} could not be loaded.` : null,
+        loading: false,
+      });
+    });
+    return () => controller.abort();
+  }, [memberKey, refreshToken]);
+  const rows = state.data ?? [];
+  return (
+    <section className="settlement-passive-crafts">
+      <div className="split-header">
+        <Header title="Passive Crafts">
+          Recent passive output reported by settlement members. Quantity combines matching records returned by BitJita.
+        </Header>
+        {state.loading && rows.length ? <span className="refreshing-label">Updating...</span> : null}
+      </div>
+      {state.error ? <p className="legend">{state.error}</p> : null}
+      {state.loading && !state.data ? <p className="legend">Loading passive craft history...</p> : null}
+      {!state.loading && rows.length === 0 ? <div className="empty-state"><Factory />No passive craft history reported for settlement members.</div> : null}
+      {rows.length ? <DataTable rows={rows} columns={[
+        ["Output", (row) => <strong>{row.recipe}</strong>],
+        ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
+        ["Member", (row) => row.memberName],
+        ["Structure", (row) => row.structure],
+        ["Status", (row) => <span className={`status-pill ${row.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(row.status)}</span>],
+        ["Quantity", (row) => formatNumber(row.quantity)],
+        ["Latest", (row) => timeAgo(row.timestamp)],
+      ]} /> : null}
+    </section>
+  );
+}
+
+function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
   const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
   const [toolbeltError, setToolbeltError] = React.useState(false);
+  const toolsForMemberRef = React.useRef<string | null>(null);
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === String(selectedMember.userName ?? selectedMember.username)) ?? null : null;
@@ -1661,12 +1855,17 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, onSh
     if (!selectedMember?.playerEntityId) {
       setToolbeltTools(null);
       setToolbeltError(false);
+      toolsForMemberRef.current = null;
       return;
     }
     const controller = new AbortController();
-    setToolbeltTools(null);
+    const memberId = String(selectedMember.playerEntityId);
+    if (toolsForMemberRef.current !== memberId) {
+      toolsForMemberRef.current = memberId;
+      setToolbeltTools(null);
+    }
     setToolbeltError(false);
-    fetch(`${API}/players/${selectedMember.playerEntityId}/inventories`, { signal: controller.signal })
+    fetch(`${API}/players/${memberId}/inventories`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`inventories HTTP ${response.status}`)))
       .then((payload) => setToolbeltTools(playerToolbeltTools(payload)))
       .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
@@ -1702,15 +1901,18 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, onSh
     const memberLevel = toNumber(selectedCitizen?.skills?.[String(skillId)]);
     const skillOk = memberLevel >= requiredLevel;
     const toolRequirement = job.toolRequirements?.[0];
+    const maxToolCraftTier = (item: AnyRecord) => toNumber(item.tier) + 1;
+    const craftTier = toNumber(toolRequirement?.level);
     const expectedTool = toolRequirement ? TOOL_TAG_BY_TYPE[toNumber(toolRequirement.tool_type)] : null;
     const ownedTool = !toolRequirement ? null : (toolbeltTools ?? []).find((item) => {
-      return toNumber(item.toolType) === toNumber(toolRequirement.tool_type) ||
+      const correctType = toNumber(item.toolType) === toNumber(toolRequirement.tool_type) ||
         String(item.tags ?? item.tag ?? "") === expectedTool;
+      return correctType && maxToolCraftTier(item) >= craftTier;
     });
     if (!skillOk) return { ok: false, text: `Needs ${skillName} Lv ${requiredLevel} (has ${memberLevel})` };
-    if (toolbeltError) return { ok: false, pending: true, text: "Toolbelt unavailable" };
+    if (toolbeltError && toolbeltTools == null) return { ok: false, pending: true, text: "Toolbelt unavailable" };
     if (toolRequirement && toolbeltTools == null) return { ok: false, pending: true, text: "Checking Toolbelt..." };
-    if (toolRequirement && !ownedTool) return { ok: false, text: `Needs ${expectedTool ?? "required tool"} in Toolbelt` };
+    if (toolRequirement && !ownedTool) return { ok: false, text: `Needs T${Math.max(1, craftTier - 1)}+ ${expectedTool ?? "required tool"} in Toolbelt` };
     return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}${ownedTool ? ` - ${ownedTool.name} (${formatNumber(ownedTool.toolPower)} power)` : ""}` };
   }
   const jobs = [...data.crafts].sort((a, b) => {
@@ -1765,7 +1967,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, onSh
         </label>
         <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
       </div>
-      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong>{selectedMember.userName ?? selectedMember.username}</strong><small>Requires skill level and the correct Toolbelt tool. Tool power controls effort per action; tool tier does not block a craft.</small></div> : null}
+      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong>{selectedMember.userName ?? selectedMember.username}</strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
@@ -1809,7 +2011,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, onSh
           );
         })}
       </div>
-      <PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} onShowMap={onShowMap} />
+      <SettlementPassiveCrafts members={data.members} refreshToken={refreshToken} />
     </div>
   );
 }
@@ -1889,8 +2091,11 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     ["Tiles", "numTiles", (r) => formatNumber(r.numTiles)],
   ];
   return (
-    <div className="panel">
-      <Header title={`${data.claim.regionName ?? "Region"} Leaderboard`}>{allRows.length} settlements ranked across the region</Header>
+    <div className="panel region-panel">
+      <div className="region-hero">
+        <Header title={`${data.claim.regionName ?? "Region"} Overview`}>{allRows.length} settlements compared across supplies, treasury, tiles, and tier</Header>
+        {myRankRow ? <div className="region-identity"><Crown size={18} /><div><strong>{myRankRow.name}</strong><span><TierBadge tier={myRankRow.tier} /> Monitored settlement</span></div></div> : null}
+      </div>
       {mine ? (
         <div className="rank-grid">
           <MiniStat icon={<Crown />} label="Tier Rank" value={rank("tier")} />
@@ -1910,16 +2115,20 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
         <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
         <div><strong>Regional Trade Value</strong><span>{formatNumber(tradeSummary.totalValue)}g in selected API window</span></div>
       </div>
-      <div className="bar-panel">
-        <h3>Top Supplies</h3>
-        {chartRows.map((row) => <div className="bar-row" key={row.entityId}><span>{row.name}</span><div><i style={{ width: `${(toNumber(row.supplies) / maxSupplies) * 100}%` }} className={String(row.entityId) === String(data.claim.entityId) ? "mine" : ""} /></div><b>{formatNumber(row.supplies)}</b></div>)}
-      </div>
-      {myRankRow ? <div className="mine-panel"><Crown size={18} /><strong>{myRankRow.name}</strong><span><TierBadge tier={myRankRow.tier} /> {formatNumber(myRankRow.supplies)} supplies - {formatNumber(myRankRow.treasury)}g treasury - {formatNumber(myRankRow.numTiles)} tiles</span></div> : null}
-      {nearbyRows.length ? (
-        <div className="highlight-grid">
-          {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span>{getOwnerName(row)} <TierBadge tier={row.tier} /> {formatNumber(row.supplies)} supplies</span></div>)}
+      <div className="region-context">
+        <div className="bar-panel">
+          <h3>Supply Leaders</h3>
+          {chartRows.map((row) => <div className="bar-row" key={row.entityId}><span>{row.name}</span><div><i style={{ width: `${(toNumber(row.supplies) / maxSupplies) * 100}%` }} className={String(row.entityId) === String(data.claim.entityId) ? "mine" : ""} /></div><b>{formatNumber(row.supplies)}</b></div>)}
         </div>
-      ) : null}
+        {nearbyRows.length ? (
+          <section className="nearby-panel">
+            <h3><MapPin size={17} /> Close Settlements</h3>
+            <p>These settlements are geographically closest to our monitored settlement.</p>
+            {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span>{getOwnerName(row)} <TierBadge tier={row.tier} /></span><small>{formatNumber(row.supplies)} supplies</small></div>)}
+          </section>
+        ) : null}
+      </div>
+      <div className="table-heading"><h3>Regional Rankings</h3><span>Click a column heading to sort</span></div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -2145,17 +2354,76 @@ function applyTheme(theme: Partial<typeof DEFAULT_THEME>) {
   document.documentElement.style.setProperty("--gold-dim", `${theme.gold ?? DEFAULT_THEME.gold}2e`);
 }
 
+function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss: (id: string) => void }) {
+  return (
+    <section className="toast-stack" aria-live="polite" aria-label="Notifications">
+      {notices.map((notice) => (
+        <article className={`toast ${notice.kind}`} key={notice.id}>
+          <div className="toast-icon">{notice.kind === "market" ? <ShoppingCart size={17} /> : <Factory size={17} />}</div>
+          <div>
+            <strong>{notice.title}</strong>
+            <p>{notice.body}</p>
+          </div>
+          <button onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification"><X size={14} /></button>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function HelpCenter({ version, onClose }: { version: string; onClose: () => void }) {
+  React.useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <CircleHelp size={19} />
+            <h2 id="help-title">Claim Monitor Help</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close help"><X size={16} /></button>
+        </header>
+        <div className="beta-notice"><strong>Beta - Work in progress</strong><span>This application is actively being developed. Data display and features may change as accuracy and coverage improve.</span></div>
+        <p className="help-intro">Track settlement operations, production opportunities, member professions and skills, storage, regional context, and market history using public BitCraft data.</p>
+        <div className="help-links">
+          <a href={`${GITHUB_REPOSITORY}#readme`} target="_blank" rel="noreferrer">
+            <strong>Application Guide</strong>
+            <span>Read the full feature and deployment overview</span>
+            <ExternalLink size={14} />
+          </a>
+          <a href={`${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">
+            <strong>Version {version}</strong>
+            <span>View the latest changes and release notes</span>
+            <ExternalLink size={14} />
+          </a>
+          <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer">
+            <strong>Report Bugs & Request Features</strong>
+            <span>Found an issue or have an idea? Let us know on GitHub Issues.</span>
+            <ExternalLink size={14} />
+          </a>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function TablePanel({ title, subtitle, rows, columns }: { title: string; subtitle: string; rows: AnyRecord[]; columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]> }) {
   return <div className="panel"><Header title={title}>{subtitle}</Header><DataTable rows={rows} columns={columns} /></div>;
 }
 
-function DataTable({ rows, columns }: { rows: AnyRecord[]; columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]> }) {
+function DataTable({ rows, columns, onRowClick, rowClassName }: { rows: AnyRecord[]; columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]>; onRowClick?: (row: AnyRecord) => void; rowClassName?: (row: AnyRecord) => string }) {
   return (
     <div className="table-wrap">
       <table>
         <thead><tr>{columns.map(([label]) => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>
-          {rows.length ? rows.map((row, index) => <tr key={row.entityId ?? row.id ?? index}>{columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
+          {rows.length ? rows.map((row, index) => <tr className={rowClassName?.(row)} key={row.entityId ?? row.id ?? index} onClick={onRowClick ? () => onRowClick(row) : undefined}>{columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -2324,6 +2592,12 @@ function App() {
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
   const [mapFocus, setMapFocus] = React.useState<MapFocus>(null);
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
+  const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const toastTimersRef = React.useRef<Map<string, number>>(new Map());
+  const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
+  const activityNoticeClaimRef = React.useRef(claimId);
+  const craftQueueRef = React.useRef<{ claimId: string; jobs: Map<string, AnyRecord> } | null>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
   const data = React.useMemo(() => {
     const normalized = normalizeData(state.data);
@@ -2331,6 +2605,25 @@ function App() {
   }, [state.data]);
   const localHistory = useLocalHistory(historyRefreshToken, claimId);
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
+  const dismissToast = React.useCallback((id: string) => {
+    const timer = toastTimersRef.current.get(id);
+    if (timer != null) window.clearTimeout(timer);
+    toastTimersRef.current.delete(id);
+    setToasts((current) => current.filter((notice) => notice.id !== id));
+  }, []);
+  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((current) => [...current, { id, title, body, kind }].slice(-4));
+    const timer = window.setTimeout(() => {
+      toastTimersRef.current.delete(id);
+      setToasts((current) => current.filter((notice) => notice.id !== id));
+    }, 7000);
+    toastTimersRef.current.set(id, timer);
+  }, []);
+  React.useEffect(() => () => {
+    for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
+    toastTimersRef.current.clear();
+  }, []);
   React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
@@ -2359,6 +2652,46 @@ function App() {
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
   }, [selectedMemberId, selectedProductionMember, state.data]);
+  React.useEffect(() => {
+    if (activityNoticeClaimRef.current !== claimId) {
+      activityNoticeClaimRef.current = claimId;
+      activityNoticeIdsRef.current = null;
+    }
+    if (!localHistory.refreshToken) return;
+    const knownIds = localHistory.activity.map((event) => String(event.id));
+    if (activityNoticeIdsRef.current == null) {
+      activityNoticeIdsRef.current = new Set(knownIds);
+      return;
+    }
+    const notable = new Set(["market_new_listing", "market_sale", "market_sale_confirmed"]);
+    const unseen = localHistory.activity
+      .filter((event) => !activityNoticeIdsRef.current?.has(String(event.id)) && notable.has(String(event.event_type)))
+      .slice(0, 3)
+      .reverse();
+    for (const id of knownIds) activityNoticeIdsRef.current.add(id);
+    for (const event of unseen) {
+      const isListing = event.event_type === "market_new_listing";
+      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market");
+    }
+  }, [claimId, localHistory.activity, localHistory.refreshToken, pushToast]);
+  React.useEffect(() => {
+    if (!state.data) return;
+    const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
+    const previous = craftQueueRef.current;
+    if (!previous || previous.claimId !== claimId) {
+      craftQueueRef.current = { claimId, jobs: current };
+      return;
+    }
+    const started = [...current.entries()].filter(([id]) => !previous.jobs.has(id)).slice(0, 2);
+    const completed = [...previous.jobs.entries()].filter(([id]) => !current.has(id)).slice(0, 2);
+    for (const [, job] of started) {
+      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
+    }
+    for (const [, job] of completed) {
+      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
+    }
+    craftQueueRef.current = { claimId, jobs: current };
+  }, [claimId, data.crafts, data.raw?.crafts, pushToast, state.data]);
   React.useEffect(() => {
     if (!state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -2389,7 +2722,8 @@ function App() {
     overview: <Overview data={data} onNavigate={setActive} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} />,
+    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
+    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} onShowMap={(focus) => { setMapFocus(focus); setActive("map"); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
@@ -2418,13 +2752,16 @@ function App() {
         <footer className="app-footer">
           <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
           <div>
-            <a href="https://github.com/Red463/bitcraft-claim-monitor" target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
-            <a href="https://github.com/Red463/bitcraft-claim-monitor/issues" target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
+            <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
+            <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>
             <a href="https://bitcraftmap.com/" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitCraft Map</a>
           </div>
         </footer>
       </main>
+      <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
+      <ToastStack notices={toasts} onDismiss={dismissToast} />
+      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} /> : null}
     </div>
   );
 }
