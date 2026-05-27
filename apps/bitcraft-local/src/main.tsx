@@ -3772,8 +3772,10 @@ function App() {
         </div>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
           <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
-          <span>{state.loading && state.data ? "Refreshing" : "Updated"}</span>
-          <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
+          <span>
+            <small>{state.loading && state.data ? "Refreshing" : "Last refresh"}</small>
+            <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
+          </span>
         </div>
       </aside>
       <main ref={mainRef}>
