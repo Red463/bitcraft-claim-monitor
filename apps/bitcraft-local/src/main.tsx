@@ -356,16 +356,17 @@ function equipmentSlots(payload: AnyRecord | null | undefined): AnyRecord[] {
 
 function equipmentPresets(payload: AnyRecord | null | undefined, fallbackSlots: AnyRecord[]): AnyRecord[] {
   const presets = Array.isArray(payload?.presets) ? payload.presets : [];
-  const byIndex = new Map<number, AnyRecord>();
-  presets.forEach((preset: AnyRecord, index: number) => byIndex.set(toNumber(preset.index) || index + 1, preset));
+  const activePreset = presets.find((preset: AnyRecord) => preset.active);
+  const alternatePreset = presets.find((preset: AnyRecord) => !preset.active);
+  const currentSlots = fallbackSlots.length ? fallbackSlots : activePreset ? equipmentSlots(activePreset) : [];
   return [1, 2].map((index) => {
-    const preset = byIndex.get(index);
-    const slots = preset ? equipmentSlots(preset) : index === 1 ? fallbackSlots : [];
+    const preset = index === 2 ? alternatePreset : activePreset;
+    const slots = index === 1 ? currentSlots : preset ? equipmentSlots(preset) : [];
     return {
-      id: String(preset?.entityId ?? preset?.id ?? `preset-${index}`),
+      id: String(index === 1 ? "current-equipment" : preset?.entityId ?? preset?.id ?? `preset-${index}`),
       label: `Preset ${index}`,
-      active: Boolean(preset?.active) || (!presets.length && index === 1 && fallbackSlots.length > 0),
-      reported: Boolean(preset),
+      active: index === 1,
+      reported: index === 1 ? currentSlots.length > 0 : Boolean(preset),
       slots,
     };
   });
