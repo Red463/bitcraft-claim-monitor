@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.4-beta.1 - 2026-05-27
+
+### Changed
+
+- Storage movements are now collected by the background server poller and persisted in Activity history rather than fetched from every browser viewing Activity.
+- Activity loads its locally stored feed every 10 seconds; its member selector roster updates separately without blocking timeline display.
+- Admin endpoint diagnostics now identify response times for each settlement storage container, with storage sync status visible in Collection Status.
+
 ## 0.6.3-beta.1 - 2026-05-27
 
 ### Changed

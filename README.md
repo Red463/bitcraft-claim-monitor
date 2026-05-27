@@ -180,6 +180,7 @@ The configured board URL can be changed through Admin.
 - Filters for storage, treasury, supplies, market, members, and structures.
 - Member filter for attributed storage and market actions; settlement-wide system events are shown only in the all-members view.
 - Optional compact view to reduce repeated low-signal entries.
+- Storage history is collected by the server in the background and read locally by browsers, avoiding slow container-log requests during page refreshes; the member filter roster is loaded separately without blocking the timeline.
 
 ### Admin
 
@@ -192,7 +193,7 @@ Admin features:
 - Choose the default opening page, Public Craft Finder region, refresh interval, notification categories and snapshot retention window.
 - Customize the application colour theme with live preview and presets.
 - Upload a logo shown in the app and a favicon shown in the browser tab.
-- Review server collection health and run public BitJita endpoint diagnostics.
+- Review server collection health and run public BitJita endpoint diagnostics, including per-container Activity storage timing.
 - Inspect, search and export local SQLite tables during testing.
 - Create and download database backups, and prune expired snapshots without deleting market/activity history.
 - Manage multiple administrator accounts, sessions and passwords.
@@ -253,7 +254,7 @@ Production default configured by the deployment service:
 /var/lib/bitcraft-claim-monitor/bitcraft-local.sqlite
 ```
 
-In production, the server polls and records snapshots every 30 seconds even when nobody has the website open.
+The server polls and records snapshots and settlement storage activity every 30 seconds even when nobody has the website open. Browser views read that persisted Activity history locally rather than waiting for every storage API request.
 Uploaded branding is stored under `branding/` and administrator-created SQLite backups under `backups/` inside the same data directory.
 
 ## Tech Stack

@@ -12,10 +12,10 @@ const distDir = path.join(root, "dist");
 const isProduction = process.env.NODE_ENV === "production";
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
-const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING === "true" || (isProduction && process.env.ENABLE_SERVER_POLLING !== "false");
+const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.6.3-beta.1";
+const appVersion = "0.6.4-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
@@ -149,8 +149,10 @@ ensureColumn("market_events", "owner_entity_id", "TEXT");
 ensureColumn("market_events", "item_id", "TEXT");
 ensureColumn("market_events", "item_type", "TEXT");
 ensureColumn("market_events", "trade_id", "TEXT");
+ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
 
 const defaultClaimId = "1369094286777412590";
 const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
@@ -229,6 +231,10 @@ const statements = {
   insertActivity: db.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
     VALUES (?, ?, ?, ?, ?)
+  `),
+  insertSourcedActivity: db.prepare(`
+    INSERT OR IGNORE INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
+    VALUES (?, ?, ?, ?, ?, ?)
   `),
   getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
   upsertSetting: db.prepare(`
@@ -313,7 +319,7 @@ function getSettings() {
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
-    browserSnapshotsEnabled: !isProduction,
+    browserSnapshotsEnabled: false,
   };
 }
 
@@ -324,6 +330,11 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
+  storageLastAttemptAt: null,
+  storageLastSuccessAt: null,
+  storageLastError: null,
+  storageRequests: 0,
+  storageInserted: 0,
 };
 
 function validSyncUrl(value) {
@@ -536,6 +547,16 @@ function tableQuery(name, params, exporting = false) {
 
 function addActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
   statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
+}
+
+const deployableStorageName = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
+
+function storageContainerName(building) {
+  return String(building?.buildingNickname ?? "").trim() || building?.buildingName || building?.name || "Storage";
+}
+
+function isDeployableStorage(building) {
+  return deployableStorageName.test(String(building?.buildingName ?? building?.name ?? ""));
 }
 
 function signedChange(after, before, suffix = "") {
@@ -904,6 +925,56 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   return results;
 }
 
+async function collectStorageActivity(claimId, inventories) {
+  const buildings = unwrap(inventories, "buildings", []).filter((building) => building.entityId && !isDeployableStorage(building));
+  const failures = [];
+  const responses = await mapWithConcurrency(buildings, 4, async (building) => {
+    try {
+      return { building, payload: await fetchBitjita(`/logs/storage?buildingEntityId=${building.entityId}&limit=40`) };
+    } catch (error) {
+      failures.push(`${storageContainerName(building)}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  });
+  let inserted = 0;
+  db.exec("BEGIN");
+  try {
+    for (const result of responses.filter(Boolean)) {
+      const items = [...(result.payload.items ?? []), ...(result.payload.cargos ?? [])];
+      const catalog = new Map(items.map((item) => [String(item.id), item]));
+      const containerName = storageContainerName(result.building);
+      for (const log of result.payload.logs ?? []) {
+        const event = log.data ?? {};
+        const eventAction = String(event.type ?? "storage").replaceAll("_", " ").toLowerCase();
+        const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
+        const item = catalog.get(String(event.item_id));
+        const actorName = String(log.subjectName ?? "Member");
+        const summary = `${actorName} ${action} ${toNumber(event.quantity).toLocaleString()} ${item?.name ?? `item #${event.item_id ?? "?"}`}`;
+        const metadata = {
+          actorName,
+          containerName,
+          buildingId: String(result.building.entityId),
+          itemName: item?.name ?? null,
+          quantity: toNumber(event.quantity),
+        };
+        inserted += Number(statements.insertSourcedActivity.run(
+          claimId,
+          "storage",
+          summary,
+          log.timestamp ?? new Date().toISOString(),
+          JSON.stringify(metadata),
+          `storage:${result.building.entityId}:${log.id ?? `${log.timestamp}:${event.type}:${event.item_id}:${event.quantity}:${actorName}`}`,
+        ).changes);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { requested: buildings.length, inserted, failures };
+}
+
 async function fetchCachedClaimDetail(claimId) {
   const cached = claimDetailCache.get(String(claimId));
   if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -950,10 +1021,11 @@ async function collectServerSnapshot(force = false) {
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
-    const [claimPayload, membersPayload, buildingsPayload, market] = await Promise.all([
+    const [claimPayload, membersPayload, buildingsPayload, inventoriesPayload, market] = await Promise.all([
       fetchBitjita(`/claims/${claimId}`),
       fetchBitjita(`/claims/${claimId}/members`),
       fetchBitjita(`/claims/${claimId}/buildings`),
+      fetchBitjita(`/claims/${claimId}/inventories`),
       fetchAllClaimListings(claimId),
     ]);
     const claim = claimPayload.claim ?? claimPayload;
@@ -967,6 +1039,12 @@ async function collectServerSnapshot(force = false) {
       market,
       source: "server_poll",
     });
+    pollStatus.storageLastAttemptAt = new Date().toISOString();
+    const storageResult = await collectStorageActivity(claimId, inventoriesPayload);
+    pollStatus.storageRequests = storageResult.requested;
+    pollStatus.storageInserted = storageResult.inserted;
+    pollStatus.storageLastError = storageResult.failures.length ? storageResult.failures.join("; ") : null;
+    pollStatus.storageLastSuccessAt = new Date().toISOString();
     await importMemberSellTrades(claimId, members);
     pollStatus.lastSuccessAt = new Date().toISOString();
     pollStatus.lastError = null;
@@ -1083,15 +1161,20 @@ async function apiDiagnostics() {
     ["Market", `/claims/${claimId}/market/listings?limit=5`],
     ["Production", `/crafts?claimEntityId=${claimId}&completed=false`],
   ];
-  return Promise.all(checks.map(async ([label, endpoint]) => {
+  const timedCheck = async (label, endpoint) => {
     const started = Date.now();
     try {
-      await fetchBitjita(endpoint);
-      return { label, endpoint, ok: true, durationMs: Date.now() - started, checkedAt: new Date().toISOString() };
+      const value = await fetchBitjita(endpoint);
+      return { result: { label, endpoint, ok: true, durationMs: Date.now() - started, checkedAt: new Date().toISOString() }, value };
     } catch (error) {
-      return { label, endpoint, ok: false, durationMs: Date.now() - started, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
+      return { result: { label, endpoint, ok: false, durationMs: Date.now() - started, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }, value: null };
     }
-  }));
+  };
+  const core = await Promise.all(checks.map(([label, endpoint]) => timedCheck(label, endpoint)));
+  const inventories = core.find((check) => check.result.label === "Inventory")?.value;
+  const storageBuildings = unwrap(inventories, "buildings", []).filter((building) => building.entityId && !isDeployableStorage(building));
+  const storage = await mapWithConcurrency(storageBuildings, 4, (building) => timedCheck(`Storage: ${storageContainerName(building)}`, `/logs/storage?buildingEntityId=${building.entityId}&limit=40`));
+  return [...core, ...storage].map((check) => check.result);
 }
 
 function csvValue(value) {
@@ -1502,9 +1585,10 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
       const claimId = url.searchParams.get("claimId") ?? "";
-      const limit = Number(url.searchParams.get("limit") ?? 200);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 500), 1), 2000);
       const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit);
-      return send(res, 200, { events });
+      const total = toNumber(db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE claim_id = ?").get(claimId)?.count);
+      return send(res, 200, { events, total });
     }
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });

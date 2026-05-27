@@ -67,7 +67,7 @@ const APP_VERSION = packageJson.version;
 type AnyRecord = Record<string, any>;
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
-type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; error: string | null; refreshToken: number };
+type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; error: string | null; refreshToken: number };
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
@@ -313,8 +313,9 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
+        const requestedEndpoints: Record<string, string> = activePanel === "activity" ? {} : endpointMap(claimId);
         const entries = await Promise.all(
-          Object.entries(endpointMap(claimId)).map(async ([key, path]) => {
+          Object.entries(requestedEndpoints).map(async ([key, path]) => {
             return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
           }),
         );
@@ -322,21 +323,15 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
-        const settlementStorageBuildings: AnyRecord[] = raw.inventories?.buildings ?? [];
-        const storageBuildingIds = settlementStorageBuildings
-          .filter((building) => !isDeployableStorage(building))
-          .map((building) => String(building.entityId ?? ""))
-          .filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsStorageDetail = activePanel === "activity";
+        const readsPlayerDetail = activePanel !== "activity";
         const readsProductionDetail = activePanel === "production";
         const readsRegionDetail = activePanel === "overview" || activePanel === "empire";
-        const [playerResults, storageResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
-          Promise.allSettled(memberIds.map(async (id) => {
+        const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
+          readsPlayerDetail ? Promise.allSettled(memberIds.map(async (id) => {
             const payload = await request(`/players/${id}`);
             return payload.player ?? payload;
-          })),
-          readsStorageDetail ? Promise.allSettled(storageBuildingIds.map((id) => request(`/logs/storage?buildingEntityId=${id}&limit=40`))) : Promise.resolve([]),
+          })) : Promise.resolve([]),
           readsProductionDetail ? Promise.allSettled(crafts.filter((craft) => craft.entityId).map(async (craft) => ({
             craftId: String(craft.entityId),
             payload: await request(`/crafts/${craft.entityId}/contributions`),
@@ -353,9 +348,6 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => normalizePlayer(result.value));
         raw.marketApi = { histories: [], trades: [] };
-        raw.storageApi = storageResults
-          .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
-          .map((result) => result.value);
         raw.contributions = Object.fromEntries(contributionResults
           .filter((result): result is PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }> => result.status === "fulfilled")
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
@@ -376,20 +368,20 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
 }
 
 function useLocalHistory(refreshToken: number, claimId: string): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], error: null, refreshToken: 0 });
+  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, error: null, refreshToken: 0 });
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
       try {
         const [marketRes, activityRes] = await Promise.all([
           fetch(`${LOCAL_API}/market/history?claimId=${claimId}&limit=120`, { signal: controller.signal }),
-          fetch(`${LOCAL_API}/activity?claimId=${claimId}&limit=250`, { signal: controller.signal }),
+          fetch(`${LOCAL_API}/activity?claimId=${claimId}&limit=2000`, { signal: controller.signal }),
         ]);
         if (!marketRes.ok) throw new Error(`market history HTTP ${marketRes.status}`);
         if (!activityRes.ok) throw new Error(`activity history HTTP ${activityRes.status}`);
         const market = await marketRes.json();
         const activity = await activityRes.json();
-        setState((prev) => ({ market, activity: activity.events ?? [], error: null, refreshToken: prev.refreshToken + 1 }));
+        setState((prev) => ({ market, activity: activity.events ?? [], activityTotal: toNumber(activity.total ?? activity.events?.length), error: null, refreshToken: prev.refreshToken + 1 }));
       } catch (err) {
         if (!controller.signal.aborted) {
           setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
@@ -397,7 +389,11 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
       }
     }
     load();
-    return () => controller.abort();
+    const timer = window.setInterval(load, 10000);
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+    };
   }, [claimId, refreshToken]);
   return state;
 }
@@ -558,10 +554,9 @@ function normalizeData(raw: AnyRecord | null) {
   const layout = raw?.layout ?? {};
   const contributions = raw?.contributions ?? {};
   const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
-  const storageApi = raw?.storageApi ?? [];
   const regionStatus = unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []);
   const tradeVolume = raw?.tradeVolume ?? {};
-  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, contributions, marketApi, storageApi, regionStatus, tradeVolume };
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, contributions, marketApi, regionStatus, tradeVolume };
 }
 
 function Header({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -2617,53 +2612,23 @@ function activitySummary(item: AnyRecord): string {
   return item.summary ?? "-";
 }
 
-function activityActorName(item: AnyRecord): string {
-  if (item.actor_name) return String(item.actor_name);
-  if (!String(item.event_type ?? "").includes("market")) return "";
+function activityMetadata(item: AnyRecord): AnyRecord {
   try {
-    const metadata = JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
-    return String(metadata.ownerUsername ?? metadata.owner ?? metadata.sellerUsername ?? "");
+    return JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
   } catch {
-    return "";
+    return {};
   }
 }
 
-const DEPLOYABLE_STORAGE_NAME = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
-
-function isDeployableStorage(building: AnyRecord | null | undefined): boolean {
-  return DEPLOYABLE_STORAGE_NAME.test(String(building?.buildingName ?? building?.name ?? ""));
+function activityActorName(item: AnyRecord): string {
+  const metadata = activityMetadata(item);
+  if (metadata.actorName) return String(metadata.actorName);
+  if (!String(item.event_type ?? "").includes("market")) return "";
+  return String(metadata.ownerUsername ?? metadata.owner ?? metadata.sellerUsername ?? "");
 }
 
-function storageActivity(storageApi: AnyRecord[], inventories: AnyRecord): AnyRecord[] {
-  const storageBuildings = new Map<string, AnyRecord>(
-    (inventories.buildings ?? [])
-      .filter((building: AnyRecord) => !isDeployableStorage(building))
-      .map((building: AnyRecord): [string, AnyRecord] => [String(building.entityId ?? ""), building])
-      .filter(([id]: [string, AnyRecord]) => Boolean(id)),
-  );
-  const uniqueLogs = new Map<string, AnyRecord>();
-  for (const payload of storageApi) {
-    const catalogs = new Map<string, AnyRecord>([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
-    for (const log of payload.logs ?? []) {
-      const buildingId = String(log.buildingEntityId ?? log.building?.entityId ?? "");
-      const building = storageBuildings.get(buildingId);
-      if (!building || isDeployableStorage(log.building)) continue;
-      const event = log.data ?? {};
-      const item = catalogs.get(String(event.item_id));
-      const eventAction = String(event.type ?? "storage").replaceAll("_", " ").toLowerCase();
-      const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
-      const containerName = String(building.buildingNickname ?? "").trim() || building.buildingName || log.building?.buildingName || "Storage";
-      uniqueLogs.set(String(log.id), {
-        id: `storage-${log.id}`,
-        event_type: "storage",
-        occurred_at: log.timestamp,
-        summary: `${log.subjectName ?? "Member"} ${action} ${formatNumber(event.quantity)} ${item?.name ?? `item #${event.item_id ?? "?"}`}`,
-        actor_name: String(log.subjectName ?? "Member"),
-        container_name: containerName,
-      });
-    }
-  }
-  return [...uniqueLogs.values()].sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
+function activityContainerName(item: AnyRecord): string {
+  return String(activityMetadata(item).containerName ?? "");
 }
 
 function activityStyle(item: AnyRecord): { label: string; tone: string; icon: React.ReactNode } {
@@ -2679,12 +2644,20 @@ function activityStyle(item: AnyRecord): { label: string; tone: string; icon: Re
   }
 }
 
-function ActivityPanel({ activity, storageApi, inventories, members, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; inventories: AnyRecord; members: AnyRecord[]; error: string | null }) {
+function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [compact, setCompact] = usePersistedState("activity.compact", true);
-  const storage = storageActivity(storageApi, inventories);
-  const combined = [...activity, ...storage].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
+  const [members, setMembers] = React.useState<AnyRecord[]>([]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/claims/${claimId}/members`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`members HTTP ${response.status}`)))
+      .then((payload) => setMembers(unwrap<AnyRecord[]>(payload, "members", [])))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [claimId]);
+  const combined = [...activity].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
   const memberOptions = unique(members.map((member) => String(member.userName ?? member.username ?? "")).filter(Boolean)).sort((a, b) => a.localeCompare(b));
   React.useEffect(() => {
     if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
@@ -2702,9 +2675,9 @@ function ActivityPanel({ activity, storageApi, inventories, members, error }: { 
       <Header title="Activity">A live audit trail of settlement updates and movements through owned storage.</Header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
       <div className="activity-overview">
-        <article><Activity /><span>Total events</span><strong>{formatNumber(memberActivity.length)}</strong><small>{memberFilter === "All" ? "Saved history and API movements" : `Attributed to ${memberFilter}`}</small></article>
-        <article><Box /><span>Storage moves</span><strong>{formatNumber(storageMoves)}</strong><small>Settlement containers only</small></article>
-        <article><Building2 /><span>{memberFilter === "All" ? "Settlement changes" : "System changes"}</span><strong>{formatNumber(settlementChanges)}</strong><small>{memberFilter === "All" ? "Recorded monitor events" : "Not attributed to members"}</small></article>
+        <article><Activity /><span>{memberFilter === "All" ? "Total history" : "Recent member events"}</span><strong>{formatNumber(memberFilter === "All" ? activityTotal : memberActivity.length)}</strong><small>{memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`}</small></article>
+        <article><Box /><span>Recent storage moves</span><strong>{formatNumber(storageMoves)}</strong><small>Settlement containers only</small></article>
+        <article><Building2 /><span>{memberFilter === "All" ? "Recent system changes" : "System changes"}</span><strong>{formatNumber(settlementChanges)}</strong><small>{memberFilter === "All" ? "Within loaded history" : "Not attributed to members"}</small></article>
         <article><RefreshCw /><span>Latest event</span><strong>{latestEvent ? timeAgo(latestEvent) : "-"}</strong><small>{latestEvent ? dateLabel(latestEvent) : "Awaiting activity"}</small></article>
       </div>
       <section className="activity-controls" aria-label="Activity filters">
@@ -2727,7 +2700,7 @@ function ActivityPanel({ activity, storageApi, inventories, members, error }: { 
         </div>
         <div className="activity-options">
           <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Combine repeated treasury changes</label>
-          <span>Showing {filtered.length} of {memberActivity.length} {scopeLabel} events</span>
+          <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>
         </div>
       </section>
       <div className="activity-timeline">
@@ -2739,7 +2712,7 @@ function ActivityPanel({ activity, storageApi, inventories, members, error }: { 
               <div className="activity-event-body">
                 <header><span>{display.label}</span><time>{timeAgo(item.occurred_at ?? item.occurredAt)}</time></header>
                 <p>{activitySummary(item)}</p>
-                {item.container_name ? <small><Box size={12} /> {item.container_name}</small> : null}
+                {activityContainerName(item) ? <small><Box size={12} /> {activityContainerName(item)}</small> : null}
               </div>
               <time className="activity-event-date">{dateLabel(item.occurred_at ?? item.occurredAt)}</time>
             </article>
@@ -3151,13 +3124,15 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <div className="status-detail">
               <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
+              <Info label="Storage activity sync" value={status?.polling?.storageLastSuccessAt ? `${dateLabel(status.polling.storageLastSuccessAt)} - ${formatNumber(status.polling.storageInserted)} new events from ${formatNumber(status.polling.storageRequests)} containers` : "Not collected yet"} />
+              <Info label="Storage sync error" value={status?.polling?.storageLastError ?? "None"} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
               <Info label="Storage" value={status?.storageLabel ?? "-"} />
             </div>
           </section>
           <section className="form-card">
             <div className="split-header"><h3><Activity size={17} /> BitJita Endpoint Check</h3><button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button></div>
-            {diagnostics.length ? <div className="diagnostics">{diagnostics.map((check) => <div key={check.label} className={check.ok ? "ok" : "fail"}><strong>{check.label}</strong><span>{check.ok ? `${check.durationMs} ms` : check.error}</span></div>)}</div> : <p className="legend">Run checks to confirm which public data sources are responding.</p>}
+            {diagnostics.length ? <div className="diagnostics">{[...diagnostics].sort((a, b) => toNumber(b.durationMs) - toNumber(a.durationMs)).map((check) => <div key={check.label} className={check.ok ? "ok" : "fail"}><strong>{check.label}</strong><span>{check.ok ? `${check.durationMs} ms` : check.error}</span></div>)}</div> : <p className="legend">Run checks to time public data sources, including each settlement storage container used for Activity history.</p>}
           </section>
         </div>
       ) : null}
@@ -3282,7 +3257,7 @@ function App() {
     const normalized = normalizeData(state.data);
     return { ...normalized, raw: state.data };
   }, [state.data]);
-  const localHistory = useLocalHistory(historyRefreshToken, claimId);
+  const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId);
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   const dismissToast = React.useCallback((id: string) => {
     const timer = toastTimersRef.current.get(id);
@@ -3471,7 +3446,7 @@ function App() {
     empire: <Region data={data} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
-    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} inventories={data.inventories} members={data.members} error={localHistory.error} />,
+    activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 

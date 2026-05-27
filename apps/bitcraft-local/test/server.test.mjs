@@ -65,6 +65,11 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === `/api/claims/${claimId}`) return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
+    if (url.pathname === `/api/claims/${claimId}/inventories`) return json(res, { buildings: [{ entityId: "storage-1", buildingName: "Basic Storage Chest", buildingNickname: "Ingots" }] });
+    if (url.pathname === "/api/logs/storage") return json(res, {
+      items: [{ id: "item-1", name: "Bronze Ingot" }],
+      logs: [{ id: "log-1", timestamp: "2026-05-20T12:05:00.000Z", subjectName: "Tester", data: { type: "deposit", item_id: "item-1", quantity: 12 } }],
+    });
     if (url.pathname === `/api/claims/${claimId}/market/listings`) {
       const page = Number(url.searchParams.get("page"));
       requestedPages.push(page);
@@ -133,6 +138,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(baselineHistory.totals.confirmedSales, 1);
   assert.equal(baselineHistory.totals.confirmedUnits, 5);
   assert.equal(baselineHistory.totals.trackedValue, 50);
+  const baselineActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  const storageEvent = baselineActivity.events.find((event) => event.event_type === "storage");
+  assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot");
+  assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
+  assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   trades = [
@@ -157,6 +167,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(history.sales.length, 3);
   assert.equal(history.topItems.some((item) => item.itemName === "Leather" && item.unitsSold === 5), true);
   assert.equal(history.events.some((event) => event.event_type === "partial_sale"), true);
+  const secondActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  assert.equal(secondActivity.events.filter((event) => event.event_type === "storage").length, 1);
 
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
   const thirdPoll = await fetch(`${origin}/api/local/admin/poll`, {
