@@ -341,6 +341,40 @@ function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[]
   return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
 }
 
+function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
+  const raw = String(item?.iconAssetName ?? "").replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!raw || raw === "\uFFEE") return null;
+  const path = raw.startsWith("Items/") ? `GeneratedIcons/${raw}` : raw;
+  return `https://bitjita.com/${path}.webp`;
+}
+
+function equipmentSlots(payload: AnyRecord | null | undefined): AnyRecord[] {
+  if (Array.isArray(payload?.equipmentSlots)) return payload.equipmentSlots;
+  if (Array.isArray(payload?.equipment)) return payload.equipment;
+  return [];
+}
+
+function equipmentPresets(payload: AnyRecord | null | undefined, fallbackSlots: AnyRecord[]): AnyRecord[] {
+  const presets = Array.isArray(payload?.presets) ? payload.presets : [];
+  const byIndex = new Map<number, AnyRecord>();
+  presets.forEach((preset: AnyRecord, index: number) => byIndex.set(toNumber(preset.index) || index + 1, preset));
+  return [1, 2].map((index) => {
+    const preset = byIndex.get(index);
+    const slots = preset ? equipmentSlots(preset) : index === 1 ? fallbackSlots : [];
+    return {
+      id: String(preset?.entityId ?? preset?.id ?? `preset-${index}`),
+      label: `Preset ${index}`,
+      active: Boolean(preset?.active) || (!presets.length && index === 1 && fallbackSlots.length > 0),
+      reported: Boolean(preset),
+      slots,
+    };
+  });
+}
+
+function equippedCount(slots: AnyRecord[]): number {
+  return slots.filter((slot) => slot.item).length;
+}
+
 function craftDisplayName(job: AnyRecord, craftsPayload?: AnyRecord): string {
   const itemId = String(job.craftedItem?.[0]?.item_id ?? "");
   const item = [...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].find((candidate: AnyRecord) => String(candidate.id) === itemId);
@@ -799,6 +833,41 @@ function TierBadge({ tier }: { tier: unknown }) {
   return <span className={`tier-badge tier-${value}`}>T{value}</span>;
 }
 
+function ItemIcon({ item }: { item: AnyRecord }) {
+  const url = bitjitaIconUrl(item);
+  const [failed, setFailed] = React.useState(false);
+  const fallback = String(item.name ?? "?").trim().slice(0, 2).toUpperCase();
+  React.useEffect(() => setFailed(false), [url]);
+  return (
+    <span className="item-thumb" aria-hidden="true">
+      {url && !failed ? <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} /> : <span>{fallback}</span>}
+    </span>
+  );
+}
+
+function ItemLabel({ item, name, meta }: { item: AnyRecord; name?: React.ReactNode; meta?: React.ReactNode }) {
+  return (
+    <span className="item-label">
+      <ItemIcon item={item} />
+      <span>
+        <strong>{name ?? item.name ?? item.itemName ?? "Unknown"}</strong>
+        {meta ? <small className="muted-line">{meta}</small> : null}
+      </span>
+    </span>
+  );
+}
+
+function TierMaterialIcon({ item, tier }: { item: AnyRecord; tier: unknown }) {
+  const value = toNumber(tier);
+  if (value < 1 || value > 10) return <b>Other</b>;
+  return (
+    <span className={`tier-framed tier-${value}`} title={`Tier ${value}`}>
+      <ItemIcon item={item} />
+      <b>T{value}</b>
+    </span>
+  );
+}
+
 function WatchlistPanel({ data, watches, onToggleWatch, onNavigate }: { data: ReturnType<typeof normalizeData>; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   const [marketValues, setMarketValues] = React.useState<Record<string, AnyRecord>>({});
   const materials = CORE_MATERIAL_GROUPS.map((group) => {
@@ -889,13 +958,14 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
     Promise.all([
       fetch(`${API}/players/${selectedId}/buffs`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/equipment`, { signal: controller.signal }).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/equipment/presets`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/inventories`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/housing`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/market-collections`, { signal: controller.signal }).then((response) => response.json()),
       fetch(`${API}/players/${selectedId}/traveler-tasks`, { signal: controller.signal }).then((response) => response.json()),
-    ]).then(([buffs, equipment, inventories, housing, passiveCrafts, collections, tasks]) => {
-      setProfile({ buffs, equipment, inventories, housing, passiveCrafts, collections, tasks });
+    ]).then(([buffs, equipment, equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks]) => {
+      setProfile({ buffs, equipment, equipmentPresets: equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks });
     }).catch((error) => {
       if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : String(error));
     }).finally(() => {
@@ -904,6 +974,9 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
     return () => controller.abort();
   }, [selectedId]);
   const passiveCraftSummaries = profile ? summarizePassiveCrafts(profile.passiveCrafts) : [];
+  const currentEquipmentSlots = profile ? equipmentSlots(profile.equipment) : [];
+  const gearPresets = profile ? equipmentPresets(profile.equipmentPresets, currentEquipmentSlots) : [];
+  const activeGearSlots = gearPresets.find((preset) => preset.active)?.slots ?? currentEquipmentSlots;
 
   return (
     <div className="panel">
@@ -943,7 +1016,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
               <div className="metric-grid">
                 <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs.buffs ?? []).length} />
                 <MiniStat icon={<Wrench />} label="Toolbelt Tools" value={playerToolbeltTools(profile.inventories).length} />
-                <MiniStat icon={<Shield />} label="Equipped Gear" value={(profile.equipment.equipment ?? []).filter((slot: AnyRecord) => slot.item).length} />
+                <MiniStat icon={<Shield />} label="Active Gear" value={equippedCount(activeGearSlots)} />
                 <MiniStat icon={<Home />} label="Housing" value={(profile.housing ?? []).length} />
               </div>
               <section className="equipment-panel">
@@ -952,7 +1025,11 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                   {playerToolbeltTools(profile.inventories).map((item: AnyRecord) => (
                     <article className="equipment-card" key={item.id}>
                       <small>{item.inventoryName}</small>
-                      <div><strong>{item.name}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}</div>
+                      <div className="equipment-card-main">
+                        <ItemIcon item={item} />
+                        <strong>{item.name}</strong>
+                        {item.tier ? <TierBadge tier={item.tier} /> : null}
+                      </div>
                       <span>{item.tag ?? "Tool"}{item.quantity > 1 ? ` - ${formatNumber(item.quantity)} held` : ""}</span>
                       {item.toolPower ? <p>Power {formatNumber(item.toolPower)} - removes {formatNumber(item.toolPower)} effort per action</p> : null}
                     </article>
@@ -961,18 +1038,39 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                 {playerToolbeltTools(profile.inventories).length === 0 ? <p className="legend">No profession tools in this member's public Toolbelt inventory.</p> : null}
               </section>
               <section className="equipment-panel">
-                <h3><Shield size={17} /> Equipped Gear</h3>
-                <div className="equipment-grid">
-                  {(profile.equipment.equipment ?? []).filter((slot: AnyRecord) => slot.item).map((slot: AnyRecord) => (
-                    <article className="equipment-card" key={slot.primary}>
-                      <small>{formatEquipmentSlot(slot.primary)}</small>
-                      <div><strong>{slot.item.name}</strong>{slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}</div>
-                      <span>{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? ` - ${slot.item.rarityString}` : ""}</span>
-                      {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
-                    </article>
-                  ))}
+                <div className="profile-section-heading">
+                  <h3><Shield size={17} /> Gear Presets</h3>
+                  <span>2 preset slots</span>
                 </div>
-                {(profile.equipment.equipment ?? []).every((slot: AnyRecord) => !slot.item) ? <p className="legend">No equipped gear reported by the API.</p> : null}
+                <div className="gear-preset-list">
+                  {gearPresets.map((preset) => {
+                    const filledSlots = preset.slots.filter((slot: AnyRecord) => slot.item);
+                    return (
+                      <article className={`gear-preset ${preset.active ? "active" : ""}`} key={preset.id}>
+                        <div className="gear-preset-header">
+                          <strong>{preset.label}</strong>
+                          <span>{preset.active ? "Current" : preset.reported ? `${formatNumber(filledSlots.length)} equipped` : "Not reported"}</span>
+                        </div>
+                        <div className="equipment-grid">
+                          {filledSlots.map((slot: AnyRecord) => (
+                            <article className="equipment-card" key={`${preset.id}-${slot.primary}`}>
+                              <small>{formatEquipmentSlot(slot.primary)}</small>
+                              <div className="equipment-card-main">
+                                <ItemIcon item={slot.item} />
+                                <strong>{slot.item.name}</strong>
+                                {slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}
+                              </div>
+                              <span>{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? ` - ${slot.item.rarityString}` : ""}</span>
+                              {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
+                            </article>
+                          ))}
+                        </div>
+                        {!filledSlots.length ? <p className="legend">{preset.reported ? "No gear reported in this preset." : "BitJita has not reported gear for this preset slot."}</p> : null}
+                      </article>
+                    );
+                  })}
+                </div>
+                {!gearPresets.length ? <p className="legend">No equipped gear reported by the API.</p> : null}
               </section>
               <div className="two-col public-profile-grid">
                 <section className="profile-history-panel">
@@ -1446,6 +1544,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
         building: building.buildingNickname ?? building.buildingName,
         itemId: contents.item_id == null ? null : String(contents.item_id),
         name: lookup.name ?? `Item #${contents.item_id ?? "?"}`,
+        iconAssetName: lookup.iconAssetName,
         quantity: contents.quantity,
         type: contents.item_type === "cargo" ? "Cargo" : "Item",
         tier: lookup.tier,
@@ -1465,14 +1564,18 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     const matches = allRows.filter((row: AnyRecord) => group.matcher(row));
     const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
     const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
-    const tierBreakdown = (Object.entries(matches.reduce((acc: Record<string, number>, row: AnyRecord) => {
-      const tierLabel = toNumber(row.tier) > 0 ? `T${toNumber(row.tier)}` : "Other";
-      acc[tierLabel] = (acc[tierLabel] ?? 0) + toNumber(row.quantity);
+    const tierBreakdown = Object.values(matches.reduce((acc: Record<string, AnyRecord>, row: AnyRecord) => {
+      const tierNumber = toNumber(row.tier);
+      const tierLabel = tierNumber > 0 ? `T${tierNumber}` : "Other";
+      const current = acc[tierLabel] ?? { tierLabel, tier: tierNumber, quantity: 0, item: row };
+      current.quantity += toNumber(row.quantity);
+      if (!current.item?.iconAssetName && row.iconAssetName) current.item = row;
+      acc[tierLabel] = current;
       return acc;
-    }, {})) as Array<[string, number]>).sort((a, b) => {
-      if (a[0] === "Other") return 1;
-      if (b[0] === "Other") return -1;
-      return toNumber(a[0].slice(1)) - toNumber(b[0].slice(1));
+    }, {})).sort((a: AnyRecord, b: AnyRecord) => {
+      if (a.tierLabel === "Other") return 1;
+      if (b.tierLabel === "Other") return -1;
+      return toNumber(a.tier) - toNumber(b.tier);
     });
     return { label: group.label, quantity, containerCount, tierBreakdown };
   });
@@ -1528,7 +1631,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
               <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None stored"}</small>
               {group.tierBreakdown.length ? (
                 <div className="material-tier-list">
-                  {group.tierBreakdown.map(([tierLabel, qty]: [string, number]) => <div key={tierLabel}>{tierLabel === "Other" ? <b>{tierLabel}</b> : <TierBadge tier={tierLabel.slice(1)} />}<em>{formatNumber(qty)}</em></div>)}
+                  {group.tierBreakdown.map((entry: AnyRecord) => <div key={entry.tierLabel}>{entry.tierLabel === "Other" ? <b>{entry.tierLabel}</b> : <TierMaterialIcon item={entry.item} tier={entry.tier} />}<em>{formatNumber(entry.quantity)}</em></div>)}
                 </div>
               ) : null}
             </button>
@@ -1583,7 +1686,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
                 <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
               </summary>
               <DataTable rows={container.items} columns={[
-                ["Item", (r) => <button className="item-link" onClick={() => setSelectedItem(r)}><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</button>],
+                ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],
                 ["Rarity", (r) => r.rarity ? <span className={`role-badge ${getRarityClass(r.rarity)}`}>{r.rarity}</span> : "-"],
@@ -1731,17 +1834,28 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   }, [claimId, memberFilter, history]);
   const analytics = memberFilter === "All" ? history : memberHistory;
   const apiTrades: AnyRecord[] = (analytics?.sales ?? [])
-    .map((event: AnyRecord) => ({
-      id: event.id,
-      itemName: event.item_name,
-      quantity: event.quantity,
-      unitPrice: event.price,
-      totalPrice: event.total_value,
-      sellerUsername: event.owner,
-      purchaserUsername: safeDisplayJson(event.raw_json)?.purchaserUsername,
-      timestamp: event.occurred_at,
-    }))
+    .map((event: AnyRecord) => {
+      const raw = safeDisplayJson(event.raw_json) ?? {};
+      return {
+        id: event.id,
+        itemName: event.item_name,
+        name: event.item_name,
+        iconAssetName: event.iconAssetName ?? raw.iconAssetName,
+        quantity: event.quantity,
+        unitPrice: event.price,
+        totalPrice: event.total_value,
+        sellerUsername: event.owner,
+        purchaserUsername: raw.purchaserUsername,
+        itemTier: event.tier ?? raw.itemTier,
+        itemRarityStr: event.rarity ?? raw.itemRarityStr,
+        timestamp: event.occurred_at,
+      };
+    })
     .sort((a: AnyRecord, b: AnyRecord) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  const marketItemMeta = React.useMemo(() => {
+    const entries = [...data.market, ...apiTrades].map((item: AnyRecord) => [String(item.itemName ?? item.name ?? ""), item] as const);
+    return new Map(entries.filter(([name]) => Boolean(name)));
+  }, [apiTrades, data.market]);
   const trackedLiveListings = React.useMemo(
     () => new Map<string, AnyRecord>((history?.liveListings ?? []).map((listing: AnyRecord) => [String(listing.listing_key), listing])),
     [history?.liveListings],
@@ -1811,7 +1925,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
               <h3><Star size={17} /> Best Sellers</h3>
               <p className="legend">Ranked by units sold in API-confirmed sales.</p>
               <DataTable rows={topItems} columns={[
-                ["Item", r => r.itemName],
+                ["Item", r => <ItemLabel item={{ ...marketItemMeta.get(String(r.itemName)), name: r.itemName, itemName: r.itemName }} name={r.itemName} />],
                 ["Units Sold", r => formatNumber(r.unitsSold)],
                 ["Sales", r => formatNumber(r.salesCount)],
                 ["Revenue", r => `${formatNumber(r.totalValue)}g`],
@@ -1839,7 +1953,8 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
             <p className="legend">Imported completed sales retained in this monitor's history for the selected current settlement member(s).</p>
             <DataTable rows={apiTrades} columns={[
               ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
-              ["Item", r => r.itemName ?? "-"],
+              ["Item", r => <ItemLabel item={r} name={r.itemName ?? "-"} />],
+              ["Tier", r => r.itemTier ? <TierBadge tier={r.itemTier} /> : "-"],
               ["Qty", r => formatNumber(r.quantity)],
               ["Unit Price", r => `${formatNumber(r.unitPrice)}g`],
               ["Value", r => `${formatNumber(r.totalPrice)}g`],
@@ -1856,7 +1971,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
         <MiniStat icon={<TrendingUp />} label="Buy Orders" value={buyOrders.length} />
         <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? `${formatNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1))}g` : "-"} />
       </div>
-      <div className="highlight-grid">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><strong>{listing.itemName}</strong><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
+      <div className="highlight-grid">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><ItemLabel item={{ ...listing, name: listing.itemName }} name={listing.itemName} /><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
       <div className="tabs"><button className={tab === "sell" ? "active" : ""} onClick={() => setTab("sell")}><TrendingDown size={15} /> Sell Orders</button><button className={tab === "buy" ? "active" : ""} onClick={() => setTab("buy")}><TrendingUp size={15} /> Buy Orders</button></div>
       <div className="toolbar-row">
         <SearchBox value={q} onChange={setQ} placeholder="Search market" />
@@ -1865,7 +1980,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       </div>
       <p className="legend">Listed time uses the BitJita listing timestamp when available; monitor tracking time is used only as a fallback.</p>
       <DataTable rows={rows} columns={[
-        ["Item", r => r.itemName ?? "Unknown"],
+        ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
         ["Qty", r => formatNumber(r.quantity)],
         ["Price", r => `${formatNumber(r.price)}g`],
@@ -1999,6 +2114,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
             <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
             {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
               <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+                <ItemIcon item={item} />
                 <strong>{item.name}</strong>
                 {item.tier ? <TierBadge tier={item.tier} /> : null}
                 <small>{item.rarityStr ?? item.tag ?? ""}</small>
@@ -2427,7 +2543,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
                 <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
-                <div className="craft-title"><h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
+                <div className="craft-title">{item?.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
                 {!item.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
                   <span>{formatNumber(job.craftCount)} craft{toNumber(job.craftCount) === 1 ? "" : "s"}</span>
@@ -3650,7 +3766,10 @@ function App() {
       <main ref={mainRef}>
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{panels[active]}</div>}
         <footer className="app-footer">
-          <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
+          <div className="footer-legal">
+            <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
+            <span>Unofficial fan-made tool. Not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data provided by the <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer">BitJita API</a>.</span>
+          </div>
           <div>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
             <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>

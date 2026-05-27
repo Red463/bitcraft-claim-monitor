@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1-beta.1 - 2026-05-27
+
+### Added
+
+- Member details now load BitJita equipment presets and show each available gear preset rather than only the currently equipped set.
+- Added BitJita item thumbnails for member toolbelt tools, gear presets, inventory rows, production craft titles and price-finder suggestions, with text fallbacks when an icon is missing.
+- Added a footer disclaimer for Clockwork Labs affiliation/trademark status and BitJita API data attribution.
+- Member details now always show both gear preset slots, including an explicit not-reported state when BitJita does not return gear for a slot.
+
 ## 0.7.0-beta.1 - 2026-05-27
 
 ### Changed
