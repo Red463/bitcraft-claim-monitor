@@ -2617,6 +2617,17 @@ function activitySummary(item: AnyRecord): string {
   return item.summary ?? "-";
 }
 
+function activityActorName(item: AnyRecord): string {
+  if (item.actor_name) return String(item.actor_name);
+  if (!String(item.event_type ?? "").includes("market")) return "";
+  try {
+    const metadata = JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
+    return String(metadata.ownerUsername ?? metadata.owner ?? metadata.sellerUsername ?? "");
+  } catch {
+    return "";
+  }
+}
+
 const DEPLOYABLE_STORAGE_NAME = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
 
 function isDeployableStorage(building: AnyRecord | null | undefined): boolean {
@@ -2624,55 +2635,116 @@ function isDeployableStorage(building: AnyRecord | null | undefined): boolean {
 }
 
 function storageActivity(storageApi: AnyRecord[], inventories: AnyRecord): AnyRecord[] {
-  const validBuildingIds = new Set(
+  const storageBuildings = new Map<string, AnyRecord>(
     (inventories.buildings ?? [])
       .filter((building: AnyRecord) => !isDeployableStorage(building))
-      .map((building: AnyRecord) => String(building.entityId ?? ""))
-      .filter(Boolean),
+      .map((building: AnyRecord): [string, AnyRecord] => [String(building.entityId ?? ""), building])
+      .filter(([id]: [string, AnyRecord]) => Boolean(id)),
   );
   const uniqueLogs = new Map<string, AnyRecord>();
   for (const payload of storageApi) {
     const catalogs = new Map<string, AnyRecord>([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
     for (const log of payload.logs ?? []) {
       const buildingId = String(log.buildingEntityId ?? log.building?.entityId ?? "");
-      if (!validBuildingIds.has(buildingId) || isDeployableStorage(log.building)) continue;
+      const building = storageBuildings.get(buildingId);
+      if (!building || isDeployableStorage(log.building)) continue;
       const event = log.data ?? {};
       const item = catalogs.get(String(event.item_id));
-      const action = String(event.type ?? "storage").replaceAll("_", " ");
+      const eventAction = String(event.type ?? "storage").replaceAll("_", " ").toLowerCase();
+      const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
+      const containerName = String(building.buildingNickname ?? "").trim() || building.buildingName || log.building?.buildingName || "Storage";
       uniqueLogs.set(String(log.id), {
         id: `storage-${log.id}`,
         event_type: "storage",
         occurred_at: log.timestamp,
-        summary: `${log.subjectName ?? "Member"}: ${action} ${formatNumber(event.quantity)} ${item?.name ?? `item #${event.item_id ?? "?"}`} - ${log.building?.buildingName ?? "storage"}`,
+        summary: `${log.subjectName ?? "Member"} ${action} ${formatNumber(event.quantity)} ${item?.name ?? `item #${event.item_id ?? "?"}`}`,
+        actor_name: String(log.subjectName ?? "Member"),
+        container_name: containerName,
       });
     }
   }
   return [...uniqueLogs.values()].sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
 }
 
-function ActivityPanel({ activity, storageApi, inventories, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; inventories: AnyRecord; error: string | null }) {
+function activityStyle(item: AnyRecord): { label: string; tone: string; icon: React.ReactNode } {
+  const eventType = String(item.event_type ?? "");
+  if (eventType.includes("market")) return { label: "Market", tone: "market", icon: <ShoppingCart size={18} /> };
+  switch (eventType) {
+    case "storage": return { label: "Storage", tone: "storage", icon: <Box size={18} /> };
+    case "treasury": return { label: "Treasury", tone: "treasury", icon: <CircleDollarSign size={18} /> };
+    case "supplies": return { label: "Supplies", tone: "supplies", icon: <Package size={18} /> };
+    case "members": return { label: "Members", tone: "members", icon: <Users size={18} /> };
+    case "buildings": return { label: "Structures", tone: "buildings", icon: <Building2 size={18} /> };
+    default: return { label: "Update", tone: "default", icon: <Activity size={18} /> };
+  }
+}
+
+function ActivityPanel({ activity, storageApi, inventories, members, error }: { activity: AnyRecord[]; storageApi: AnyRecord[]; inventories: AnyRecord; members: AnyRecord[]; error: string | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
+  const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [compact, setCompact] = usePersistedState("activity.compact", true);
   const storage = storageActivity(storageApi, inventories);
   const combined = [...activity, ...storage].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
-  const baseFiltered = filter === "all" ? combined : combined.filter((item) => String(item.event_type ?? "").includes(filter));
+  const memberOptions = unique(members.map((member) => String(member.userName ?? member.username ?? "")).filter(Boolean)).sort((a, b) => a.localeCompare(b));
+  React.useEffect(() => {
+    if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
+  }, [memberFilter, memberOptions.join("|")]);
+  const memberActivity = memberFilter === "All" ? combined : combined.filter((item) => activityActorName(item).toLowerCase() === memberFilter.toLowerCase());
+  const baseFiltered = filter === "all" ? memberActivity : memberActivity.filter((item) => String(item.event_type ?? "").includes(filter));
   const filtered = compact ? compactActivity(baseFiltered) : baseFiltered;
+  const filterCounts = new Map(ACTIVITY_FILTERS.map(([id]) => [id, id === "all" ? memberActivity.length : memberActivity.filter((item) => String(item.event_type ?? "").includes(id)).length]));
+  const storageMoves = memberActivity.filter((item) => item.event_type === "storage").length;
+  const settlementChanges = memberActivity.length - storageMoves;
+  const latestEvent = memberActivity[0]?.occurred_at ?? memberActivity[0]?.occurredAt;
+  const scopeLabel = memberFilter === "All" ? "settlement" : memberFilter;
   return (
-    <div className="panel">
-      <Header title="Activity">Settlement changes saved locally plus storage movement in settlement-owned containers</Header>
+    <div className="panel activity-panel">
+      <Header title="Activity">A live audit trail of settlement updates and movements through owned storage.</Header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
-      <div className="toolbar-row">
-        <Segmented options={ACTIVITY_FILTERS.map(([, label]) => label)} value={ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1] ?? "All"} onChange={(label) => setFilter(ACTIVITY_FILTERS.find(([, itemLabel]) => itemLabel === label)?.[0] ?? "all")} label="Filter" />
-        <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Compact treasury</label>
-        <span>{filtered.length} of {combined.length} events - {storage.length} storage events from API</span>
+      <div className="activity-overview">
+        <article><Activity /><span>Total events</span><strong>{formatNumber(memberActivity.length)}</strong><small>{memberFilter === "All" ? "Saved history and API movements" : `Attributed to ${memberFilter}`}</small></article>
+        <article><Box /><span>Storage moves</span><strong>{formatNumber(storageMoves)}</strong><small>Settlement containers only</small></article>
+        <article><Building2 /><span>{memberFilter === "All" ? "Settlement changes" : "System changes"}</span><strong>{formatNumber(settlementChanges)}</strong><small>{memberFilter === "All" ? "Recorded monitor events" : "Not attributed to members"}</small></article>
+        <article><RefreshCw /><span>Latest event</span><strong>{latestEvent ? timeAgo(latestEvent) : "-"}</strong><small>{latestEvent ? dateLabel(latestEvent) : "Awaiting activity"}</small></article>
       </div>
-      <div className="activity-list">
-        {filtered.length ? filtered.map((item) => (
-          <div key={item.id ?? `${item.occurred_at}-${item.summary}`}>
-            <strong>{dateLabel(item.occurred_at ?? item.occurredAt)}</strong>
-            <span>{activitySummary(item)}</span>
-          </div>
-        )) : <p>{combined.length ? "No activity matches this filter." : "No activity has been returned yet."}</p>}
+      <section className="activity-controls" aria-label="Activity filters">
+        <label className="activity-member-filter">
+          <User size={16} />
+          <span>Member</span>
+          <select className="select-control" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
+            <option value="All">All members</option>
+            {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+          {memberFilter !== "All" ? <small>Shows attributed storage and market events only.</small> : null}
+        </label>
+        <div className="activity-filters">
+          {ACTIVITY_FILTERS.map(([id, label]) => (
+            <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>
+              <span>{label}</span>
+              <strong>{filterCounts.get(id) ?? 0}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="activity-options">
+          <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Combine repeated treasury changes</label>
+          <span>Showing {filtered.length} of {memberActivity.length} {scopeLabel} events</span>
+        </div>
+      </section>
+      <div className="activity-timeline">
+        {filtered.length ? filtered.map((item) => {
+          const display = activityStyle(item);
+          return (
+            <article className={`activity-event ${display.tone}`} key={item.id ?? `${item.occurred_at}-${item.summary}`}>
+              <div className="activity-event-icon">{display.icon}</div>
+              <div className="activity-event-body">
+                <header><span>{display.label}</span><time>{timeAgo(item.occurred_at ?? item.occurredAt)}</time></header>
+                <p>{activitySummary(item)}</p>
+                {item.container_name ? <small><Box size={12} /> {item.container_name}</small> : null}
+              </div>
+              <time className="activity-event-date">{dateLabel(item.occurred_at ?? item.occurredAt)}</time>
+            </article>
+          );
+        }) : <div className="empty-state activity-empty"><Activity />{combined.length ? "No activity matches this filter." : "No activity has been returned yet."}</div>}
       </div>
     </div>
   );
@@ -2683,6 +2755,11 @@ function compactActivity(items: AnyRecord[]): AnyRecord[] {
   let treasuryGroup: AnyRecord[] = [];
   const flush = () => {
     if (!treasuryGroup.length) return;
+    if (treasuryGroup.length === 1) {
+      output.push(treasuryGroup[0]);
+      treasuryGroup = [];
+      return;
+    }
     const first = treasuryGroup[0];
     const last = treasuryGroup[treasuryGroup.length - 1];
     const total = treasuryGroup.reduce((sum, item) => {
@@ -2693,7 +2770,7 @@ function compactActivity(items: AnyRecord[]): AnyRecord[] {
         return sum;
       }
     }, 0);
-    output.push({ id: `treasury-${first.id}-${last.id}`, occurred_at: first.occurred_at, summary: `${total >= 0 ? "+" : "-"}${formatNumber(Math.abs(total))}g to treasury across ${treasuryGroup.length} refreshes` });
+    output.push({ id: `treasury-${first.id}-${last.id}`, event_type: "treasury", occurred_at: first.occurred_at, summary: `${total >= 0 ? "+" : "-"}${formatNumber(Math.abs(total))}g to treasury across ${treasuryGroup.length} refreshes` });
     treasuryGroup = [];
   };
   for (const item of items) {
@@ -3394,7 +3471,7 @@ function App() {
     empire: <Region data={data} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
-    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} inventories={data.inventories} error={localHistory.error} />,
+    activity: <ActivityPanel activity={localHistory.activity} storageApi={data.storageApi} inventories={data.inventories} members={data.members} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 

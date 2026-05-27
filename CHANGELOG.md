@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3-beta.1 - 2026-05-27
+
+### Changed
+
+- Redesigned Activity as a summary and timeline view with event counts, clearer filters and category styling.
+- Storage deposit and withdrawal entries now show the settlement container nickname when one is configured, falling back to its structure name.
+- Added an Activity member selector for filtering attributed storage and market events by settlement member.
+
 ## 0.6.2-beta.1 - 2026-05-26
 
 ### Fixed

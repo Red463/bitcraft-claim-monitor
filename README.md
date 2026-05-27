@@ -175,8 +175,10 @@ The configured board URL can be changed through Admin.
 
 - Locally recorded settlement changes over time.
 - Public API storage movement events limited to known containers belonging to the monitored settlement.
+- Timeline cards identify named settlement containers for deposits and withdrawals when nickname data is available.
 - Deployable storage, including carts, wagons, boats and similar mobile containers, is excluded.
 - Filters for storage, treasury, supplies, market, members, and structures.
+- Member filter for attributed storage and market actions; settlement-wide system events are shown only in the all-members view.
 - Optional compact view to reduce repeated low-signal entries.
 
 ### Admin
