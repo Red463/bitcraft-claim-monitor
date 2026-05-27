@@ -9,6 +9,8 @@
 - Added a footer disclaimer for Clockwork Labs affiliation/trademark status and BitJita API data attribution.
 - Member details now always show both gear preset slots, including an explicit not-reported state when BitJita does not return gear for a slot.
 - Corrected gear preset mapping so the current equipment appears as Preset 1 and BitJita's saved alternate preset appears as Preset 2.
+- Gear preset detection now compares actual equipped item slots instead of trusting BitJita's active flag, so members with differently flagged alternate presets still show Preset 2.
+- The member gear "Current" marker now follows BitJita's active preset flag when the saved alternate preset is the selected one.
 
 ## 0.7.0-beta.1 - 2026-05-27
 

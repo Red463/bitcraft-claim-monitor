@@ -354,18 +354,30 @@ function equipmentSlots(payload: AnyRecord | null | undefined): AnyRecord[] {
   return [];
 }
 
+function equipmentSignature(slots: AnyRecord[]): string {
+  return slots
+    .map((slot: AnyRecord) => `${slot.primary}:${slot.item?.id ?? "empty"}`)
+    .sort()
+    .join("|");
+}
+
 function equipmentPresets(payload: AnyRecord | null | undefined, fallbackSlots: AnyRecord[]): AnyRecord[] {
   const presets = Array.isArray(payload?.presets) ? payload.presets : [];
   const activePreset = presets.find((preset: AnyRecord) => preset.active);
-  const alternatePreset = presets.find((preset: AnyRecord) => !preset.active);
   const currentSlots = fallbackSlots.length ? fallbackSlots : activePreset ? equipmentSlots(activePreset) : [];
+  const currentSignature = equipmentSignature(currentSlots);
+  const alternatePreset = presets.find((preset: AnyRecord) => {
+    const slots = equipmentSlots(preset);
+    return slots.some((slot: AnyRecord) => slot.item) && equipmentSignature(slots) !== currentSignature;
+  });
   return [1, 2].map((index) => {
     const preset = index === 2 ? alternatePreset : activePreset;
     const slots = index === 1 ? currentSlots : preset ? equipmentSlots(preset) : [];
+    const presetTwoActive = Boolean(alternatePreset?.active);
     return {
       id: String(index === 1 ? "current-equipment" : preset?.entityId ?? preset?.id ?? `preset-${index}`),
       label: `Preset ${index}`,
-      active: index === 1,
+      active: index === 2 ? presetTwoActive : !presetTwoActive,
       reported: index === 1 ? currentSlots.length > 0 : Boolean(preset),
       slots,
     };
