@@ -128,18 +128,40 @@ test("server collection paginates listings and protects production mutations", a
   const cookie = setup.headers.get("set-cookie").split(";")[0];
   assert.ok(auth.csrfToken);
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
-  assert.deepEqual(initialConfig.analytics, { enabled: false, scriptUrl: "", endpoint: "" });
-  const updatedSettings = await fetch(`${origin}/api/local/admin/settings`, {
-    method: "PUT",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: JSON.stringify({
-      ...initialConfig,
-      analytics: { enabled: true, scriptUrl: "https://plausible.io/js/pa-test.js", endpoint: "" },
-    }),
+  assert.equal(initialConfig.analytics, undefined);
+  const refusedAnalytics = await fetch(`${origin}/api/local/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "page_view", page: "production" }),
   });
-  assert.equal(updatedSettings.status, 200);
-  assert.deepEqual((await updatedSettings.json()).analytics, { enabled: true, scriptUrl: "https://plausible.io/js/pa-test.js", endpoint: "" });
-  assert.equal((await fetch(`${origin}/api/local/config`).then((response) => response.json())).analytics.enabled, true);
+  assert.equal(refusedAnalytics.status, 403);
+  const analyticsCookie = "claim_monitor_analytics_consent=accepted; claim_monitor_analytics_visitor=visitor-identifier-0001";
+  const analyticsView = await fetch(`${origin}/api/local/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin, cookie: analyticsCookie },
+    body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "page_view", page: "production" }),
+  });
+  assert.equal(analyticsView.status, 201);
+  const analyticsUse = await fetch(`${origin}/api/local/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin, cookie: analyticsCookie },
+    body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "production_eligibility_filter_used", page: "production", properties: { scope: "member" } }),
+  });
+  assert.equal(analyticsUse.status, 201);
+  const analyticsDuration = await fetch(`${origin}/api/local/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin, cookie: analyticsCookie },
+    body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "page_duration", page: "production", durationSeconds: 90 }),
+  });
+  assert.equal(analyticsDuration.status, 201);
+  const analyticsDashboard = await fetch(`${origin}/api/local/admin/analytics?days=30`, {
+    method: "GET",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(analyticsDashboard.totals.visitors, 1);
+  assert.equal(analyticsDashboard.totals.pageViews, 1);
+  assert.equal(analyticsDashboard.totals.interactions, 1);
+  assert.equal(analyticsDashboard.totals.durationSeconds, 90);
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",

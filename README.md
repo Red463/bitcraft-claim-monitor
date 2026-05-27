@@ -15,7 +15,7 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
-- Supports optional cookieless Plausible usage analytics with an in-app Privacy & Analytics disclosure.
+- Supports opt-in first-party usage analytics with an in-app cookie notice, privacy controls and Admin reporting.
 - Embeds the settlement's BitCraft Sync board for material planning and shared goals.
 - Provides a protected admin console for configuration, branding, theme editing, diagnostics, account management, audit history, database inspection, exports and backups.
 
@@ -192,7 +192,7 @@ Admin features:
 - Select which settlement/claim ID the dashboard monitors.
 - Configure the embedded BitCraft Sync URL.
 - Choose the default opening page, Public Craft Finder region, refresh interval, notification categories and snapshot retention window.
-- Optionally enable anonymous Plausible analytics by supplying the per-site installation script URL.
+- Review or clear consented first-party usage analytics, including popular pages, recorded engagement time and feature usage.
 - Customize the application colour theme with live preview and presets.
 - Upload a logo shown in the app and a favicon shown in the browser tab.
 - Review server collection health and run public BitJita endpoint diagnostics, including per-container Activity storage timing.
@@ -213,11 +213,11 @@ Authentication behavior:
 
 ### Privacy And Analytics
 
-Analytics are disabled by default. An administrator can optionally configure Plausible from **Admin > Configuration > Anonymous Analytics** using the script URL supplied in the Plausible Site Installation screen.
+Analytics are disabled until a visitor explicitly selects **Accept Analytics** in the cookie notice or Privacy & Analytics dialog. The app remains fully usable when analytics are declined.
 
-When enabled, the app sends aggregate page views using section-only URLs such as `?page=production` and events for high-level feature usage including Market tabs, Price Finder searches, member-details opening, Production eligibility filters, Public Craft Finder controls, map links, and Activity filters.
+When accepted, first-party cookies store the user's consent and a random browser identifier for up to 180 days. The application records section page views, time spent in each section and high-level feature usage including Market tabs, Price Finder searches, member-details opening, Production eligibility filters, Public Craft Finder controls, map links, and Activity filters. Raw analytics events are retained for up to 90 days, and results are available to administrators in **Admin > Analytics**, where all analytics data can also be deleted.
 
-The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, or database contents in analytics events. Plausible is configured for manual page views so item IDs, item names, region query values, and other in-app URL state are not sent as page locations.
+The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, item IDs, item names, region query values, or database contents in analytics events. Visitors may withdraw permission at any time through **Privacy & Analytics**, which removes the analytics browser identifier.
 
 ## Data Sources And Persistence
 
@@ -246,9 +246,10 @@ It records:
 | `market_events` | Listing lifecycle and reconciled trade events |
 | `market_trades` | Imported, deduplicated completed sell trades for settlement members |
 | `activity_events` | Settlement activity history |
+| `analytics_events` | Consented first-party aggregate usage analytics |
 | `admin_users` | Local admin credentials |
 | `admin_sessions` | Authenticated sessions |
-| `app_settings` | Settlement, Sync, display, branding, analytics and collection configuration |
+| `app_settings` | Settlement, Sync, display, branding and collection configuration |
 | `admin_audit_log` | Administrative changes and operations |
 | `admin_login_events` | Successful and failed sign-in records |
 

@@ -73,7 +73,7 @@ type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
 type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
-type AnalyticsSettings = { enabled: boolean; scriptUrl: string; endpoint: string };
+type AnalyticsConsent = "accepted" | "declined" | null;
 type AppSettings = {
   claimId: string;
   syncUrl: string;
@@ -83,16 +83,9 @@ type AppSettings = {
   defaultRegion: string;
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
-  analytics: AnalyticsSettings;
   snapshotRetentionDays: number;
   browserSnapshotsEnabled: boolean;
 };
-
-declare global {
-  interface Window {
-    plausible?: ((eventName: string, options?: AnyRecord) => void) & { q?: unknown[]; init?: (options?: AnyRecord) => void; o?: AnyRecord };
-  }
-}
 
 const NAV = [
   ["overview", "Overview", Shield],
@@ -134,7 +127,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultRegion: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
-  analytics: { enabled: false, scriptUrl: "", endpoint: "" },
   snapshotRetentionDays: 365,
   browserSnapshotsEnabled: true,
 };
@@ -268,15 +260,62 @@ function updateQueryState(values: Record<string, string | null>) {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-let analyticsEnabled = false;
+const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent";
+const ANALYTICS_VISITOR_COOKIE = "claim_monitor_analytics_visitor";
+const ANALYTICS_SESSION_KEY = "claim-monitor.analytics.session";
+let analyticsConsent: AnalyticsConsent = null;
 
-function analyticsPageUrl(panel: ActivePanel = urlPanel() ?? "overview"): string {
-  return `${window.location.origin}${window.location.pathname}?page=${panel}`;
+function getCookie(name: string): string {
+  const entry = document.cookie.split("; ").find((cookie) => cookie.startsWith(`${name}=`));
+  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : "";
 }
 
-function trackAnalyticsEvent(eventName: string, props?: Record<string, string | number | boolean>) {
-  if (!analyticsEnabled || typeof window.plausible !== "function") return;
-  window.plausible(eventName, { url: analyticsPageUrl(), ...(props ? { props } : {}) });
+function readAnalyticsConsent(): AnalyticsConsent {
+  const consent = getCookie(ANALYTICS_CONSENT_COOKIE);
+  return consent === "accepted" || consent === "declined" ? consent : null;
+}
+
+function cookieSuffix(maxAge: number): string {
+  return `; Path=/; SameSite=Lax; Max-Age=${maxAge}${window.location.protocol === "https:" ? "; Secure" : ""}`;
+}
+
+function setAnalyticsPreference(consent: Exclude<AnalyticsConsent, null>) {
+  analyticsConsent = consent;
+  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${consent}${cookieSuffix(180 * 24 * 60 * 60)}`;
+  if (consent === "declined") {
+    document.cookie = `${ANALYTICS_VISITOR_COOKIE}=${cookieSuffix(0)}`;
+    window.sessionStorage.removeItem(ANALYTICS_SESSION_KEY);
+  } else if (!getCookie(ANALYTICS_VISITOR_COOKIE)) {
+    document.cookie = `${ANALYTICS_VISITOR_COOKIE}=${crypto.randomUUID()}${cookieSuffix(180 * 24 * 60 * 60)}`;
+  }
+}
+
+function analyticsSessionId(): string | null {
+  if (analyticsConsent !== "accepted") return null;
+  let visitorId = getCookie(ANALYTICS_VISITOR_COOKIE);
+  if (!visitorId) {
+    visitorId = crypto.randomUUID();
+    document.cookie = `${ANALYTICS_VISITOR_COOKIE}=${visitorId}${cookieSuffix(180 * 24 * 60 * 60)}`;
+  }
+  let sessionId = window.sessionStorage.getItem(ANALYTICS_SESSION_KEY) ?? "";
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    window.sessionStorage.setItem(ANALYTICS_SESSION_KEY, sessionId);
+  }
+  return sessionId;
+}
+
+function trackAnalyticsEvent(eventName: string, properties?: Record<string, string | number | boolean>, durationSeconds?: number, pageOverride?: ActivePanel) {
+  const sessionId = analyticsSessionId();
+  if (!sessionId) return;
+  const page = pageOverride ?? urlPanel() ?? "overview";
+  if (page === "admin") return;
+  void fetch(`${LOCAL_API}/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    keepalive: true,
+    body: JSON.stringify({ sessionId, eventName, page, properties, durationSeconds }),
+  }).catch(() => undefined);
 }
 
 function catalogEntries(catalog: unknown): AnyRecord[] {
@@ -878,7 +917,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
       </div>
       <DataTable
         rows={filtered}
-        onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); trackAnalyticsEvent("Member Details Opened"); }}
+        onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); trackAnalyticsEvent("member_details_opened"); }}
         rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
         columns={[
           ["", (m) => <span className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} title={m.player?.signedIn ? `Online ${formatDuration(m.player.sessionSeconds)}` : "Offline"} />],
@@ -887,7 +926,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
           ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); trackAnalyticsEvent("Member Details Opened"); }}>View</button>],
+          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); trackAnalyticsEvent("member_details_opened"); }}>View</button>],
         ]}
       />
       {selectedMember ? (
@@ -1664,7 +1703,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   const selectView = (next: "live" | "analytics" | "pricing") => {
     setView(next);
     updateQueryState({ page: "market", tab: next });
-    trackAnalyticsEvent("Market Tab Viewed", { tab: next });
+    trackAnalyticsEvent("market_tab_viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {
     const names = [
@@ -1745,7 +1784,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       {view !== "pricing" ? <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("Market Member Filter Used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
+          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
             <option>All</option>
             {memberOptions.map((name) => <option key={name}>{name}</option>)}
           </select>
@@ -1934,7 +1973,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
     setQuery(String(item.name));
     setSuggestions([]);
     updateQueryState({ item: String(item.id), itemName: String(item.name), itemType: String(item.itemType ?? 0), region: activeRegion || "all" });
-    trackAnalyticsEvent("Price Finder Search", { region: activeRegion ? "selected_region" : "all_regions" });
+    trackAnalyticsEvent("price_finder_search", { region: activeRegion ? "selected_region" : "all_regions" });
   }
 
   const stats = priceState.data?.priceStats ?? {};
@@ -1971,7 +2010,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
         </label>
         <label className="field">
           <span>Region</span>
-          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("Price Finder Region Changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
+          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("price_finder_region_changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
             {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
             <option value="All">All Regions</option>
           </select>
@@ -2138,7 +2177,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
   const columns: Array<[string, PublicCraftSortKey, (job: AnyRecord) => React.ReactNode]> = [
     ["Craft", "output", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
     ["Tier", "tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
-    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => { trackAnalyticsEvent("Public Craft Map Opened"); onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) }); }}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
+    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => { trackAnalyticsEvent("public_craft_map_opened"); onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) }); }}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
     ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
     ["Effort to Craft", "remaining", (job) => formatNumber(job.remaining)],
     ["XP Available", "availableXp", (job) => formatNumber(job.availableXp)],
@@ -2152,13 +2191,13 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
         </Header>
         <div className="toolbar-row">
           <label className="inline-field"><span>Skill</span>
-            <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("Public Craft Skill Filter Used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
+            <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("public_craft_skill_filter_used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
               <option value="All">All Skills</option>
               {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
             </select>
           </label>
           <label className="inline-field"><span>Region</span>
-            <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); trackAnalyticsEvent("Public Craft Region Filter Used", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
+            <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); trackAnalyticsEvent("public_craft_region_filter_used", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
               <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
             </select>
           </label>
@@ -2349,7 +2388,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
       </div>
       <div className="toolbar-row production-controls">
         <label className="inline-field"><span>Member</span>
-          <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("Production Eligibility Filter Used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
+          <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("production_eligibility_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
             <option value="All">All members</option>
             {data.members.map((member: AnyRecord) => <option key={member.playerEntityId} value={String(member.playerEntityId)}>{member.userName ?? member.username}</option>)}
           </select>
@@ -2706,7 +2745,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         <label className="activity-member-filter">
           <User size={16} />
           <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("Activity Member Filter Used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
+          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("activity_member_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
             <option value="All">All members</option>
             {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -2714,7 +2753,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         </label>
         <div className="activity-filters">
           {ACTIVITY_FILTERS.map(([id, label]) => (
-            <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("Activity Category Filter Used", { category: id }); }}>
+            <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
               <span>{label}</span>
               <strong>{filterCounts.get(id) ?? 0}</strong>
             </button>
@@ -2918,7 +2957,7 @@ function HelpCenter({ version, onClose, onPrivacy }: { version: string; onClose:
   );
 }
 
-function PrivacyDialog({ analyticsEnabled: trackingEnabled, onClose }: { analyticsEnabled: boolean; onClose: () => void }) {
+function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsConsent; onConsent: (choice: Exclude<AnalyticsConsent, null>) => void; onClose: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -2936,16 +2975,35 @@ function PrivacyDialog({ analyticsEnabled: trackingEnabled, onClose }: { analyti
           </div>
           <button onClick={onClose} aria-label="Close privacy information"><X size={16} /></button>
         </header>
-        <div className={`analytics-status ${trackingEnabled ? "enabled" : ""}`}>
-          <strong>Anonymous analytics {trackingEnabled ? "enabled" : "disabled"}</strong>
-          <span>{trackingEnabled ? "This installation measures aggregate product usage with Plausible Analytics." : "This installation is not currently sending usage analytics."}</span>
+        <div className={`analytics-status ${consent === "accepted" ? "enabled" : ""}`}>
+          <strong>Usage analytics {consent === "accepted" ? "accepted" : consent === "declined" ? "declined" : "not selected"}</strong>
+          <span>{consent === "accepted" ? "This browser is helping development by sharing anonymous feature usage." : "This browser is not currently contributing usage analytics."}</span>
         </div>
-        <p className="help-intro">When enabled, analytics measure pages visited, engagement time, and use of key features such as filters, Price Finder, member details, and map links.</p>
-        <p className="help-intro">The app does not send BitCraft usernames, selected member identities, typed search text, admin credentials, or database contents to analytics.</p>
-        <p className="help-intro">Plausible is configured without analytics cookies or persistent personal identifiers. Gameplay data displayed by this application continues to come from public BitJita endpoints.</p>
-        <a className="privacy-provider-link" href="https://plausible.io/data-policy" target="_blank" rel="noreferrer"><ExternalLink size={13} /> Plausible data policy</a>
+        <p className="help-intro">With your permission, this site uses first-party analytics cookies to understand which pages and tools are valuable and how long sections are used. This information is genuinely helpful while the app is being developed.</p>
+        <p className="help-intro">Analytics record a random browser identifier, visits to app sections and high-level feature actions. They do not record BitCraft usernames, selected member identities, typed search text, admin credentials or database contents.</p>
+        <p className="help-intro">Consent and analytics cookies last for up to 180 days. Raw usage events are retained for up to 90 days. You can change your preference here at any time; declining removes the analytics identifier from this browser.</p>
+        <div className="privacy-actions">
+          <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
+          <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
+        </div>
       </section>
     </div>
+  );
+}
+
+function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exclude<AnalyticsConsent, null>) => void; onPrivacy: () => void }) {
+  return (
+    <section className="cookie-banner" role="dialog" aria-label="Analytics cookies">
+      <div>
+        <strong>Help improve Claim Monitor</strong>
+        <p>We would like to use analytics cookies to see which pages and tools are useful. This data is genuinely helpful for development, so please accept if you are happy to help.</p>
+        <button className="cookie-details" onClick={onPrivacy}>Privacy & Analytics details</button>
+      </div>
+      <div className="cookie-actions">
+        <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
+        <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
+      </div>
+    </section>
   );
 }
 
@@ -2982,7 +3040,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-type AdminTab = "status" | "configuration" | "theme" | "database" | "users" | "audit" | "backups";
+type AdminTab = "status" | "analytics" | "configuration" | "theme" | "database" | "users" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -3013,6 +3071,8 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   const [resetPassword, setResetPassword] = React.useState("");
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
+  const [analyticsDays, setAnalyticsDays] = React.useState("30");
+  const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
 
   async function api(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
@@ -3059,6 +3119,10 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     setBackups((await api("/admin/backups")).backups ?? []);
   }
 
+  async function refreshAnalytics() {
+    setAnalyticsData(await api(`/admin/analytics?days=${encodeURIComponent(analyticsDays)}`));
+  }
+
   React.useEffect(() => {
     api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
   }, []);
@@ -3071,12 +3135,13 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     if (!auth?.authenticated) return;
     run(async () => {
       if (tab === "status") await refreshStatus();
+      if (tab === "analytics") await refreshAnalytics();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
       if (tab === "audit") await refreshAudit();
       if (tab === "backups") await refreshBackups();
     });
-  }, [auth?.authenticated, tab]);
+  }, [auth?.authenticated, tab, analyticsDays]);
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
     const timer = window.setTimeout(() => {
@@ -3134,7 +3199,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
+  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
   const themePresets: Array<[string, typeof DEFAULT_THEME]> = [
     ["Default", DEFAULT_THEME],
     ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
@@ -3195,6 +3260,44 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
         </div>
       ) : null}
 
+      {tab === "analytics" ? (
+        <div className="admin-section analytics-admin">
+          <section className="form-card">
+            <div className="split-header">
+              <h3><TrendingUp size={17} /> Usage Analytics</h3>
+              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => setAnalyticsDays(event.target.value)}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button" onClick={() => { if (window.confirm("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
+            </div>
+            <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
+            <div className="metric-grid analytics-metrics">
+              <Stat icon={<Users />} label="Visitors" value={formatNumber(analyticsData?.totals?.visitors)} />
+              <Stat icon={<Globe2 />} label="Sessions" value={formatNumber(analyticsData?.totals?.sessions)} />
+              <Stat icon={<Activity />} label="Page Views" value={formatNumber(analyticsData?.totals?.pageViews)} />
+              <Stat icon={<Command />} label="Feature Uses" value={formatNumber(analyticsData?.totals?.interactions)} />
+              <Stat icon={<RefreshCw />} label="Time Recorded" value={formatDuration(toNumber(analyticsData?.totals?.durationSeconds))} />
+            </div>
+          </section>
+          <div className="admin-grid">
+            <section className="form-card">
+              <h3><Globe2 size={17} /> Most Used Pages</h3>
+              <DataTable rows={analyticsData?.pages ?? []} columns={[
+                ["Page", (row) => String(row.page).replaceAll("publiccrafts", "Public Craft Finder")],
+                ["Views", (row) => formatNumber(row.pageViews)],
+                ["Visitors", (row) => formatNumber(row.visitors)],
+                ["Time", (row) => formatDuration(toNumber(row.durationSeconds))],
+              ]} />
+            </section>
+            <section className="form-card">
+              <h3><Factory size={17} /> Feature Usage</h3>
+              <DataTable rows={analyticsData?.features ?? []} columns={[
+                ["Feature", (row) => String(row.eventName).replaceAll("_", " ")],
+                ["Uses", (row) => formatNumber(row.uses)],
+                ["Visitors", (row) => formatNumber(row.visitors)],
+              ]} />
+            </section>
+          </div>
+        </div>
+      ) : null}
+
       {tab === "configuration" ? (
         <div className="admin-grid">
           <section className="form-card">
@@ -3211,14 +3314,6 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <section className="form-card">
               <h3><Activity size={17} /> Notifications</h3>
               {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => <label className="toggle-row" key={key}><input type="checkbox" checked={draft.toastSettings[key]} onChange={(event) => updateDraft("toastSettings", { ...draft.toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>)}
-            </section>
-            <section className="form-card">
-              <h3><TrendingUp size={17} /> Anonymous Analytics</h3>
-              <p className="legend">Optional cookieless usage analytics through Plausible. Paste the unique script URL from the Plausible Site Installation screen. Page locations are reduced to app sections and feature events never include member identities or search text.</p>
-              <label className="toggle-row"><input type="checkbox" checked={draft.analytics.enabled} onChange={(event) => updateDraft("analytics", { ...draft.analytics, enabled: event.target.checked })} /><span>Enable anonymous usage analytics</span></label>
-              <label className="field"><span>Plausible script URL</span><input value={draft.analytics.scriptUrl} onChange={(event) => updateDraft("analytics", { ...draft.analytics, scriptUrl: event.target.value })} placeholder="https://plausible.io/js/pa-XXXXX.js" /></label>
-              <label className="field"><span>Custom event endpoint (optional)</span><input value={draft.analytics.endpoint} onChange={(event) => updateDraft("analytics", { ...draft.analytics, endpoint: event.target.value })} placeholder="For a future first-party proxy" /></label>
-              <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Analytics</button>
             </section>
             <section className="form-card">
               <h3><Upload size={17} /> Branding</h3>
@@ -3299,7 +3394,6 @@ function App() {
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
-  const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
@@ -3314,6 +3408,7 @@ function App() {
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
+  const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
@@ -3327,6 +3422,7 @@ function App() {
   }, [state.data]);
   const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId);
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
+  analyticsConsent = consent;
   const dismissToast = React.useCallback((id: string) => {
     const timer = toastTimersRef.current.get(id);
     if (timer != null) window.clearTimeout(timer);
@@ -3392,7 +3488,7 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
         if (!config) return;
-        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {}, analytics: { ...DEFAULT_SETTINGS.analytics, ...(config.analytics ?? {}) } } as AppSettings;
+        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {} } as AppSettings;
         setAppSettings(next);
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);
@@ -3401,47 +3497,29 @@ function App() {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
         }
-        setSettingsLoaded(true);
       })
-      .catch(() => setSettingsLoaded(true));
+      .catch(() => undefined);
   }, []);
   React.useEffect(() => {
     applyTheme(theme);
   }, [theme]);
   React.useEffect(() => {
-    const analytics = appSettings.analytics;
-    const existing = document.querySelector<HTMLScriptElement>("script[data-claim-monitor-analytics]");
-    analyticsEnabled = Boolean(analytics.enabled && analytics.scriptUrl);
-    if (!analyticsEnabled) {
-      existing?.remove();
-      return;
-    }
-    if (!window.plausible) {
-      const queued = ((...args: unknown[]) => {
-        queued.q = queued.q ?? [];
-        queued.q.push(args);
-      }) as NonNullable<Window["plausible"]>;
-      window.plausible = queued;
-    }
-    if (!window.plausible.init) {
-      window.plausible.init = (options?: AnyRecord) => {
-        if (window.plausible) window.plausible.o = options ?? {};
-      };
-    }
-    window.plausible.init({ autoCapturePageviews: false, ...(analytics.endpoint ? { endpoint: analytics.endpoint } : {}) });
-    if (existing?.src !== new URL(analytics.scriptUrl, window.location.origin).href) {
-      existing?.remove();
-      const script = document.createElement("script");
-      script.async = true;
-      script.src = analytics.scriptUrl;
-      script.dataset.claimMonitorAnalytics = "true";
-      document.head.appendChild(script);
-    }
-  }, [appSettings.analytics]);
-  React.useEffect(() => {
-    if (!settingsLoaded || !appSettings.analytics.enabled || !appSettings.analytics.scriptUrl) return;
-    trackAnalyticsEvent("pageview");
-  }, [active, appSettings.analytics.enabled, appSettings.analytics.scriptUrl, settingsLoaded]);
+    if (consent !== "accepted") return;
+    trackAnalyticsEvent("page_view", undefined, undefined, active);
+    const enteredAt = Date.now();
+    let recorded = false;
+    const recordDuration = () => {
+      if (recorded) return;
+      recorded = true;
+      const durationSeconds = Math.round((Date.now() - enteredAt) / 1000);
+      if (durationSeconds > 0) trackAnalyticsEvent("page_duration", undefined, durationSeconds, active);
+    };
+    window.addEventListener("pagehide", recordDuration);
+    return () => {
+      window.removeEventListener("pagehide", recordDuration);
+      recordDuration();
+    };
+  }, [active, consent]);
   React.useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
     window.scrollTo(0, 0);
@@ -3550,7 +3628,7 @@ function App() {
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
-    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings({ ...settings, analytics: { ...DEFAULT_SETTINGS.analytics, ...(settings.analytics ?? {}) } }); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
   return (
@@ -3587,7 +3665,8 @@ function App() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
-      {privacyOpen ? <PrivacyDialog analyticsEnabled={appSettings.analytics.enabled && Boolean(appSettings.analytics.scriptUrl)} onClose={() => setPrivacyOpen(false)} /> : null}
+      {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
+      {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
     </div>
   );
 }

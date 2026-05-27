@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.6.6-beta.1";
+const appVersion = "0.7.0-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
@@ -132,9 +132,21 @@ db.exec(`
     occurred_at TEXT NOT NULL,
     remote_address TEXT
   );
+  CREATE TABLE IF NOT EXISTS analytics_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_key TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    page TEXT NOT NULL,
+    properties_json TEXT NOT NULL,
+    duration_seconds INTEGER,
+    occurred_at TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -178,7 +190,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("analytics_json", JSON.stringify({ enabled: false, scriptUrl: "", endpoint: "" }), now);
+db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
 const statements = {
   latestSnapshot: db.prepare("SELECT * FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
@@ -261,6 +273,10 @@ const statements = {
   deleteExpiredSessions: db.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?"),
   insertAudit: db.prepare("INSERT INTO admin_audit_log (user_id, username, action, details_json, occurred_at) VALUES (?, ?, ?, ?, ?)"),
   insertLoginEvent: db.prepare("INSERT INTO admin_login_events (username, successful, occurred_at, remote_address) VALUES (?, ?, ?, ?)"),
+  insertAnalyticsEvent: db.prepare(`
+    INSERT INTO analytics_events (visitor_key, session_key, event_name, page, properties_json, duration_seconds, occurred_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
 };
 
 function toNumber(value) {
@@ -310,7 +326,6 @@ function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
-  const analytics = safeJson(statements.getSetting.get("analytics_json")?.value, { enabled: false, scriptUrl: "", endpoint: "" });
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
@@ -320,11 +335,6 @@ function getSettings() {
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
-    analytics: {
-      enabled: analytics.enabled === true,
-      scriptUrl: String(analytics.scriptUrl ?? ""),
-      endpoint: String(analytics.endpoint ?? ""),
-    },
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
     browserSnapshotsEnabled: false,
   };
@@ -348,16 +358,6 @@ function validSyncUrl(value) {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "https:" && parsed.hostname === "bitcraftsync.app";
-  } catch {
-    return false;
-  }
-}
-
-function validAnalyticsUrl(value) {
-  if (!value) return true;
-  if (/^\/(?!\/)/.test(value)) return true;
-  try {
-    return new URL(value).protocol === "https:";
   } catch {
     return false;
   }
@@ -560,6 +560,87 @@ function tableQuery(name, params, exporting = false) {
   const offset = exporting ? 0 : Math.max(Number(params.offset) || 0, 0);
   const rows = db.prepare(`SELECT * FROM "${safeName}"${where} ORDER BY "${orderBy.replaceAll('"', '""')}" ${direction} LIMIT ? OFFSET ?`).all(...values, limit, offset);
   return { table: name, columns, rows, total, limit, offset, timeColumn };
+}
+
+const analyticsEvents = new Set([
+  "page_view",
+  "page_duration",
+  "member_details_opened",
+  "market_tab_viewed",
+  "market_member_filter_used",
+  "price_finder_search",
+  "price_finder_region_changed",
+  "public_craft_map_opened",
+  "public_craft_skill_filter_used",
+  "public_craft_region_filter_used",
+  "production_eligibility_filter_used",
+  "activity_member_filter_used",
+  "activity_category_filter_used",
+]);
+const analyticsPages = new Set(["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "buildings", "research", "market", "empire", "map", "sync", "activity"]);
+const analyticsRetentionDays = 90;
+let lastAnalyticsPruneAt = 0;
+
+function recordAnalyticsEvent(body, req) {
+  const eventName = String(body.eventName ?? "");
+  const page = String(body.page ?? "");
+  const cookies = parseCookies(req);
+  if (cookies.claim_monitor_analytics_consent !== "accepted") throw new Error("Analytics consent is required");
+  const visitorId = String(cookies.claim_monitor_analytics_visitor ?? "");
+  const sessionId = String(body.sessionId ?? "");
+  if (!analyticsEvents.has(eventName) || !analyticsPages.has(page)) throw new Error("Unknown analytics event");
+  if (!/^[a-zA-Z0-9-]{16,80}$/.test(visitorId) || !/^[a-zA-Z0-9-]{16,80}$/.test(sessionId)) throw new Error("Invalid analytics identifier");
+  const rawProperties = body.properties && typeof body.properties === "object" && !Array.isArray(body.properties) ? body.properties : {};
+  const properties = Object.fromEntries(Object.entries(rawProperties)
+    .filter(([key, value]) => /^[a-zA-Z_]{1,32}$/.test(key) && ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 6)
+    .map(([key, value]) => [key, String(value).slice(0, 50)]));
+  const durationSeconds = eventName === "page_duration" ? Math.min(Math.max(Math.round(toNumber(body.durationSeconds)), 1), 86400) : null;
+  const visitorKey = createHash("sha256").update(visitorId).digest("hex");
+  const sessionKey = createHash("sha256").update(sessionId).digest("hex");
+  if (Date.now() - lastAnalyticsPruneAt > 24 * 60 * 60 * 1000) {
+    const before = new Date(Date.now() - analyticsRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare("DELETE FROM analytics_events WHERE occurred_at < ?").run(before);
+    lastAnalyticsPruneAt = Date.now();
+  }
+  statements.insertAnalyticsEvent.run(visitorKey, sessionKey, eventName, page, JSON.stringify(properties), durationSeconds, new Date().toISOString());
+  return { ok: true };
+}
+
+function analyticsDashboard(days = 30) {
+  const selectedDays = [1, 7, 30, 90].includes(Number(days)) ? Number(days) : 30;
+  const since = new Date(Date.now() - selectedDays * 24 * 60 * 60 * 1000).toISOString();
+  const totals = db.prepare(`
+    SELECT
+      COUNT(CASE WHEN event_name = 'page_view' THEN 1 END) AS pageViews,
+      COUNT(CASE WHEN event_name NOT IN ('page_view', 'page_duration') THEN 1 END) AS interactions,
+      COUNT(DISTINCT visitor_key) AS visitors,
+      COUNT(DISTINCT session_key) AS sessions,
+      COALESCE(SUM(CASE WHEN event_name = 'page_duration' THEN duration_seconds ELSE 0 END), 0) AS durationSeconds
+    FROM analytics_events WHERE occurred_at >= ?
+  `).get(since);
+  const pages = db.prepare(`
+    SELECT page,
+      COUNT(CASE WHEN event_name = 'page_view' THEN 1 END) AS pageViews,
+      COUNT(DISTINCT visitor_key) AS visitors,
+      COALESCE(SUM(CASE WHEN event_name = 'page_duration' THEN duration_seconds ELSE 0 END), 0) AS durationSeconds
+    FROM analytics_events WHERE occurred_at >= ?
+    GROUP BY page ORDER BY pageViews DESC, durationSeconds DESC LIMIT 20
+  `).all(since);
+  const features = db.prepare(`
+    SELECT event_name AS eventName, COUNT(*) AS uses, COUNT(DISTINCT visitor_key) AS visitors
+    FROM analytics_events
+    WHERE occurred_at >= ? AND event_name NOT IN ('page_view', 'page_duration')
+    GROUP BY event_name ORDER BY uses DESC, event_name ASC LIMIT 30
+  `).all(since);
+  const daily = db.prepare(`
+    SELECT substr(occurred_at, 1, 10) AS day,
+      COUNT(CASE WHEN event_name = 'page_view' THEN 1 END) AS pageViews,
+      COUNT(DISTINCT visitor_key) AS visitors
+    FROM analytics_events WHERE occurred_at >= ?
+    GROUP BY substr(occurred_at, 1, 10) ORDER BY day ASC
+  `).all(since);
+  return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
 function addActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
@@ -1153,7 +1234,7 @@ function safeJson(value, fallback = {}) {
 }
 
 function databaseStatus() {
-  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "market_trades", "activity_events"].map((table) => [
+  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "market_trades", "activity_events", "analytics_events"].map((table) => [
     table,
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
@@ -1358,6 +1439,15 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "POST" && url.pathname === "/api/local/analytics/event") {
+      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin analytics event rejected" });
+      try {
+        return send(res, 201, recordAnalyticsEvent(await readJson(req), req));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return send(res, message === "Analytics consent is required" ? 403 : 400, { error: message });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
@@ -1452,14 +1542,6 @@ const server = createServer(async (req, res) => {
           marketSales: body.toastSettings?.marketSales !== false,
           production: body.toastSettings?.production !== false,
         };
-        const analytics = {
-          enabled: body.analytics?.enabled === true,
-          scriptUrl: String(body.analytics?.scriptUrl ?? "").trim(),
-          endpoint: String(body.analytics?.endpoint ?? "").trim(),
-        };
-        if (analytics.enabled && !analytics.scriptUrl) return send(res, 400, { error: "Add a Plausible script URL before enabling analytics" });
-        if (!validAnalyticsUrl(analytics.scriptUrl)) return send(res, 400, { error: "Plausible script URL must be an HTTPS URL or same-site path" });
-        if (!validAnalyticsUrl(analytics.endpoint)) return send(res, 400, { error: "Analytics event endpoint must be an HTTPS URL or same-site path" });
         const updatedAt = new Date().toISOString();
         statements.upsertSetting.run("claim_id", nextClaimId, updatedAt);
         statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
@@ -1469,8 +1551,7 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
-        statements.upsertSetting.run("analytics_json", JSON.stringify(analytics), updatedAt);
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, analyticsEnabled: analytics.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays });
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
@@ -1559,6 +1640,14 @@ const server = createServer(async (req, res) => {
         const auditLog = db.prepare("SELECT * FROM admin_audit_log ORDER BY occurred_at DESC, id DESC LIMIT ?").all(limit);
         const logins = db.prepare("SELECT * FROM admin_login_events ORDER BY occurred_at DESC, id DESC LIMIT ?").all(Math.min(limit, 100));
         return send(res, 200, { auditLog, logins });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/analytics") {
+        return send(res, 200, analyticsDashboard(url.searchParams.get("days")));
+      }
+      if (req.method === "DELETE" && url.pathname === "/api/local/admin/analytics") {
+        const removed = db.prepare("DELETE FROM analytics_events").run().changes;
+        audit(user, "analytics.clear", { removed });
+        return send(res, 200, { removed });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/tables") return send(res, 200, { tables: tableInfo() });
       if (req.method === "GET" && url.pathname === "/api/local/admin/table") {

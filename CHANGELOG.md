@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0-beta.1 - 2026-05-27
+
+### Changed
+
+- Replaced the external Plausible integration with opt-in first-party usage analytics stored in the application's SQLite database.
+- Added a cookie notice requesting development-supporting analytics consent, with equally accessible decline and persistent preference controls.
+- Added an Admin Analytics dashboard for visitor, session, page-view, engagement-time and feature-usage aggregates.
+
 ## 0.6.6-beta.1 - 2026-05-27
 
 ### Added
