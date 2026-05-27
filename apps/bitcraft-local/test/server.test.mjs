@@ -127,6 +127,19 @@ test("server collection paginates listings and protects production mutations", a
   const auth = await setup.json();
   const cookie = setup.headers.get("set-cookie").split(";")[0];
   assert.ok(auth.csrfToken);
+  const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
+  assert.deepEqual(initialConfig.analytics, { enabled: false, scriptUrl: "", endpoint: "" });
+  const updatedSettings = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...initialConfig,
+      analytics: { enabled: true, scriptUrl: "https://plausible.io/js/pa-test.js", endpoint: "" },
+    }),
+  });
+  assert.equal(updatedSettings.status, 200);
+  assert.deepEqual((await updatedSettings.json()).analytics, { enabled: true, scriptUrl: "https://plausible.io/js/pa-test.js", endpoint: "" });
+  assert.equal((await fetch(`${origin}/api/local/config`).then((response) => response.json())).analytics.enabled, true);
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",

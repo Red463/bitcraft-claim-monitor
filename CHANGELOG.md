@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.6-beta.1 - 2026-05-27
+
+### Added
+
+- Optional cookieless Plausible analytics configured from Admin, disabled until an administrator enables it with a Plausible per-site script URL.
+- Manual, sanitized section page views and anonymous high-level feature events for Market, Price Finder, Production filtering, member details, Public Craft Finder and Activity controls.
+- A Privacy & Analytics dialog accessible from the footer and help panel that discloses tracking state and excluded data.
+
+## 0.6.5-beta.1 - 2026-05-27
+
+### Changed
+
+- Renamed the Production passive-craft history panel to Member Passive Crafts and clarified that the API identifies the member, but not the settlement location where the craft occurred.
+
 ## 0.6.4-beta.1 - 2026-05-27
 
 ### Changed

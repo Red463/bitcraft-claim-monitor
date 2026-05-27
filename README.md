@@ -15,6 +15,7 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
+- Supports optional cookieless Plausible usage analytics with an in-app Privacy & Analytics disclosure.
 - Embeds the settlement's BitCraft Sync board for material planning and shared goals.
 - Provides a protected admin console for configuration, branding, theme editing, diagnostics, account management, audit history, database inspection, exports and backups.
 
@@ -62,7 +63,7 @@ Settlement production and member passive output tracking:
 - Configurable sorting, defaulting to highest tier first.
 - Optional selected-member highlighting based on public skill levels and matching profession tools held in that member's public Toolbelt inventory; a tool can complete crafts up to one tier above its own, while tool power determines effort contributed per action.
 - Recent contributor records.
-- Recent passive craft output aggregated from each settlement member's public passive-craft history, with resolved item names, member, structure, quantity, and completion status.
+- Recent public passive craft output aggregated for members in the monitored settlement, with resolved item names, member, structure, quantity, and completion status. BitJita does not identify where a passive craft occurred, so this is member history rather than settlement-location activity.
 - Activity status based on contribution recency:
   - `Active now`: a contribution was received within the last five minutes.
   - `Paused`: progress exists, but no recent contribution was recorded.
@@ -191,6 +192,7 @@ Admin features:
 - Select which settlement/claim ID the dashboard monitors.
 - Configure the embedded BitCraft Sync URL.
 - Choose the default opening page, Public Craft Finder region, refresh interval, notification categories and snapshot retention window.
+- Optionally enable anonymous Plausible analytics by supplying the per-site installation script URL.
 - Customize the application colour theme with live preview and presets.
 - Upload a logo shown in the app and a favicon shown in the browser tab.
 - Review server collection health and run public BitJita endpoint diagnostics, including per-container Activity storage timing.
@@ -208,6 +210,14 @@ Authentication behavior:
 - Repeated failed logins are temporarily throttled.
 - In production, first-time admin creation requires the server-side `ADMIN_SETUP_KEY`.
 - Production history collection is server-owned; public browsers cannot submit snapshots.
+
+### Privacy And Analytics
+
+Analytics are disabled by default. An administrator can optionally configure Plausible from **Admin > Configuration > Anonymous Analytics** using the script URL supplied in the Plausible Site Installation screen.
+
+When enabled, the app sends aggregate page views using section-only URLs such as `?page=production` and events for high-level feature usage including Market tabs, Price Finder searches, member-details opening, Production eligibility filters, Public Craft Finder controls, map links, and Activity filters.
+
+The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, or database contents in analytics events. Plausible is configured for manual page views so item IDs, item names, region query values, and other in-app URL state are not sent as page locations.
 
 ## Data Sources And Persistence
 
@@ -238,7 +248,7 @@ It records:
 | `activity_events` | Settlement activity history |
 | `admin_users` | Local admin credentials |
 | `admin_sessions` | Authenticated sessions |
-| `app_settings` | Settlement, Sync, display, branding and collection configuration |
+| `app_settings` | Settlement, Sync, display, branding, analytics and collection configuration |
 | `admin_audit_log` | Administrative changes and operations |
 | `admin_login_events` | Successful and failed sign-in records |
 

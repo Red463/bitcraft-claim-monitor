@@ -73,6 +73,7 @@ type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
 type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
+type AnalyticsSettings = { enabled: boolean; scriptUrl: string; endpoint: string };
 type AppSettings = {
   claimId: string;
   syncUrl: string;
@@ -82,9 +83,16 @@ type AppSettings = {
   defaultRegion: string;
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
+  analytics: AnalyticsSettings;
   snapshotRetentionDays: number;
   browserSnapshotsEnabled: boolean;
 };
+
+declare global {
+  interface Window {
+    plausible?: ((eventName: string, options?: AnyRecord) => void) & { q?: unknown[]; init?: (options?: AnyRecord) => void; o?: AnyRecord };
+  }
+}
 
 const NAV = [
   ["overview", "Overview", Shield],
@@ -126,6 +134,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultRegion: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
+  analytics: { enabled: false, scriptUrl: "", endpoint: "" },
   snapshotRetentionDays: 365,
   browserSnapshotsEnabled: true,
 };
@@ -257,6 +266,17 @@ function updateQueryState(values: Record<string, string | null>) {
     else url.searchParams.delete(key);
   }
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+let analyticsEnabled = false;
+
+function analyticsPageUrl(panel: ActivePanel = urlPanel() ?? "overview"): string {
+  return `${window.location.origin}${window.location.pathname}?page=${panel}`;
+}
+
+function trackAnalyticsEvent(eventName: string, props?: Record<string, string | number | boolean>) {
+  if (!analyticsEnabled || typeof window.plausible !== "function") return;
+  window.plausible(eventName, { url: analyticsPageUrl(), ...(props ? { props } : {}) });
 }
 
 function catalogEntries(catalog: unknown): AnyRecord[] {
@@ -858,7 +878,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
       </div>
       <DataTable
         rows={filtered}
-        onRowClick={(member) => setSelectedId(String(member.playerEntityId))}
+        onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); trackAnalyticsEvent("Member Details Opened"); }}
         rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
         columns={[
           ["", (m) => <span className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} title={m.player?.signedIn ? `Online ${formatDuration(m.player.sessionSeconds)}` : "Offline"} />],
@@ -867,7 +887,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
           ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); }}>View</button>],
+          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); trackAnalyticsEvent("Member Details Opened"); }}>View</button>],
         ]}
       />
       {selectedMember ? (
@@ -1644,6 +1664,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   const selectView = (next: "live" | "analytics" | "pricing") => {
     setView(next);
     updateQueryState({ page: "market", tab: next });
+    trackAnalyticsEvent("Market Tab Viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {
     const names = [
@@ -1724,7 +1745,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       {view !== "pricing" ? <div className="toolbar-row">
         <label className="inline-field">
           <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
+          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("Market Member Filter Used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
             <option>All</option>
             {memberOptions.map((name) => <option key={name}>{name}</option>)}
           </select>
@@ -1913,6 +1934,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
     setQuery(String(item.name));
     setSuggestions([]);
     updateQueryState({ item: String(item.id), itemName: String(item.name), itemType: String(item.itemType ?? 0), region: activeRegion || "all" });
+    trackAnalyticsEvent("Price Finder Search", { region: activeRegion ? "selected_region" : "all_regions" });
   }
 
   const stats = priceState.data?.priceStats ?? {};
@@ -1949,7 +1971,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
         </label>
         <label className="field">
           <span>Region</span>
-          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); }}>
+          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("Price Finder Region Changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
             {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
             <option value="All">All Regions</option>
           </select>
@@ -2116,7 +2138,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
   const columns: Array<[string, PublicCraftSortKey, (job: AnyRecord) => React.ReactNode]> = [
     ["Craft", "output", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
     ["Tier", "tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
-    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) })}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
+    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => { trackAnalyticsEvent("Public Craft Map Opened"); onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) }); }}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
     ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
     ["Effort to Craft", "remaining", (job) => formatNumber(job.remaining)],
     ["XP Available", "availableXp", (job) => formatNumber(job.availableXp)],
@@ -2130,13 +2152,13 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
         </Header>
         <div className="toolbar-row">
           <label className="inline-field"><span>Skill</span>
-            <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); }}>
+            <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("Public Craft Skill Filter Used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
               <option value="All">All Skills</option>
               {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
             </select>
           </label>
           <label className="inline-field"><span>Region</span>
-            <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); }}>
+            <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); trackAnalyticsEvent("Public Craft Region Filter Used", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
               <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
             </select>
           </label>
@@ -2160,7 +2182,7 @@ function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
   });
 }
 
-function SettlementPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
+function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
   const [state, setState] = React.useState<LoadState<AnyRecord[]>>({ data: null, error: null, loading: true });
   const memberKey = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean).join(",");
   React.useEffect(() => {
@@ -2197,8 +2219,8 @@ function SettlementPassiveCrafts({ members, refreshToken }: { members: AnyRecord
   return (
     <section className="settlement-passive-crafts">
       <div className="split-header">
-        <Header title="Passive Crafts">
-          Recent passive output reported by settlement members. Quantity combines matching records returned by BitJita.
+        <Header title="Member Passive Crafts">
+          Recent public passive output for current settlement members. BitJita does not report craft location, so entries may have been performed elsewhere.
         </Header>
         {state.loading && rows.length ? <span className="refreshing-label">Updating...</span> : null}
       </div>
@@ -2327,7 +2349,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
       </div>
       <div className="toolbar-row production-controls">
         <label className="inline-field"><span>Member</span>
-          <select className="select-control" value={selectedMemberId} onChange={(event) => onSelectMember(event.target.value)}>
+          <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("Production Eligibility Filter Used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
             <option value="All">All members</option>
             {data.members.map((member: AnyRecord) => <option key={member.playerEntityId} value={String(member.playerEntityId)}>{member.userName ?? member.username}</option>)}
           </select>
@@ -2390,7 +2412,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           );
         })}
       </div>
-      <SettlementPassiveCrafts members={data.members} refreshToken={refreshToken} />
+      <MemberPassiveCrafts members={data.members} refreshToken={refreshToken} />
     </div>
   );
 }
@@ -2684,7 +2706,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         <label className="activity-member-filter">
           <User size={16} />
           <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
+          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("Activity Member Filter Used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
             <option value="All">All members</option>
             {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -2692,7 +2714,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         </label>
         <div className="activity-filters">
           {ACTIVITY_FILTERS.map(([id, label]) => (
-            <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>
+            <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("Activity Category Filter Used", { category: id }); }}>
               <span>{label}</span>
               <strong>{filterCounts.get(id) ?? 0}</strong>
             </button>
@@ -2849,7 +2871,7 @@ function CommandPalette({ data, onClose, onNavigate, onSelectMember }: { data: R
   );
 }
 
-function HelpCenter({ version, onClose }: { version: string; onClose: () => void }) {
+function HelpCenter({ version, onClose, onPrivacy }: { version: string; onClose: () => void; onPrivacy: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -2885,7 +2907,43 @@ function HelpCenter({ version, onClose }: { version: string; onClose: () => void
             <span>Found an issue or have an idea? Let us know on GitHub Issues.</span>
             <ExternalLink size={14} />
           </a>
+          <button className="help-link-button" onClick={() => { onClose(); onPrivacy(); }}>
+            <strong>Privacy & Analytics</strong>
+            <span>See what anonymous usage data may be measured</span>
+            <Shield size={14} />
+          </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function PrivacyDialog({ analyticsEnabled: trackingEnabled, onClose }: { analyticsEnabled: boolean; onClose: () => void }) {
+  React.useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog privacy-dialog" role="dialog" aria-modal="true" aria-labelledby="privacy-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <Shield size={19} />
+            <h2 id="privacy-title">Privacy & Analytics</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close privacy information"><X size={16} /></button>
+        </header>
+        <div className={`analytics-status ${trackingEnabled ? "enabled" : ""}`}>
+          <strong>Anonymous analytics {trackingEnabled ? "enabled" : "disabled"}</strong>
+          <span>{trackingEnabled ? "This installation measures aggregate product usage with Plausible Analytics." : "This installation is not currently sending usage analytics."}</span>
+        </div>
+        <p className="help-intro">When enabled, analytics measure pages visited, engagement time, and use of key features such as filters, Price Finder, member details, and map links.</p>
+        <p className="help-intro">The app does not send BitCraft usernames, selected member identities, typed search text, admin credentials, or database contents to analytics.</p>
+        <p className="help-intro">Plausible is configured without analytics cookies or persistent personal identifiers. Gameplay data displayed by this application continues to come from public BitJita endpoints.</p>
+        <a className="privacy-provider-link" href="https://plausible.io/data-policy" target="_blank" rel="noreferrer"><ExternalLink size={13} /> Plausible data policy</a>
       </section>
     </div>
   );
@@ -3155,6 +3213,14 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => <label className="toggle-row" key={key}><input type="checkbox" checked={draft.toastSettings[key]} onChange={(event) => updateDraft("toastSettings", { ...draft.toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>)}
             </section>
             <section className="form-card">
+              <h3><TrendingUp size={17} /> Anonymous Analytics</h3>
+              <p className="legend">Optional cookieless usage analytics through Plausible. Paste the unique script URL from the Plausible Site Installation screen. Page locations are reduced to app sections and feature events never include member identities or search text.</p>
+              <label className="toggle-row"><input type="checkbox" checked={draft.analytics.enabled} onChange={(event) => updateDraft("analytics", { ...draft.analytics, enabled: event.target.checked })} /><span>Enable anonymous usage analytics</span></label>
+              <label className="field"><span>Plausible script URL</span><input value={draft.analytics.scriptUrl} onChange={(event) => updateDraft("analytics", { ...draft.analytics, scriptUrl: event.target.value })} placeholder="https://plausible.io/js/pa-XXXXX.js" /></label>
+              <label className="field"><span>Custom event endpoint (optional)</span><input value={draft.analytics.endpoint} onChange={(event) => updateDraft("analytics", { ...draft.analytics, endpoint: event.target.value })} placeholder="For a future first-party proxy" /></label>
+              <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Analytics</button>
+            </section>
+            <section className="form-card">
               <h3><Upload size={17} /> Branding</h3>
               {(["logo", "favicon"] as const).map((type) => {
                 const asset = draft.branding?.[type];
@@ -3233,6 +3299,7 @@ function App() {
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = React.useState(false);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
@@ -3246,6 +3313,7 @@ function App() {
   const [watches, setWatches] = usePersistedState<WatchEntry[]>("overview.watchlist", []);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [privacyOpen, setPrivacyOpen] = React.useState(false);
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
@@ -3324,7 +3392,7 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
         if (!config) return;
-        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {} } as AppSettings;
+        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {}, analytics: { ...DEFAULT_SETTINGS.analytics, ...(config.analytics ?? {}) } } as AppSettings;
         setAppSettings(next);
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);
@@ -3333,12 +3401,47 @@ function App() {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
         }
+        setSettingsLoaded(true);
       })
-      .catch(() => undefined);
+      .catch(() => setSettingsLoaded(true));
   }, []);
   React.useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+  React.useEffect(() => {
+    const analytics = appSettings.analytics;
+    const existing = document.querySelector<HTMLScriptElement>("script[data-claim-monitor-analytics]");
+    analyticsEnabled = Boolean(analytics.enabled && analytics.scriptUrl);
+    if (!analyticsEnabled) {
+      existing?.remove();
+      return;
+    }
+    if (!window.plausible) {
+      const queued = ((...args: unknown[]) => {
+        queued.q = queued.q ?? [];
+        queued.q.push(args);
+      }) as NonNullable<Window["plausible"]>;
+      window.plausible = queued;
+    }
+    if (!window.plausible.init) {
+      window.plausible.init = (options?: AnyRecord) => {
+        if (window.plausible) window.plausible.o = options ?? {};
+      };
+    }
+    window.plausible.init({ autoCapturePageviews: false, ...(analytics.endpoint ? { endpoint: analytics.endpoint } : {}) });
+    if (existing?.src !== new URL(analytics.scriptUrl, window.location.origin).href) {
+      existing?.remove();
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = analytics.scriptUrl;
+      script.dataset.claimMonitorAnalytics = "true";
+      document.head.appendChild(script);
+    }
+  }, [appSettings.analytics]);
+  React.useEffect(() => {
+    if (!settingsLoaded || !appSettings.analytics.enabled || !appSettings.analytics.scriptUrl) return;
+    trackAnalyticsEvent("pageview");
+  }, [active, appSettings.analytics.enabled, appSettings.analytics.scriptUrl, settingsLoaded]);
   React.useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
     window.scrollTo(0, 0);
@@ -3447,7 +3550,7 @@ function App() {
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
-    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings({ ...settings, analytics: { ...DEFAULT_SETTINGS.analytics, ...(settings.analytics ?? {}) } }); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
 
   return (
@@ -3473,6 +3576,7 @@ function App() {
           <div>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
             <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
+            <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>
             <a href="https://bitcraftmap.com/" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitCraft Map</a>
           </div>
@@ -3482,7 +3586,8 @@ function App() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} /> : null}
+      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
+      {privacyOpen ? <PrivacyDialog analyticsEnabled={appSettings.analytics.enabled && Boolean(appSettings.analytics.scriptUrl)} onClose={() => setPrivacyOpen(false)} /> : null}
     </div>
   );
 }

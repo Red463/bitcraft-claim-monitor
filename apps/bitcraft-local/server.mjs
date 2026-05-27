@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.6.4-beta.1";
+const appVersion = "0.6.6-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
@@ -178,6 +178,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("analytics_json", JSON.stringify({ enabled: false, scriptUrl: "", endpoint: "" }), now);
 
 const statements = {
   latestSnapshot: db.prepare("SELECT * FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
@@ -309,6 +310,7 @@ function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
+  const analytics = safeJson(statements.getSetting.get("analytics_json")?.value, { enabled: false, scriptUrl: "", endpoint: "" });
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
@@ -318,6 +320,11 @@ function getSettings() {
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
+    analytics: {
+      enabled: analytics.enabled === true,
+      scriptUrl: String(analytics.scriptUrl ?? ""),
+      endpoint: String(analytics.endpoint ?? ""),
+    },
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
     browserSnapshotsEnabled: false,
   };
@@ -341,6 +348,16 @@ function validSyncUrl(value) {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "https:" && parsed.hostname === "bitcraftsync.app";
+  } catch {
+    return false;
+  }
+}
+
+function validAnalyticsUrl(value) {
+  if (!value) return true;
+  if (/^\/(?!\/)/.test(value)) return true;
+  try {
+    return new URL(value).protocol === "https:";
   } catch {
     return false;
   }
@@ -1435,6 +1452,14 @@ const server = createServer(async (req, res) => {
           marketSales: body.toastSettings?.marketSales !== false,
           production: body.toastSettings?.production !== false,
         };
+        const analytics = {
+          enabled: body.analytics?.enabled === true,
+          scriptUrl: String(body.analytics?.scriptUrl ?? "").trim(),
+          endpoint: String(body.analytics?.endpoint ?? "").trim(),
+        };
+        if (analytics.enabled && !analytics.scriptUrl) return send(res, 400, { error: "Add a Plausible script URL before enabling analytics" });
+        if (!validAnalyticsUrl(analytics.scriptUrl)) return send(res, 400, { error: "Plausible script URL must be an HTTPS URL or same-site path" });
+        if (!validAnalyticsUrl(analytics.endpoint)) return send(res, 400, { error: "Analytics event endpoint must be an HTTPS URL or same-site path" });
         const updatedAt = new Date().toISOString();
         statements.upsertSetting.run("claim_id", nextClaimId, updatedAt);
         statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
@@ -1444,7 +1469,8 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays });
+        statements.upsertSetting.run("analytics_json", JSON.stringify(analytics), updatedAt);
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, analyticsEnabled: analytics.enabled });
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
