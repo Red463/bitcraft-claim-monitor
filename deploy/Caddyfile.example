@@ -1,5 +1,5 @@
-# Replace monitor.example.com with the domain name you point at this VPS.
-monitor.example.com {
+# Canonical production domain.
+claim.timbersteeltrade.com {
 	encode zstd gzip
 	header {
 		X-Content-Type-Options nosniff
@@ -8,4 +8,9 @@ monitor.example.com {
 		X-Frame-Options SAMEORIGIN
 	}
 	reverse_proxy 127.0.0.1:18430
+}
+
+# Legacy host redirect.
+claim.hostred.co.uk {
+	redir https://claim.timbersteeltrade.com{uri} permanent
 }
