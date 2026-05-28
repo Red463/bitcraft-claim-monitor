@@ -370,9 +370,11 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .production-card section { padding: 14px; display: grid; gap: 10px; }
 .production-card h3 { color: var(--text); font-size: 16px; }
 .production-controls { justify-content: flex-end; }
-.craft-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
-.craft-title h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.craft-title .item-thumb { flex: 0 0 auto; }
+.craft-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; min-height: 36px; }
+.craft-title.has-icon { grid-template-columns: 36px minmax(0, 1fr) auto; }
+.craft-title h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.15; }
+.craft-title .item-thumb { width: 36px; height: 36px; border-radius: 8px; }
+.craft-title .tier-badge { justify-self: end; }
 .production-member-banner { min-height: 43px; border: 1px solid rgba(116,182,255,.32); background: rgba(116,182,255,.08); border-radius: 7px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .production-member-banner svg, .production-member-banner strong { color: var(--copper); }
 .production-member-banner small { margin-left: auto; color: var(--muted); }
