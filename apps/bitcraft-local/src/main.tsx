@@ -31,6 +31,7 @@ import {
   HardDrive,
   Map as MapIcon,
   MapPin,
+  MessageCircle,
   Package,
   Palette,
   Pin,
@@ -62,6 +63,7 @@ const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 
 type AnyRecord = Record<string, any>;
@@ -3765,6 +3767,7 @@ function App() {
       <aside>
         <div className="brand">{appSettings.branding.logo ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" /> : <Shield />}<div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
         <button className="command-launch" onClick={() => setCommandOpen(true)}><Search size={15} /><span>Quick find</span><kbd>Ctrl K</kbd></button>
+        <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><MessageCircle size={17} /><span>Join Discord</span><ExternalLink size={13} /></a>
         <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => navigate(id)}><Icon size={16} />{label}</button>)}</nav>
         <div className="sidebar-tools">
           <button onClick={() => setDensity(density === "compact" ? "comfortable" : "compact")} title="Change table density"><Command size={14} /> {density === "compact" ? "Comfortable View" : "Compact View"}</button>
