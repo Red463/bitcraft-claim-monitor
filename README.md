@@ -394,6 +394,28 @@ artifacts/                           Original exported/Replit application artifa
 - Keep the production Node process bound to localhost and expose it through HTTPS with Caddy.
 - Back up the SQLite database separately from the Git repository.
 
+## License
+
+This project is licensed under the PolyForm Noncommercial 1.0.0 license.
+
+You are free to:
+
+- Self-host
+- Modify
+- Fork
+- Deploy personal/community instances
+
+You may NOT:
+
+- Sell this software
+- Offer it as a paid service
+- Monetise it commercially without permission
+
+Attribution to the original project and author must be retained.
+
+Original project by Tom Bush:
+[github.com/Red463](https://github.com/Red463)
+
 ## Links
 
 - Application repository: [github.com/Red463/bitcraft-claim-monitor](https://github.com/Red463/bitcraft-claim-monitor)
