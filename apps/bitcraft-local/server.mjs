@@ -837,7 +837,7 @@ function discordEnabledFor(eventType, settings, metadata) {
 }
 
 function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
-  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : eventType.includes("production") ? 0x65b7fa : 0xef6461;
+  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : eventType.includes("production") ? 0x65b7fa : eventType === "app_update" ? 0xa349af : 0xef6461;
   const fields = [];
   if (metadata.itemName) fields.push({ name: "Item", value: String(metadata.itemName), inline: true });
   if (metadata.owner) fields.push({ name: "Member", value: String(metadata.owner), inline: true });
@@ -846,17 +846,24 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (toNumber(metadata.totalValue ?? metadata.totalPrice)) fields.push({ name: "Total", value: formatGold(metadata.totalValue ?? metadata.totalPrice), inline: true });
   if (metadata.buildingName) fields.push({ name: "Structure", value: String(metadata.buildingName), inline: true });
   if (metadata.crafterName) fields.push({ name: "Crafter", value: String(metadata.crafterName), inline: true });
+  if (metadata.runway) fields.push({ name: "Runway", value: String(metadata.runway), inline: true });
+  if (metadata.upkeep) fields.push({ name: "Upkeep", value: String(metadata.upkeep), inline: true });
+  if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
+  const title = eventType === "market_new_listing" ? "Market Listing"
+    : eventType.includes("sale") ? "Market Sale"
+    : eventType === "production_started" ? "Craft Started"
+    : eventType === "production_completed" ? "Craft Completed"
+    : eventType === "supplies" ? "Supply Watch"
+    : eventType === "app_update" ? "App Update"
+    : "Settlement Update";
   return {
-    title: eventType === "market_new_listing" ? "New market listing"
-      : eventType.includes("sale") ? "Market sale"
-      : eventType === "production_started" ? "Craft started"
-      : eventType === "production_completed" ? "Craft completed"
-      : "Settlement update",
-    description: summary,
+    author: { name: "Timbersteel Trade" },
+    title,
+    description: `**${summary}**`,
     color,
     fields: fields.slice(0, 8),
     timestamp: occurredAt,
-    footer: { text: "Timbersteel Trade" },
+    footer: { text: "BitCraft settlement monitor" },
   };
 }
 
@@ -881,6 +888,54 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw()) {
   });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
+}
+
+const discordTestEvents = {
+  listing: {
+    eventType: "market_new_listing",
+    summary: "New listing: Rough Plank x240 at 6g",
+    metadata: { itemName: "Rough Plank", owner: "Modular", quantity: 240, price: 6, totalValue: 1440 },
+  },
+  sale: {
+    eventType: "market_sale_confirmed",
+    summary: "Confirmed sale: Bronze Ingot x75 at 18g",
+    metadata: { itemName: "Bronze Ingot", owner: "Mosswick", quantity: 75, price: 18, totalValue: 1350 },
+  },
+  craftStarted: {
+    eventType: "production_started",
+    summary: "Craft started: Tier 4 Scholar Workstation",
+    metadata: { label: "Tier 4 Scholar Workstation", buildingName: "Scholar Hall", crafterName: "Settlement queue" },
+  },
+  craftCompleted: {
+    eventType: "production_completed",
+    summary: "Craft completed: Refined Rough Plank",
+    metadata: { label: "Refined Rough Plank", buildingName: "Carpentry Workshop", crafterName: "Settlement queue" },
+  },
+  supplies: {
+    eventType: "supplies",
+    summary: "Supply stock changed: 11,946 remaining",
+    metadata: { runway: "12 days 22 hours", upkeep: "448.5 supplies per day" },
+  },
+  appUpdate: {
+    eventType: "app_update",
+    summary: "Version 0.8.0-beta.1 is live with Discord notifications and slash commands",
+    metadata: { version: appVersion },
+  },
+};
+
+async function sendDiscordTestNotification(kind = "basic") {
+  if (kind === "basic") {
+    return sendDiscordMessage({
+      content: "Discord integration test from Timbersteel Trade.",
+      allowed_mentions: { parse: [] },
+    });
+  }
+  const sample = discordTestEvents[kind];
+  if (!sample) throw new Error("Unknown Discord test notification");
+  return sendDiscordMessage({
+    embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
+    allowed_mentions: { parse: [] },
+  });
 }
 
 const deployableStorageName = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
@@ -1951,8 +2006,10 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { commands });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
-        await sendDiscordMessage({ content: "Discord integration test from Timbersteel Trade.", allowed_mentions: { parse: [] } });
-        audit(user, "discord.test_message");
+        const body = await readJson(req);
+        const kind = String(body.kind ?? "basic");
+        await sendDiscordTestNotification(kind);
+        audit(user, "discord.test_message", { kind });
         return send(res, 200, { ok: true });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());

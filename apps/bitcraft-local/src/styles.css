@@ -688,6 +688,17 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .toolbar-button.primary { color: var(--gold); border-color: rgba(240,198,79,.45); background: var(--gold-dim); }
 .toolbar-button:disabled { opacity: .45; cursor: not-allowed; }
 .status-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 30px; }
+.toggle-line { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 42px; padding: 9px 11px; display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 13px; }
+.toggle-line span { min-width: 0; overflow-wrap: anywhere; }
+.discord-admin { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.discord-admin .field input { min-width: 0; width: 100%; }
+.discord-admin .status-detail { grid-template-columns: 1fr; gap: 8px; }
+.discord-admin .info { min-width: 0; }
+.discord-admin .info strong, .discord-admin .info span { overflow-wrap: anywhere; }
+.discord-actions .toolbar-button { flex: 1 1 210px; justify-content: center; }
+.discord-preview-card { grid-column: 1 / -1; }
+.discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 9px; }
+.discord-test-grid .toolbar-button { justify-content: center; min-width: 0; }
 .diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .diagnostics div { display: grid; gap: 4px; border: 1px solid var(--border); background: var(--panel-2); padding: 10px; border-radius: 7px; font-size: 12px; }
 .diagnostics .ok strong { color: var(--good); }

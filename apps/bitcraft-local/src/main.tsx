@@ -3593,6 +3593,15 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
     ["Ember", { ...DEFAULT_THEME, bg: "#120c0a", sidebar: "#090705", panel: "#211815", panel2: "#17110f", border: "#50382d", gold: "#f5aa45", good: "#55db96" }],
   ];
+  const discordTestButtons = [
+    ["basic", "Basic"],
+    ["listing", "Listing"],
+    ["sale", "Sale"],
+    ["craftStarted", "Craft Started"],
+    ["craftCompleted", "Craft Completed"],
+    ["supplies", "Supplies"],
+    ["appUpdate", "App Update"],
+  ];
 
   if (authLoading) return <div className="panel"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
   if (!auth?.authenticated) {
@@ -3723,7 +3732,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <label className="field"><span>Server/Guild ID</span><input value={draft.discord.guildId} onChange={(event) => updateDiscord({ guildId: event.target.value })} placeholder="Recommended for instant slash command updates" /></label>
             <label className="field"><span>Notification Channel ID</span><input value={draft.discord.channelId} onChange={(event) => updateDiscord({ channelId: event.target.value })} /></label>
             <label className="field"><span>Minimum sale value for Discord alerts</span><input type="number" min={0} value={draft.discord.minSaleValue} onChange={(event) => updateDiscord({ minSaleValue: Number(event.target.value) })} /></label>
-            <div className="toolbar"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Discord Settings</button><button className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: "{}" }); }, "Discord test message sent.")}><MessageCircle size={15} /> Send Test</button><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
+            <div className="toolbar discord-actions"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Discord Settings</button><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
           </section>
           <section className="form-card">
             <h3><Bell size={17} /> Notifications</h3>
@@ -3738,6 +3747,11 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
             </div>
             <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
+          </section>
+          <section className="form-card discord-preview-card">
+            <h3><MessageCircle size={17} /> Notification Tests</h3>
+            <p className="legend">Send sample messages to the configured channel to preview how each alert type will look in Discord.</p>
+            <div className="discord-test-grid">{discordTestButtons.map(([kind, label]) => <button key={kind} className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) }); }, `${label} Discord test sent.`)}><MessageCircle size={14} /> {label}</button>)}</div>
           </section>
         </div>
       ) : null}
