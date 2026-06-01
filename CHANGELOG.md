@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.13-beta.1 - 2026-06-01
+
+### Fixed
+
+- Map focus from Public Craft Finder is now stored per browser and reflected in the page URL, so refreshing the Map page keeps the selected settlement/location.
+
 ## 0.8.12-beta.1 - 2026-06-01
 
 ### Changed

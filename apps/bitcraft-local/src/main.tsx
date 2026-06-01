@@ -382,6 +382,18 @@ function urlPanel(): ActivePanel | null {
   return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
 }
 
+function urlMapFocus(): MapFocus {
+  const params = new URLSearchParams(window.location.search);
+  const x = params.get("mapX");
+  const z = params.get("mapZ");
+  if (x == null || z == null) return null;
+  return {
+    name: params.get("mapName") ?? "Map focus",
+    locationX: toNumber(x),
+    locationZ: toNumber(z),
+  };
+}
+
 function updateQueryState(values: Record<string, string | null>) {
   const url = new URL(window.location.href);
   for (const [key, value] of Object.entries(values)) {
@@ -4002,7 +4014,7 @@ function App() {
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
-  const [mapFocus, setMapFocus] = React.useState<MapFocus>(null);
+  const [mapFocus, setMapFocus] = usePersistedState<MapFocus>("map.focus", urlMapFocus());
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
@@ -4033,8 +4045,9 @@ function App() {
     toastTimersRef.current.delete(id);
     setToasts((current) => current.filter((notice) => notice.id !== id));
   }, []);
-  const navigate = React.useCallback((panel: ActivePanel, marketTab?: string) => {
+  const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
+    const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
     updateQueryState({
       page: panel,
       tab: panel === "market" ? marketTab ?? null : null,
@@ -4042,8 +4055,11 @@ function App() {
       itemName: panel === "market" ? new URLSearchParams(window.location.search).get("itemName") : null,
       itemType: panel === "market" ? new URLSearchParams(window.location.search).get("itemType") : null,
       region: panel === "market" ? new URLSearchParams(window.location.search).get("region") : null,
+      mapName: activeMapFocus?.name ?? null,
+      mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
+      mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
     });
-  }, [setActive]);
+  }, [mapFocus, setActive]);
   const toggleWatch = React.useCallback((watch: WatchEntry) => {
     setWatches((current) => current.some((entry) => entry.id === watch.id) ? current.filter((entry) => entry.id !== watch.id) : [...current, watch].slice(-12));
   }, [setWatches]);
@@ -4064,14 +4080,18 @@ function App() {
   }, []);
   React.useEffect(() => {
     const requested = urlPanel();
+    const requestedMapFocus = urlMapFocus();
+    if (requestedMapFocus) setMapFocus(requestedMapFocus);
     if (requested) setActive(requested);
     function restoreFromHistory() {
       const panel = urlPanel();
+      const historyMapFocus = urlMapFocus();
+      if (historyMapFocus) setMapFocus(historyMapFocus);
       if (panel) setActive(panel);
     }
     window.addEventListener("popstate", restoreFromHistory);
     return () => window.removeEventListener("popstate", restoreFromHistory);
-  }, [setActive]);
+  }, [setActive, setMapFocus]);
   React.useEffect(() => {
     function openCommands(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -4222,14 +4242,14 @@ function App() {
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
-    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map"); }} /></div>,
+    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     buildings: <Buildings data={data} />,
     research: <Research data={data} />,
     market: <Market data={data} history={localHistory.market} claimId={claimId} watches={watches} onToggleWatch={toggleWatch} />,
     empire: <Region data={data} />,
-    map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => setMapFocus(null)} />,
+    map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
