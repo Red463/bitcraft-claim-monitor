@@ -695,7 +695,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .admin-tabs button { min-height: 37px; border: 1px solid transparent; border-radius: 6px; padding: 0 16px; color: var(--muted); background: transparent; cursor: pointer; }
 .admin-tabs button:hover, .admin-tabs button.active { color: var(--gold); background: var(--gold-dim); border-color: rgba(240,198,79,.34); }
 .admin-message { border: 1px solid rgba(240,198,79,.3); border-radius: 7px; padding: 11px 14px; color: var(--text); background: rgba(240,198,79,.07); font-size: 13px; }
-.floating-save { position: fixed; left: 50%; bottom: 18px; z-index: 22; transform: translateX(-50%); width: min(620px, calc(100vw - 120px)); border: 1px solid rgba(240,198,79,.38); border-radius: 9px; background: rgba(18,20,25,.96); box-shadow: 0 18px 42px rgba(0,0,0,.46); padding: 10px; display: flex; align-items: center; gap: 8px; animation: toast-enter .18s ease-out; }
+.floating-save { position: sticky; bottom: 14px; z-index: 6; width: min(620px, 100%); margin: 14px auto 0; border: 1px solid rgba(240,198,79,.38); border-radius: 9px; background: rgba(18,20,25,.96); box-shadow: 0 18px 42px rgba(0,0,0,.46); padding: 10px; display: flex; align-items: center; gap: 8px; animation: toast-enter .18s ease-out; }
 .floating-save div { min-width: 0; margin-right: auto; display: grid; gap: 1px; }
 .floating-save strong { color: var(--text); font-size: 13px; }
 .floating-save span { color: var(--muted); font-size: 12px; }
@@ -784,7 +784,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .activity-member-filter .select-control { min-width: 0; flex: 1; }
   .floating-help { right: 12px; bottom: 12px; }
   .toast-stack { right: 12px; bottom: 69px; width: calc(100vw - 24px); }
-  .floating-save { left: 12px; right: 12px; bottom: 68px; transform: none; width: auto; display: grid; grid-template-columns: 1fr 1fr; }
+  .floating-save { bottom: 12px; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .floating-save div { grid-column: 1 / -1; }
   .floating-save .toolbar-button { justify-content: center; }
   .database-toolbar, .backup-list > div { align-items: stretch; flex-direction: column; }

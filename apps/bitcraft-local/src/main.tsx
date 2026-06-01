@@ -3712,13 +3712,6 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
       </div>
       <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>
       {message ? <div className="admin-message">{message}</div> : null}
-      {hasUnsavedSettings ? (
-        <div className="floating-save">
-          <div><strong>Unsaved changes</strong><span>Save to apply these settings.</span></div>
-          <button className="toolbar-button" onClick={revertSettings}><RefreshCw size={14} /> Revert</button>
-          <button className="toolbar-button primary" onClick={saveSettings}><Save size={14} /> Save Changes</button>
-        </div>
-      ) : null}
 
       {tab === "status" ? (
         <div className="admin-section">
@@ -3934,6 +3927,13 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
             <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
           </section>
+        </div>
+      ) : null}
+      {hasUnsavedSettings ? (
+        <div className="floating-save">
+          <div><strong>Unsaved changes</strong><span>Save to apply these settings.</span></div>
+          <button className="toolbar-button" onClick={revertSettings}><RefreshCw size={14} /> Revert</button>
+          <button className="toolbar-button primary" onClick={saveSettings}><Save size={14} /> Save Changes</button>
         </div>
       ) : null}
     </div>
