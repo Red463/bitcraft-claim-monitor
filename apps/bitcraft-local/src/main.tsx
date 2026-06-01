@@ -3559,6 +3559,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
   }, []);
   React.useEffect(() => setDraft(settings), [settings]);
+  const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
   React.useEffect(() => {
     if (tab === "theme" && auth?.authenticated) applyTheme(draft.theme);
     return () => { if (tab === "theme") applyTheme(settings.theme); };
@@ -3600,6 +3601,12 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
       setDraft(next);
       onSettingsSaved(next);
     }, "Settings saved and applied.");
+  }
+
+  function revertSettings() {
+    setDraft(settings);
+    applyTheme(settings.theme);
+    setMessage("Unsaved changes reverted.");
   }
 
   function updateDraft<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
@@ -3705,6 +3712,13 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
       </div>
       <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>
       {message ? <div className="admin-message">{message}</div> : null}
+      {hasUnsavedSettings ? (
+        <div className="floating-save">
+          <div><strong>Unsaved changes</strong><span>Save to apply these settings.</span></div>
+          <button className="toolbar-button" onClick={revertSettings}><RefreshCw size={14} /> Revert</button>
+          <button className="toolbar-button primary" onClick={saveSettings}><Save size={14} /> Save Changes</button>
+        </div>
+      ) : null}
 
       {tab === "status" ? (
         <div className="admin-section">

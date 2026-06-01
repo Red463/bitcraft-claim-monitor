@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.5-beta.1 - 2026-06-01
+
+### Added
+
+- Added a floating Admin save prompt that appears when settings have unsaved changes, with Save and Revert actions.
+
 ## 0.8.4-beta.1 - 2026-06-01
 
 ### Changed
