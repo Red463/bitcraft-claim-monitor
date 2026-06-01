@@ -2950,21 +2950,8 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
-  const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
-  const roster = data.players;
-  const defaultSelection = React.useMemo(() => {
-    const online = roster.filter((player) => player.signedIn).map((player) => String(player.entityId)).filter(Boolean);
-    return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
-  }, [roster]);
-  const current = React.useMemo(() => selectedIds === null ? defaultSelection : new Set(selectedIds), [defaultSelection, selectedIds]);
-  const playerQuery = current.size ? `?playerId=${[...current].sort().join(",")}` : "";
-  const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
-    name: data.claim.name ?? "Monitored settlement",
-    locationX: toNumber(data.claim.locationX),
-    locationZ: toNumber(data.claim.locationZ),
-  } : null;
-  const mapMarker = focus ?? defaultFocus;
+function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false) {
+  const playerQuery = playerIds.length ? `?playerId=${playerIds.sort().join(",")}` : "";
   const waypoint = mapMarker ? {
     type: "FeatureCollection",
     features: [{
@@ -2973,29 +2960,65 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
         popupText: mapMarker.name,
         iconName: "waypoint",
         turnLayerOn: MAP_DEFAULT_LAYERS,
-        ...(focus ? { flyTo: [focus.locationZ, focus.locationX], zoomTo: 2 } : { noPan: true }),
+        ...(flyTo ? { flyTo: [mapMarker.locationZ, mapMarker.locationX], zoomTo: 2 } : { noPan: true }),
       },
       geometry: { type: "Point", coordinates: [mapMarker.locationX, mapMarker.locationZ] },
     }],
   } : null;
-  const mapUrl = `https://bitcraftmap.com/${playerQuery}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
+  return `https://bitcraftmap.com/${playerQuery}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
+}
+
+function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
+  const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
+  const [frameUrl, setFrameUrl] = usePersistedState("map.url", "");
+  const roster = data.players;
+  const defaultSelection = React.useMemo(() => {
+    const online = roster.filter((player) => player.signedIn).map((player) => String(player.entityId)).filter(Boolean);
+    return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
+  }, [roster]);
+  const current = React.useMemo(() => selectedIds === null ? defaultSelection : new Set(selectedIds), [defaultSelection, selectedIds]);
+  const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
+    name: data.claim.name ?? "Monitored settlement",
+    locationX: toNumber(data.claim.locationX),
+    locationZ: toNumber(data.claim.locationZ),
+  } : null;
+  const mapMarker = focus ?? defaultFocus;
+  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus)), [current, focus, mapMarker]);
+  const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
+  React.useEffect(() => {
+    if (!frameUrl) setFrameUrl(mapUrl);
+  }, [frameUrl, mapUrl, setFrameUrl]);
+  React.useEffect(() => {
+    if (focus) setFrameUrl(bitcraftMapUrl([...current], focus, true));
+  }, [focusKey, setFrameUrl]);
   function toggle(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev === null ? [...defaultSelection] : prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return [...next].sort();
+      const nextIds = [...next].sort();
+      setFrameUrl(bitcraftMapUrl(nextIds, mapMarker, false));
+      return nextIds;
     });
   }
   function toggleAll() {
-    setSelectedIds(current.size === roster.length ? [] : roster.map((player) => String(player.entityId)).filter(Boolean).sort());
+    const nextIds = current.size === roster.length ? [] : roster.map((player) => String(player.entityId)).filter(Boolean).sort();
+    setSelectedIds(nextIds);
+    setFrameUrl(bitcraftMapUrl(nextIds, mapMarker, false));
+  }
+  function resetMapFilters() {
+    const nextIds = [...defaultSelection].sort();
+    setSelectedIds(null);
+    onClearFocus();
+    setFrameUrl(bitcraftMapUrl(nextIds, defaultFocus, false));
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
+  const currentFrameUrl = frameUrl || mapUrl;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
       <div className="split-header">
         <Header title="World Map">Live player tracking via bitcraftmap.com</Header>
-        <a className="toolbar-button" href={mapUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
+        <a className="toolbar-button" href={currentFrameUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
       </div>
       <p className="online-summary"><strong>{onlineCount} online</strong> - {roster.length} members total</p>
       {focus ? (
@@ -3007,13 +3030,13 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
       ) : null}
       <div className="player-pills">
         <button className={current.size === roster.length ? "active" : ""} onClick={toggleAll}>All</button>
-        <button onClick={() => { setSelectedIds(null); onClearFocus(); }}>Clear filters</button>
+        <button onClick={resetMapFilters}>Clear filters</button>
         {roster.map((player) => {
           const id = String(player.entityId);
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
-      <iframe className="map-frame" src={mapUrl} title="BitCraft World Map" />
+      <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
     </div>
   );
 }

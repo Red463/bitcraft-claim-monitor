@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.14-beta.1 - 2026-06-01
+
+### Fixed
+
+- The embedded map URL is now persisted per browser and only changed by explicit map actions, preventing normal app refreshes from reloading the map and wiping map-side filters.
+
 ## 0.8.13-beta.1 - 2026-06-01
 
 ### Fixed
