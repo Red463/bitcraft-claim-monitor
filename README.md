@@ -223,6 +223,11 @@ The Discord bot is optional and provided as part of this unofficial community ap
 
 Using the bot means Discord command names, command options, server IDs, channel IDs, user IDs, delivery status, and notification diagnostics may be processed by this app and Discord so the bot can respond and administrators can diagnose delivery issues. Server administrators can disable notifications, remove the bot, rotate the bot token, or delete local diagnostic/history data from the administration tools.
 
+Dedicated public pages are available for Discord application submission:
+
+- Terms of Service: `/terms`
+- Privacy Policy: `/privacy`
+
 Authentication behavior:
 
 - The first administrator is created from the Admin page; additional administrators can then be created there.

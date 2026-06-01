@@ -102,6 +102,13 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .terms-section { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 12px; display: grid; gap: 8px; }
 .terms-section h3 { color: var(--gold); font-size: 14px; margin: 0; }
 .terms-section p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
+.legal-page { min-height: 100vh; background: var(--bg); color: var(--text); padding: 28px; display: grid; place-items: start center; }
+.legal-document { width: min(860px, 100%); border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 22px; display: grid; gap: 16px; box-shadow: 0 20px 55px rgba(0,0,0,.4); }
+.legal-document header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+.legal-document header div { display: flex; align-items: center; gap: 10px; color: var(--gold); }
+.legal-document h1 { color: var(--text); font-size: 30px; }
+.legal-document footer { border-top: 1px solid var(--border); padding-top: 13px; display: grid; gap: 5px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.legal-document a { color: var(--gold); text-decoration: none; }
 .settings-dialog { width: min(620px, 100%); }
 .settings-grid { display: grid; gap: 13px; }
 .settings-grid section { border: 1px solid rgba(255,255,255,.075); border-radius: 8px; background: var(--panel-2); padding: 13px; display: grid; gap: 10px; }

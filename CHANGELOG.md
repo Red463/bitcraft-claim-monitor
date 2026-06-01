@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.16-beta.1 - 2026-06-02
+
+### Added
+
+- Added dedicated `/terms` and `/privacy` pages for Discord application submission, linked from the in-app Legal & Bot Terms and Privacy popups.
+
 ## 0.8.15-beta.1 - 2026-06-02
 
 ### Added

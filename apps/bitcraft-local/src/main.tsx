@@ -3378,6 +3378,59 @@ function HelpCenter({ version, onClose, onPrivacy, onTerms }: { version: string;
   );
 }
 
+function TermsContent({ compact = false }: { compact?: boolean }) {
+  return (
+    <>
+      <section className="terms-section">
+        <h3>Application Terms</h3>
+        <p>This is an unofficial fan-made settlement tool for BitCraft players. It is provided as-is for community use, testing and development. Data may be delayed, incomplete, unavailable or inaccurate, so do not rely on it as the only source for important settlement decisions.</p>
+        <p>The app is not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data is provided by the BitJita API.</p>
+      </section>
+      <section className="terms-section">
+        <h3>Discord Bot Terms</h3>
+        <p>The optional Timbersteel Trade Discord bot posts settlement notifications and responds to slash commands using the same public BitJita data and locally stored app data used by this dashboard.</p>
+        <p>Using the bot in Discord means command names, command options, Discord user/server/channel identifiers, response status, and notification delivery diagnostics may be processed by this app and Discord to provide the requested bot features.</p>
+        <p>Bot responses are informational only. Server administrators can disable notifications, remove the bot, rotate its token, or delete local diagnostic/history data from the app administration tools.</p>
+      </section>
+      {!compact ? <p className="help-intro">Questions, bug reports and feature requests can be raised through the GitHub Issues link in this app.</p> : null}
+    </>
+  );
+}
+
+function PrivacyContent() {
+  return (
+    <>
+      <p className="help-intro">With your permission, this site uses first-party analytics cookies to understand which pages and tools are valuable and how long sections are used. This information is genuinely helpful while the app is being developed.</p>
+      <p className="help-intro">Analytics record a random browser identifier, visits to app sections and high-level feature actions. They do not record BitCraft usernames, selected member identities, typed search text, admin credentials or database contents.</p>
+      <p className="help-intro">The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics so the bot can respond and administrators can diagnose delivery issues.</p>
+      <p className="help-intro">Consent and analytics cookies last for up to 180 days. Raw usage events are retained for up to 90 days. You can change your preference in the app at any time; declining removes the analytics identifier from this browser.</p>
+    </>
+  );
+}
+
+function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
+  const isTerms = type === "terms";
+  return (
+    <main className="legal-page">
+      <section className="legal-document">
+        <header>
+          <div>
+            {isTerms ? <FileText size={22} /> : <Shield size={22} />}
+            <h1>{isTerms ? "Terms & Discord Bot Use" : "Privacy Policy"}</h1>
+          </div>
+          <a className="toolbar-button" href="/"><ExternalLink size={14} /> Open app</a>
+        </header>
+        <p className="help-intro">Timbersteel Claim Monitor - version {APP_VERSION}</p>
+        {isTerms ? <TermsContent /> : <PrivacyContent />}
+        <footer>
+          <span>Unofficial fan-made tool. Not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc.</span>
+          <span>Data provided by the <a href="https://bitjita.com/docs/api">BitJita API</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
+        </footer>
+      </section>
+    </main>
+  );
+}
+
 function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPrivacy: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -3396,18 +3449,11 @@ function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPrivacy: (
           </div>
           <button onClick={onClose} aria-label="Close legal and bot terms"><X size={16} /></button>
         </header>
-        <section className="terms-section">
-          <h3>Application Terms</h3>
-          <p>This is an unofficial fan-made settlement tool for BitCraft players. It is provided as-is for community use, testing and development. Data may be delayed, incomplete, unavailable or inaccurate, so do not rely on it as the only source for important settlement decisions.</p>
-          <p>The app is not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data is provided by the BitJita API.</p>
-        </section>
-        <section className="terms-section">
-          <h3>Discord Bot Terms</h3>
-          <p>The optional Timbersteel Trade Discord bot posts settlement notifications and responds to slash commands using the same public BitJita data and locally stored app data used by this dashboard.</p>
-          <p>Using the bot in Discord means command names, command options, Discord user/server/channel identifiers, response status, and notification delivery diagnostics may be processed by this app and Discord to provide the requested bot features.</p>
-          <p>Bot responses are informational only. Server administrators can disable notifications, remove the bot, rotate its token, or delete local diagnostic/history data from the app administration tools.</p>
-        </section>
-        <button className="toolbar-button" onClick={() => { onClose(); onPrivacy(); }}><Shield size={14} /> Privacy details</button>
+        <TermsContent compact />
+        <div className="toolbar">
+          <a className="toolbar-button primary" href="/terms" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open dedicated page</a>
+          <button className="toolbar-button" onClick={() => { onClose(); onPrivacy(); }}><Shield size={14} /> Privacy details</button>
+        </div>
       </section>
     </div>
   );
@@ -3435,13 +3481,11 @@ function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsCons
           <strong>Usage analytics {consent === "accepted" ? "accepted" : consent === "declined" ? "declined" : "not selected"}</strong>
           <span>{consent === "accepted" ? "This browser is helping development by sharing anonymous feature usage." : "This browser is not currently contributing usage analytics."}</span>
         </div>
-        <p className="help-intro">With your permission, this site uses first-party analytics cookies to understand which pages and tools are valuable and how long sections are used. This information is genuinely helpful while the app is being developed.</p>
-        <p className="help-intro">Analytics record a random browser identifier, visits to app sections and high-level feature actions. They do not record BitCraft usernames, selected member identities, typed search text, admin credentials or database contents.</p>
-        <p className="help-intro">The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics so the bot can respond and administrators can diagnose delivery issues.</p>
-        <p className="help-intro">Consent and analytics cookies last for up to 180 days. Raw usage events are retained for up to 90 days. You can change your preference here at any time; declining removes the analytics identifier from this browser.</p>
+        <PrivacyContent />
         <div className="privacy-actions">
           <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
           <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
+          <a className="toolbar-button" href="/privacy" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open dedicated page</a>
         </div>
       </section>
     </div>
@@ -4067,7 +4111,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   );
 }
 
-function App() {
+function DashboardApp() {
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "overview");
   const mainRef = React.useRef<HTMLElement | null>(null);
   const defaultPageAppliedRef = React.useRef(false);
@@ -4368,6 +4412,11 @@ function App() {
       {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
     </div>
   );
+}
+
+function App() {
+  const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
+  return dedicatedLegalPath ? <DedicatedLegalPage type={dedicatedLegalPath} /> : <DashboardApp />;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
