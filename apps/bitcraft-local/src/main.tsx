@@ -40,6 +40,7 @@ import {
   Save,
   Search,
   Server,
+  Settings,
   Shield,
   Share2,
   ShoppingBag,
@@ -76,6 +77,7 @@ type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; o
 type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
+type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
 type AppSettings = {
   claimId: string;
   syncUrl: string;
@@ -133,6 +135,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   browserSnapshotsEnabled: true,
 };
 
+const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true };
+
 const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
   ["bg", "Background", "--bg"],
   ["sidebar", "Sidebar", "--sidebar"],
@@ -159,6 +163,7 @@ function endpointMap(claimId: string) {
     market: `/claims/${claimId}/market/listings?limit=200`,
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
     layout: `/claims/${claimId}/layout`,
+    skills: `/skills`,
   } as const;
 }
 
@@ -216,6 +221,15 @@ const TOOL_TAG_BY_TYPE: Record<number, string> = {
   14: "Tool",
 };
 
+function bitjitaSkillRows(skills: AnyRecord, category: "Profession" | "Adventure"): AnyRecord[] {
+  const key = category === "Profession" ? "profession" : "adventure";
+  return Array.isArray(skills?.[key]) ? skills[key] : [];
+}
+
+function skillNameFromRows(rows: AnyRecord[], id: number): string {
+  return String(rows.find((skill) => toNumber(skill.id) === id)?.name ?? SKILL_NAMES[id] ?? `Skill ${id}`);
+}
+
 function unwrap<T>(payload: any, key: string, fallback: T): T {
   if (Array.isArray(payload)) return payload as T;
   return (payload?.[key] ?? fallback) as T;
@@ -245,6 +259,26 @@ function hasPersistedState(key: string): boolean {
     return window.localStorage.getItem(`claim-monitor.${key}`) != null;
   } catch {
     return false;
+  }
+}
+
+function clearBrowserLocalSettings() {
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("claim-monitor.")) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage can be blocked without affecting the dashboard.
+  }
+}
+
+function legacyDefaultWatchlist(): WatchEntry[] {
+  try {
+    const saved = window.localStorage.getItem("claim-monitor.overview.watchlists");
+    const parsed = saved ? JSON.parse(saved) : null;
+    return Array.isArray(parsed?.default) ? parsed.default : [];
+  } catch {
+    return [];
   }
 }
 
@@ -350,10 +384,49 @@ function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
   return `https://bitjita.com/${path}.webp`;
 }
 
+function isMarketableItem(item: AnyRecord): boolean {
+  const name = String(item.name ?? "");
+  const hasOrders = item.hasSellOrders === true || item.hasBuyOrders === true || toNumber(item.sellOrders) > 0 || toNumber(item.buyOrders) > 0;
+  return Boolean(item.id && name) && !/\b(Output|Input)\b/i.test(name) && hasOrders;
+}
+
 function equipmentSlots(payload: AnyRecord | null | undefined): AnyRecord[] {
   if (Array.isArray(payload?.equipmentSlots)) return payload.equipmentSlots;
   if (Array.isArray(payload?.equipment)) return payload.equipment;
   return [];
+}
+
+const VISIBLE_EQUIPMENT_SLOTS = [
+  "head_clothing",
+  "torso_clothing",
+  "hand_clothing",
+  "belt_clothing",
+  "leg_clothing",
+  "feet_clothing",
+  "head_artifact",
+  "hand_artifact",
+] as const;
+
+const EQUIPMENT_SLOT_LABELS: Record<string, string> = {
+  head_clothing: "Head",
+  torso_clothing: "Torso",
+  hand_clothing: "Hands",
+  belt_clothing: "Belt",
+  leg_clothing: "Legs",
+  feet_clothing: "Feet",
+  head_artifact: "Heart",
+  hand_artifact: "Jewellery",
+};
+
+function slotKey(slot: AnyRecord): string {
+  return String(slot.primary ?? slot.secondary ?? "").toLowerCase();
+}
+
+function visibleEquipmentSlots(slots: AnyRecord[]): AnyRecord[] {
+  const bySlot = new Map(slots.map((slot) => [slotKey(slot), slot]));
+  const visible = VISIBLE_EQUIPMENT_SLOTS.map((key) => ({ primary: key, ...(bySlot.get(key) ?? {}) }));
+  const unexpectedEquipped = slots.filter((slot) => slot.item && !VISIBLE_EQUIPMENT_SLOTS.includes(slotKey(slot) as typeof VISIBLE_EQUIPMENT_SLOTS[number]));
+  return [...visible, ...unexpectedEquipped];
 }
 
 function equipmentSignature(slots: AnyRecord[]): string {
@@ -433,7 +506,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel !== "activity";
-        const readsProductionDetail = activePanel === "production";
+        const readsProductionDetail = activePanel === "production" || activePanel === "overview";
         const readsRegionDetail = activePanel === "overview" || activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
           readsPlayerDetail ? Promise.allSettled(memberIds.map(async (id) => {
@@ -537,6 +610,11 @@ function parseDateValue(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function timestampMs(value: unknown): number {
+  const date = parseDateValue(value);
+  return date ? date.getTime() : 0;
+}
+
 function dateLabel(value: unknown): string {
   if (!value) return "Never";
   const date = parseDateValue(value);
@@ -587,7 +665,8 @@ function formatDuration(seconds: unknown): string {
 }
 
 function formatEquipmentSlot(value: unknown): string {
-  return String(value ?? "equipment").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const key = String(value ?? "equipment").toLowerCase();
+  return EQUIPMENT_SLOT_LABELS[key] ?? key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatDaysAndHours(days: number): string {
@@ -595,6 +674,17 @@ function formatDaysAndHours(days: number): string {
   const wholeDays = Math.floor(days);
   const hours = Math.floor((days - wholeDays) * 24);
   return wholeDays > 0 ? `${wholeDays}d ${hours}h` : `${hours}h`;
+}
+
+function claimSupplyCap(claim: AnyRecord): number {
+  const direct = toNumber(claim.maxSupplies ?? claim.suppliesMax ?? claim.supplyCap ?? claim.maxSupply);
+  if (direct > 0) return direct;
+  const maxSupplyTechs = (claim.researchedTechs ?? []).filter((tech: AnyRecord) => tech.techType === "max_supplies");
+  return maxSupplyTechs.reduce((max: number, tech: AnyRecord) => {
+    const match = String(tech.name ?? "").match(/(\d[\d,]*)\s*max supplies/i);
+    const value = match ? toNumber(match[1].replaceAll(",", "")) : 0;
+    return Math.max(max, value);
+  }, 0);
 }
 
 function summarizePassiveCrafts(payload: AnyRecord): AnyRecord[] {
@@ -660,11 +750,12 @@ function normalizeData(raw: AnyRecord | null) {
   const players = unwrap<AnyRecord[]>(raw?.players, "players", []);
   const region = unwrap<AnyRecord[]>(raw?.region, "claims", []);
   const layout = raw?.layout ?? {};
+  const skills = raw?.skills ?? {};
   const contributions = raw?.contributions ?? {};
   const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
   const regionStatus = unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []);
   const tradeVolume = raw?.tradeVolume ?? {};
-  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, contributions, marketApi, regionStatus, tradeVolume };
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, skills, contributions, marketApi, regionStatus, tradeVolume };
 }
 
 function Header({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -696,6 +787,7 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
 function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
+  const supplyCap = claimSupplyCap(claim);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
   const suppliesPerDay = (upkeep || toNumber(claim.tileCost) * toNumber(claim.numTiles)) * 24;
@@ -707,7 +799,7 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
   const activeCrafts = crafts.filter((job) => {
     const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
-    return total > 0 && progress > 0 && progress < total;
+    return total > 0 && progress < total && hasRecentCraftContribution(data.contributions[String(job.entityId)] ?? []);
   }).length;
   const constructionProjects = Array.isArray(construction) ? construction : (construction.projects ?? []);
   const activeProjects = constructionProjects.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
@@ -715,12 +807,12 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
   const supplyDays = runOutDate && runOutDate.getTime() > Date.now()
     ? (runOutDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)
     : suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
-  const supplyPct = Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
+  const supplyPct = supplyCap > 0 ? Math.max(2, Math.min(100, (supplies / supplyCap) * 100)) : Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
   const health = supplies < 2000 ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
   const attention = [
     supplies < 2000 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatNumber(supplies)} supplies remaining`, panel: "inventory" as ActivePanel } : null,
     activeProjects ? { icon: <Hammer />, title: "Construction active", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel } : null,
-    crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} working, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
+    crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} active in 30s, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
     !market.length ? { icon: <ShoppingCart />, title: "No market listings", body: "No current settlement market activity", panel: "market" as ActivePanel } : null,
   ].filter(Boolean) as Array<{ icon: React.ReactNode; title: string; body: string; panel: ActivePanel }>;
   return (
@@ -741,7 +833,7 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
       <div className="overview-pulse">
         <div><span>Members</span><strong><LiveValue value={members.length} /></strong><small>{onlineCount} online now</small></div>
         <div><span>Supply Status</span><strong><LiveValue value={formatDaysAndHours(supplyDays)} /></strong><small>{formatNumber(supplies)} stored</small></div>
-        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts / {activeProjects} builds</small></div>
+        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts active in 30s / {activeProjects} builds</small></div>
         <div><span>Market Presence</span><strong><LiveValue value={market.length} /></strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
       </div>
 
@@ -750,6 +842,7 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
           <header><Box /><span>Supply Runway</span><strong>{formatDaysAndHours(supplyDays)}</strong></header>
           <div className="progress"><div style={{ width: `${supplyPct}%` }} /></div>
           <Info label="Current stock" value={formatNumber(supplies)} />
+          {supplyCap > 0 ? <Info label="Storage cap" value={formatNumber(supplyCap)} /> : null}
           <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
           <Info label="Runs out" value={runOut} />
         </section>
@@ -761,7 +854,7 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
         </section>
         <section className="ops-card">
           <header><Factory /><span>Work Queue</span><strong>{activeCrafts + activeProjects}</strong></header>
-          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active / {crafts.length} jobs</strong></button>
+          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active in 30s / {crafts.length} jobs</strong></button>
           <button className="ops-link" onClick={() => onNavigate("construction")}><span>Construction</span><strong>{activeProjects} projects</strong></button>
           <button className="ops-link" onClick={() => onNavigate("research")}><span>Research</span><strong>{researched} complete</strong></button>
         </section>
@@ -1045,7 +1138,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                         <strong>{item.name}</strong>
                         {item.tier ? <TierBadge tier={item.tier} /> : null}
                       </div>
-                      <span>{item.tag ?? "Tool"}{item.quantity > 1 ? ` - ${formatNumber(item.quantity)} held` : ""}</span>
+                      <span className="item-meta-line">{item.tag ?? "Tool"}{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.quantity > 1 ? `${formatNumber(item.quantity)} held` : ""}</span>
                       {item.toolPower ? <p>Power {formatNumber(item.toolPower)} - removes {formatNumber(item.toolPower)} effort per action</p> : null}
                     </article>
                   ))}
@@ -1060,6 +1153,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                 <div className="gear-preset-list">
                   {gearPresets.map((preset) => {
                     const filledSlots = preset.slots.filter((slot: AnyRecord) => slot.item);
+                    const displaySlots = visibleEquipmentSlots(preset.slots);
                     return (
                       <article className={`gear-preset ${preset.active ? "active" : ""}`} key={preset.id}>
                         <div className="gear-preset-header">
@@ -1067,20 +1161,29 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
                           <span>{preset.active ? "Current" : preset.reported ? `${formatNumber(filledSlots.length)} equipped` : "Not reported"}</span>
                         </div>
                         <div className="equipment-grid">
-                          {filledSlots.map((slot: AnyRecord) => (
-                            <article className="equipment-card" key={`${preset.id}-${slot.primary}`}>
+                          {displaySlots.map((slot: AnyRecord, index: number) => (
+                            <article className={`equipment-card ${slot.item ? "" : "empty-slot"}`} key={`${preset.id}-${slot.primary ?? slot.secondary ?? slot.item?.id ?? index}`}>
                               <small>{formatEquipmentSlot(slot.primary)}</small>
-                              <div className="equipment-card-main">
-                                <ItemIcon item={slot.item} />
-                                <strong>{slot.item.name}</strong>
-                                {slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}
-                              </div>
-                              <span>{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? ` - ${slot.item.rarityString}` : ""}</span>
-                              {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
+                              {slot.item ? (
+                                <>
+                                  <div className="equipment-card-main">
+                                    <ItemIcon item={slot.item} />
+                                    <strong>{slot.item.name}</strong>
+                                    {slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}
+                                  </div>
+                                  <span className="item-meta-line">{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? <RarityBadge rarity={slot.item.rarityString} /> : null}</span>
+                                  {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
+                                </>
+                              ) : (
+                                <div className="equipment-card-main">
+                                  <span className="empty-slot-icon"><Shield size={15} /></span>
+                                  <strong>Empty</strong>
+                                </div>
+                              )}
                             </article>
                           ))}
                         </div>
-                        {!filledSlots.length ? <p className="legend">{preset.reported ? "No gear reported in this preset." : "BitJita has not reported gear for this preset slot."}</p> : null}
+                        {!preset.reported ? <p className="legend">BitJita has not reported gear for this preset slot, so empty visible slots are shown as placeholders.</p> : null}
                       </article>
                     );
                   })}
@@ -1133,17 +1236,22 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
   const citizens = data.citizens;
-  const focusedProfession = PROFESSION_IDS.includes(focusSkill) ? focusSkill : PROFESSION_IDS[0];
+  const professionRows = bitjitaSkillRows(data.skills, "Profession");
+  const adventureRows = bitjitaSkillRows(data.skills, "Adventure");
+  const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
+  const adventureSkillIds = adventureRows.length ? adventureRows.map((skill) => toNumber(skill.id)).filter(Boolean) : ADVENTURE_SKILL_IDS;
+  const skillLabel = (id: number) => skillNameFromRows([...professionRows, ...adventureRows], id);
+  const focusedProfession = professionIds.includes(focusSkill) ? focusSkill : professionIds[0];
   const getName = (c: AnyRecord) => c.userName ?? c.username ?? "Unknown";
   const getSkill = (c: AnyRecord, id: number) => toNumber(c.skills?.[String(id)]);
-  const getTotal = (c: AnyRecord) => PROFESSION_IDS.reduce((total, id) => total + getSkill(c, id), 0);
-  const getHighest = (c: AnyRecord) => Math.max(...PROFESSION_IDS.map((id) => getSkill(c, id)), 0);
+  const getTotal = (c: AnyRecord) => professionIds.reduce((total, id) => total + getSkill(c, id), 0);
+  const getHighest = (c: AnyRecord) => Math.max(...professionIds.map((id) => getSkill(c, id)), 0);
   React.useEffect(() => {
     if (focusSkill !== focusedProfession) setFocusSkill(focusedProfession);
   }, [focusSkill, focusedProfession, setFocusSkill]);
   React.useEffect(() => {
-    if (typeof sortKey === "number" && !PROFESSION_IDS.includes(sortKey)) setSortKey("total");
-  }, [sortKey, setSortKey]);
+    if (typeof sortKey === "number" && !professionIds.includes(sortKey)) setSortKey("total");
+  }, [professionIds, sortKey, setSortKey]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((dir) => dir === "desc" ? "asc" : "desc");
@@ -1179,15 +1287,15 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
     const tier = skillTier(max);
     const specialists = levels.filter((level) => skillTier(level) >= 5).length;
-    return { id, name: SKILL_NAMES[id], max, avg, tier, specialists };
+    return { id, name: skillLabel(id), max, avg, tier, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
-  const coverage = summarizeCoverage(PROFESSION_IDS);
-  const adventureSkills = summarizeCoverage(ADVENTURE_SKILL_IDS);
+  const coverage = summarizeCoverage(professionIds);
+  const adventureSkills = summarizeCoverage(adventureSkillIds);
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
     <div className="panel">
-      <Header title="Member Professions">{citizens.length} citizens - {PROFESSION_IDS.length} professions tracked separately from adventure skills</Header>
+      <Header title="Member Professions">{citizens.length} citizens - {professionIds.length} professions tracked separately from adventure skills</Header>
       <div className="summary-grid skills-summary">
         <MiniStat icon={<TrendingUp />} label="Profession Levels" value={formatNumber(settlementTotalLevel)} />
         <MiniStat icon={<Star />} label="Highest Profession" value={settlementBest} />
@@ -1199,7 +1307,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <div className="split-header">
             <h3><Star size={17} /> Profession Focus</h3>
             <select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
-              {PROFESSION_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
+              {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
             </select>
           </div>
           <div className="focus-metrics">
@@ -1254,9 +1362,9 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <th className="sticky-col clickable" onClick={() => toggleSort("name")}>Member {sortIcon("name")}</th>
               <th className="clickable numeric summary-header" onClick={() => toggleSort("total")}><span>Total Levels</span>{sortIcon("total")}</th>
               <th className="clickable numeric summary-header" onClick={() => toggleSort("highest")}><span>Best Level</span>{sortIcon("highest")}</th>
-              {PROFESSION_IDS.map((id) => (
+              {professionIds.map((id) => (
                 <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id)}>
-                  <span>{SKILL_NAMES[id]}</span>{sortIcon(id)}
+                  <span>{skillLabel(id)}</span>{sortIcon(id)}
                 </th>
               ))}
             </tr>
@@ -1269,9 +1377,9 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
                   <td className="sticky-col member-cell">{name}</td>
                   <td className="numeric">{formatNumber(getTotal(citizen))}</td>
                   <td className="numeric best">{getHighest(citizen)}</td>
-                  {PROFESSION_IDS.map((id) => {
+                  {professionIds.map((id) => {
                     const level = getSkill(citizen, id);
-                    return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${SKILL_NAMES[id]}: Lv ${level} (${skillTierLabel(level)})`}>{level > 0 ? level : "-"}</td>;
+                    return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${skillLabel(id)}: Lv ${level} (${skillTierLabel(level)})`}>{level > 0 ? level : "-"}</td>;
                   })}
                 </tr>
               );
@@ -1282,9 +1390,9 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               <td className="sticky-col member-cell">Settlement Max</td>
               <td className="numeric">-</td>
               <td className="numeric best">{settlementBest}</td>
-              {PROFESSION_IDS.map((id) => {
+              {professionIds.map((id) => {
                 const max = Math.max(...citizens.map((c) => getSkill(c, id)), 0);
-                return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)} title={`${SKILL_NAMES[id]} max: Lv ${max} (${skillTierLabel(max)})`}>{max > 0 ? max : "-"}</td>;
+                return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)} title={`${skillLabel(id)} max: Lv ${max} (${skillTierLabel(max)})`}>{max > 0 ? max : "-"}</td>;
               })}
             </tr>
           </tfoot>
@@ -1674,8 +1782,8 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
       ) : null}
       <div className="toolbar-row">
         {selectedCoreMaterial ? <button className="mini-action active" onClick={() => setCoreMaterialFilter("All")}><X size={13} /> {selectedCoreMaterial.label} only</button> : null}
-        <SearchBox value={q} onChange={setQ} placeholder="Search inventory" />
-        <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" />
+        <SearchBox value={q} onChange={setQ} placeholder="Search for items" />
+        <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search for containers" />
         <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
           <option>All</option><option>Item</option><option>Cargo</option>
         </select>
@@ -1704,7 +1812,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
                 ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],
-                ["Rarity", (r) => r.rarity ? <span className={`role-badge ${getRarityClass(r.rarity)}`}>{r.rarity}</span> : "-"],
+                ["Rarity", (r) => r.rarity ? <RarityBadge rarity={r.rarity} /> : "-"],
                 ["Type", (r) => r.type],
               ]} />
             </details>
@@ -1715,23 +1823,36 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const itemLookup = new Map([...(data.construction.items ?? []), ...(data.construction.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
+  const itemLookup = new Map<string, AnyRecord>((data.construction.items ?? []).map((i: AnyRecord) => [String(i.id), i]));
+  const cargoLookup = new Map<string, AnyRecord>((data.construction.cargos ?? []).map((i: AnyRecord) => [String(i.id), i]));
   const storedTotals = new Map<string, number>();
   for (const building of data.inventories.buildings ?? []) {
     for (const slot of building.inventory ?? []) {
       const contents = slot.contents ?? {};
-      const key = String(contents.item_id ?? "");
-      if (key) storedTotals.set(key, (storedTotals.get(key) ?? 0) + toNumber(contents.quantity));
+      const rawType = contents.item_type ?? contents.itemType;
+      const type = rawType === "cargo" || rawType === 1 ? "cargo" : "item";
+      const itemId = contents.item_id ?? contents.itemId;
+      if (itemId == null) continue;
+      const key = `${type}:${itemId}`;
+      storedTotals.set(key, (storedTotals.get(key) ?? 0) + toNumber(contents.quantity));
     }
   }
+  const materialRows = (materials: AnyRecord[], type: "item" | "cargo") => materials.map((mat: AnyRecord) => {
+    const itemId = mat.item_id ?? mat.itemId ?? mat.id;
+    const lookup = type === "cargo" ? cargoLookup.get(String(itemId)) : itemLookup.get(String(itemId));
+    const required = toNumber(mat.required ?? mat.quantityRequired ?? mat.quantity ?? mat.amount);
+    return {
+      type,
+      itemId,
+      name: lookup?.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${itemId}`,
+      required,
+      available: storedTotals.get(`${type}:${itemId}`) ?? 0,
+    };
+  }).filter((mat: AnyRecord) => mat.itemId != null && mat.required > 0);
   const projects: AnyRecord[] = (data.construction.projects ?? []).map((project: AnyRecord) => ({
     ...project,
     name: project.recipeName ?? project.buildingName ?? project.entityId,
-    materials: [...(project.items ?? []), ...(project.cargos ?? [])].map((mat: AnyRecord) => ({
-      name: itemLookup.get(String(mat.item_id))?.name ?? `Item #${mat.item_id}`,
-      required: toNumber(mat.quantity),
-      available: storedTotals.get(String(mat.item_id)) ?? 0,
-    })),
+    materials: [...materialRows(project.items ?? [], "item"), ...materialRows(project.cargos ?? [], "cargo")],
   }));
   const needed = Object.entries((projects.flatMap((project: AnyRecord) => project.materials) as AnyRecord[]).reduce((acc: Record<string, number>, mat: AnyRecord) => {
     acc[mat.name] = (acc[mat.name] ?? 0) + Math.max(0, mat.required - mat.available);
@@ -1756,7 +1877,10 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
               <header><Hammer /><strong>{project.name}</strong><span>{pct}%</span></header>
               <div className="progress"><div style={{ width: `${pct}%` }} /></div>
               <div className="material-grid">
-                {project.materials.map((mat: AnyRecord, index: number) => <div key={index}><strong>{mat.name}</strong><span>{formatNumber(mat.available)} / {formatNumber(mat.required)} - need {formatNumber(mat.required - mat.available)}</span></div>)}
+                {project.materials.map((mat: AnyRecord, index: number) => {
+                  const remaining = Math.max(0, mat.required - mat.available);
+                  return <div key={`${mat.type}-${mat.itemId}-${index}`}><strong>{mat.name}</strong><span>{formatNumber(mat.required)} required - {formatNumber(mat.available)} in storage{remaining ? ` - need ${formatNumber(remaining)}` : ""}</span></div>;
+                })}
               </div>
             </article>
           );
@@ -1780,6 +1904,16 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   const totalResearched = data.research.filter((item) => item.isResearched).length;
   const totalAvailable = data.research.filter((item) => !item.isResearched).length;
   const completion = data.research.length ? Math.round((totalResearched / data.research.length) * 100) : 0;
+  const researchedTechs = data.research.filter((item) => item.isResearched);
+  const maxTiles = Math.max(toNumber(data.claim.numTiles), ...researchedTechs.map((item) => toNumber(item.area)), 0);
+  const maxSupplies = claimSupplyCap(data.claim);
+  const settlementTier = toNumber(data.claim.tier);
+  const workstationTiers = researchedTechs
+    .filter((item) => /tier\s+\d+/i.test(String(item.name ?? "")) && item.techType && !["tier_upgrade", "settlement"].includes(String(item.techType)))
+    .reduce<Record<string, number>>((acc, item) => {
+      acc[String(item.techType)] = Math.max(acc[String(item.techType)] ?? 0, toNumber(item.tier));
+      return acc;
+    }, {});
   const card = (item: AnyRecord, done: boolean) => (
     <div className={`research-card ${done ? "done" : ""}`} key={item.entityId ?? item.id ?? item.name}>
       <span>{done ? <CheckCircle2 /> : <Circle />}</span>
@@ -1796,7 +1930,17 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
       <div className="research-summary">
         <div><CheckCircle2 /><strong>{totalResearched}</strong><span>Researched</span></div>
         <div><Lock /><strong>{totalAvailable}</strong><span>Available</span></div>
+        <div><Crown /><strong>T{settlementTier || "-"}</strong><span>Settlement Tier</span></div>
+        <div><Box /><strong>{maxSupplies ? formatNumber(maxSupplies) : "-"}</strong><span>Supply Cap</span></div>
+        <div><MapPin /><strong>{maxTiles ? formatNumber(maxTiles) : "-"}</strong><span>Tile Cap</span></div>
       </div>
+      {Object.keys(workstationTiers).length ? (
+        <div className="research-unlocks">
+          {Object.entries(workstationTiers).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => (
+            <span key={name}>{name.replaceAll("_", " ")} <TierBadge tier={value} /></span>
+          ))}
+        </div>
+      ) : null}
       <div className="toolbar-row">
         <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
         <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
@@ -2000,7 +2144,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
         ["Qty", r => formatNumber(r.quantity)],
         ["Price", r => `${formatNumber(r.price)}g`],
         ["Tier", r => (r.itemTier ?? r.tier) ? <TierBadge tier={r.itemTier ?? r.tier} /> : "-"],
-        ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <span className={`role-badge ${getRarityClass(r.itemRarityStr ?? r.rarity)}`}>{r.itemRarityStr ?? r.rarity}</span> : "-"],
+        ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <RarityBadge rarity={r.itemRarityStr ?? r.rarity} /> : "-"],
         ["Owner", r => r.ownerUsername ?? "-"],
         ["Listed", r => listingListedAt(r) ? dateLabel(listingListedAt(r)) : "-"],
         ["Live", r => liveDaysSince(listingListedAt(r))],
@@ -2064,7 +2208,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
       fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
         .then((payload) => {
-          setSuggestions((payload.data?.items ?? []).slice(0, 8));
+          setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).slice(0, 8));
           setSearchState("idle");
         })
         .catch(() => {
@@ -2110,6 +2254,8 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
   const suggestedWindow = stats.avg24h != null ? "Last 24 Hours" : stats.avg7d != null ? "Last 7 Days" : stats.avg30d != null ? "Last 30 Days" : "";
   const suggestedAverage = stats.avg24h ?? stats.avg7d ?? stats.avg30d;
   const suggestedPrice = suggestedAverage == null ? null : Math.max(1, Math.round(toNumber(suggestedAverage)));
+  const tradeCount = toNumber(stats.totalTrades);
+  const confidence = tradeCount >= 20 ? "High confidence" : tradeCount >= 5 ? "Medium confidence" : tradeCount > 0 ? "Low confidence" : "No sales data";
   const recentTrades: AnyRecord[] = priceState.data?.recentTrades ?? [];
   const regionLabel = activeRegion ? `R${activeRegion}` : "All Regions";
   const regionIds = unique([
@@ -2132,7 +2278,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
                 <ItemIcon item={item} />
                 <strong>{item.name}</strong>
                 {item.tier ? <TierBadge tier={item.tier} /> : null}
-                <small>{item.rarityStr ?? item.tag ?? ""}</small>
+                <small className="item-meta-line">{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
               </button>
             ))}</div> : null}
           </div>
@@ -2162,10 +2308,11 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
               {selectedWatch ? <button className={`pin-action ${pinned ? "active" : ""}`} onClick={() => onToggleWatch(selectedWatch)} title={pinned ? "Remove from Overview watchlist" : "Pin to Overview watchlist"}>{pinned ? <PinOff size={14} /> : <Pin size={14} />}{pinned ? "Pinned" : "Pin"}</button> : null}
             </div>
             <div className="metric-grid">
-              <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
+            <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
             <MiniStat icon={<TrendingUp />} label="Last 7 Days" value={stats.avg7d == null ? "-" : `${formatNumber(Math.round(stats.avg7d))}g`} />
             <MiniStat icon={<CircleDollarSign />} label="Last 30 Days" value={stats.avg30d == null ? "-" : `${formatNumber(Math.round(stats.avg30d))}g`} />
             <MiniStat icon={<ShoppingCart />} label="Trade Volume" value={formatNumber(stats.totalVolume)} />
+            <MiniStat icon={<CheckCircle2 />} label="Price Confidence" value={confidence} />
           </div>
           <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
           <section>
@@ -2341,14 +2488,14 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
   );
 }
 
-const ACTIVE_CRAFT_WINDOW_MS = 5 * 60 * 1000;
+const ACTIVE_CRAFT_WINDOW_MS = 30 * 1000;
 
 function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
   return contributors.some((person) => {
     const lastContribution = parseDateValue(person.lastContributedAt);
     if (!lastContribution) return false;
     const age = Date.now() - lastContribution.getTime();
-    return age >= -60 * 1000 && age <= ACTIVE_CRAFT_WINDOW_MS;
+    return age >= -5 * 1000 && age <= ACTIVE_CRAFT_WINDOW_MS;
   });
 }
 
@@ -2511,7 +2658,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
     <div className="panel">
       <div className="split-header">
         <Header title="Active Production">
-          {data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active in the last 5m - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}
+          {data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active in the last 30s - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}
         </Header>
         <div className="crafter-pills">
           {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={13} /> <strong>{name}</strong> {count} job{count === 1 ? "" : "s"}</span>)}
@@ -2659,6 +2806,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       <div className="metric-grid">
         <MiniStat icon={<Globe2 />} label="Settlements" value={allRows.length} />
         <MiniStat icon={<Users />} label="Players Online" value={liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} />
+        <MiniStat icon={<Server />} label="Region Status" value={liveStatus ? liveStatus.syncing ? "Syncing" : liveStatus.active ? "Active" : "Offline" : "-"} />
         <MiniStat icon={<ShoppingCart />} label="Regional Trades" value={formatNumber(tradeSummary.totalTrades)} />
         <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={`${formatNumber(totalTreasury)}g`} />
       </div>
@@ -2696,14 +2844,14 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
 }
 
 function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
-  const [selected, setSelected] = React.useState<Set<string> | null>(null);
+  const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const roster = data.players;
   const defaultSelection = React.useMemo(() => {
     const online = roster.filter((player) => player.signedIn).map((player) => String(player.entityId)).filter(Boolean);
     return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
   }, [roster]);
-  const current = selected ?? defaultSelection;
-  const playerQuery = current.size ? `?playerId=${[...current].join(",")}` : "";
+  const current = React.useMemo(() => selectedIds === null ? defaultSelection : new Set(selectedIds), [defaultSelection, selectedIds]);
+  const playerQuery = current.size ? `?playerId=${[...current].sort().join(",")}` : "";
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",
     locationX: toNumber(data.claim.locationX),
@@ -2725,15 +2873,15 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   } : null;
   const mapUrl = `https://bitcraftmap.com/${playerQuery}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
   function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev ?? defaultSelection);
+    setSelectedIds((prev) => {
+      const next = new Set(prev === null ? [...defaultSelection] : prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return next;
+      return [...next].sort();
     });
   }
   function toggleAll() {
-    setSelected(current.size === roster.length ? new Set() : new Set(roster.map((player) => String(player.entityId)).filter(Boolean)));
+    setSelectedIds(current.size === roster.length ? [] : roster.map((player) => String(player.entityId)).filter(Boolean).sort());
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
   return (
@@ -2752,6 +2900,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
       ) : null}
       <div className="player-pills">
         <button className={current.size === roster.length ? "active" : ""} onClick={toggleAll}>All</button>
+        <button onClick={() => { setSelectedIds(null); onClearFocus(); }}>Clear filters</button>
         {roster.map((player) => {
           const id = String(player.entityId);
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
@@ -2812,6 +2961,11 @@ function activityMetadata(item: AnyRecord): AnyRecord {
   }
 }
 
+function RarityBadge({ rarity }: { rarity: unknown }) {
+  if (!rarity) return null;
+  return <span className={`rarity-badge ${getRarityClass(rarity)}`}>{String(rarity)}</span>;
+}
+
 function activityActorName(item: AnyRecord): string {
   const metadata = activityMetadata(item);
   if (metadata.actorName) return String(metadata.actorName);
@@ -2849,7 +3003,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
       .catch(() => undefined);
     return () => controller.abort();
   }, [claimId]);
-  const combined = [...activity].sort((a, b) => String(b.occurred_at ?? "").localeCompare(String(a.occurred_at ?? "")));
+  const combined = [...activity].sort((a, b) => timestampMs(b.occurred_at ?? b.occurredAt) - timestampMs(a.occurred_at ?? a.occurredAt) || toNumber(b.id) - toNumber(a.id));
   const memberOptions = unique(members.map((member) => String(member.userName ?? member.username ?? "")).filter(Boolean)).sort((a, b) => a.localeCompare(b));
   React.useEffect(() => {
     if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
@@ -3116,6 +3270,58 @@ function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsCons
         <div className="privacy-actions">
           <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
           <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function UserSettingsDialog({ density, onDensityChange, toastSettings, onToastSettingsChange, watchCount, onClearWatches, onResetSettings, onClose }: { density: "comfortable" | "compact"; onDensityChange: (density: "comfortable" | "compact") => void; toastSettings: UserToastSettings; onToastSettingsChange: (settings: UserToastSettings) => void; watchCount: number; onClearWatches: () => void; onResetSettings: () => void; onClose: () => void }) {
+  React.useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <Settings size={19} />
+            <h2 id="settings-title">User Settings</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close user settings"><X size={16} /></button>
+        </header>
+        <div className="settings-grid">
+          <section>
+            <h3>This Browser</h3>
+            <p className="legend">Your page, filters, density, notifications and pinned overview items are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+          </section>
+          <section>
+            <h3>Display Density</h3>
+            <div className="segmented-control">
+              <button className={density === "comfortable" ? "active" : ""} onClick={() => onDensityChange("comfortable")}>Comfortable</button>
+              <button className={density === "compact" ? "active" : ""} onClick={() => onDensityChange("compact")}>Compact</button>
+            </div>
+          </section>
+          <section>
+            <h3>Notifications</h3>
+            {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
+              <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
+            ))}
+          </section>
+          <section>
+            <h3>Pinned Items</h3>
+            <p className="legend">{watchCount ? `${watchCount} pinned item${watchCount === 1 ? "" : "s"} saved in this browser.` : "No pinned items saved in this browser."}</p>
+            <button className="toolbar-button" disabled={!watchCount} onClick={onClearWatches}><PinOff size={14} /> Clear pinned items</button>
+          </section>
+          <section>
+            <h3>Reset</h3>
+            <p className="legend">Reset this browser's local app preferences. Admin settings and settlement data are not affected.</p>
+            <button className="toolbar-button" onClick={onResetSettings}><RefreshCw size={14} /> Reset my settings</button>
+          </section>
         </div>
       </section>
     </div>
@@ -3443,10 +3649,6 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
           </section>
           <div className="admin-section">
             <section className="form-card">
-              <h3><Activity size={17} /> Notifications</h3>
-              {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => <label className="toggle-row" key={key}><input type="checkbox" checked={draft.toastSettings[key]} onChange={(event) => updateDraft("toastSettings", { ...draft.toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>)}
-            </section>
-            <section className="form-card">
               <h3><Upload size={17} /> Branding</h3>
               {(["logo", "favicon"] as const).map((type) => {
                 const asset = draft.branding?.[type];
@@ -3535,9 +3737,11 @@ function App() {
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
-  const [watches, setWatches] = usePersistedState<WatchEntry[]>("overview.watchlist", []);
+  const [watches, setWatches] = usePersistedState<WatchEntry[]>("overview.watches", legacyDefaultWatchlist());
+  const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
@@ -3691,11 +3895,11 @@ function App() {
     for (const id of knownIds) activityNoticeIdsRef.current.add(id);
     for (const event of unseen) {
       const isListing = event.event_type === "market_new_listing";
-      if (isListing && !appSettings.toastSettings.marketListings) continue;
-      if (!isListing && !appSettings.toastSettings.marketSales) continue;
+      if (isListing && (!appSettings.toastSettings.marketListings || !userToastSettings.marketListings)) continue;
+      if (!isListing && (!appSettings.toastSettings.marketSales || !userToastSettings.marketSales)) continue;
       pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market");
     }
-  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast]);
+  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
     if (!state.data) return;
     const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
@@ -3704,7 +3908,7 @@ function App() {
       craftQueueRef.current = { claimId, jobs: current };
       return;
     }
-    if (!appSettings.toastSettings.production) {
+    if (!appSettings.toastSettings.production || !userToastSettings.production) {
       craftQueueRef.current = { claimId, jobs: current };
       return;
     }
@@ -3717,7 +3921,7 @@ function App() {
       pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
     }
     craftQueueRef.current = { claimId, jobs: current };
-  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data]);
+  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);
   React.useEffect(() => {
     if (!appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -3770,7 +3974,7 @@ function App() {
         <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><MessageCircle size={17} /><span>Join Discord</span><ExternalLink size={13} /></a>
         <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => navigate(id)}><Icon size={16} />{label}</button>)}</nav>
         <div className="sidebar-tools">
-          <button onClick={() => setDensity(density === "compact" ? "comfortable" : "compact")} title="Change table density"><Command size={14} /> {density === "compact" ? "Comfortable View" : "Compact View"}</button>
+          <button onClick={() => setUserSettingsOpen(true)} title="Browser settings"><Settings size={14} /> Browser Settings</button>
           <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }}><Bell size={14} /> Updates{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         </div>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
@@ -3801,6 +4005,7 @@ function App() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}

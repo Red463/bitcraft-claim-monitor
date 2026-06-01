@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.7.9-beta.1 - 2026-06-01
+
+### Changed
+
+- Member Toolbelt cards now use the shared colour-coded rarity badge.
+
+## 0.7.8-beta.1 - 2026-06-01
+
+### Changed
+
+- Price Finder suggestions now mirror BitJita's available-item market filtering by hiding output/input pseudo-items and items with no buy or sell orders.
+- Item rarity is now displayed as a consistent colour-coded badge across market, inventory, price finder and member equipment views.
+
+## 0.7.7-beta.1 - 2026-06-01
+
+### Changed
+
+- Gear preset slot labels now match in-game terminology: Heart, Jewellery, Head, Hands, Torso, Belt, Legs and Feet.
+
+## 0.7.6-beta.1 - 2026-06-01
+
+### Changed
+
+- Gear presets now render a curated set of visible in-game equipment slots, including empty placeholders, while still hiding unused/internal server slots.
+
+## 0.7.5-beta.1 - 2026-06-01
+
+### Changed
+
+- Gear preset cards now show only equipped items instead of rendering BitJita's empty placeholder slots as visible equipment slots.
+
+## 0.7.4-beta.1 - 2026-06-01
+
+### Changed
+
+- Replaced the manual local settings profile dropdown with automatic browser-specific settings.
+- Pinned overview items, filters, density and notification preferences now persist in local browser storage without requiring analytics cookie consent.
+- Added a browser settings reset action for clearing local app preferences without touching admin settings or settlement data.
+
+## 0.7.3-beta.1 - 2026-06-01
+
+### Changed
+
+- Production activity now uses BitJita craft contribution timestamps and only marks a craft active when it was worked in the last 30 seconds.
+- Overview production counts now use the same 30-second active-craft rule.
+- Market listing tracking now preserves BitJita's original listing timestamp when available.
+- Storage activity summaries now include the container name directly in deposit/withdrawal text.
+- Research now surfaces settlement tier, supply cap, tile cap, and researched workstation tier unlocks from claim technology data.
+- Region now shows live region status alongside online player and trade-volume data.
+- Professions now prefer BitJita skill metadata when available instead of relying only on local static skill groupings.
+- Price Finder now shows a simple confidence label based on available completed-trade count.
+
+## 0.7.2-beta.1 - 2026-06-01
+
+### Added
+
+- Added browser-local User Settings for display density, notification preferences, selected profile, and profile-specific pinned overview items.
+- Added a clear-filters action to the Map page and persisted player map selections.
+
+### Changed
+
+- Overview supply runway now uses the settlement's max-supplies research cap for the progress bar while keeping the days/hours runway text.
+- Construction now separates item and cargo requirements, labels required materials versus settlement storage availability, and avoids item/cargo ID collisions.
+- Activity now sorts by parsed event timestamps and keeps timeline markers vertically centered.
+- Member gear presets now show empty reported slots instead of hiding them.
+- Inventory search placeholders now clearly identify item and container search.
+
+### Fixed
+
+- Price Finder suggestions now hide BitJita output/input pseudo-items that are not valid market items.
+- Member table rows are vertically centered for cleaner roster readability.
+
 ## 0.7.1-beta.1 - 2026-05-27
 
 ### Added

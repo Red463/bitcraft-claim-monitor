@@ -301,6 +301,19 @@ function listingKey(row) {
   ].join("|");
 }
 
+function bitjitaTimestampIso(value) {
+  if (!value) return null;
+  const text = String(value);
+  if (!/^\d+$/.test(text)) {
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  const numeric = Number(text);
+  const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
+  const date = new Date(millis);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function normalizeListing(row) {
   const quantity = toNumber(row.quantity);
   const price = toNumber(row.price);
@@ -317,6 +330,7 @@ function normalizeListing(row) {
     totalValue: quantity * price,
     tier: row.itemTier ?? row.tier ?? null,
     rarity: row.itemRarityStr ?? row.rarity ?? null,
+    listedAt: bitjitaTimestampIso(row.timestamp ?? row.createdAt),
     tradeId: row.tradeId ?? row.id ?? null,
     raw: row,
   };
@@ -886,7 +900,7 @@ async function recordSnapshot(payload) {
         listing.totalValue,
         listing.tier == null ? null : String(listing.tier),
         listing.rarity,
-        existing?.first_seen ?? now,
+        existing?.first_seen ?? listing.listedAt ?? now,
         now,
         JSON.stringify(listing.raw),
       );
@@ -1047,7 +1061,7 @@ async function collectStorageActivity(claimId, inventories) {
         const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
         const item = catalog.get(String(event.item_id));
         const actorName = String(log.subjectName ?? "Member");
-        const summary = `${actorName} ${action} ${toNumber(event.quantity).toLocaleString()} ${item?.name ?? `item #${event.item_id ?? "?"}`}`;
+        const summary = `${actorName} ${action} ${toNumber(event.quantity).toLocaleString()} ${item?.name ?? `item #${event.item_id ?? "?"}`} ${action === "withdrew" ? "from" : "to"} ${containerName}`;
         const metadata = {
           actorName,
           containerName,

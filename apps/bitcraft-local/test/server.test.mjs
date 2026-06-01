@@ -175,7 +175,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(baselineHistory.totals.trackedValue, 50);
   const baselineActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   const storageEvent = baselineActivity.events.find((event) => event.event_type === "storage");
-  assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot");
+  assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
 
