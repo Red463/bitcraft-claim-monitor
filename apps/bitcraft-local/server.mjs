@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.8-beta.1";
+const appVersion = "0.8.9-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -159,12 +159,26 @@ db.exec(`
     duration_seconds INTEGER,
     occurred_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS discord_delivery_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary TEXT,
+    channel_id TEXT,
+    channel_key TEXT,
+    reason TEXT,
+    error TEXT,
+    metadata_json TEXT NOT NULL,
+    response_json TEXT,
+    occurred_at TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
+  CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -321,6 +335,12 @@ const statements = {
     INSERT INTO analytics_events (visitor_key, session_key, event_name, page, properties_json, duration_seconds, occurred_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
+  insertDiscordDelivery: db.prepare(`
+    INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
+  pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
 };
 
 function toNumber(value) {
@@ -451,7 +471,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       const summary = `Craft started: ${job.label}`;
       const skipReason = productionNotificationSkipReason("production_started", job);
       if (skipReason) {
-        recordDiscordDelivery({ status: "skipped", eventType: "production_started", summary, reason: skipReason });
+        recordDiscordDelivery({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", job) });
         continue;
       }
       statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(job));
@@ -473,7 +493,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     const summary = `Craft completed: ${current.label}`;
     const skipReason = productionNotificationSkipReason("production_completed", metadata);
     if (skipReason) {
-      recordDiscordDelivery({ status: "skipped", eventType: "production_completed", summary, reason: skipReason });
+      recordDiscordDelivery({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
       continue;
     }
     statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
@@ -1019,31 +1039,78 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
   return settings.channelId;
 }
 
+function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "production_started" || eventType === "production_completed") {
+    const selectionKey = eventType === "production_started" ? "productionStarted" : "productionCompleted";
+    const selection = settings.notificationChannels?.[selectionKey] ?? "profession";
+    if (selection === "profession") return normalizeProfessionKey(metadata.professionKey ?? metadata.skillName) || "profession";
+    return selection;
+  }
+  if (eventType === "market_new_listing") return settings.notificationChannels?.marketListings ?? "notifications";
+  if (eventType === "market_sale" || eventType === "market_sale_confirmed") return settings.notificationChannels?.marketSales ?? "notifications";
+  if (eventType === "supplies") return settings.notificationChannels?.lowSupplies ?? "notifications";
+  if (eventType === "supply_report") return settings.notificationChannels?.supplyReport ?? "modNotes";
+  if (eventType === "app_update") return settings.notificationChannels?.appUpdates ?? "notifications";
+  return "notifications";
+}
+
+function discordDiagnosticContext(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  return {
+    eventType,
+    enabled: Boolean(settings.enabled),
+    hasBotToken: Boolean(settings.botToken),
+    channelId: discordChannelForEvent(eventType, metadata, settings) || "",
+    channelKey: discordChannelKeyForEvent(eventType, metadata, settings),
+    notify: settings.notify,
+    minSaleValue: settings.minSaleValue,
+    supplyRunwayDaysThreshold: settings.supplyRunwayDaysThreshold,
+    productionMinXp: settings.productionMinXp,
+    productionMinProgressPct: settings.productionMinProgressPct,
+    productionUsers: settings.productionUsers,
+    metadata,
+  };
+}
+
 function recordDiscordDelivery(status) {
-  statements.upsertSetting.run("discord_last_delivery_json", JSON.stringify({ ...status, at: new Date().toISOString() }), new Date().toISOString());
+  const occurredAt = new Date().toISOString();
+  const record = { ...status, at: occurredAt };
+  statements.upsertSetting.run("discord_last_delivery_json", JSON.stringify(record), occurredAt);
+  statements.insertDiscordDelivery.run(
+    String(status.eventType ?? "unknown"),
+    String(status.status ?? "unknown"),
+    status.summary ? String(status.summary) : null,
+    status.channelId ? String(status.channelId) : null,
+    status.channelKey ? String(status.channelKey) : null,
+    status.reason ? String(status.reason) : null,
+    status.error ? String(status.error) : null,
+    JSON.stringify(status.metadata ?? status.details ?? {}),
+    status.response ? JSON.stringify(status.response) : null,
+    occurredAt,
+  );
+  statements.pruneDiscordDeliveries.run();
 }
 
 async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+  const channelId = discordChannelForEvent(eventType, metadata, settings);
+  const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
+  const diagnostics = discordDiagnosticContext(eventType, metadata, settings);
   if (!discordEnabledFor(eventType, settings, metadata)) {
     const reason = eventType === "production_started" || eventType === "production_completed"
       ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
       : eventType === "app_update" ? "App update notifications are disabled" : "Notification disabled or below configured threshold";
-    if (eventType === "production_started" || eventType === "production_completed" || eventType === "app_update") {
-      recordDiscordDelivery({ status: "skipped", eventType, summary, reason });
-    }
+    recordDiscordDelivery({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true };
   }
-  const channelId = discordChannelForEvent(eventType, metadata, settings);
   try {
-    await sendDiscordMessage({
+    const response = await sendDiscordMessage({
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDelivery({ status: "sent", eventType, channelId, summary });
+    recordDiscordDelivery({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
     return { ok: true, skipped: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    recordDiscordDelivery({ status: "failed", eventType, channelId, summary, error: message });
+    recordDiscordDelivery({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
     throw error;
   }
 }
@@ -1131,32 +1198,55 @@ const discordTestEvents = {
   },
   appUpdate: {
     eventType: "app_update",
-    summary: "Version 0.8.8-beta.1 is live with fixed craft notification routing and lower default craft thresholds",
+    summary: `Version ${appVersion} is live with Discord diagnostics`,
     metadata: { version: appVersion, changelogUrl },
   },
 };
 
 async function sendDiscordTestNotification(kind = "basic") {
+  const settings = getDiscordSettingsRaw();
   if (kind === "basic") {
-    return sendDiscordMessage({
-      content: "Discord integration test from Timbersteel Trade.",
-      allowed_mentions: { parse: [] },
-    });
+    const summary = "Discord integration test from Timbersteel Trade.";
+    try {
+      const response = await sendDiscordMessage({
+        content: summary,
+        allowed_mentions: { parse: [] },
+      }, settings, settings.channelId);
+      recordDiscordDelivery({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+      return response;
+    } catch (error) {
+      recordDiscordDelivery({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
+      throw error;
+    }
   }
   const sample = discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
-  const settings = getDiscordSettingsRaw();
-  return sendDiscordMessage({
-    embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
-    allowed_mentions: { parse: [] },
-  }, settings, discordChannelForEvent(sample.eventType, sample.metadata, settings));
+  const channelId = discordChannelForEvent(sample.eventType, sample.metadata, settings);
+  const channelKey = discordChannelKeyForEvent(sample.eventType, sample.metadata, settings);
+  try {
+    const response = await sendDiscordMessage({
+      embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
+      allowed_mentions: { parse: [] },
+    }, settings, channelId);
+    recordDiscordDelivery({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    return response;
+  } catch (error) {
+    recordDiscordDelivery({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings) });
+    throw error;
+  }
 }
 
 async function announceDiscordAppUpdateIfNeeded() {
   const settings = getDiscordSettingsRaw();
-  if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) return;
+  if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) {
+    recordDiscordDelivery({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl }, settings) });
+    return;
+  }
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
-  if (lastAnnounced === appVersion) return;
+  if (lastAnnounced === appVersion) {
+    recordDiscordDelivery({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${appVersion} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl, lastAnnounced }, settings) });
+    return;
+  }
   await sendDiscordActivity(
     "app_update",
     `Version ${appVersion} is now live.`,
@@ -1180,17 +1270,29 @@ function discordSupplyEmbed(claim) {
 
 async function sendScheduledSupplyReportIfDue(claim) {
   const settings = getDiscordSettingsRaw();
-  if (!settings.enabled || !settings.botToken || !settings.notify.supplyReports) return;
+  if (!settings.enabled || !settings.botToken || !settings.notify.supplyReports) {
+    recordDiscordDelivery({ status: "skipped", eventType: "supply_report", summary: "Scheduled supply report", reason: "Discord disabled, bot token missing, or scheduled reports disabled", metadata: discordDiagnosticContext("supply_report", {}, settings) });
+    return;
+  }
   const lastSent = statements.getSetting.get("discord_last_supply_report_at")?.value ?? "";
   const lastSentMs = lastSent ? new Date(lastSent).getTime() : 0;
   const intervalMs = settings.supplyReportIntervalDays * 24 * 60 * 60 * 1000;
-  if (lastSentMs && Date.now() - lastSentMs < intervalMs) return;
+  if (lastSentMs && Date.now() - lastSentMs < intervalMs) {
+    recordDiscordDelivery({ status: "skipped", eventType: "supply_report", summary: "Scheduled supply report", reason: `Next report not due until ${new Date(lastSentMs + intervalMs).toISOString()}`, metadata: discordDiagnosticContext("supply_report", { lastSent, intervalDays: settings.supplyReportIntervalDays }, settings) });
+    return;
+  }
   const channelKey = settings.notificationChannels?.supplyReport ?? "modNotes";
   const channelId = settings.channels?.[channelKey] || settings.channelId;
-  await sendDiscordMessage({
-    embeds: [discordSupplyEmbed(claim)],
-    allowed_mentions: { parse: [] },
-  }, settings, channelId);
+  try {
+    const response = await sendDiscordMessage({
+      embeds: [discordSupplyEmbed(claim)],
+      allowed_mentions: { parse: [] },
+    }, settings, channelId);
+    recordDiscordDelivery({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+  } catch (error) {
+    recordDiscordDelivery({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
+    throw error;
+  }
   statements.upsertSetting.run("discord_last_supply_report_at", new Date().toISOString(), new Date().toISOString());
 }
 
@@ -1793,6 +1895,11 @@ function databaseStatus() {
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
+  const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
+    ...row,
+    metadata: safeJson(row.metadata_json, {}),
+    response: row.response_json ? safeJson(row.response_json, {}) : null,
+  }));
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
@@ -1800,7 +1907,7 @@ function databaseStatus() {
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: pollStatus,
-    discord: { lastDelivery: discordLastDelivery },
+    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog },
     settings: getSettings(),
   };
 }

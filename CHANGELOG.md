@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.9-beta.1 - 2026-06-01
+
+### Added
+
+- Added an Admin > Discord diagnostics console that records sent, skipped and failed Discord notification attempts with routing, thresholds, allowed crafters, payload context and Discord response details.
+- Discord test messages, app update checks and scheduled supply reports now write diagnostic records as well as live notifications.
+
 ## 0.8.8-beta.1 - 2026-06-01
 
 ### Fixed

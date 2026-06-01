@@ -3705,6 +3705,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
+  const discordLog: AnyRecord[] = status?.discord?.deliveryLog ?? [];
   const discordDeliveryLabel = discordDelivery.status === "failed"
     ? `Failed ${dateLabel(discordDelivery.at)}: ${discordDelivery.error ?? "Unknown Discord error"}`
     : discordDelivery.status === "sent"
@@ -3879,6 +3880,41 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <p className="legend">Send sample messages to the configured channel to preview how each alert type will look in Discord.</p>
             <div className="discord-test-grid">{discordTestButtons.map(([kind, label]) => <button key={kind} className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) }); }, `${label} Discord test sent.`)}><MessageCircle size={14} /> {label}</button>)}</div>
           </details>
+          <section className="form-card discord-terminal-card">
+            <div className="split-header">
+              <h3><Activity size={17} /> Discord Diagnostics</h3>
+              <button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh Log</button>
+            </div>
+            <p className="legend">Newest entries are shown first. This records sent, skipped and failed Discord notifications with routing and filter details so notification issues can be diagnosed.</p>
+            <div className="discord-terminal" role="log" aria-label="Discord diagnostics log">
+              {discordLog.length ? discordLog.map((entry) => {
+                const metadata = entry.metadata ?? {};
+                const detailLines = [
+                  `event=${entry.event_type}`,
+                  `status=${entry.status}`,
+                  entry.channel_key ? `channelKey=${entry.channel_key}` : "",
+                  entry.channel_id ? `channelId=${entry.channel_id}` : "",
+                  entry.reason ? `reason=${entry.reason}` : "",
+                  entry.error ? `error=${entry.error}` : "",
+                  metadata?.productionUsers ? `allowedCrafters=${metadata.productionUsers}` : "",
+                  metadata?.productionMinXp !== undefined ? `minXp=${metadata.productionMinXp}` : "",
+                  metadata?.productionMinProgressPct !== undefined ? `minProgress=${metadata.productionMinProgressPct}%` : "",
+                  metadata?.metadata?.crafterName ? `crafter=${metadata.metadata.crafterName}` : "",
+                  metadata?.metadata?.skillName ? `profession=${metadata.metadata.skillName}` : "",
+                  metadata?.metadata?.totalXp !== undefined ? `craftXp=${metadata.metadata.totalXp}` : "",
+                  metadata?.metadata?.progressPct !== undefined ? `progress=${metadata.metadata.progressPct}%` : "",
+                ].filter(Boolean).join(" | ");
+                return (
+                  <article className={`discord-log-entry ${String(entry.status ?? "unknown").toLowerCase()}`} key={entry.id}>
+                    <time>{dateLabel(entry.occurred_at)}</time>
+                    <strong>{entry.summary ?? entry.event_type}</strong>
+                    <code>{detailLines}</code>
+                    {entry.response ? <code>response={JSON.stringify(entry.response)}</code> : null}
+                  </article>
+                );
+              }) : <div className="discord-log-empty">No Discord diagnostics recorded yet.</div>}
+            </div>
+          </section>
         </div>
       ) : null}
 
