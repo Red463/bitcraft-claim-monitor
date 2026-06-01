@@ -815,6 +815,16 @@ function formatGold(value) {
   return `${Math.round(toNumber(value)).toLocaleString()}g`;
 }
 
+function formatDaysAndHours(days) {
+  const value = toNumber(days);
+  if (value <= 0) return "0 hours";
+  const wholeDays = Math.floor(value);
+  const hours = Math.round((value - wholeDays) * 24);
+  if (wholeDays <= 0) return `${hours} hours`;
+  if (hours <= 0) return `${wholeDays} days`;
+  return `${wholeDays} days ${hours} hours`;
+}
+
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken || !settings.channelId) return false;
   if (eventType === "market_new_listing") return settings.notify.marketListings;
@@ -1686,9 +1696,13 @@ async function discordSuppliesCommand() {
   const payload = await fetchBitjita(`/claims/${claimId}`);
   const claim = payload.claim ?? payload;
   const supplies = toNumber(claim.supplies);
-  const upkeep = toNumber(claim.upkeepPerDay ?? claim.suppliesPerDay ?? claim.tileCostPerDay ?? claim.tileCost);
-  const runway = upkeep > 0 ? `${(supplies / upkeep).toFixed(1)} days` : "unknown";
-  return `Settlement supplies: ${supplies.toLocaleString()}\nUpkeep: ${upkeep ? `${upkeep.toLocaleString()} per day` : "unknown"}\nRunway: ${runway}`;
+  const hourlyUpkeep = toNumber(claim.upkeepCost) || toNumber(claim.tileCost) * toNumber(claim.numTiles);
+  const dailyUpkeep = hourlyUpkeep * 24;
+  const runOutDate = bitjitaTimestampIso(claim.suppliesRunOut);
+  const daysRemaining = runOutDate && new Date(runOutDate).getTime() > Date.now()
+    ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+    : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
+  return `Settlement supplies: ${supplies.toLocaleString()}\nUpkeep: ${dailyUpkeep ? `${dailyUpkeep.toLocaleString(undefined, { maximumFractionDigits: 2 })} supplies per day` : "unknown"}\nRunway: ${formatDaysAndHours(daysRemaining)}${runOutDate ? `\nRuns out: ${new Date(runOutDate).toLocaleString("en-GB", { timeZone: "Europe/London" })}` : ""}`;
 }
 
 async function discordOnlineCommand() {

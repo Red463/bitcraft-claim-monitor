@@ -376,7 +376,7 @@ The intended production setup is:
 - Application installed at `/opt/bitcraft-claim-monitor`.
 - Persistent data at `/var/lib/bitcraft-claim-monitor`.
 - systemd running the Node application on `127.0.0.1:18430`.
-- Caddy serving `https://app.timbersteeltrace.com` as the public HTTPS domain, with `https://claim.timbersteeltrace.com` and `https://claim.hostred.co.uk` redirected to it.
+- Caddy serving `https://app.timbersteeltrade.com` as the public HTTPS domain, with `https://claim.timbersteeltrade.com` and `https://claim.hostred.co.uk` redirected to it.
 
 Full first-time instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 

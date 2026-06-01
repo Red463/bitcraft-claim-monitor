@@ -14,7 +14,7 @@ The app server now serves the compiled frontend, the local history/admin API, an
 You need:
 
 - An Ubuntu 22.04 VPS with its public IP address
-- A domain or subdomain, for example `app.timbersteeltrace.com`, with an `A` DNS record pointing at that IP
+- A domain or subdomain, for example `app.timbersteeltrade.com`, with an `A` DNS record pointing at that IP
 - Your GitHub repository URL: `https://github.com/Red463/bitcraft-claim-monitor.git`
 
 The server must run Node.js 24 or newer because the database uses Node's built-in SQLite support.
@@ -111,7 +111,7 @@ The final command should return JSON containing `"ok":true` and polling status. 
 
 ## 6. Publish the Website With HTTPS
 
-The checked-in Caddy example uses `app.timbersteeltrace.com` as the canonical domain and redirects `claim.timbersteeltrace.com` and the previous `claim.hostred.co.uk` host to it. If you use different hostnames, edit them before reloading Caddy:
+The checked-in Caddy example uses `app.timbersteeltrade.com` as the canonical domain and redirects `claim.timbersteeltrade.com` and the previous `claim.hostred.co.uk` host to it. If you use different hostnames, edit them before reloading Caddy:
 
 ```bash
 cp /opt/bitcraft-claim-monitor/deploy/Caddyfile.example /etc/caddy/Caddyfile
@@ -120,7 +120,7 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
-Open `https://app.timbersteeltrace.com/` in your browser. Caddy automatically obtains and renews the HTTPS certificate when DNS is pointing at the VPS and ports 80 and 443 are open.
+Open `https://app.timbersteeltrade.com/` in your browser. Caddy automatically obtains and renews the HTTPS certificate when DNS is pointing at the VPS and ports 80 and 443 are open.
 
 Go to the app's **Admin** page. Enter the server setup key printed above and create your admin password. Once this succeeds, remove the one-time setup key from the running service:
 
