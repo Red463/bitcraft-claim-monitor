@@ -17,6 +17,7 @@ const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 3
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const appVersion = "0.8.0-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
+const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 mkdirSync(dataDir, { recursive: true });
@@ -208,6 +209,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, notify: { marketListings: true, marketSales: true, production: true, lowSupplies: false, appUpdates: true } }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
 const statements = {
@@ -849,6 +851,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (metadata.runway) fields.push({ name: "Runway", value: String(metadata.runway), inline: true });
   if (metadata.upkeep) fields.push({ name: "Upkeep", value: String(metadata.upkeep), inline: true });
   if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
+  if (metadata.changelogUrl) fields.push({ name: "Changelog", value: `[View changes](${metadata.changelogUrl})`, inline: false });
   const title = eventType === "market_new_listing" ? "Market Listing"
     : eventType.includes("sale") ? "Market Sale"
     : eventType === "production_started" ? "Craft Started"
@@ -859,6 +862,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   return {
     author: { name: "Timbersteel Trade" },
     title,
+    url: metadata.url ?? metadata.changelogUrl,
     description: `**${summary}**`,
     color,
     fields: fields.slice(0, 8),
@@ -919,7 +923,7 @@ const discordTestEvents = {
   appUpdate: {
     eventType: "app_update",
     summary: "Version 0.8.0-beta.1 is live with Discord notifications and slash commands",
-    metadata: { version: appVersion },
+    metadata: { version: appVersion, changelogUrl },
   },
 };
 
@@ -936,6 +940,23 @@ async function sendDiscordTestNotification(kind = "basic") {
     embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
     allowed_mentions: { parse: [] },
   });
+}
+
+async function announceDiscordAppUpdateIfNeeded() {
+  const settings = getDiscordSettingsRaw();
+  if (!settings.enabled || !settings.botToken || !settings.channelId || !settings.notify.appUpdates) return;
+  const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
+  if (lastAnnounced === appVersion) return;
+  await sendDiscordMessage({
+    embeds: [discordEmbedForActivity(
+      "app_update",
+      `Version ${appVersion} is now live.`,
+      new Date().toISOString(),
+      { version: appVersion, changelogUrl },
+    )],
+    allowed_mentions: { parse: [] },
+  }, settings);
+  statements.upsertSetting.run("discord_last_announced_version", appVersion, new Date().toISOString());
 }
 
 const deployableStorageName = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
@@ -1696,14 +1717,32 @@ function verifyDiscordInteraction(req, rawBody, publicKeyHex) {
 }
 
 function discordResponse(content, options = {}) {
+  const data = {
+    flags: options.ephemeral ? 64 : undefined,
+    allowed_mentions: { parse: [] },
+  };
+  if (options.embeds) data.embeds = options.embeds;
+  else data.content = String(content).slice(0, 1900);
   return {
     type: 4,
-    data: {
-      content: String(content).slice(0, 1900),
-      flags: options.ephemeral ? 64 : undefined,
-      allowed_mentions: { parse: [] },
-    },
+    data,
   };
+}
+
+function discordCommandEmbed(title, description, fields = [], color = 0xf0c64f) {
+  return {
+    author: { name: "Timbersteel Trade" },
+    title,
+    description,
+    color,
+    fields: fields.slice(0, 10),
+    timestamp: new Date().toISOString(),
+    footer: { text: "BitCraft settlement monitor" },
+  };
+}
+
+function discordEmbedResponse(embed, options = {}) {
+  return discordResponse("", { ...options, embeds: [embed] });
 }
 
 async function handleDiscordInteraction(req) {
@@ -1736,10 +1775,10 @@ async function discordAutocomplete(interaction) {
 async function runDiscordCommand(interaction) {
   try {
     const command = String(interaction.data?.name ?? "");
-    if (command === "supplies") return discordResponse(await discordSuppliesCommand());
-    if (command === "online") return discordResponse(await discordOnlineCommand());
-    if (command === "crafts") return discordResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
-    if (command === "price") return discordResponse(await discordPriceCommand(String(discordOption(interaction, "item") ?? ""), discordOption(interaction, "region")));
+    if (command === "supplies") return discordEmbedResponse(await discordSuppliesCommand());
+    if (command === "online") return discordEmbedResponse(await discordOnlineCommand());
+    if (command === "crafts") return discordEmbedResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
+    if (command === "price") return discordEmbedResponse(await discordPriceCommand(String(discordOption(interaction, "item") ?? ""), discordOption(interaction, "region")));
     return discordResponse("Unknown command.", { ephemeral: true });
   } catch (error) {
     return discordResponse(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { ephemeral: true });
@@ -1757,7 +1796,12 @@ async function discordSuppliesCommand() {
   const daysRemaining = runOutDate && new Date(runOutDate).getTime() > Date.now()
     ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
     : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
-  return `Settlement supplies: ${supplies.toLocaleString()}\nUpkeep: ${dailyUpkeep ? `${dailyUpkeep.toLocaleString(undefined, { maximumFractionDigits: 2 })} supplies per day` : "unknown"}\nRunway: ${formatDaysAndHours(daysRemaining)}${runOutDate ? `\nRuns out: ${new Date(runOutDate).toLocaleString("en-GB", { timeZone: "Europe/London" })}` : ""}`;
+  return discordCommandEmbed("Settlement Supplies", `**${claim.name ?? "Monitored settlement"}** supply status`, [
+    { name: "Current stock", value: supplies.toLocaleString(), inline: true },
+    { name: "Upkeep", value: dailyUpkeep ? `${dailyUpkeep.toLocaleString(undefined, { maximumFractionDigits: 2 })} / day` : "Unknown", inline: true },
+    { name: "Runway", value: formatDaysAndHours(daysRemaining), inline: true },
+    ...(runOutDate ? [{ name: "Runs out", value: new Date(runOutDate).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false }] : []),
+  ], daysRemaining < 3 ? 0xef6461 : daysRemaining < 7 ? 0xf0c64f : 0x4ee28a);
 }
 
 async function discordOnlineCommand() {
@@ -1776,9 +1820,10 @@ async function discordOnlineCommand() {
     }
   });
   const online = details.filter((entry) => entry?.online);
-  return online.length
-    ? `Online now (${online.length}/${members.length}): ${online.map((entry) => entry.name).join(", ")}`
-    : `No settlement members appear online right now (${members.length} tracked).`;
+  return discordCommandEmbed("Members Online", online.length ? `**${online.length}/${members.length}** settlement members are online.` : `No settlement members appear online right now.`, [
+    { name: "Online", value: online.length ? online.map((entry) => entry.name).join(", ").slice(0, 1024) : "None", inline: false },
+    { name: "Tracked members", value: String(members.length), inline: true },
+  ], online.length ? 0x4ee28a : 0x838e9e);
 }
 
 async function discordCraftsCommand(skillFilter = "") {
@@ -1788,11 +1833,15 @@ async function discordCraftsCommand(skillFilter = "") {
   const jobs = unwrap(payload, "craftResults", [])
     .filter((job) => !filter || JSON.stringify(job.levelRequirements ?? job.experiencePerProgress ?? "").toLowerCase().includes(filter) || String(job.recipeName ?? "").toLowerCase().includes(filter))
     .slice(0, 8);
-  if (!jobs.length) return filter ? `No active settlement crafts matched "${skillFilter}".` : "No active settlement crafts found.";
-  return [`Active crafts (${jobs.length}${filter ? ` matching ${skillFilter}` : ""}):`, ...jobs.map((job) => {
+  if (!jobs.length) return discordCommandEmbed("Active Crafts", filter ? `No active settlement crafts matched **${skillFilter}**.` : "No active settlement crafts found.", [], 0x838e9e);
+  return discordCommandEmbed("Active Crafts", `${jobs.length} craft${jobs.length === 1 ? "" : "s"}${filter ? ` matching **${skillFilter}**` : ""}`, jobs.map((job) => {
     const remaining = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? job.remainingEffort);
-    return `- ${craftDisplayName(job, payload)}${job.buildingName ? ` at ${job.buildingName}` : ""}${remaining ? ` - ${remaining.toLocaleString()} effort left` : ""}`;
-  })].join("\n");
+    return {
+      name: craftDisplayName(job, payload).slice(0, 256),
+      value: `${job.buildingName ? `Structure: ${job.buildingName}\n` : ""}${remaining ? `Effort left: ${remaining.toLocaleString()}` : "Effort left: unknown"}`.slice(0, 1024),
+      inline: false,
+    };
+  }), 0x65b7fa);
 }
 
 async function discordPriceCommand(itemName, regionOption) {
@@ -1803,7 +1852,7 @@ async function discordPriceCommand(itemName, regionOption) {
   const regionId = String(regionOption ?? (claimPayload.claim ?? claimPayload)?.regionId ?? "").trim();
   const searchPayload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
   const item = unwrap(searchPayload, "items", []).find((candidate) => String(candidate.name ?? candidate.itemName ?? "").toLowerCase() === query.toLowerCase()) ?? unwrap(searchPayload, "items", [])[0];
-  if (!item) return `No market item found for "${query}".`;
+  if (!item) return discordCommandEmbed("Price Finder", `No market item found for **${query}**.`, [], 0x838e9e);
   const itemId = item.id ?? item.itemId;
   const itemType = item.itemType ?? item.type ?? 0;
   const historyPath = `/market/items/${encodeURIComponent(String(itemId))}/price-history?bucket=1%20day&limit=30${regionId ? `&regionId=${encodeURIComponent(regionId)}` : ""}`;
@@ -1819,7 +1868,13 @@ async function discordPriceCommand(itemName, regionOption) {
   const a7 = avg(7);
   const a30 = avg(30);
   const suggested = a7 || a30 || a1;
-  return `${item.name ?? item.itemName} pricing${regionId ? ` in R${regionId}` : ""}\n24h avg: ${a1 ? formatGold(a1) : "no sales"}\n7d avg: ${a7 ? formatGold(a7) : "no sales"}\n30d avg: ${a30 ? formatGold(a30) : "no sales"}\nSuggested listing price: ${suggested ? formatGold(suggested) : "not enough sales data"}\nItem type: ${itemType}`;
+  return discordCommandEmbed("Price Finder", `**${item.name ?? item.itemName}**${regionId ? ` pricing in **R${regionId}**` : ""}`, [
+    { name: "24h average", value: a1 ? formatGold(a1) : "No sales", inline: true },
+    { name: "7d average", value: a7 ? formatGold(a7) : "No sales", inline: true },
+    { name: "30d average", value: a30 ? formatGold(a30) : "No sales", inline: true },
+    { name: "Suggested list price", value: suggested ? formatGold(suggested) : "Not enough sales data", inline: false },
+    { name: "Item type", value: String(itemType), inline: true },
+  ], suggested ? 0xf0c64f : 0x838e9e);
 }
 
 async function registerDiscordCommands() {
@@ -2053,6 +2108,7 @@ const server = createServer(async (req, res) => {
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
@@ -2217,6 +2273,9 @@ const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430)
 const host = process.env.APP_HOST ?? "127.0.0.1";
 server.listen(port, host, () => {
   console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
+  setTimeout(() => {
+    void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
+  }, 5000);
   if (serverPollingEnabled) {
     console.log(`Server snapshot polling enabled every ${snapshotIntervalMs / 1000} seconds`);
     collectServerSnapshot();
