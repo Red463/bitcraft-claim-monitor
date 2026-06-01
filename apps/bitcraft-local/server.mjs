@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.6-beta.1";
+const appVersion = "0.8.8-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -209,7 +209,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 60000, productionMinProgressPct: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinProgressPct: 1, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_delivery_json", JSON.stringify({ status: "none" }), now);
@@ -477,7 +477,7 @@ async function deliverProductionNotifications(pendingNotifications = []) {
   for (const notification of pendingNotifications) {
     try {
       const result = await sendDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata);
-      if (notification.eventType === "production_started" && result.ok) statements.markProductionStartNotified.run(notification.jobKey);
+      if (notification.eventType === "production_started" && result.ok && !result.skipped) statements.markProductionStartNotified.run(notification.jobKey);
     } catch (error) {
       console.warn(`Discord production notification failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -524,8 +524,8 @@ const defaultDiscordSettings = {
   channelId: "",
   minSaleValue: 0,
   supplyRunwayDaysThreshold: 7,
-  productionMinXp: 60000,
-  productionMinProgressPct: 5,
+  productionMinXp: 40000,
+  productionMinProgressPct: 1,
   productionUsers: "",
   supplyReportIntervalDays: 3,
   channels: defaultDiscordChannels,
@@ -555,8 +555,8 @@ function normalizeDiscordSettings(value = {}) {
     channelId: String(value.channelId ?? "").trim(),
     minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
     supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
-    productionMinXp: Math.max(toNumber(value.productionMinXp) || 60000, 0),
-    productionMinProgressPct: Math.max(Math.min(toNumber(value.productionMinProgressPct) || 5, 100), 0),
+    productionMinXp: Math.max(toNumber(value.productionMinXp) || 40000, 0),
+    productionMinProgressPct: Math.max(Math.min(toNumber(value.productionMinProgressPct) || 1, 100), 0),
     productionUsers: String(value.productionUsers ?? "").trim(),
     supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
     channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
@@ -963,7 +963,7 @@ function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
 }
 
 function discordEnabledFor(eventType, settings, metadata) {
-  if (!settings.enabled || !settings.botToken || !settings.channelId) return false;
+  if (!settings.enabled || !settings.botToken) return false;
   if (eventType === "market_new_listing") return settings.notify.marketListings;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
     return settings.notify.marketSales && toNumber(metadata?.totalValue ?? metadata?.totalPrice ?? toNumber(metadata?.quantity) * toNumber(metadata?.price)) >= settings.minSaleValue;
@@ -1107,7 +1107,7 @@ const discordTestEvents = {
   },
   appUpdate: {
     eventType: "app_update",
-    summary: "Version 0.8.6-beta.1 is live with Discord delivery diagnostics and safer craft notification retries",
+    summary: "Version 0.8.8-beta.1 is live with fixed craft notification routing and lower default craft thresholds",
     metadata: { version: appVersion, changelogUrl },
   },
 };
@@ -1130,18 +1130,16 @@ async function sendDiscordTestNotification(kind = "basic") {
 
 async function announceDiscordAppUpdateIfNeeded() {
   const settings = getDiscordSettingsRaw();
-  if (!settings.enabled || !settings.botToken || !settings.channelId || !settings.notify.appUpdates) return;
+  if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) return;
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
   if (lastAnnounced === appVersion) return;
-  await sendDiscordMessage({
-    embeds: [discordEmbedForActivity(
-      "app_update",
-      `Version ${appVersion} is now live.`,
-      new Date().toISOString(),
-      { version: appVersion, changelogUrl },
-    )],
-    allowed_mentions: { parse: [] },
-  }, settings);
+  await sendDiscordActivity(
+    "app_update",
+    `Version ${appVersion} is now live.`,
+    new Date().toISOString(),
+    { version: appVersion, changelogUrl },
+    settings,
+  );
   statements.upsertSetting.run("discord_last_announced_version", appVersion, new Date().toISOString());
 }
 

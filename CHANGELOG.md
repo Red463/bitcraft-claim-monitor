@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.8-beta.1 - 2026-06-01
+
+### Fixed
+
+- Craft Discord notifications no longer require the default notifications channel when routing to profession channels.
+- Craft-start notifications are no longer marked as delivered when Discord sending is skipped.
+
+### Changed
+
+- Craft notification defaults are now 40,000 total XP and 1% start progress.
+
+## 0.8.7-beta.1 - 2026-06-01
+
+### Fixed
+
+- App update Discord notifications now use the configured Updates channel instead of always posting to the default notifications channel.
+
 ## 0.8.6-beta.1 - 2026-06-01
 
 ### Changed
