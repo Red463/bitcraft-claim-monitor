@@ -3567,7 +3567,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   React.useEffect(() => {
     if (!auth?.authenticated) return;
     run(async () => {
-      if (tab === "status") await refreshStatus();
+      if (tab === "status" || tab === "discord") await refreshStatus();
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
@@ -3704,6 +3704,14 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
       {channelOptions.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}{entry.id ? ` (${entry.id})` : ""}</option>)}
     </select>
   );
+  const discordDelivery = status?.discord?.lastDelivery ?? {};
+  const discordDeliveryLabel = discordDelivery.status === "failed"
+    ? `Failed ${dateLabel(discordDelivery.at)}: ${discordDelivery.error ?? "Unknown Discord error"}`
+    : discordDelivery.status === "sent"
+      ? `Sent ${dateLabel(discordDelivery.at)}: ${discordDelivery.eventType ?? "notification"}${discordDelivery.channelId ? ` to ${discordDelivery.channelId}` : ""}`
+      : discordDelivery.status === "skipped"
+        ? `Skipped ${dateLabel(discordDelivery.at)}: ${discordDelivery.reason ?? "Not enabled"}`
+        : "No Discord deliveries recorded";
   return (
     <div className="panel admin-console">
       <div className="split-header">
@@ -3730,6 +3738,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <Info label="Storage activity sync" value={status?.polling?.storageLastSuccessAt ? `${dateLabel(status.polling.storageLastSuccessAt)} - ${formatNumber(status.polling.storageInserted)} new events from ${formatNumber(status.polling.storageRequests)} containers` : "Not collected yet"} />
               <Info label="Storage sync error" value={status?.polling?.storageLastError ?? "None"} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
+              <Info label="Discord delivery" value={discordDeliveryLabel} />
               <Info label="Storage" value={status?.storageLabel ?? "-"} />
             </div>
           </section>
@@ -3861,6 +3870,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
               <Info label="Slash commands" value="/supplies, /online, /crafts, /price" />
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
+              <Info label="Last Discord delivery" value={discordDeliveryLabel} />
             </div>
             <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
           </section>

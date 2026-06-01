@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.5-beta.1";
+const appVersion = "0.8.6-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -212,6 +212,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 60000, productionMinProgressPct: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_delivery_json", JSON.stringify({ status: "none" }), now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
 const statements = {
@@ -440,14 +441,16 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
   const seen = new Set(jobs.map((job) => job.key));
   const existing = new Map(statements.activeProductionJobs.all(claimId).map((row) => [row.job_key, row]));
   const hasProductionBaseline = toNumber(statements.productionJobCount.get(claimId)?.count) > 0;
+  const pendingNotifications = [];
 
   for (const job of jobs) {
     const current = existing.get(job.key);
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
     if (!startAlreadyNotified && hasProductionBaseline && productionNotificationAllowed("production_started", job)) {
-      addActivity(claimId, "production_started", `Craft started: ${job.label}`, occurredAt, job);
-      statements.markProductionStartNotified.run(job.key);
+      const summary = `Craft started: ${job.label}`;
+      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(job));
+      pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: job });
     }
   }
 
@@ -456,13 +459,28 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     statements.completeProductionJob.run(occurredAt, key);
     const job = { ...normalizeProductionJob(safeJson(current.raw_json)), key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name };
     if (!productionNotificationAllowed("production_completed", job)) continue;
-    addActivity(claimId, "production_completed", `Craft completed: ${current.label}`, occurredAt, {
+    const metadata = {
       key,
       label: current.label,
       buildingName: current.building_name,
       crafterName: current.crafter_name,
       ...job,
-    });
+    };
+    const summary = `Craft completed: ${current.label}`;
+    statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
+    pendingNotifications.push({ jobKey: key, eventType: "production_completed", summary, occurredAt, metadata });
+  }
+  return pendingNotifications;
+}
+
+async function deliverProductionNotifications(pendingNotifications = []) {
+  for (const notification of pendingNotifications) {
+    try {
+      const result = await sendDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata);
+      if (notification.eventType === "production_started" && result.ok) statements.markProductionStartNotified.run(notification.jobKey);
+    } catch (error) {
+      console.warn(`Discord production notification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 
@@ -983,6 +1001,29 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
   return settings.channelId;
 }
 
+function recordDiscordDelivery(status) {
+  statements.upsertSetting.run("discord_last_delivery_json", JSON.stringify({ ...status, at: new Date().toISOString() }), new Date().toISOString());
+}
+
+async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (!discordEnabledFor(eventType, settings, metadata)) {
+    return { ok: true, skipped: true };
+  }
+  const channelId = discordChannelForEvent(eventType, metadata, settings);
+  try {
+    await sendDiscordMessage({
+      embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
+      allowed_mentions: { parse: [] },
+    }, settings, channelId);
+    recordDiscordDelivery({ status: "sent", eventType, channelId, summary });
+    return { ok: true, skipped: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDelivery({ status: "failed", eventType, channelId, summary, error: message });
+    throw error;
+  }
+}
+
 function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
   const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : eventType.includes("production") ? 0x65b7fa : eventType === "app_update" ? 0xa349af : 0xef6461;
   const fields = [];
@@ -1021,12 +1062,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
 }
 
 function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
-  const settings = getDiscordSettingsRaw();
-  if (!discordEnabledFor(eventType, settings, metadata)) return;
-  void sendDiscordMessage({
-    embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
-    allowed_mentions: { parse: [] },
-  }, settings, discordChannelForEvent(eventType, metadata, settings)).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
+  void sendDiscordActivity(eventType, summary, occurredAt, metadata).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
@@ -1071,7 +1107,7 @@ const discordTestEvents = {
   },
   appUpdate: {
     eventType: "app_update",
-    summary: "Version 0.8.5-beta.1 is live with clearer unsaved-settings prompts in Admin",
+    summary: "Version 0.8.6-beta.1 is live with Discord delivery diagnostics and safer craft notification retries",
     metadata: { version: appVersion, changelogUrl },
   },
 };
@@ -1293,6 +1329,7 @@ function addMarketEvent(claimId, eventType, listing, occurredAt) {
 
 async function recordSnapshot(payload) {
   const now = new Date().toISOString();
+  let pendingProductionNotifications = [];
   const claimId = String(payload.claimId ?? payload.claim?.entityId ?? "");
   if (!claimId) throw new Error("Missing claim id");
 
@@ -1403,9 +1440,10 @@ async function recordSnapshot(payload) {
     }
 
     applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
-    if (payload.crafts) recordProductionJobs(claimId, payload.crafts, now);
+    if (payload.crafts) pendingProductionNotifications = recordProductionJobs(claimId, payload.crafts, now);
 
     db.exec("COMMIT");
+    await deliverProductionNotifications(pendingProductionNotifications);
     return { ok: true, capturedAt: now };
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1732,6 +1770,7 @@ function databaseStatus() {
     table,
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
+  const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
@@ -1739,6 +1778,7 @@ function databaseStatus() {
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: pollStatus,
+    discord: { lastDelivery: discordLastDelivery },
     settings: getSettings(),
   };
 }

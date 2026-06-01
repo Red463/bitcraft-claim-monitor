@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.6-beta.1 - 2026-06-01
+
+### Changed
+
+- Craft-start Discord notifications are now only marked as delivered after Discord accepts the message, so permission failures can be retried.
+- Admin now shows the latest Discord notification delivery status, including channel errors such as missing access.
+
 ## 0.8.5-beta.1 - 2026-06-01
 
 ### Added
