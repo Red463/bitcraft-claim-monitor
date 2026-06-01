@@ -98,6 +98,10 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .help-links span { color: var(--muted); font-size: 12px; grid-column: 1; }
 .help-links svg { grid-column: 2; grid-row: 1 / 3; align-self: center; color: var(--gold); }
 .privacy-dialog { width: min(520px, 100%); }
+.terms-dialog { width: min(620px, 100%); }
+.terms-section { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 12px; display: grid; gap: 8px; }
+.terms-section h3 { color: var(--gold); font-size: 14px; margin: 0; }
+.terms-section p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
 .settings-dialog { width: min(620px, 100%); }
 .settings-grid { display: grid; gap: 13px; }
 .settings-grid section { border: 1px solid rgba(255,255,255,.075); border-radius: 8px; background: var(--panel-2); padding: 13px; display: grid; gap: 10px; }

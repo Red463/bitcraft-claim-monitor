@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.15-beta.1 - 2026-06-02
+
+### Added
+
+- Added in-app Legal & Bot Terms covering the optional Discord bot, community-app status, data source disclaimer, and bot usage expectations.
+- Added Discord bot data processing notes to the Privacy & Analytics dialog and README.
+
 ## 0.8.14-beta.1 - 2026-06-01
 
 ### Fixed

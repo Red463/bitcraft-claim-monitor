@@ -20,6 +20,7 @@ import {
   Download,
   ExternalLink,
   Factory,
+  FileText,
   FlaskConical,
   Flame,
   Globe2,
@@ -3325,7 +3326,7 @@ function CommandPalette({ data, onClose, onNavigate, onSelectMember }: { data: R
   );
 }
 
-function HelpCenter({ version, onClose, onPrivacy }: { version: string; onClose: () => void; onPrivacy: () => void }) {
+function HelpCenter({ version, onClose, onPrivacy, onTerms }: { version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -3366,7 +3367,47 @@ function HelpCenter({ version, onClose, onPrivacy }: { version: string; onClose:
             <span>See what anonymous usage data may be measured</span>
             <Shield size={14} />
           </button>
+          <button className="help-link-button" onClick={() => { onClose(); onTerms(); }}>
+            <strong>Legal & Bot Terms</strong>
+            <span>Read usage terms for the site and Discord bot</span>
+            <FileText size={14} />
+          </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPrivacy: () => void }) {
+  React.useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog terms-dialog" role="dialog" aria-modal="true" aria-labelledby="terms-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <FileText size={19} />
+            <h2 id="terms-title">Legal & Bot Terms</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close legal and bot terms"><X size={16} /></button>
+        </header>
+        <section className="terms-section">
+          <h3>Application Terms</h3>
+          <p>This is an unofficial fan-made settlement tool for BitCraft players. It is provided as-is for community use, testing and development. Data may be delayed, incomplete, unavailable or inaccurate, so do not rely on it as the only source for important settlement decisions.</p>
+          <p>The app is not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data is provided by the BitJita API.</p>
+        </section>
+        <section className="terms-section">
+          <h3>Discord Bot Terms</h3>
+          <p>The optional Timbersteel Trade Discord bot posts settlement notifications and responds to slash commands using the same public BitJita data and locally stored app data used by this dashboard.</p>
+          <p>Using the bot in Discord means command names, command options, Discord user/server/channel identifiers, response status, and notification delivery diagnostics may be processed by this app and Discord to provide the requested bot features.</p>
+          <p>Bot responses are informational only. Server administrators can disable notifications, remove the bot, rotate its token, or delete local diagnostic/history data from the app administration tools.</p>
+        </section>
+        <button className="toolbar-button" onClick={() => { onClose(); onPrivacy(); }}><Shield size={14} /> Privacy details</button>
       </section>
     </div>
   );
@@ -3396,6 +3437,7 @@ function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsCons
         </div>
         <p className="help-intro">With your permission, this site uses first-party analytics cookies to understand which pages and tools are valuable and how long sections are used. This information is genuinely helpful while the app is being developed.</p>
         <p className="help-intro">Analytics record a random browser identifier, visits to app sections and high-level feature actions. They do not record BitCraft usernames, selected member identities, typed search text, admin credentials or database contents.</p>
+        <p className="help-intro">The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics so the bot can respond and administrators can diagnose delivery issues.</p>
         <p className="help-intro">Consent and analytics cookies last for up to 180 days. Raw usage events are retained for up to 90 days. You can change your preference here at any time; declining removes the analytics identifier from this browser.</p>
         <div className="privacy-actions">
           <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
@@ -4047,6 +4089,7 @@ function App() {
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
+  const [termsOpen, setTermsOpen] = React.useState(false);
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
@@ -4308,6 +4351,7 @@ function App() {
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
             <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
             <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
+            <button className="footer-link" onClick={() => setTermsOpen(true)}><FileText size={13} /> Terms & Bot Use</button>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>
             <a href="https://bitcraftmap.com/" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitCraft Map</a>
           </div>
@@ -4318,9 +4362,10 @@ function App() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
-      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
+      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
+      {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
     </div>
   );
 }

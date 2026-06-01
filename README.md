@@ -217,6 +217,12 @@ Available commands:
 
 Discord setup is managed in **Admin > Discord**. The bot token is stored in the protected `app_secrets` table or can be supplied with `DISCORD_BOT_TOKEN`; it is not returned through the settings API or shown in the admin table browser.
 
+#### Discord Bot Terms
+
+The Discord bot is optional and provided as part of this unofficial community app. It posts settlement notifications and responds to slash commands using public BitJita data and locally stored app data. Bot output is informational only and may be delayed, incomplete or inaccurate.
+
+Using the bot means Discord command names, command options, server IDs, channel IDs, user IDs, delivery status, and notification diagnostics may be processed by this app and Discord so the bot can respond and administrators can diagnose delivery issues. Server administrators can disable notifications, remove the bot, rotate the bot token, or delete local diagnostic/history data from the administration tools.
+
 Authentication behavior:
 
 - The first administrator is created from the Admin page; additional administrators can then be created there.
@@ -234,6 +240,8 @@ Analytics are disabled until a visitor explicitly selects **Accept Analytics** i
 When accepted, first-party cookies store the user's consent and a random browser identifier for up to 180 days. The application records section page views, time spent in each section and high-level feature usage including Market tabs, Price Finder searches, member-details opening, Production eligibility filters, Public Craft Finder controls, map links, and Activity filters. Raw analytics events are retained for up to 90 days, and results are available to administrators in **Admin > Analytics**, where all analytics data can also be deleted.
 
 The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, item IDs, item names, region query values, or database contents in analytics events. Visitors may withdraw permission at any time through **Privacy & Analytics**, which removes the analytics browser identifier.
+
+The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics. This is separate from browser analytics consent and is required for the bot features to operate.
 
 ## Data Sources And Persistence
 
