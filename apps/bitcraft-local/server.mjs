@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.0-beta.1";
+const appVersion = "0.8.2-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -182,6 +182,7 @@ ensureColumn("market_events", "trade_id", "TEXT");
 ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
+ensureColumn("production_jobs", "start_notified", "INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
 
 const defaultClaimId = "1369094286777412590";
@@ -208,7 +209,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, notify: { marketListings: true, marketSales: true, production: true, lowSupplies: false, appUpdates: true } }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 60000, productionMinProgressPct: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
@@ -271,6 +272,7 @@ const statements = {
   `),
   activeProductionJobs: db.prepare("SELECT * FROM production_jobs WHERE claim_id = ? AND status = 'active'"),
   productionJobCount: db.prepare("SELECT COUNT(*) AS count FROM production_jobs WHERE claim_id = ?"),
+  markProductionStartNotified: db.prepare("UPDATE production_jobs SET start_notified = 1 WHERE job_key = ?"),
   upsertProductionJob: db.prepare(`
     INSERT INTO production_jobs (job_key, claim_id, label, building_name, crafter_name, first_seen, last_seen, status, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
@@ -387,12 +389,48 @@ function craftDisplayName(job, craftsPayload = {}) {
 }
 
 function normalizeProductionJob(job, craftsPayload = {}) {
+  const metrics = productionMetrics(job);
   return {
     key: craftJobKey(job),
     label: craftDisplayName(job, craftsPayload),
     buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
-    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? null,
+    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
+    ...metrics,
     raw: job,
+  };
+}
+
+const skillNames = {
+  2: "Forestry",
+  3: "Carpentry",
+  4: "Masonry",
+  5: "Mining",
+  6: "Smithing",
+  7: "Scholar",
+  8: "Leatherworking",
+  9: "Hunting",
+  10: "Tailoring",
+  11: "Farming",
+  12: "Fishing",
+  13: "Cooking",
+  14: "Foraging",
+};
+
+function productionMetrics(job) {
+  const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
+  const skillName = job.levelRequirements?.[0]?.skillName ?? skillNames[skillId] ?? "";
+  const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+  const totalEffort = toNumber(job.totalCraftWork ?? job.requiredCraftWork ?? job.craftWorkRequired ?? job.effortRequired ?? job.totalEffort);
+  const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? (totalEffort ? totalEffort - toNumber(job.completedCraftWork ?? job.progress) : 0));
+  const progressPct = totalEffort > 0 ? Math.max(0, Math.min(100, ((totalEffort - remainingEffort) / totalEffort) * 100)) : Math.max(0, Math.min(100, toNumber(job.progressPct ?? job.progressPercent ?? job.progress)));
+  return {
+    skillId,
+    skillName,
+    professionKey: String(skillName || "").toLowerCase().replace(/[^a-z]/g, ""),
+    totalEffort,
+    remainingEffort,
+    progressPct,
+    totalXp: totalEffort * xpPerEffort,
   };
 }
 
@@ -405,22 +443,43 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
   for (const job of jobs) {
     const current = existing.get(job.key);
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
-    if (!current && hasProductionBaseline) {
+    const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
+    if (!startAlreadyNotified && hasProductionBaseline && productionNotificationAllowed("production_started", job)) {
       addActivity(claimId, "production_started", `Craft started: ${job.label}`, occurredAt, job);
+      statements.markProductionStartNotified.run(job.key);
     }
   }
 
   for (const [key, current] of existing) {
     if (seen.has(key)) continue;
     statements.completeProductionJob.run(occurredAt, key);
+    const job = { ...normalizeProductionJob(safeJson(current.raw_json)), key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name };
+    if (!productionNotificationAllowed("production_completed", job)) continue;
     addActivity(claimId, "production_completed", `Craft completed: ${current.label}`, occurredAt, {
       key,
       label: current.label,
       buildingName: current.building_name,
       crafterName: current.crafter_name,
+      ...job,
     });
   }
 }
+
+const defaultCraftChannels = {
+  forestry: "1509932116077711411",
+  carpentry: "1509932154442875201",
+  masonry: "1509932188446101585",
+  mining: "1509932207060291797",
+  smithing: "1509932228090658936",
+  scholar: "1509932259262595245",
+  hunting: "1510275986766434325",
+  leatherworking: "1509932280829710547",
+  tailoring: "1509932306486398976",
+  farming: "1509932539626786926",
+  fishing: "1509932564641747074",
+  cooking: "1509932588180181033",
+  foraging: "1509932609378058412",
+};
 
 const defaultDiscordSettings = {
   enabled: false,
@@ -429,10 +488,17 @@ const defaultDiscordSettings = {
   guildId: "",
   channelId: "",
   minSaleValue: 0,
+  supplyRunwayDaysThreshold: 7,
+  productionMinXp: 60000,
+  productionMinProgressPct: 5,
+  productionUsers: "",
+  craftChannels: defaultCraftChannels,
   notify: {
     marketListings: true,
     marketSales: true,
     production: true,
+    productionStarted: true,
+    productionCompleted: true,
     lowSupplies: false,
     appUpdates: true,
   },
@@ -449,10 +515,17 @@ function normalizeDiscordSettings(value = {}) {
     guildId: String(value.guildId ?? "").trim(),
     channelId: String(value.channelId ?? "").trim(),
     minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
+    supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
+    productionMinXp: Math.max(toNumber(value.productionMinXp) || 60000, 0),
+    productionMinProgressPct: Math.max(Math.min(toNumber(value.productionMinProgressPct) || 5, 100), 0),
+    productionUsers: String(value.productionUsers ?? "").trim(),
+    craftChannels: { ...defaultCraftChannels, ...(value.craftChannels ?? {}) },
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
       production: notify.production !== false,
+      productionStarted: notify.productionStarted ?? notify.production ?? true,
+      productionCompleted: notify.productionCompleted ?? notify.production ?? true,
       lowSupplies: notify.lowSupplies === true,
       appUpdates: notify.appUpdates !== false,
     },
@@ -827,15 +900,51 @@ function formatDaysAndHours(days) {
   return `${wholeDays} days ${hours} hours`;
 }
 
+function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
+  const hourlyUpkeep = toNumber(claim?.upkeepCost) || toNumber(claim?.tileCost) * toNumber(claim?.numTiles);
+  const dailyUpkeep = hourlyUpkeep * 24;
+  const runOutDate = bitjitaTimestampIso(claim?.suppliesRunOut);
+  const runwayDays = runOutDate && new Date(runOutDate).getTime() > Date.now()
+    ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+    : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
+  return {
+    dailyUpkeep,
+    runwayDays,
+    runway: formatDaysAndHours(runwayDays),
+    upkeep: dailyUpkeep ? `${dailyUpkeep.toLocaleString(undefined, { maximumFractionDigits: 2 })} supplies per day` : "Unknown",
+    runsOutAt: runOutDate,
+  };
+}
+
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken || !settings.channelId) return false;
   if (eventType === "market_new_listing") return settings.notify.marketListings;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
     return settings.notify.marketSales && toNumber(metadata?.totalValue ?? metadata?.totalPrice ?? toNumber(metadata?.quantity) * toNumber(metadata?.price)) >= settings.minSaleValue;
   }
-  if (eventType === "production_started" || eventType === "production_completed") return settings.notify.production;
-  if (eventType === "supplies") return settings.notify.lowSupplies && toNumber(metadata?.after) < 250000;
+  if (eventType === "production_started") return settings.notify.production && settings.notify.productionStarted && productionNotificationAllowed(eventType, metadata, settings);
+  if (eventType === "production_completed") return settings.notify.production && settings.notify.productionCompleted && productionNotificationAllowed(eventType, metadata, settings);
+  if (eventType === "supplies") return settings.notify.lowSupplies && toNumber(metadata?.runwayDays) > 0 && toNumber(metadata.runwayDays) < settings.supplyRunwayDaysThreshold;
   return false;
+}
+
+function productionNotificationAllowed(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "production_started" && toNumber(metadata.progressPct) < settings.productionMinProgressPct) return false;
+  if (toNumber(metadata.totalXp) < settings.productionMinXp) return false;
+  const allowedUsers = String(settings.productionUsers ?? "").split(/[\n,]/).map((name) => name.trim().toLowerCase()).filter(Boolean);
+  if (allowedUsers.length) {
+    const crafter = String(metadata.crafterName ?? "").trim().toLowerCase();
+    if (!crafter || !allowedUsers.includes(crafter)) return false;
+  }
+  return true;
+}
+
+function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "production_started" || eventType === "production_completed") {
+    const professionKey = String(metadata.professionKey ?? "").toLowerCase();
+    return settings.craftChannels?.[professionKey] || settings.channelId;
+  }
+  return settings.channelId;
 }
 
 function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
@@ -848,8 +957,12 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (toNumber(metadata.totalValue ?? metadata.totalPrice)) fields.push({ name: "Total", value: formatGold(metadata.totalValue ?? metadata.totalPrice), inline: true });
   if (metadata.buildingName) fields.push({ name: "Structure", value: String(metadata.buildingName), inline: true });
   if (metadata.crafterName) fields.push({ name: "Crafter", value: String(metadata.crafterName), inline: true });
+  if (metadata.skillName) fields.push({ name: "Profession", value: String(metadata.skillName), inline: true });
+  if (toNumber(metadata.totalXp)) fields.push({ name: "Total XP", value: toNumber(metadata.totalXp).toLocaleString(), inline: true });
+  if (toNumber(metadata.progressPct)) fields.push({ name: "Progress", value: `${toNumber(metadata.progressPct).toFixed(1)}%`, inline: true });
   if (metadata.runway) fields.push({ name: "Runway", value: String(metadata.runway), inline: true });
   if (metadata.upkeep) fields.push({ name: "Upkeep", value: String(metadata.upkeep), inline: true });
+  if (metadata.runsOutAt) fields.push({ name: "Runs out", value: new Date(metadata.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false });
   if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
   if (metadata.changelogUrl) fields.push({ name: "Changelog", value: `[View changes](${metadata.changelogUrl})`, inline: false });
   const title = eventType === "market_new_listing" ? "Market Listing"
@@ -877,12 +990,12 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
   void sendDiscordMessage({
     embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
     allowed_mentions: { parse: [] },
-  }, settings).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
+  }, settings, discordChannelForEvent(eventType, metadata, settings)).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
-async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw()) {
-  if (!settings.enabled || !settings.botToken || !settings.channelId) throw new Error("Discord integration is not fully configured");
-  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(settings.channelId)}/messages`, {
+async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
+  if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
+  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: {
       authorization: `Bot ${settings.botToken}`,
@@ -908,21 +1021,21 @@ const discordTestEvents = {
   craftStarted: {
     eventType: "production_started",
     summary: "Craft started: Tier 4 Scholar Workstation",
-    metadata: { label: "Tier 4 Scholar Workstation", buildingName: "Scholar Hall", crafterName: "Settlement queue" },
+    metadata: { label: "Tier 4 Scholar Workstation", buildingName: "Scholar Hall", crafterName: "Modular", skillName: "Scholar", professionKey: "scholar", totalXp: 82000, progressPct: 7.5 },
   },
   craftCompleted: {
     eventType: "production_completed",
     summary: "Craft completed: Refined Rough Plank",
-    metadata: { label: "Refined Rough Plank", buildingName: "Carpentry Workshop", crafterName: "Settlement queue" },
+    metadata: { label: "Refined Rough Plank", buildingName: "Carpentry Workshop", crafterName: "Modular", skillName: "Carpentry", professionKey: "carpentry", totalXp: 64000, progressPct: 100 },
   },
   supplies: {
     eventType: "supplies",
     summary: "Supply stock changed: 11,946 remaining",
-    metadata: { runway: "12 days 22 hours", upkeep: "448.5 supplies per day" },
+    metadata: { runwayDays: 6.8, runway: "6 days 19 hours", upkeep: "448.5 supplies per day", runsOutAt: new Date(Date.now() + 6.8 * 24 * 60 * 60 * 1000).toISOString() },
   },
   appUpdate: {
     eventType: "app_update",
-    summary: "Version 0.8.0-beta.1 is live with Discord notifications and slash commands",
+    summary: "Version 0.8.1-beta.1 is live with Discord notifications and slash commands",
     metadata: { version: appVersion, changelogUrl },
   },
 };
@@ -936,10 +1049,11 @@ async function sendDiscordTestNotification(kind = "basic") {
   }
   const sample = discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
+  const settings = getDiscordSettingsRaw();
   return sendDiscordMessage({
     embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
     allowed_mentions: { parse: [] },
-  });
+  }, settings, discordChannelForEvent(sample.eventType, sample.metadata, settings));
 }
 
 async function announceDiscordAppUpdateIfNeeded() {
@@ -1126,6 +1240,7 @@ async function recordSnapshot(payload) {
   const marketCount = market.length;
   const supplies = toNumber(claim.supplies);
   const treasury = toNumber(claim.treasury);
+  const supplyMeta = supplyRunwayMetadata(claim, supplies);
   const previous = statements.latestSnapshot.get(claimId);
   const normalizedListings = market.map(normalizeListing);
   const seen = new Set(normalizedListings.map((listing) => listing.key));
@@ -1176,7 +1291,7 @@ async function recordSnapshot(payload) {
         ["market", toNumber(previous.market_count), marketCount, `${signedChange(marketCount, previous.market_count)} market listings`],
       ];
       for (const [type, before, after, summary] of checks) {
-        if (before !== after) addActivity(claimId, type, summary, now, { before, after });
+        if (before !== after) addActivity(claimId, type, summary, now, type === "supplies" ? { before, after, ...supplyMeta } : { before, after });
       }
     } else {
       addActivity(claimId, "baseline", "Baseline snapshot saved", now, { membersCount, buildingsCount, marketCount });
@@ -1790,18 +1905,13 @@ async function discordSuppliesCommand() {
   const payload = await fetchBitjita(`/claims/${claimId}`);
   const claim = payload.claim ?? payload;
   const supplies = toNumber(claim.supplies);
-  const hourlyUpkeep = toNumber(claim.upkeepCost) || toNumber(claim.tileCost) * toNumber(claim.numTiles);
-  const dailyUpkeep = hourlyUpkeep * 24;
-  const runOutDate = bitjitaTimestampIso(claim.suppliesRunOut);
-  const daysRemaining = runOutDate && new Date(runOutDate).getTime() > Date.now()
-    ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
-    : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
+  const supplyMeta = supplyRunwayMetadata(claim, supplies);
   return discordCommandEmbed("Settlement Supplies", `**${claim.name ?? "Monitored settlement"}** supply status`, [
     { name: "Current stock", value: supplies.toLocaleString(), inline: true },
-    { name: "Upkeep", value: dailyUpkeep ? `${dailyUpkeep.toLocaleString(undefined, { maximumFractionDigits: 2 })} / day` : "Unknown", inline: true },
-    { name: "Runway", value: formatDaysAndHours(daysRemaining), inline: true },
-    ...(runOutDate ? [{ name: "Runs out", value: new Date(runOutDate).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false }] : []),
-  ], daysRemaining < 3 ? 0xef6461 : daysRemaining < 7 ? 0xf0c64f : 0x4ee28a);
+    { name: "Upkeep", value: supplyMeta.upkeep, inline: true },
+    { name: "Runway", value: supplyMeta.runway, inline: true },
+    ...(supplyMeta.runsOutAt ? [{ name: "Runs out", value: new Date(supplyMeta.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false }] : []),
+  ], supplyMeta.runwayDays < 3 ? 0xef6461 : supplyMeta.runwayDays < 7 ? 0xf0c64f : 0x4ee28a);
 }
 
 async function discordOnlineCommand() {

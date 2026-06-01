@@ -85,7 +85,12 @@ type DiscordSettings = {
   guildId: string;
   channelId: string;
   minSaleValue: number;
-  notify: { marketListings: boolean; marketSales: boolean; production: boolean; lowSupplies: boolean; appUpdates: boolean };
+  supplyRunwayDaysThreshold: number;
+  productionMinXp: number;
+  productionMinProgressPct: number;
+  productionUsers: string;
+  craftChannels: Record<string, string>;
+  notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean };
   botToken?: string;
   clearBotToken?: boolean;
   botTokenConfigured?: boolean;
@@ -137,6 +142,24 @@ const DEFAULT_THEME = {
   danger: "#ef6461",
 };
 
+const DEFAULT_CRAFT_CHANNELS: Record<string, string> = {
+  forestry: "1509932116077711411",
+  carpentry: "1509932154442875201",
+  masonry: "1509932188446101585",
+  mining: "1509932207060291797",
+  smithing: "1509932228090658936",
+  scholar: "1509932259262595245",
+  hunting: "1510275986766434325",
+  leatherworking: "1509932280829710547",
+  tailoring: "1509932306486398976",
+  farming: "1509932539626786926",
+  fishing: "1509932564641747074",
+  cooking: "1509932588180181033",
+  foraging: "1509932609378058412",
+};
+
+const CRAFT_CHANNEL_FIELDS = Object.keys(DEFAULT_CRAFT_CHANNELS);
+
 const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
   syncUrl: DEFAULT_SYNC_URL,
@@ -155,7 +178,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     guildId: "",
     channelId: "",
     minSaleValue: 0,
-    notify: { marketListings: true, marketSales: true, production: true, lowSupplies: false, appUpdates: true },
+    supplyRunwayDaysThreshold: 7,
+    productionMinXp: 60000,
+    productionMinProgressPct: 5,
+    productionUsers: "",
+    craftChannels: DEFAULT_CRAFT_CHANNELS,
+    notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true },
     botTokenConfigured: false,
     botTokenSource: null,
     interactionUrl: "/api/discord/interactions",
@@ -174,6 +202,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     discord: {
       ...DEFAULT_SETTINGS.discord,
       ...((config as AnyRecord)?.discord ?? {}),
+      craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
     },
   } as AppSettings;
@@ -3561,6 +3590,10 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     setDraft((current) => ({ ...current, discord: { ...current.discord, notify: { ...current.discord.notify, [key]: value } } }));
   }
 
+  function updateDiscordCraftChannel(key: string, value: string) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, craftChannels: { ...current.discord.craftChannels, [key]: value } } }));
+  }
+
   async function uploadBrand(type: "logo" | "favicon", file?: File) {
     if (!file) return;
     if (file.size > 1024 * 1024) return setMessage("Image must be smaller than 1 MB.");
@@ -3738,8 +3771,14 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <h3><Bell size={17} /> Notifications</h3>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketListings} onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)} /><span>New market listings</span></label>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketSales} onChange={(event) => updateDiscordNotify("marketSales", event.target.checked)} /><span>Confirmed market sales</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Craft started and completed</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Craft notifications master switch</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionStarted} onChange={(event) => updateDiscordNotify("productionStarted", event.target.checked)} /><span>Craft started</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionCompleted} onChange={(event) => updateDiscordNotify("productionCompleted", event.target.checked)} /><span>Craft completed</span></label>
+            <label className="field"><span>Minimum craft XP</span><input type="number" min={0} value={draft.discord.productionMinXp} onChange={(event) => updateDiscord({ productionMinXp: Number(event.target.value) })} /></label>
+            <label className="field"><span>Minimum start progress (%)</span><input type="number" min={0} max={100} step={0.5} value={draft.discord.productionMinProgressPct} onChange={(event) => updateDiscord({ productionMinProgressPct: Number(event.target.value) })} /></label>
+            <label className="field"><span>Craft users allowed</span><input value={draft.discord.productionUsers} onChange={(event) => updateDiscord({ productionUsers: event.target.value })} placeholder="Blank allows all, or comma separate usernames" /></label>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
+            <label className="field"><span>Low supplies threshold (days of runway)</span><input type="number" min={0.25} step={0.25} value={draft.discord.supplyRunwayDaysThreshold} onChange={(event) => updateDiscord({ supplyRunwayDaysThreshold: Number(event.target.value) })} /></label>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.appUpdates} onChange={(event) => updateDiscordNotify("appUpdates", event.target.checked)} /><span>App update announcements</span></label>
             <div className="status-detail">
               <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
@@ -3747,6 +3786,11 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
             </div>
             <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
+          </section>
+          <section className="form-card discord-preview-card">
+            <h3><Factory size={17} /> Craft Channels</h3>
+            <p className="legend">Craft notifications route to these Discord channels by profession. Blank values fall back to the main notification channel.</p>
+            <div className="craft-channel-grid">{CRAFT_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.craftChannels?.[key] ?? ""} onChange={(event) => updateDiscordCraftChannel(key, event.target.value)} /></label>)}</div>
           </section>
           <section className="form-card discord-preview-card">
             <h3><MessageCircle size={17} /> Notification Tests</h3>

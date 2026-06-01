@@ -697,6 +697,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .discord-admin .info strong, .discord-admin .info span { overflow-wrap: anywhere; }
 .discord-actions .toolbar-button { flex: 1 1 210px; justify-content: center; }
 .discord-preview-card { grid-column: 1 / -1; }
+.craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
 .discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 9px; }
 .discord-test-grid .toolbar-button { justify-content: center; min-width: 0; }
 .diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }

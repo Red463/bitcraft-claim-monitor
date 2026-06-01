@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.2-beta.1 - 2026-06-01
+
+### Added
+
+- Discord craft notifications now have separate start and completion toggles.
+- Added configurable Discord craft notification filters for minimum total XP, minimum start progress, and allowed crafter usernames.
+- Added configurable per-profession Discord channel routing for craft notifications, with Timbersteel's current craft channel IDs as defaults.
+
+## 0.8.1-beta.1 - 2026-06-01
+
+### Changed
+
+- Low-supplies Discord notifications now use configurable supply runway days, defaulting to alerts below seven days of supplies.
+- Supply-change activity metadata now includes calculated runway, daily upkeep, and run-out time for more accurate Discord alerts.
+
 ## 0.8.0-beta.1 - 2026-06-01
 
 ### Added
