@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.10-beta.1 - 2026-06-01
+
+### Fixed
+
+- Reused production fallback keys now reset craft-start notification state when a completed craft becomes active again.
+
+### Changed
+
+- Discord diagnostics now include production poll rows showing active crafts returned by BitJita, baseline state and known craft counts.
+- Scheduled supply reports no longer flood diagnostics with routine "not due yet" skips every polling cycle.
+
 ## 0.8.9-beta.1 - 2026-06-01
 
 ### Added

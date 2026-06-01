@@ -3899,6 +3899,9 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                   metadata?.productionUsers ? `allowedCrafters=${metadata.productionUsers}` : "",
                   metadata?.productionMinXp !== undefined ? `minXp=${metadata.productionMinXp}` : "",
                   metadata?.productionMinProgressPct !== undefined ? `minProgress=${metadata.productionMinProgressPct}%` : "",
+                  metadata?.metadata?.activeCraftCount !== undefined ? `activeCrafts=${metadata.metadata.activeCraftCount}` : "",
+                  metadata?.metadata?.activeKnownBeforePoll !== undefined ? `knownBeforePoll=${metadata.metadata.activeKnownBeforePoll}` : "",
+                  metadata?.metadata?.hasProductionBaseline !== undefined ? `hasBaseline=${metadata.metadata.hasProductionBaseline}` : "",
                   metadata?.metadata?.crafterName ? `crafter=${metadata.metadata.crafterName}` : "",
                   metadata?.metadata?.skillName ? `profession=${metadata.metadata.skillName}` : "",
                   metadata?.metadata?.totalXp !== undefined ? `craftXp=${metadata.metadata.totalXp}` : "",
@@ -3909,6 +3912,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                     <time>{dateLabel(entry.occurred_at)}</time>
                     <strong>{entry.summary ?? entry.event_type}</strong>
                     <code>{detailLines}</code>
+                    {Array.isArray(metadata?.metadata?.crafts) && metadata.metadata.crafts.length ? <code>crafts={JSON.stringify(metadata.metadata.crafts)}</code> : null}
                     {entry.response ? <code>response={JSON.stringify(entry.response)}</code> : null}
                   </article>
                 );

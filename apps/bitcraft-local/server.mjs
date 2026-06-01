@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.9-beta.1";
+const appVersion = "0.8.10-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -298,6 +298,7 @@ const statements = {
       crafter_name = excluded.crafter_name,
       last_seen = excluded.last_seen,
       status = 'active',
+      start_notified = CASE WHEN production_jobs.status = 'active' THEN production_jobs.start_notified ELSE 0 END,
       raw_json = excluded.raw_json
   `),
   completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
@@ -456,22 +457,58 @@ function productionMetrics(job) {
   };
 }
 
+function normalizeProfessionKey(value) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
   const jobs = unwrap(craftsPayload, "craftResults", []).map((job) => normalizeProductionJob(job, craftsPayload));
   const seen = new Set(jobs.map((job) => job.key));
   const existing = new Map(statements.activeProductionJobs.all(claimId).map((row) => [row.job_key, row]));
   const hasProductionBaseline = toNumber(statements.productionJobCount.get(claimId)?.count) > 0;
   const pendingNotifications = [];
+  const diagnostics = [{
+    status: "debug",
+    eventType: "production_poll",
+    summary: `Production poll saw ${jobs.length} active craft${jobs.length === 1 ? "" : "s"}`,
+    reason: hasProductionBaseline ? "Production baseline exists" : "First production baseline; start notifications are suppressed for this poll",
+    metadata: discordDiagnosticContext("production_started", {
+      claimId,
+      activeCraftCount: jobs.length,
+      activeKnownBeforePoll: existing.size,
+      hasProductionBaseline,
+      crafts: jobs.slice(0, 12).map((job) => ({
+        key: job.key,
+        label: job.label,
+        crafterName: job.crafterName,
+        skillName: job.skillName,
+        professionKey: job.professionKey,
+        totalXp: job.totalXp,
+        progressPct: job.progressPct,
+        totalEffort: job.totalEffort,
+        remainingEffort: job.remainingEffort,
+      })),
+    }),
+  }];
 
   for (const job of jobs) {
     const current = existing.get(job.key);
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
+    if (startAlreadyNotified) {
+      diagnostics.push({
+        status: "debug",
+        eventType: "production_started",
+        summary: `Craft start already notified: ${job.label}`,
+        reason: "Existing active craft row already has start_notified=1",
+        metadata: discordDiagnosticContext("production_started", { ...job, existingFirstSeen: current.first_seen, existingLastSeen: current.last_seen }),
+      });
+    }
     if (!startAlreadyNotified && hasProductionBaseline) {
       const summary = `Craft started: ${job.label}`;
       const skipReason = productionNotificationSkipReason("production_started", job);
       if (skipReason) {
-        recordDiscordDelivery({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", job) });
+        diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", job) });
         continue;
       }
       statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(job));
@@ -493,13 +530,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     const summary = `Craft completed: ${current.label}`;
     const skipReason = productionNotificationSkipReason("production_completed", metadata);
     if (skipReason) {
-      recordDiscordDelivery({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
+      diagnostics.push({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
       continue;
     }
     statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
     pendingNotifications.push({ jobKey: key, eventType: "production_completed", summary, occurredAt, metadata });
   }
-  return pendingNotifications;
+  return { pendingNotifications, diagnostics };
 }
 
 async function deliverProductionNotifications(pendingNotifications = []) {
@@ -1090,6 +1127,14 @@ function recordDiscordDelivery(status) {
   statements.pruneDiscordDeliveries.run();
 }
 
+function recordDiscordDeliverySafe(status) {
+  try {
+    recordDiscordDelivery(status);
+  } catch (error) {
+    console.warn(`Discord diagnostic log failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
   const channelId = discordChannelForEvent(eventType, metadata, settings);
   const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
@@ -1098,7 +1143,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     const reason = eventType === "production_started" || eventType === "production_completed"
       ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
       : eventType === "app_update" ? "App update notifications are disabled" : "Notification disabled or below configured threshold";
-    recordDiscordDelivery({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
+    recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true };
   }
   try {
@@ -1106,11 +1151,11 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDelivery({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
     return { ok: true, skipped: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    recordDiscordDelivery({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
+    recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
     throw error;
   }
 }
@@ -1212,10 +1257,10 @@ async function sendDiscordTestNotification(kind = "basic") {
         content: summary,
         allowed_mentions: { parse: [] },
       }, settings, settings.channelId);
-      recordDiscordDelivery({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+      recordDiscordDeliverySafe({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
       return response;
     } catch (error) {
-      recordDiscordDelivery({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
+      recordDiscordDeliverySafe({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
       throw error;
     }
   }
@@ -1228,10 +1273,10 @@ async function sendDiscordTestNotification(kind = "basic") {
       embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDelivery({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
     return response;
   } catch (error) {
-    recordDiscordDelivery({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings) });
+    recordDiscordDeliverySafe({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings) });
     throw error;
   }
 }
@@ -1239,12 +1284,12 @@ async function sendDiscordTestNotification(kind = "basic") {
 async function announceDiscordAppUpdateIfNeeded() {
   const settings = getDiscordSettingsRaw();
   if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) {
-    recordDiscordDelivery({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl }, settings) });
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl }, settings) });
     return;
   }
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
   if (lastAnnounced === appVersion) {
-    recordDiscordDelivery({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${appVersion} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl, lastAnnounced }, settings) });
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${appVersion} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl, lastAnnounced }, settings) });
     return;
   }
   await sendDiscordActivity(
@@ -1271,16 +1316,13 @@ function discordSupplyEmbed(claim) {
 async function sendScheduledSupplyReportIfDue(claim) {
   const settings = getDiscordSettingsRaw();
   if (!settings.enabled || !settings.botToken || !settings.notify.supplyReports) {
-    recordDiscordDelivery({ status: "skipped", eventType: "supply_report", summary: "Scheduled supply report", reason: "Discord disabled, bot token missing, or scheduled reports disabled", metadata: discordDiagnosticContext("supply_report", {}, settings) });
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "supply_report", summary: "Scheduled supply report", reason: "Discord disabled, bot token missing, or scheduled reports disabled", metadata: discordDiagnosticContext("supply_report", {}, settings) });
     return;
   }
   const lastSent = statements.getSetting.get("discord_last_supply_report_at")?.value ?? "";
   const lastSentMs = lastSent ? new Date(lastSent).getTime() : 0;
   const intervalMs = settings.supplyReportIntervalDays * 24 * 60 * 60 * 1000;
-  if (lastSentMs && Date.now() - lastSentMs < intervalMs) {
-    recordDiscordDelivery({ status: "skipped", eventType: "supply_report", summary: "Scheduled supply report", reason: `Next report not due until ${new Date(lastSentMs + intervalMs).toISOString()}`, metadata: discordDiagnosticContext("supply_report", { lastSent, intervalDays: settings.supplyReportIntervalDays }, settings) });
-    return;
-  }
+  if (lastSentMs && Date.now() - lastSentMs < intervalMs) return;
   const channelKey = settings.notificationChannels?.supplyReport ?? "modNotes";
   const channelId = settings.channels?.[channelKey] || settings.channelId;
   try {
@@ -1288,9 +1330,9 @@ async function sendScheduledSupplyReportIfDue(claim) {
       embeds: [discordSupplyEmbed(claim)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDelivery({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
   } catch (error) {
-    recordDiscordDelivery({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
+    recordDiscordDeliverySafe({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
     throw error;
   }
   statements.upsertSetting.run("discord_last_supply_report_at", new Date().toISOString(), new Date().toISOString());
@@ -1454,6 +1496,7 @@ function addMarketEvent(claimId, eventType, listing, occurredAt) {
 async function recordSnapshot(payload) {
   const now = new Date().toISOString();
   let pendingProductionNotifications = [];
+  let productionDiagnostics = [];
   const claimId = String(payload.claimId ?? payload.claim?.entityId ?? "");
   if (!claimId) throw new Error("Missing claim id");
 
@@ -1564,9 +1607,14 @@ async function recordSnapshot(payload) {
     }
 
     applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
-    if (payload.crafts) pendingProductionNotifications = recordProductionJobs(claimId, payload.crafts, now);
+    if (payload.crafts) {
+      const productionResult = recordProductionJobs(claimId, payload.crafts, now);
+      pendingProductionNotifications = productionResult.pendingNotifications;
+      productionDiagnostics = productionResult.diagnostics;
+    }
 
     db.exec("COMMIT");
+    for (const diagnostic of productionDiagnostics) recordDiscordDeliverySafe(diagnostic);
     await deliverProductionNotifications(pendingProductionNotifications);
     return { ok: true, capturedAt: now };
   } catch (error) {
