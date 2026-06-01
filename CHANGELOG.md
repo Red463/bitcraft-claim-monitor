@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.12-beta.1 - 2026-06-01
+
+### Changed
+
+- App update Discord notifications now include the current release notes from the changelog directly in the embed.
+
 ## 0.8.11-beta.1 - 2026-06-01
 
 ### Fixed

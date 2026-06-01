@@ -15,9 +15,10 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.11-beta.1";
+const appVersion = "0.8.12-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
+const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 mkdirSync(dataDir, { recursive: true });
@@ -1178,6 +1179,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (metadata.upkeep) fields.push({ name: "Upkeep", value: String(metadata.upkeep), inline: true });
   if (metadata.runsOutAt) fields.push({ name: "Runs out", value: new Date(metadata.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false });
   if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
+  if (metadata.changeNotes) fields.push({ name: "Changes", value: String(metadata.changeNotes).slice(0, 1024), inline: false });
   if (metadata.changelogUrl) fields.push({ name: "Changelog", value: `[View changes](${metadata.changelogUrl})`, inline: false });
   const title = eventType === "market_new_listing" ? "Market Listing"
     : eventType.includes("sale") ? "Market Sale"
@@ -1244,10 +1246,38 @@ const discordTestEvents = {
   },
   appUpdate: {
     eventType: "app_update",
-    summary: `Version ${appVersion} is live with Discord diagnostics`,
+    summary: `Version ${appVersion} is live with the latest changes`,
     metadata: { version: appVersion, changelogUrl },
   },
 };
+
+async function currentAppUpdateDetails() {
+  try {
+    const changelog = await readFile(changelogPath, "utf8");
+    const escapedVersion = appVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = changelog.match(new RegExp(`## ${escapedVersion}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
+    const section = match?.[1] ?? "";
+    const notes = section
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- "))
+      .map((line) => line.slice(2).trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    if (notes.length) {
+      return {
+        summary: `Version ${appVersion} is live: ${notes[0].replace(/\.$/, "")}.`,
+        changeNotes: notes.map((note) => `- ${note}`).join("\n"),
+      };
+    }
+  } catch (error) {
+    console.warn(`Unable to read changelog for Discord app update: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return {
+    summary: `Version ${appVersion} is live with the latest fixes and improvements.`,
+    changeNotes: "- See the changelog for the full list of changes.",
+  };
+}
 
 async function sendDiscordTestNotification(kind = "basic") {
   const settings = getDiscordSettingsRaw();
@@ -1267,17 +1297,20 @@ async function sendDiscordTestNotification(kind = "basic") {
   }
   const sample = discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
+  const updateDetails = sample.eventType === "app_update" ? await currentAppUpdateDetails() : null;
+  const summary = updateDetails?.summary ?? sample.summary;
+  const metadata = updateDetails ? { ...sample.metadata, changeNotes: updateDetails.changeNotes } : sample.metadata;
   const channelId = discordChannelForEvent(sample.eventType, sample.metadata, settings);
   const channelKey = discordChannelKeyForEvent(sample.eventType, sample.metadata, settings);
   try {
     const response = await sendDiscordMessage({
-      embeds: [discordEmbedForActivity(sample.eventType, sample.summary, new Date().toISOString(), sample.metadata)],
+      embeds: [discordEmbedForActivity(sample.eventType, summary, new Date().toISOString(), metadata)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary, metadata: discordDiagnosticContext(sample.eventType, metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
     return response;
   } catch (error) {
-    recordDiscordDeliverySafe({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary: sample.summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, sample.metadata, settings) });
+    recordDiscordDeliverySafe({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, metadata, settings) });
     throw error;
   }
 }
@@ -1293,11 +1326,12 @@ async function announceDiscordAppUpdateIfNeeded() {
     recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${appVersion} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl, lastAnnounced }, settings) });
     return;
   }
+  const updateDetails = await currentAppUpdateDetails();
   await sendDiscordActivity(
     "app_update",
-    `Version ${appVersion} is now live.`,
+    updateDetails.summary,
     new Date().toISOString(),
-    { version: appVersion, changelogUrl },
+    { version: appVersion, changelogUrl, changeNotes: updateDetails.changeNotes },
     settings,
   );
   statements.upsertSetting.run("discord_last_announced_version", appVersion, new Date().toISOString());
