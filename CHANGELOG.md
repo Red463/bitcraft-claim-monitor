@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0-beta.1 - 2026-06-01
+
+### Added
+
+- Optional Discord bot integration with admin-managed settings, protected bot-token storage, test-message sending, and slash command registration.
+- Discord slash commands for settlement supplies, online members, active crafts, and item price checks.
+- Discord notifications for new listings, confirmed sales, craft starts, craft completions, and optional low-supplies changes.
+- Server-side production job tracking so craft start/completion events can be recorded consistently.
+
 ## 0.7.9-beta.1 - 2026-06-01
 
 ### Changed

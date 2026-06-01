@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.7.0-beta.1";
+const appVersion = "0.8.0-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
@@ -117,6 +117,22 @@ db.exec(`
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS app_secrets (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS production_jobs (
+    job_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    building_name TEXT,
+    crafter_name TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    status TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS admin_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -147,6 +163,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -190,6 +207,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, notify: { marketListings: true, marketSales: true, production: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
 const statements = {
@@ -249,11 +267,31 @@ const statements = {
     INSERT OR IGNORE INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
     VALUES (?, ?, ?, ?, ?, ?)
   `),
+  activeProductionJobs: db.prepare("SELECT * FROM production_jobs WHERE claim_id = ? AND status = 'active'"),
+  productionJobCount: db.prepare("SELECT COUNT(*) AS count FROM production_jobs WHERE claim_id = ?"),
+  upsertProductionJob: db.prepare(`
+    INSERT INTO production_jobs (job_key, claim_id, label, building_name, crafter_name, first_seen, last_seen, status, raw_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+    ON CONFLICT(job_key) DO UPDATE SET
+      label = excluded.label,
+      building_name = excluded.building_name,
+      crafter_name = excluded.crafter_name,
+      last_seen = excluded.last_seen,
+      status = 'active',
+      raw_json = excluded.raw_json
+  `),
+  completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
   getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
   upsertSetting: db.prepare(`
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
+  getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
+  upsertSecret: db.prepare(`
+    INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `),
+  deleteSecret: db.prepare("DELETE FROM app_secrets WHERE key = ?"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminBySession: db.prepare(`
@@ -336,6 +374,114 @@ function normalizeListing(row) {
   };
 }
 
+function craftJobKey(job) {
+  return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.claimEntityId ?? "claim"}:${job.buildingEntityId ?? job.buildingName ?? "building"}:${job.recipeId ?? job.recipe_entity_id ?? job.craftedItem?.[0]?.item_id ?? "recipe"}`);
+}
+
+function craftDisplayName(job, craftsPayload = {}) {
+  const itemId = String(job.craftedItem?.[0]?.item_id ?? job.outputItemId ?? job.itemId ?? "");
+  const item = [...(craftsPayload.items ?? []), ...(craftsPayload.cargos ?? [])].find((candidate) => String(candidate.id) === itemId);
+  return String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`);
+}
+
+function normalizeProductionJob(job, craftsPayload = {}) {
+  return {
+    key: craftJobKey(job),
+    label: craftDisplayName(job, craftsPayload),
+    buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
+    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? null,
+    raw: job,
+  };
+}
+
+function recordProductionJobs(claimId, craftsPayload, occurredAt) {
+  const jobs = unwrap(craftsPayload, "craftResults", []).map((job) => normalizeProductionJob(job, craftsPayload));
+  const seen = new Set(jobs.map((job) => job.key));
+  const existing = new Map(statements.activeProductionJobs.all(claimId).map((row) => [row.job_key, row]));
+  const hasProductionBaseline = toNumber(statements.productionJobCount.get(claimId)?.count) > 0;
+
+  for (const job of jobs) {
+    const current = existing.get(job.key);
+    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
+    if (!current && hasProductionBaseline) {
+      addActivity(claimId, "production_started", `Craft started: ${job.label}`, occurredAt, job);
+    }
+  }
+
+  for (const [key, current] of existing) {
+    if (seen.has(key)) continue;
+    statements.completeProductionJob.run(occurredAt, key);
+    addActivity(claimId, "production_completed", `Craft completed: ${current.label}`, occurredAt, {
+      key,
+      label: current.label,
+      buildingName: current.building_name,
+      crafterName: current.crafter_name,
+    });
+  }
+}
+
+const defaultDiscordSettings = {
+  enabled: false,
+  applicationId: "",
+  publicKey: "",
+  guildId: "",
+  channelId: "",
+  minSaleValue: 0,
+  notify: {
+    marketListings: true,
+    marketSales: true,
+    production: true,
+    lowSupplies: false,
+    appUpdates: true,
+  },
+};
+
+function normalizeDiscordSettings(value = {}) {
+  const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
+  return {
+    ...defaultDiscordSettings,
+    ...value,
+    enabled: value.enabled === true,
+    applicationId: String(value.applicationId ?? "").trim(),
+    publicKey: String(value.publicKey ?? "").trim(),
+    guildId: String(value.guildId ?? "").trim(),
+    channelId: String(value.channelId ?? "").trim(),
+    minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
+    notify: {
+      marketListings: notify.marketListings !== false,
+      marketSales: notify.marketSales !== false,
+      production: notify.production !== false,
+      lowSupplies: notify.lowSupplies === true,
+      appUpdates: notify.appUpdates !== false,
+    },
+  };
+}
+
+function getDiscordSettingsRaw() {
+  const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
+  const envToken = String(process.env.DISCORD_BOT_TOKEN ?? "").trim();
+  return {
+    ...stored,
+    applicationId: String(process.env.DISCORD_APPLICATION_ID ?? stored.applicationId).trim(),
+    publicKey: String(process.env.DISCORD_PUBLIC_KEY ?? stored.publicKey).trim(),
+    guildId: String(process.env.DISCORD_GUILD_ID ?? stored.guildId).trim(),
+    channelId: String(process.env.DISCORD_CHANNEL_ID ?? stored.channelId).trim(),
+    botToken: envToken || String(statements.getSecret.get("discord_bot_token")?.value ?? "").trim(),
+    botTokenSource: envToken ? "environment" : statements.getSecret.get("discord_bot_token") ? "database" : "",
+  };
+}
+
+function publicDiscordSettings() {
+  const settings = getDiscordSettingsRaw();
+  const { botToken, ...publicSettings } = settings;
+  return {
+    ...publicSettings,
+    botTokenConfigured: Boolean(botToken),
+    botTokenSource: settings.botTokenSource || null,
+    interactionUrl: "/api/discord/interactions",
+  };
+}
+
 function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
@@ -351,6 +497,7 @@ function getSettings() {
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
     browserSnapshotsEnabled: false,
+    discord: publicDiscordSettings(),
   };
 }
 
@@ -525,7 +672,9 @@ function adminStatus(req) {
 }
 
 function tableNames() {
-  return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name);
+  return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
+    .map((row) => row.name)
+    .filter((name) => name !== "app_secrets");
 }
 
 function tableColumns(name) {
@@ -659,6 +808,69 @@ function analyticsDashboard(days = 30) {
 
 function addActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
   statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
+  queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata);
+}
+
+function formatGold(value) {
+  return `${Math.round(toNumber(value)).toLocaleString()}g`;
+}
+
+function discordEnabledFor(eventType, settings, metadata) {
+  if (!settings.enabled || !settings.botToken || !settings.channelId) return false;
+  if (eventType === "market_new_listing") return settings.notify.marketListings;
+  if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
+    return settings.notify.marketSales && toNumber(metadata?.totalValue ?? metadata?.totalPrice ?? toNumber(metadata?.quantity) * toNumber(metadata?.price)) >= settings.minSaleValue;
+  }
+  if (eventType === "production_started" || eventType === "production_completed") return settings.notify.production;
+  if (eventType === "supplies") return settings.notify.lowSupplies && toNumber(metadata?.after) < 250000;
+  return false;
+}
+
+function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
+  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : eventType.includes("production") ? 0x65b7fa : 0xef6461;
+  const fields = [];
+  if (metadata.itemName) fields.push({ name: "Item", value: String(metadata.itemName), inline: true });
+  if (metadata.owner) fields.push({ name: "Member", value: String(metadata.owner), inline: true });
+  if (toNumber(metadata.quantity)) fields.push({ name: "Quantity", value: toNumber(metadata.quantity).toLocaleString(), inline: true });
+  if (toNumber(metadata.price)) fields.push({ name: "Unit price", value: formatGold(metadata.price), inline: true });
+  if (toNumber(metadata.totalValue ?? metadata.totalPrice)) fields.push({ name: "Total", value: formatGold(metadata.totalValue ?? metadata.totalPrice), inline: true });
+  if (metadata.buildingName) fields.push({ name: "Structure", value: String(metadata.buildingName), inline: true });
+  if (metadata.crafterName) fields.push({ name: "Crafter", value: String(metadata.crafterName), inline: true });
+  return {
+    title: eventType === "market_new_listing" ? "New market listing"
+      : eventType.includes("sale") ? "Market sale"
+      : eventType === "production_started" ? "Craft started"
+      : eventType === "production_completed" ? "Craft completed"
+      : "Settlement update",
+    description: summary,
+    color,
+    fields: fields.slice(0, 8),
+    timestamp: occurredAt,
+    footer: { text: "Timbersteel Trade" },
+  };
+}
+
+function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
+  const settings = getDiscordSettingsRaw();
+  if (!discordEnabledFor(eventType, settings, metadata)) return;
+  void sendDiscordMessage({
+    embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
+    allowed_mentions: { parse: [] },
+  }, settings).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw()) {
+  if (!settings.enabled || !settings.botToken || !settings.channelId) throw new Error("Discord integration is not fully configured");
+  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(settings.channelId)}/messages`, {
+    method: "POST",
+    headers: {
+      authorization: `Bot ${settings.botToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return response.json();
 }
 
 const deployableStorageName = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
@@ -927,6 +1139,7 @@ async function recordSnapshot(payload) {
     }
 
     applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
+    if (payload.crafts) recordProductionJobs(claimId, payload.crafts, now);
 
     db.exec("COMMIT");
     return { ok: true, capturedAt: now };
@@ -1133,12 +1346,13 @@ async function collectServerSnapshot(force = false) {
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
-    const [claimPayload, membersPayload, buildingsPayload, inventoriesPayload, market] = await Promise.all([
+    const [claimPayload, membersPayload, buildingsPayload, inventoriesPayload, market, craftsPayload] = await Promise.all([
       fetchBitjita(`/claims/${claimId}`),
       fetchBitjita(`/claims/${claimId}/members`),
       fetchBitjita(`/claims/${claimId}/buildings`),
       fetchBitjita(`/claims/${claimId}/inventories`),
       fetchAllClaimListings(claimId),
+      fetchBitjita(`/crafts?claimEntityId=${claimId}&completed=false`).catch(() => ({ craftResults: [] })),
     ]);
     const claim = claimPayload.claim ?? claimPayload;
     const members = unwrap(membersPayload, "members", []);
@@ -1149,6 +1363,7 @@ async function collectServerSnapshot(force = false) {
       membersCount: members.length,
       buildingsCount: buildings.length,
       market,
+      crafts: craftsPayload,
       source: "server_poll",
     });
     pollStatus.storageLastAttemptAt = new Date().toISOString();
@@ -1365,15 +1580,192 @@ function createBackup() {
   return { name, size: info.size, createdAt: info.mtime.toISOString() };
 }
 
-async function readJson(req) {
+async function readRawBody(req, limit = 1500000) {
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > 1500000) throw new Error("Request body is too large");
+    if (total > limit) throw new Error("Request body is too large");
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  return Buffer.concat(chunks);
+}
+
+async function readJson(req) {
+  return JSON.parse((await readRawBody(req)).toString("utf8") || "{}");
+}
+
+const discordCommands = [
+  { name: "supplies", description: "Show settlement supplies, upkeep and runway." },
+  { name: "online", description: "Show which settlement members are online." },
+  {
+    name: "crafts",
+    description: "List current settlement crafts.",
+    options: [{ type: 3, name: "skill", description: "Optional profession/skill filter", required: false }],
+  },
+  {
+    name: "price",
+    description: "Look up recent BitJita sale pricing for an item.",
+    options: [
+      { type: 3, name: "item", description: "Item name", required: true, autocomplete: true },
+      { type: 4, name: "region", description: "Region number, defaults to settlement region", required: false },
+    ],
+  },
+];
+
+function discordOption(interaction, name) {
+  return interaction?.data?.options?.find((option) => option.name === name)?.value;
+}
+
+function verifyDiscordInteraction(req, rawBody, publicKeyHex) {
+  const signature = String(req.headers["x-signature-ed25519"] ?? "");
+  const timestamp = String(req.headers["x-signature-timestamp"] ?? "");
+  if (!signature || !timestamp || !/^[0-9a-f]{64}$/i.test(publicKeyHex)) return false;
+  try {
+    const spkiPrefix = "302a300506032b6570032100";
+    const key = createPublicKey({ key: Buffer.from(`${spkiPrefix}${publicKeyHex}`, "hex"), format: "der", type: "spki" });
+    return verify(null, Buffer.concat([Buffer.from(timestamp), rawBody]), key, Buffer.from(signature, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+function discordResponse(content, options = {}) {
+  return {
+    type: 4,
+    data: {
+      content: String(content).slice(0, 1900),
+      flags: options.ephemeral ? 64 : undefined,
+      allowed_mentions: { parse: [] },
+    },
+  };
+}
+
+async function handleDiscordInteraction(req) {
+  const rawBody = await readRawBody(req, 1000000);
+  const settings = getDiscordSettingsRaw();
+  if (!settings.publicKey || !verifyDiscordInteraction(req, rawBody, settings.publicKey)) {
+    return { status: 401, body: { error: "Invalid Discord request signature" } };
+  }
+  const interaction = JSON.parse(rawBody.toString("utf8") || "{}");
+  if (interaction.type === 1) return { status: 200, body: { type: 1 } };
+  if (interaction.type === 4) return { status: 200, body: await discordAutocomplete(interaction) };
+  if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
+  return { status: 200, body: await runDiscordCommand(interaction) };
+}
+
+async function discordAutocomplete(interaction) {
+  const focused = interaction?.data?.options?.find((option) => option.focused);
+  if (interaction?.data?.name !== "price" || focused?.name !== "item") return { type: 8, data: { choices: [] } };
+  const query = String(focused.value ?? "").trim();
+  if (query.length < 2) return { type: 8, data: { choices: [] } };
+  try {
+    const payload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
+    const entries = unwrap(payload, "items", []).slice(0, 20);
+    return { type: 8, data: { choices: entries.map((item) => ({ name: String(item.name ?? item.itemName ?? "Item").slice(0, 100), value: String(item.name ?? item.itemName ?? query).slice(0, 100) })) } };
+  } catch {
+    return { type: 8, data: { choices: [] } };
+  }
+}
+
+async function runDiscordCommand(interaction) {
+  try {
+    const command = String(interaction.data?.name ?? "");
+    if (command === "supplies") return discordResponse(await discordSuppliesCommand());
+    if (command === "online") return discordResponse(await discordOnlineCommand());
+    if (command === "crafts") return discordResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
+    if (command === "price") return discordResponse(await discordPriceCommand(String(discordOption(interaction, "item") ?? ""), discordOption(interaction, "region")));
+    return discordResponse("Unknown command.", { ephemeral: true });
+  } catch (error) {
+    return discordResponse(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { ephemeral: true });
+  }
+}
+
+async function discordSuppliesCommand() {
+  const { claimId } = getSettings();
+  const payload = await fetchBitjita(`/claims/${claimId}`);
+  const claim = payload.claim ?? payload;
+  const supplies = toNumber(claim.supplies);
+  const upkeep = toNumber(claim.upkeepPerDay ?? claim.suppliesPerDay ?? claim.tileCostPerDay ?? claim.tileCost);
+  const runway = upkeep > 0 ? `${(supplies / upkeep).toFixed(1)} days` : "unknown";
+  return `Settlement supplies: ${supplies.toLocaleString()}\nUpkeep: ${upkeep ? `${upkeep.toLocaleString()} per day` : "unknown"}\nRunway: ${runway}`;
+}
+
+async function discordOnlineCommand() {
+  const { claimId } = getSettings();
+  const membersPayload = await fetchBitjita(`/claims/${claimId}/members`);
+  const members = unwrap(membersPayload, "members", []);
+  const details = await mapWithConcurrency(members.slice(0, 80), 8, async (member) => {
+    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+    if (!playerId) return null;
+    try {
+      const payload = await fetchBitjita(`/players/${playerId}`);
+      const player = payload.player ?? payload;
+      return { name: player.username ?? member.userName ?? member.username ?? playerId, online: Boolean(player.signedIn ?? player.online) };
+    } catch {
+      return { name: member.userName ?? member.username ?? playerId, online: false };
+    }
+  });
+  const online = details.filter((entry) => entry?.online);
+  return online.length
+    ? `Online now (${online.length}/${members.length}): ${online.map((entry) => entry.name).join(", ")}`
+    : `No settlement members appear online right now (${members.length} tracked).`;
+}
+
+async function discordCraftsCommand(skillFilter = "") {
+  const { claimId } = getSettings();
+  const payload = await fetchBitjita(`/crafts?claimEntityId=${claimId}&completed=false`);
+  const filter = skillFilter.trim().toLowerCase();
+  const jobs = unwrap(payload, "craftResults", [])
+    .filter((job) => !filter || JSON.stringify(job.levelRequirements ?? job.experiencePerProgress ?? "").toLowerCase().includes(filter) || String(job.recipeName ?? "").toLowerCase().includes(filter))
+    .slice(0, 8);
+  if (!jobs.length) return filter ? `No active settlement crafts matched "${skillFilter}".` : "No active settlement crafts found.";
+  return [`Active crafts (${jobs.length}${filter ? ` matching ${skillFilter}` : ""}):`, ...jobs.map((job) => {
+    const remaining = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? job.remainingEffort);
+    return `- ${craftDisplayName(job, payload)}${job.buildingName ? ` at ${job.buildingName}` : ""}${remaining ? ` - ${remaining.toLocaleString()} effort left` : ""}`;
+  })].join("\n");
+}
+
+async function discordPriceCommand(itemName, regionOption) {
+  const query = itemName.trim();
+  if (query.length < 2) throw new Error("Enter an item name.");
+  const { claimId } = getSettings();
+  const claimPayload = await fetchBitjita(`/claims/${claimId}`).catch(() => ({}));
+  const regionId = String(regionOption ?? (claimPayload.claim ?? claimPayload)?.regionId ?? "").trim();
+  const searchPayload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
+  const item = unwrap(searchPayload, "items", []).find((candidate) => String(candidate.name ?? candidate.itemName ?? "").toLowerCase() === query.toLowerCase()) ?? unwrap(searchPayload, "items", [])[0];
+  if (!item) return `No market item found for "${query}".`;
+  const itemId = item.id ?? item.itemId;
+  const itemType = item.itemType ?? item.type ?? 0;
+  const historyPath = `/market/items/${encodeURIComponent(String(itemId))}/price-history?bucket=1%20day&limit=30${regionId ? `&regionId=${encodeURIComponent(regionId)}` : ""}`;
+  const history = await fetchBitjita(historyPath);
+  const buckets = unwrap(history, "buckets", []);
+  const avg = (days) => {
+    const selected = buckets.slice(-days).filter((bucket) => toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume));
+    const totalValue = selected.reduce((sum, bucket) => sum + toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value), 0);
+    const quantity = selected.reduce((sum, bucket) => sum + toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume), 0);
+    return quantity ? Math.round(totalValue / quantity) : 0;
+  };
+  const a1 = avg(1);
+  const a7 = avg(7);
+  const a30 = avg(30);
+  const suggested = a7 || a30 || a1;
+  return `${item.name ?? item.itemName} pricing${regionId ? ` in R${regionId}` : ""}\n24h avg: ${a1 ? formatGold(a1) : "no sales"}\n7d avg: ${a7 ? formatGold(a7) : "no sales"}\n30d avg: ${a30 ? formatGold(a30) : "no sales"}\nSuggested listing price: ${suggested ? formatGold(suggested) : "not enough sales data"}\nItem type: ${itemType}`;
+}
+
+async function registerDiscordCommands() {
+  const settings = getDiscordSettingsRaw();
+  if (!settings.botToken || !settings.applicationId) throw new Error("Discord bot token and application ID are required");
+  const route = settings.guildId
+    ? `/applications/${settings.applicationId}/guilds/${settings.guildId}/commands`
+    : `/applications/${settings.applicationId}/commands`;
+  const response = await fetch(`https://discord.com/api/v10${route}`, {
+    method: "PUT",
+    headers: { authorization: `Bot ${settings.botToken}`, "content-type": "application/json" },
+    body: JSON.stringify(discordCommands),
+  });
+  if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return response.json();
 }
 
 function send(res, status, body, headers = {}) {
@@ -1453,6 +1845,10 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
+      const result = await handleDiscordInteraction(req);
+      return send(res, result.status, result.body);
+    }
     if (req.method === "POST" && url.pathname === "/api/local/analytics/event") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin analytics event rejected" });
       try {
@@ -1535,6 +1931,16 @@ const server = createServer(async (req, res) => {
         audit(user, "diagnostics.run", { failures: checks.filter((check) => !check.ok).length });
         return send(res, 200, { checks });
       }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/register-commands") {
+        const commands = await registerDiscordCommands();
+        audit(user, "discord.register_commands", { count: Array.isArray(commands) ? commands.length : 0 });
+        return send(res, 200, { commands });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
+        await sendDiscordMessage({ content: "Discord integration test from Timbersteel Trade.", allowed_mentions: { parse: [] } });
+        audit(user, "discord.test_message");
+        return send(res, 200, { ok: true });
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
         const body = await readJson(req);
@@ -1556,6 +1962,13 @@ const server = createServer(async (req, res) => {
           marketSales: body.toastSettings?.marketSales !== false,
           production: body.toastSettings?.production !== false,
         };
+        const discordSettings = normalizeDiscordSettings(body.discord ?? {});
+        const discordToken = String(body.discord?.botToken ?? "").trim();
+        if (discordSettings.enabled) {
+          if (!discordSettings.applicationId) return send(res, 400, { error: "Discord application ID is required when Discord is enabled" });
+          if (!discordSettings.publicKey) return send(res, 400, { error: "Discord public key is required when Discord is enabled" });
+          if (!discordSettings.channelId) return send(res, 400, { error: "Discord channel ID is required when Discord is enabled" });
+        }
         const updatedAt = new Date().toISOString();
         statements.upsertSetting.run("claim_id", nextClaimId, updatedAt);
         statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
@@ -1565,7 +1978,10 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays });
+        statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
+        if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
+        if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {

@@ -78,6 +78,20 @@ type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: st
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
+type DiscordSettings = {
+  enabled: boolean;
+  applicationId: string;
+  publicKey: string;
+  guildId: string;
+  channelId: string;
+  minSaleValue: number;
+  notify: { marketListings: boolean; marketSales: boolean; production: boolean; lowSupplies: boolean; appUpdates: boolean };
+  botToken?: string;
+  clearBotToken?: boolean;
+  botTokenConfigured?: boolean;
+  botTokenSource?: string | null;
+  interactionUrl?: string;
+};
 type AppSettings = {
   claimId: string;
   syncUrl: string;
@@ -89,6 +103,7 @@ type AppSettings = {
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
   browserSnapshotsEnabled: boolean;
+  discord: DiscordSettings;
 };
 
 const NAV = [
@@ -133,9 +148,36 @@ const DEFAULT_SETTINGS: AppSettings = {
   branding: {},
   snapshotRetentionDays: 365,
   browserSnapshotsEnabled: true,
+  discord: {
+    enabled: false,
+    applicationId: "",
+    publicKey: "",
+    guildId: "",
+    channelId: "",
+    minSaleValue: 0,
+    notify: { marketListings: true, marketSales: true, production: true, lowSupplies: false, appUpdates: true },
+    botTokenConfigured: false,
+    botTokenSource: null,
+    interactionUrl: "/api/discord/interactions",
+  },
 };
 
 const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true };
+
+function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(config ?? {}),
+    theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
+    toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
+    branding: (config as AnyRecord)?.branding ?? {},
+    discord: {
+      ...DEFAULT_SETTINGS.discord,
+      ...((config as AnyRecord)?.discord ?? {}),
+      notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
+    },
+  } as AppSettings;
+}
 
 const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
   ["bg", "Background", "--bg"],
@@ -3377,7 +3419,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-type AdminTab = "status" | "analytics" | "configuration" | "theme" | "database" | "users" | "audit" | "backups";
+type AdminTab = "status" | "analytics" | "configuration" | "discord" | "theme" | "database" | "users" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -3501,13 +3543,22 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   async function saveSettings() {
     await run(async () => {
       const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify(draft) });
-      setDraft(result);
-      onSettingsSaved(result);
+      const next = normalizeAppSettings(result);
+      setDraft(next);
+      onSettingsSaved(next);
     }, "Settings saved and applied.");
   }
 
   function updateDraft<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateDiscord(value: Partial<DiscordSettings>) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, ...value } }));
+  }
+
+  function updateDiscordNotify(key: keyof DiscordSettings["notify"], value: boolean) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, notify: { ...current.discord.notify, [key]: value } } }));
   }
 
   async function uploadBrand(type: "logo" | "favicon", file?: File) {
@@ -3536,7 +3587,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
+  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["discord", "Discord"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
   const themePresets: Array<[string, typeof DEFAULT_THEME]> = [
     ["Default", DEFAULT_THEME],
     ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
@@ -3657,6 +3708,37 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               <p className="legend">PNG, JPG or WebP up to 1 MB. The logo is shown on Overview and the favicon is used by the browser tab.</p>
             </section>
           </div>
+        </div>
+      ) : null}
+
+      {tab === "discord" ? (
+        <div className="admin-grid discord-admin">
+          <section className="form-card">
+            <h3><MessageCircle size={17} /> Discord Bot</h3>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.enabled} onChange={(event) => updateDiscord({ enabled: event.target.checked })} /><span>Enable Discord notifications and slash commands</span></label>
+            <label className="field"><span>Bot Token</span><input type="password" value={draft.discord.botToken ?? ""} onChange={(event) => updateDiscord({ botToken: event.target.value, clearBotToken: false })} placeholder={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Paste token from Discord Developer Portal"} /></label>
+            {draft.discord.botTokenConfigured ? <label className="toggle-line"><input type="checkbox" checked={draft.discord.clearBotToken === true} onChange={(event) => updateDiscord({ clearBotToken: event.target.checked, botToken: "" })} /><span>Clear stored bot token on save</span></label> : null}
+            <label className="field"><span>Application ID</span><input value={draft.discord.applicationId} onChange={(event) => updateDiscord({ applicationId: event.target.value })} /></label>
+            <label className="field"><span>Public Key</span><input value={draft.discord.publicKey} onChange={(event) => updateDiscord({ publicKey: event.target.value })} /></label>
+            <label className="field"><span>Server/Guild ID</span><input value={draft.discord.guildId} onChange={(event) => updateDiscord({ guildId: event.target.value })} placeholder="Recommended for instant slash command updates" /></label>
+            <label className="field"><span>Notification Channel ID</span><input value={draft.discord.channelId} onChange={(event) => updateDiscord({ channelId: event.target.value })} /></label>
+            <label className="field"><span>Minimum sale value for Discord alerts</span><input type="number" min={0} value={draft.discord.minSaleValue} onChange={(event) => updateDiscord({ minSaleValue: Number(event.target.value) })} /></label>
+            <div className="toolbar"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Discord Settings</button><button className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: "{}" }); }, "Discord test message sent.")}><MessageCircle size={15} /> Send Test</button><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
+          </section>
+          <section className="form-card">
+            <h3><Bell size={17} /> Notifications</h3>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketListings} onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)} /><span>New market listings</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketSales} onChange={(event) => updateDiscordNotify("marketSales", event.target.checked)} /><span>Confirmed market sales</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Craft started and completed</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.appUpdates} onChange={(event) => updateDiscordNotify("appUpdates", event.target.checked)} /><span>App update announcements</span></label>
+            <div className="status-detail">
+              <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
+              <Info label="Slash commands" value="/supplies, /online, /crafts, /price" />
+              <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
+            </div>
+            <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
+          </section>
         </div>
       ) : null}
 
@@ -3823,7 +3905,7 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
         if (!config) return;
-        const next = { ...DEFAULT_SETTINGS, ...config, theme: { ...DEFAULT_THEME, ...(config.theme ?? {}) }, toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...(config.toastSettings ?? {}) }, branding: config.branding ?? {} } as AppSettings;
+        const next = normalizeAppSettings(config);
         setAppSettings(next);
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);

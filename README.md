@@ -14,10 +14,12 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 - Imports retained confirmed-sales history from BitJita completed trades, with settlement-member filtering.
 - Helps players find large public crafts for skill XP and navigate directly to their locations on the world map.
 - Displays lightweight in-app notifications for new listings, confirmed sales, and settlement craft queue changes while the dashboard is open.
+- Optionally sends Discord bot notifications and provides slash commands for supplies, online members, active crafts, and item price checks.
 - Provides a floating help panel on every page with version, documentation, changelog, and issue-reporting links.
 - Supports opt-in first-party usage analytics with an in-app cookie notice, privacy controls and Admin reporting.
 - Embeds the settlement's BitCraft Sync board for material planning and shared goals.
 - Provides a protected admin console for configuration, branding, theme editing, diagnostics, account management, audit history, database inspection, exports and backups.
+- Stores Discord bot tokens as protected server secrets, hidden from the admin database browser.
 
 ## Application Pages
 
@@ -192,6 +194,7 @@ Admin features:
 - Select which settlement/claim ID the dashboard monitors.
 - Configure the embedded BitCraft Sync URL.
 - Choose the default opening page, Public Craft Finder region, refresh interval, notification categories and snapshot retention window.
+- Configure optional Discord bot notifications, test delivery, and register slash commands.
 - Review or clear consented first-party usage analytics, including popular pages, recorded engagement time and feature usage.
 - Customize the application colour theme with live preview and presets.
 - Upload a logo shown in the app and a favicon shown in the browser tab.
@@ -200,6 +203,19 @@ Admin features:
 - Create and download database backups, and prune expired snapshots without deleting market/activity history.
 - Manage multiple administrator accounts, sessions and passwords.
 - Review administrator actions and sign-in attempts.
+
+### Discord Bot
+
+The Discord integration is optional and runs inside the existing Node server. It can post settlement notifications to a configured channel and exposes Discord slash commands at `/api/discord/interactions`.
+
+Available commands:
+
+- `/supplies` shows settlement supplies, upkeep and runway.
+- `/online` shows online settlement members.
+- `/crafts` lists active settlement crafts, optionally filtered by skill text.
+- `/price` looks up recent BitJita sale pricing for an item, defaulting to the monitored settlement region.
+
+Discord setup is managed in **Admin > Discord**. The bot token is stored in the protected `app_secrets` table or can be supplied with `DISCORD_BOT_TOKEN`; it is not returned through the settings API or shown in the admin table browser.
 
 Authentication behavior:
 
@@ -345,6 +361,11 @@ Supported application server environment variables:
 | `ADMIN_SETUP_KEY` | One-time key required to create the first production admin | unset |
 | `ENABLE_SERVER_POLLING` | Override server-side snapshot polling | enabled in production |
 | `SNAPSHOT_INTERVAL_MS` | Polling interval, minimum 10 seconds | `30000` |
+| `DISCORD_BOT_TOKEN` | Optional Discord bot token override | admin-stored secret |
+| `DISCORD_APPLICATION_ID` | Optional Discord application ID override | admin setting |
+| `DISCORD_PUBLIC_KEY` | Optional Discord interactions public key override | admin setting |
+| `DISCORD_GUILD_ID` | Optional Discord guild ID override for command registration | admin setting |
+| `DISCORD_CHANNEL_ID` | Optional Discord notification channel ID override | admin setting |
 
 ## VPS Deployment
 
@@ -355,7 +376,7 @@ The intended production setup is:
 - Application installed at `/opt/bitcraft-claim-monitor`.
 - Persistent data at `/var/lib/bitcraft-claim-monitor`.
 - systemd running the Node application on `127.0.0.1:18430`.
-- Caddy serving `https://claim.timbersteeltrade.com` as the public HTTPS domain, with `https://claim.hostred.co.uk` redirected to it.
+- Caddy serving `https://app.timbersteeltrace.com` as the public HTTPS domain, with `https://claim.timbersteeltrace.com` and `https://claim.hostred.co.uk` redirected to it.
 
 Full first-time instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 

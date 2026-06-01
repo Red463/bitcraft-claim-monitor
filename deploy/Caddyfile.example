@@ -1,5 +1,5 @@
 # Canonical production domain.
-claim.timbersteeltrade.com {
+app.timbersteeltrace.com {
 	encode zstd gzip
 	header {
 		X-Content-Type-Options nosniff
@@ -10,7 +10,11 @@ claim.timbersteeltrade.com {
 	reverse_proxy 127.0.0.1:18430
 }
 
-# Legacy host redirect.
+# Legacy host redirects.
+claim.timbersteeltrace.com {
+	redir https://app.timbersteeltrace.com{uri} permanent
+}
+
 claim.hostred.co.uk {
-	redir https://claim.timbersteeltrade.com{uri} permanent
+	redir https://app.timbersteeltrace.com{uri} permanent
 }
