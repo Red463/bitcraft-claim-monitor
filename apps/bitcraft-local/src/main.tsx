@@ -89,8 +89,11 @@ type DiscordSettings = {
   productionMinXp: number;
   productionMinProgressPct: number;
   productionUsers: string;
+  supplyReportIntervalDays: number;
+  channels: Record<string, string>;
+  notificationChannels: Record<string, string>;
   craftChannels: Record<string, string>;
-  notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean };
+  notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean };
   botToken?: string;
   clearBotToken?: boolean;
   botTokenConfigured?: boolean;
@@ -158,7 +161,23 @@ const DEFAULT_CRAFT_CHANNELS: Record<string, string> = {
   foraging: "1509932609378058412",
 };
 
-const CRAFT_CHANNEL_FIELDS = Object.keys(DEFAULT_CRAFT_CHANNELS);
+const DEFAULT_DISCORD_CHANNELS: Record<string, string> = {
+  notifications: "",
+  modNotes: "1509972023927902218",
+  ...DEFAULT_CRAFT_CHANNELS,
+};
+
+const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
+  marketListings: "notifications",
+  marketSales: "notifications",
+  lowSupplies: "notifications",
+  appUpdates: "notifications",
+  supplyReport: "modNotes",
+  productionStarted: "profession",
+  productionCompleted: "profession",
+};
+
+const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
 const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
@@ -182,8 +201,11 @@ const DEFAULT_SETTINGS: AppSettings = {
     productionMinXp: 60000,
     productionMinProgressPct: 5,
     productionUsers: "",
+    supplyReportIntervalDays: 3,
+    channels: DEFAULT_DISCORD_CHANNELS,
+    notificationChannels: DEFAULT_NOTIFICATION_CHANNELS,
     craftChannels: DEFAULT_CRAFT_CHANNELS,
-    notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true },
+    notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true },
     botTokenConfigured: false,
     botTokenSource: null,
     interactionUrl: "/api/discord/interactions",
@@ -202,7 +224,9 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     discord: {
       ...DEFAULT_SETTINGS.discord,
       ...((config as AnyRecord)?.discord ?? {}),
-      craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
+      channels: { ...DEFAULT_DISCORD_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), notifications: (config as AnyRecord)?.discord?.channelId ?? (config as AnyRecord)?.discord?.channels?.notifications ?? "" },
+      notificationChannels: { ...DEFAULT_NOTIFICATION_CHANNELS, ...((config as AnyRecord)?.discord?.notificationChannels ?? {}) },
+      craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
     },
   } as AppSettings;
@@ -3590,8 +3614,20 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     setDraft((current) => ({ ...current, discord: { ...current.discord, notify: { ...current.discord.notify, [key]: value } } }));
   }
 
-  function updateDiscordCraftChannel(key: string, value: string) {
-    setDraft((current) => ({ ...current, discord: { ...current.discord, craftChannels: { ...current.discord.craftChannels, [key]: value } } }));
+  function updateDiscordChannel(key: string, value: string) {
+    setDraft((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        channels: { ...current.discord.channels, [key]: value },
+        craftChannels: key in DEFAULT_CRAFT_CHANNELS ? { ...current.discord.craftChannels, [key]: value } : current.discord.craftChannels,
+        ...(key === "notifications" ? { channelId: value } : {}),
+      },
+    }));
+  }
+
+  function updateNotificationChannel(key: string, value: string) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, notificationChannels: { ...current.discord.notificationChannels, [key]: value } } }));
   }
 
   async function uploadBrand(type: "logo" | "favicon", file?: File) {
@@ -3654,6 +3690,13 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
 
   const tableRows: AnyRecord[] = tableResult.rows ?? [];
   const tableColumns = (tableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
+  const channelOptions = Object.entries(draft.discord.channels ?? {}).map(([key, id]) => ({ key, label: key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1), id })).filter((entry) => entry.id || entry.key === "notifications");
+  const channelSelect = (key: string, value: string, allowProfession = false) => (
+    <select value={value} onChange={(event) => updateNotificationChannel(key, event.target.value)}>
+      {allowProfession ? <option value="profession">Profession channel</option> : null}
+      {channelOptions.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}{entry.id ? ` (${entry.id})` : ""}</option>)}
+    </select>
+  );
   return (
     <div className="panel admin-console">
       <div className="split-header">
@@ -3763,23 +3806,50 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <label className="field"><span>Application ID</span><input value={draft.discord.applicationId} onChange={(event) => updateDiscord({ applicationId: event.target.value })} /></label>
             <label className="field"><span>Public Key</span><input value={draft.discord.publicKey} onChange={(event) => updateDiscord({ publicKey: event.target.value })} /></label>
             <label className="field"><span>Server/Guild ID</span><input value={draft.discord.guildId} onChange={(event) => updateDiscord({ guildId: event.target.value })} placeholder="Recommended for instant slash command updates" /></label>
-            <label className="field"><span>Notification Channel ID</span><input value={draft.discord.channelId} onChange={(event) => updateDiscord({ channelId: event.target.value })} /></label>
-            <label className="field"><span>Minimum sale value for Discord alerts</span><input type="number" min={0} value={draft.discord.minSaleValue} onChange={(event) => updateDiscord({ minSaleValue: Number(event.target.value) })} /></label>
             <div className="toolbar discord-actions"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Discord Settings</button><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
           </section>
-          <section className="form-card">
+          <details className="form-card discord-channel-card">
+            <summary><span><MessageCircle size={17} /> Channel List</span><small>Channel IDs and profession routing</small></summary>
+            <p className="legend">Configure each Discord channel ID once. Profession channels here are also used when craft notifications route by profession.</p>
+            <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.channels?.[key] ?? ""} onChange={(event) => updateDiscordChannel(key, event.target.value)} /></label>)}</div>
+          </details>
+          <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketListings} onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)} /><span>New market listings</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketSales} onChange={(event) => updateDiscordNotify("marketSales", event.target.checked)} /><span>Confirmed market sales</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Craft notifications master switch</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionStarted} onChange={(event) => updateDiscordNotify("productionStarted", event.target.checked)} /><span>Craft started</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionCompleted} onChange={(event) => updateDiscordNotify("productionCompleted", event.target.checked)} /><span>Craft completed</span></label>
-            <label className="field"><span>Minimum craft XP</span><input type="number" min={0} value={draft.discord.productionMinXp} onChange={(event) => updateDiscord({ productionMinXp: Number(event.target.value) })} /></label>
-            <label className="field"><span>Minimum start progress (%)</span><input type="number" min={0} max={100} step={0.5} value={draft.discord.productionMinProgressPct} onChange={(event) => updateDiscord({ productionMinProgressPct: Number(event.target.value) })} /></label>
-            <label className="field"><span>Craft users allowed</span><input value={draft.discord.productionUsers} onChange={(event) => updateDiscord({ productionUsers: event.target.value })} placeholder="Blank allows all, or comma separate usernames" /></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
-            <label className="field"><span>Low supplies threshold (days of runway)</span><input type="number" min={0.25} step={0.25} value={draft.discord.supplyRunwayDaysThreshold} onChange={(event) => updateDiscord({ supplyRunwayDaysThreshold: Number(event.target.value) })} /></label>
-            <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.appUpdates} onChange={(event) => updateDiscordNotify("appUpdates", event.target.checked)} /><span>App update announcements</span></label>
+            <div className="discord-rule-grid">
+              <div className="discord-rule-card">
+                <h4>Market</h4>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketListings} onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)} /><span>New listings</span></label>
+                <label className="field"><span>Listings channel</span>{channelSelect("marketListings", draft.discord.notificationChannels.marketListings)}</label>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketSales} onChange={(event) => updateDiscordNotify("marketSales", event.target.checked)} /><span>Confirmed sales</span></label>
+                <label className="field"><span>Sales channel</span>{channelSelect("marketSales", draft.discord.notificationChannels.marketSales)}</label>
+                <label className="field"><span>Minimum sale value</span><input type="number" min={0} value={draft.discord.minSaleValue} onChange={(event) => updateDiscord({ minSaleValue: Number(event.target.value) })} /></label>
+              </div>
+              <div className="discord-rule-card">
+                <h4>Crafts</h4>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Enable craft alerts</span></label>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionStarted} onChange={(event) => updateDiscordNotify("productionStarted", event.target.checked)} /><span>Craft started</span></label>
+                <label className="field"><span>Started channel</span>{channelSelect("productionStarted", draft.discord.notificationChannels.productionStarted, true)}</label>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionCompleted} onChange={(event) => updateDiscordNotify("productionCompleted", event.target.checked)} /><span>Craft completed</span></label>
+                <label className="field"><span>Completed channel</span>{channelSelect("productionCompleted", draft.discord.notificationChannels.productionCompleted, true)}</label>
+                <label className="field"><span>Minimum total XP</span><input type="number" min={0} value={draft.discord.productionMinXp} onChange={(event) => updateDiscord({ productionMinXp: Number(event.target.value) })} /></label>
+                <label className="field"><span>Start progress (%)</span><input type="number" min={0} max={100} step={0.5} value={draft.discord.productionMinProgressPct} onChange={(event) => updateDiscord({ productionMinProgressPct: Number(event.target.value) })} /></label>
+                <label className="field"><span>Allowed crafters</span><input value={draft.discord.productionUsers} onChange={(event) => updateDiscord({ productionUsers: event.target.value })} placeholder="Blank allows all, or comma separate usernames" /></label>
+              </div>
+              <div className="discord-rule-card">
+                <h4>Supplies</h4>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
+                <label className="field"><span>Low supplies channel</span>{channelSelect("lowSupplies", draft.discord.notificationChannels.lowSupplies)}</label>
+                <label className="field"><span>Runway threshold (days)</span><input type="number" min={0.25} step={0.25} value={draft.discord.supplyRunwayDaysThreshold} onChange={(event) => updateDiscord({ supplyRunwayDaysThreshold: Number(event.target.value) })} /></label>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.supplyReports} onChange={(event) => updateDiscordNotify("supplyReports", event.target.checked)} /><span>Scheduled report</span></label>
+                <label className="field"><span>Report channel</span>{channelSelect("supplyReport", draft.discord.notificationChannels.supplyReport)}</label>
+                <label className="field"><span>Report interval (days)</span><input type="number" min={1} step={1} value={draft.discord.supplyReportIntervalDays} onChange={(event) => updateDiscord({ supplyReportIntervalDays: Number(event.target.value) })} /></label>
+              </div>
+              <div className="discord-rule-card">
+                <h4>Application</h4>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.appUpdates} onChange={(event) => updateDiscordNotify("appUpdates", event.target.checked)} /><span>App update announcements</span></label>
+                <label className="field"><span>Updates channel</span>{channelSelect("appUpdates", draft.discord.notificationChannels.appUpdates)}</label>
+              </div>
+            </div>
             <div className="status-detail">
               <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
               <Info label="Slash commands" value="/supplies, /online, /crafts, /price" />
@@ -3787,16 +3857,11 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             </div>
             <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
           </section>
-          <section className="form-card discord-preview-card">
-            <h3><Factory size={17} /> Craft Channels</h3>
-            <p className="legend">Craft notifications route to these Discord channels by profession. Blank values fall back to the main notification channel.</p>
-            <div className="craft-channel-grid">{CRAFT_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.craftChannels?.[key] ?? ""} onChange={(event) => updateDiscordCraftChannel(key, event.target.value)} /></label>)}</div>
-          </section>
-          <section className="form-card discord-preview-card">
-            <h3><MessageCircle size={17} /> Notification Tests</h3>
+          <details className="form-card discord-preview-card">
+            <summary><span><MessageCircle size={17} /> Notification Tests</span><small>Preview Discord message formats</small></summary>
             <p className="legend">Send sample messages to the configured channel to preview how each alert type will look in Discord.</p>
             <div className="discord-test-grid">{discordTestButtons.map(([kind, label]) => <button key={kind} className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) }); }, `${label} Discord test sent.`)}><MessageCircle size={14} /> {label}</button>)}</div>
-          </section>
+          </details>
         </div>
       ) : null}
 

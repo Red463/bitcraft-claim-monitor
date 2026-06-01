@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.2-beta.1";
+const appVersion = "0.8.4-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const brandingDir = path.join(dataDir, "branding");
@@ -211,6 +211,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 60000, productionMinProgressPct: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
 const statements = {
@@ -481,6 +482,22 @@ const defaultCraftChannels = {
   foraging: "1509932609378058412",
 };
 
+const defaultDiscordChannels = {
+  notifications: "",
+  modNotes: "1509972023927902218",
+  ...defaultCraftChannels,
+};
+
+const defaultNotificationChannels = {
+  marketListings: "notifications",
+  marketSales: "notifications",
+  lowSupplies: "notifications",
+  appUpdates: "notifications",
+  supplyReport: "modNotes",
+  productionStarted: "profession",
+  productionCompleted: "profession",
+};
+
 const defaultDiscordSettings = {
   enabled: false,
   applicationId: "",
@@ -492,6 +509,9 @@ const defaultDiscordSettings = {
   productionMinXp: 60000,
   productionMinProgressPct: 5,
   productionUsers: "",
+  supplyReportIntervalDays: 3,
+  channels: defaultDiscordChannels,
+  notificationChannels: defaultNotificationChannels,
   craftChannels: defaultCraftChannels,
   notify: {
     marketListings: true,
@@ -501,6 +521,7 @@ const defaultDiscordSettings = {
     productionCompleted: true,
     lowSupplies: false,
     appUpdates: true,
+    supplyReports: true,
   },
 };
 
@@ -519,7 +540,10 @@ function normalizeDiscordSettings(value = {}) {
     productionMinXp: Math.max(toNumber(value.productionMinXp) || 60000, 0),
     productionMinProgressPct: Math.max(Math.min(toNumber(value.productionMinProgressPct) || 5, 100), 0),
     productionUsers: String(value.productionUsers ?? "").trim(),
-    craftChannels: { ...defaultCraftChannels, ...(value.craftChannels ?? {}) },
+    supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
+    channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
+    notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
+    craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
@@ -528,6 +552,7 @@ function normalizeDiscordSettings(value = {}) {
       productionCompleted: notify.productionCompleted ?? notify.production ?? true,
       lowSupplies: notify.lowSupplies === true,
       appUpdates: notify.appUpdates !== false,
+      supplyReports: notify.supplyReports !== false,
     },
   };
 }
@@ -535,12 +560,15 @@ function normalizeDiscordSettings(value = {}) {
 function getDiscordSettingsRaw() {
   const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
   const envToken = String(process.env.DISCORD_BOT_TOKEN ?? "").trim();
+  const envChannelId = String(process.env.DISCORD_CHANNEL_ID ?? "").trim();
+  const channelId = envChannelId || stored.channelId;
   return {
     ...stored,
     applicationId: String(process.env.DISCORD_APPLICATION_ID ?? stored.applicationId).trim(),
     publicKey: String(process.env.DISCORD_PUBLIC_KEY ?? stored.publicKey).trim(),
     guildId: String(process.env.DISCORD_GUILD_ID ?? stored.guildId).trim(),
-    channelId: String(process.env.DISCORD_CHANNEL_ID ?? stored.channelId).trim(),
+    channelId,
+    channels: { ...stored.channels, notifications: channelId },
     botToken: envToken || String(statements.getSecret.get("discord_bot_token")?.value ?? "").trim(),
     botTokenSource: envToken ? "environment" : statements.getSecret.get("discord_bot_token") ? "database" : "",
   };
@@ -941,9 +969,17 @@ function productionNotificationAllowed(eventType, metadata = {}, settings = getD
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
   if (eventType === "production_started" || eventType === "production_completed") {
+    const selection = settings.notificationChannels?.[eventType === "production_started" ? "productionStarted" : "productionCompleted"] ?? "profession";
+    if (selection && selection !== "profession") return settings.channels?.[selection] || settings.channelId;
     const professionKey = String(metadata.professionKey ?? "").toLowerCase();
     return settings.craftChannels?.[professionKey] || settings.channelId;
   }
+  const selection = eventType === "market_new_listing" ? "marketListings"
+    : eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
+    : eventType === "supplies" ? "lowSupplies"
+    : eventType === "app_update" ? "appUpdates"
+    : "";
+  if (selection) return settings.channels?.[settings.notificationChannels?.[selection]] || settings.channelId;
   return settings.channelId;
 }
 
@@ -1035,7 +1071,7 @@ const discordTestEvents = {
   },
   appUpdate: {
     eventType: "app_update",
-    summary: "Version 0.8.1-beta.1 is live with Discord notifications and slash commands",
+    summary: "Version 0.8.4-beta.1 is live with a cleaner Discord admin page and unified channel routing",
     metadata: { version: appVersion, changelogUrl },
   },
 };
@@ -1071,6 +1107,33 @@ async function announceDiscordAppUpdateIfNeeded() {
     allowed_mentions: { parse: [] },
   }, settings);
   statements.upsertSetting.run("discord_last_announced_version", appVersion, new Date().toISOString());
+}
+
+function discordSupplyEmbed(claim) {
+  const supplies = toNumber(claim.supplies);
+  const supplyMeta = supplyRunwayMetadata(claim, supplies);
+  return discordCommandEmbed("Settlement Supplies", `**${claim.name ?? "Monitored settlement"}** supply status`, [
+    { name: "Current stock", value: supplies.toLocaleString(), inline: true },
+    { name: "Upkeep", value: supplyMeta.upkeep, inline: true },
+    { name: "Runway", value: supplyMeta.runway, inline: true },
+    ...(supplyMeta.runsOutAt ? [{ name: "Runs out", value: new Date(supplyMeta.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false }] : []),
+  ], supplyMeta.runwayDays < 3 ? 0xef6461 : supplyMeta.runwayDays < 7 ? 0xf0c64f : 0x4ee28a);
+}
+
+async function sendScheduledSupplyReportIfDue(claim) {
+  const settings = getDiscordSettingsRaw();
+  if (!settings.enabled || !settings.botToken || !settings.notify.supplyReports) return;
+  const lastSent = statements.getSetting.get("discord_last_supply_report_at")?.value ?? "";
+  const lastSentMs = lastSent ? new Date(lastSent).getTime() : 0;
+  const intervalMs = settings.supplyReportIntervalDays * 24 * 60 * 60 * 1000;
+  if (lastSentMs && Date.now() - lastSentMs < intervalMs) return;
+  const channelKey = settings.notificationChannels?.supplyReport ?? "modNotes";
+  const channelId = settings.channels?.[channelKey] || settings.channelId;
+  await sendDiscordMessage({
+    embeds: [discordSupplyEmbed(claim)],
+    allowed_mentions: { parse: [] },
+  }, settings, channelId);
+  statements.upsertSetting.run("discord_last_supply_report_at", new Date().toISOString(), new Date().toISOString());
 }
 
 const deployableStorageName = /\b(?:cart|handcart|wagon|boat|ship|goat|sled|mount)\b/i;
@@ -1558,6 +1621,7 @@ async function collectServerSnapshot(force = false) {
     const claim = claimPayload.claim ?? claimPayload;
     const members = unwrap(membersPayload, "members", []);
     const buildings = unwrap(buildingsPayload, "buildings", []);
+    await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
     await enqueueSnapshot({
       claimId,
       claim,
@@ -1904,14 +1968,7 @@ async function discordSuppliesCommand() {
   const { claimId } = getSettings();
   const payload = await fetchBitjita(`/claims/${claimId}`);
   const claim = payload.claim ?? payload;
-  const supplies = toNumber(claim.supplies);
-  const supplyMeta = supplyRunwayMetadata(claim, supplies);
-  return discordCommandEmbed("Settlement Supplies", `**${claim.name ?? "Monitored settlement"}** supply status`, [
-    { name: "Current stock", value: supplies.toLocaleString(), inline: true },
-    { name: "Upkeep", value: supplyMeta.upkeep, inline: true },
-    { name: "Runway", value: supplyMeta.runway, inline: true },
-    ...(supplyMeta.runsOutAt ? [{ name: "Runs out", value: new Date(supplyMeta.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false }] : []),
-  ], supplyMeta.runwayDays < 3 ? 0xef6461 : supplyMeta.runwayDays < 7 ? 0xf0c64f : 0x4ee28a);
+  return discordSupplyEmbed(claim);
 }
 
 async function discordOnlineCommand() {

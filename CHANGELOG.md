@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.4-beta.1 - 2026-06-01
+
+### Changed
+
+- Simplified Admin > Discord so the channel list is the single place to configure Discord channel IDs, including profession craft channels.
+- Reworked Discord notification settings into grouped cards to reduce clutter.
+- Replaced checkbox styling across the app with theme-matched toggle switches.
+
+## 0.8.3-beta.1 - 2026-06-01
+
+### Added
+
+- Added a scheduled Discord supplies report, defaulting to every three days in the configured mod-notes channel.
+- Added a named Discord channel list and dropdown-based routing for market, supply, app update, and craft notifications.
+
+### Changed
+
+- Admin > Discord is grouped around bot credentials, channel configuration, notification routing, craft channels, and test previews.
+
 ## 0.8.2-beta.1 - 2026-06-01
 
 ### Added

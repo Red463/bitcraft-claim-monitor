@@ -21,6 +21,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--text); background: var(--bg); }
 button, input, select { font: inherit; }
+select option { background: var(--panel); color: var(--text); }
+select option:checked, select option:hover { background: var(--gold-dim); color: var(--text); }
 svg { flex: 0 0 auto; }
 
 .app-shell { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 100vh; background: radial-gradient(circle at top right, rgba(240,198,79,.1), transparent 32%), var(--bg); }
@@ -667,11 +669,23 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .activity-empty { margin-left: -17px; }
 .admin-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(360px, 1.2fr); gap: 16px; align-items: start; }
 .form-card { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 16px; display: grid; gap: 14px; }
+.form-card summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--gold); font: 700 16px Outfit, sans-serif; }
+.form-card summary::-webkit-details-marker { display: none; }
+.form-card summary span { display: inline-flex; align-items: center; gap: 8px; }
+.form-card summary small { color: var(--muted); font: 500 11px Outfit, sans-serif; }
+.form-card summary::after { content: "+"; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.form-card[open] summary::after { content: "-"; color: var(--gold); border-color: rgba(240,198,79,.42); }
+.form-card[open] { gap: 10px; }
 .form-card h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
 .form-card h3 small { color: var(--muted); font: 500 12px Outfit, sans-serif; }
 .field { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
 .field input, .field select { height: 39px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 0 11px; outline: 0; }
 .field input:focus, .field select:focus { border-color: var(--gold); }
+input[type="checkbox"] { appearance: none; -webkit-appearance: none; flex: 0 0 auto; width: 38px; height: 22px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; background: rgba(255,255,255,.08); cursor: pointer; position: relative; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
+input[type="checkbox"]::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: var(--muted); box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .18s ease, background .18s ease; }
+input[type="checkbox"]:checked { border-color: rgba(240,198,79,.65); background: rgba(240,198,79,.24); box-shadow: 0 0 0 3px rgba(240,198,79,.08); }
+input[type="checkbox"]:checked::before { transform: translateX(16px); background: var(--gold); }
+input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); outline-offset: 2px; }
 .theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .color-field { min-height: 42px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
 .color-field input { width: 34px; height: 24px; border: 0; padding: 0; background: transparent; cursor: pointer; }
@@ -688,24 +702,37 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .toolbar-button.primary { color: var(--gold); border-color: rgba(240,198,79,.45); background: var(--gold-dim); }
 .toolbar-button:disabled { opacity: .45; cursor: not-allowed; }
 .status-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 30px; }
-.toggle-line { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 42px; padding: 9px 11px; display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 13px; }
+.toggle-line { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 42px; padding: 9px 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text); font-size: 13px; }
+.toggle-line input[type="checkbox"] { order: 2; }
 .toggle-line span { min-width: 0; overflow-wrap: anywhere; }
-.discord-admin { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.discord-admin { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 10px; }
+.discord-admin .form-card { padding: 12px; gap: 10px; }
+.discord-admin .form-card h3 { font-size: 16px; }
+.discord-admin .field { gap: 4px; }
+.discord-admin .field input, .discord-admin .field select { height: 34px; }
 .discord-admin .field input { min-width: 0; width: 100%; }
 .discord-admin .status-detail { grid-template-columns: 1fr; gap: 8px; }
 .discord-admin .info { min-width: 0; }
 .discord-admin .info strong, .discord-admin .info span { overflow-wrap: anywhere; }
 .discord-actions .toolbar-button { flex: 1 1 210px; justify-content: center; }
 .discord-preview-card { grid-column: 1 / -1; }
-.craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-.discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 9px; }
+.discord-channel-card { grid-column: 1 / -1; }
+.discord-rule-grid { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 8px; align-items: start; }
+.discord-rule-card { border: 1px solid var(--border); background: var(--panel-2); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.discord-rule-card h4 { color: var(--gold); font-size: 14px; letter-spacing: 0; margin: 0; }
+.discord-rule-card .field input { background: rgba(0,0,0,.16); }
+.discord-rule-card .field select { background: var(--panel); }
+.discord-rule-card .toggle-line { background: rgba(255,255,255,.025); min-height: 36px; padding: 7px 9px; }
+.craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 7px; }
 .discord-test-grid .toolbar-button { justify-content: center; min-width: 0; }
 .diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .diagnostics div { display: grid; gap: 4px; border: 1px solid var(--border); background: var(--panel-2); padding: 10px; border-radius: 7px; font-size: 12px; }
 .diagnostics .ok strong { color: var(--good); }
 .diagnostics .fail strong { color: var(--danger); }
 .diagnostics span { color: var(--muted); overflow-wrap: anywhere; }
-.toggle-row { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 43px; padding: 0 12px; display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 13px; }
+.toggle-row { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 43px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text); font-size: 13px; }
+.toggle-row input[type="checkbox"] { order: 2; }
 .brand-upload { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); background: var(--panel-2); border-radius: 7px; padding: 9px; }
 .brand-upload > div { margin-right: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .brand-upload img { width: 38px; height: 38px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; object-fit: contain; }
@@ -731,7 +758,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid { grid-template-columns: 1fr; }
   .cookie-banner, .cookie-actions { display: grid; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-pulse div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.06); }
