@@ -447,8 +447,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     const current = existing.get(job.key);
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
-    if (!startAlreadyNotified && hasProductionBaseline && productionNotificationAllowed("production_started", job)) {
+    if (!startAlreadyNotified && hasProductionBaseline) {
       const summary = `Craft started: ${job.label}`;
+      const skipReason = productionNotificationSkipReason("production_started", job);
+      if (skipReason) {
+        recordDiscordDelivery({ status: "skipped", eventType: "production_started", summary, reason: skipReason });
+        continue;
+      }
       statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(job));
       pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: job });
     }
@@ -458,7 +463,6 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     if (seen.has(key)) continue;
     statements.completeProductionJob.run(occurredAt, key);
     const job = { ...normalizeProductionJob(safeJson(current.raw_json)), key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name };
-    if (!productionNotificationAllowed("production_completed", job)) continue;
     const metadata = {
       key,
       label: current.label,
@@ -467,6 +471,11 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       ...job,
     };
     const summary = `Craft completed: ${current.label}`;
+    const skipReason = productionNotificationSkipReason("production_completed", metadata);
+    if (skipReason) {
+      recordDiscordDelivery({ status: "skipped", eventType: "production_completed", summary, reason: skipReason });
+      continue;
+    }
     statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
     pendingNotifications.push({ jobKey: key, eventType: "production_completed", summary, occurredAt, metadata });
   }
@@ -971,18 +980,27 @@ function discordEnabledFor(eventType, settings, metadata) {
   if (eventType === "production_started") return settings.notify.production && settings.notify.productionStarted && productionNotificationAllowed(eventType, metadata, settings);
   if (eventType === "production_completed") return settings.notify.production && settings.notify.productionCompleted && productionNotificationAllowed(eventType, metadata, settings);
   if (eventType === "supplies") return settings.notify.lowSupplies && toNumber(metadata?.runwayDays) > 0 && toNumber(metadata.runwayDays) < settings.supplyRunwayDaysThreshold;
+  if (eventType === "app_update") return settings.notify.appUpdates;
   return false;
 }
 
-function productionNotificationAllowed(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
-  if (eventType === "production_started" && toNumber(metadata.progressPct) < settings.productionMinProgressPct) return false;
-  if (toNumber(metadata.totalXp) < settings.productionMinXp) return false;
+function productionNotificationSkipReason(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (!settings.notify.production) return "Craft notifications are disabled";
+  if (eventType === "production_started" && !settings.notify.productionStarted) return "Craft started notifications are disabled";
+  if (eventType === "production_completed" && !settings.notify.productionCompleted) return "Craft completed notifications are disabled";
+  if (eventType === "production_started" && toNumber(metadata.progressPct) < settings.productionMinProgressPct) return `Progress ${toNumber(metadata.progressPct).toFixed(1)}% is below ${settings.productionMinProgressPct}%`;
+  if (toNumber(metadata.totalXp) < settings.productionMinXp) return `Total XP ${toNumber(metadata.totalXp).toLocaleString()} is below ${settings.productionMinXp.toLocaleString()}`;
   const allowedUsers = String(settings.productionUsers ?? "").split(/[\n,]/).map((name) => name.trim().toLowerCase()).filter(Boolean);
   if (allowedUsers.length) {
     const crafter = String(metadata.crafterName ?? "").trim().toLowerCase();
-    if (!crafter || !allowedUsers.includes(crafter)) return false;
+    if (!crafter) return `Allowed crafters are set, but BitJita did not provide a crafter name for this craft`;
+    if (!allowedUsers.includes(crafter)) return `Crafter "${metadata.crafterName}" is not in allowed crafters: ${settings.productionUsers}`;
   }
-  return true;
+  return "";
+}
+
+function productionNotificationAllowed(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  return !productionNotificationSkipReason(eventType, metadata, settings);
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
@@ -1007,6 +1025,12 @@ function recordDiscordDelivery(status) {
 
 async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
   if (!discordEnabledFor(eventType, settings, metadata)) {
+    const reason = eventType === "production_started" || eventType === "production_completed"
+      ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
+      : eventType === "app_update" ? "App update notifications are disabled" : "Notification disabled or below configured threshold";
+    if (eventType === "production_started" || eventType === "production_completed" || eventType === "app_update") {
+      recordDiscordDelivery({ status: "skipped", eventType, summary, reason });
+    }
     return { ok: true, skipped: true };
   }
   const channelId = discordChannelForEvent(eventType, metadata, settings);

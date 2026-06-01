@@ -6,6 +6,8 @@
 
 - Craft Discord notifications no longer require the default notifications channel when routing to profession channels.
 - Craft-start notifications are no longer marked as delivered when Discord sending is skipped.
+- App update Discord notifications are now included in the generic notification enablement checks.
+- Craft notification skips now record a visible Admin reason, including allowed-crafter mismatches or missing crafter names.
 
 ### Changed
 
