@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.11-beta.1 - 2026-06-01
+
+### Fixed
+
+- Discord craft notification filters now calculate production XP from the same BitJita fields as the Production page, including `totalActionsRequired` and `progress`.
+
 ## 0.8.10-beta.1 - 2026-06-01
 
 ### Fixed
