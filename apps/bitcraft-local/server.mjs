@@ -698,6 +698,7 @@ const defaultCraftRoles = {
 const defaultDiscordChannels = {
   notifications: "",
   modNotes: "1509972023927902218",
+  modLog: "",
   ...defaultCraftChannels,
 };
 
@@ -2190,7 +2191,7 @@ async function discordWarningCreate(body, moderator = "dashboard", settings = ge
     deliveries.push({ target: "member_dm", status: "failed", error: message });
     recordDiscordDeliverySafe({ status: "failed", eventType: "moderation_warning_dm", summary: `Warning DM failed for ${userId}`, error: message, metadata: { userId, moderator, reason, warningId } });
   }
-  const logChannelId = String(settings.channels?.modNotes || settings.channelId || "").trim();
+  const logChannelId = String(settings.channels?.modLog || settings.channels?.modNotes || settings.channelId || "").trim();
   if (logChannelId) {
     try {
       const response = await sendDiscordMessage({ embeds: [discordCommandEmbed("Warning Recorded", `<@${userId}> received a warning.`, [
@@ -2199,11 +2200,11 @@ async function discordWarningCreate(body, moderator = "dashboard", settings = ge
         { name: "Case", value: String(modCase.caseId ?? warningId ?? "Recorded"), inline: true },
       ], 0xef6461)] }, settings, logChannelId);
       deliveries.push({ target: "mod_log", status: "sent", messageId: response?.id, channelId: response?.channel_id });
-      recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_warning_log", summary: `Warning logged for ${userId}`, channelId: logChannelId, channelKey: "modNotes", metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
+      recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_warning_log", summary: `Warning logged for ${userId}`, channelId: logChannelId, channelKey: settings.channels?.modLog ? "modLog" : "modNotes", metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       deliveries.push({ target: "mod_log", status: "failed", error: message });
-      recordDiscordDeliverySafe({ status: "failed", eventType: "moderation_warning_log", summary: `Warning log failed for ${userId}`, channelId: logChannelId, channelKey: "modNotes", error: message, metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
+      recordDiscordDeliverySafe({ status: "failed", eventType: "moderation_warning_log", summary: `Warning log failed for ${userId}`, channelId: logChannelId, channelKey: settings.channels?.modLog ? "modLog" : "modNotes", error: message, metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
     }
   }
   return { ok: true, warningId, deliveries, ...modCase };
@@ -2300,7 +2301,7 @@ async function syncDiscordAutoModeration(body, settings = getDiscordSettingsRaw(
   const keywords = String(body.blockedWords ?? "").split(/[\n,]/).map((word) => word.trim()).filter(Boolean).slice(0, 100);
   if (!keywords.length) throw new Error("Add at least one blocked word or phrase.");
   const name = String(body.name ?? "Timbersteel keyword filter").trim() || "Timbersteel keyword filter";
-  const alertChannelId = String(settings.channels?.modNotes || settings.channelId || "").trim();
+  const alertChannelId = String(settings.channels?.modLog || settings.channels?.modNotes || settings.channelId || "").trim();
   const actions = [
     { type: 1, metadata: { custom_message: "That message was blocked by Timbersteel Trade AutoMod." } },
     ...(/^\d+$/.test(alertChannelId) ? [{ type: 2, metadata: { channel_id: alertChannelId } }] : []),

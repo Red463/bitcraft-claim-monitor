@@ -9,6 +9,7 @@
 - Updated Discord poll and RSVP messages after button votes so the visible message counts stay current.
 - Made Discord warnings send a member DM and staff mod-log message while recording delivery diagnostics for failed sends.
 - Updated Discord AutoMod rule creation to send mod-notes alerts and clarified that Discord exempts Administrator and Manage Server users.
+- Added a configurable Discord mod-log channel and routed moderation warning logs and AutoMod alerts through it.
 
 ## 0.8.40-beta.1 - 2026-06-02
 

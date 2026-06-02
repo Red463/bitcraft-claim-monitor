@@ -181,6 +181,7 @@ const DEFAULT_CRAFT_CHANNELS: Record<string, string> = {
 const DEFAULT_DISCORD_CHANNELS: Record<string, string> = {
   notifications: "",
   modNotes: "1509972023927902218",
+  modLog: "",
   ...DEFAULT_CRAFT_CHANNELS,
 };
 
@@ -4335,7 +4336,13 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   const tableRows: AnyRecord[] = tableResult.rows ?? [];
   const tableColumns = (tableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
-  const channelOptions = Object.entries(draft.discord.channels ?? {}).map(([key, id]) => ({ key, label: key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1), id })).filter((entry) => entry.id || entry.key === "notifications");
+  const discordChannelLabel = (key: string) => {
+    if (key === "notifications") return "Default notifications";
+    if (key === "modNotes") return "Mod notes";
+    if (key === "modLog") return "Mod log";
+    return key[0].toUpperCase() + key.slice(1);
+  };
+  const channelOptions = Object.entries(draft.discord.channels ?? {}).map(([key, id]) => ({ key, label: discordChannelLabel(key), id })).filter((entry) => entry.id || entry.key === "notifications");
   const channelSelect = (key: string, value: string, allowProfession = false) => (
     <select value={value} onChange={(event) => updateNotificationChannel(key, event.target.value)}>
       {allowProfession ? <option value="profession">Profession channel</option> : null}
@@ -4796,7 +4803,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <summary><span><MessageCircle size={17} /> Channel List</span><small>Channel IDs and profession routing</small></summary>
             <p className="legend">Choose channels discovered by the bot. Profession channels here are also used when craft notifications route by profession.</p>
             {!discoveredChannels.length ? <div className="error">No Discord channels synced yet. Use Setup &gt; Sync Discord Server.</div> : null}
-            <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1)}</span>{channelIdSelect(draft.discord.channels?.[key] ?? "", (value) => updateDiscordChannel(key, value))}</label>)}</div>
+            <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{discordChannelLabel(key)}</span>{channelIdSelect(draft.discord.channels?.[key] ?? "", (value) => updateDiscordChannel(key, value))}</label>)}</div>
           </details> : null}
           {(!botOnly || botSection === "roleManager") ? <section className="form-card discord-channel-card bot-role-manager-card">
             <div className="split-header">
