@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.44-beta.1 - 2026-06-02
+
+### Fixed
+
+- Fixed the Discord bot page rendering blank by removing hook-order-sensitive diagnostics calculations from the admin render path.
+- Hardened Discord diagnostics log handling when the status payload is missing or not yet loaded.
+
 ## 0.8.43-beta.1 - 2026-06-02
 
 ### Fixed

@@ -4392,17 +4392,17 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
-  const discordLog: AnyRecord[] = status?.discord?.deliveryLog ?? [];
-  const discordDiagnosticTypes = React.useMemo(() => Array.from(new Set(discordLog.map((entry) => String(entry.event_type ?? "")).filter(Boolean))).sort(), [discordLog]);
-  const filteredDiscordLog = React.useMemo(() => discordDiagnosticsFilter === "all"
+  const discordLog: AnyRecord[] = Array.isArray(status?.discord?.deliveryLog) ? status.discord.deliveryLog : [];
+  const discordDiagnosticTypes = Array.from(new Set(discordLog.map((entry) => String(entry.event_type ?? "")).filter(Boolean))).sort();
+  const filteredDiscordLog = discordDiagnosticsFilter === "all"
     ? discordLog
-    : discordLog.filter((entry) => String(entry.event_type ?? "") === discordDiagnosticsFilter), [discordDiagnosticsFilter, discordLog]);
-  const discordDiagnosticCounts = React.useMemo(() => ({
+    : discordLog.filter((entry) => String(entry.event_type ?? "") === discordDiagnosticsFilter);
+  const discordDiagnosticCounts = {
     total: filteredDiscordLog.length,
     sent: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "sent").length,
     skipped: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "skipped").length,
     failed: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "failed").length,
-  }), [filteredDiscordLog]);
+  };
   const discordDeliveryLabel = discordDelivery.status === "failed"
     ? `Failed ${dateLabel(discordDelivery.at)}: ${discordDelivery.error ?? "Unknown Discord error"}`
     : discordDelivery.status === "sent"
