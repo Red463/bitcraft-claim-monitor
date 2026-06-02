@@ -1351,12 +1351,13 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
   if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
   const guildId = String(settings.guildId);
-  const [botUser, guild, channels, roles, botMember] = await Promise.all([
-    discordApiRequest("/users/@me", {}, settings),
+  const botUser = await discordApiRequest("/users/@me", {}, settings);
+  const botUserId = String(botUser?.id ?? "");
+  const [guild, channels, roles, botMember] = await Promise.all([
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}`, {}, settings),
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/channels`, {}, settings),
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles`, {}, settings),
-    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/@me`, {}, settings).catch(() => null),
+    botUserId ? discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`, {}, settings).catch(() => null) : null,
   ]);
   const sortedChannels = (Array.isArray(channels) ? channels : [])
     .filter((channel) => [0, 5, 10, 11, 12, 15].includes(Number(channel.type)))
@@ -1414,7 +1415,7 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     });
   return {
     guild: { id: guildId, name: String(guild?.name ?? guildId) },
-    bot: { id: String(botUser?.id ?? ""), username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
+    bot: { id: botUserId, username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
     channels: sortedChannels,
     roles: normalizedRoles,
     members: members.slice(0, 1000),
