@@ -1144,13 +1144,15 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
   return <button className="toolbar-button" onClick={onClick}>{children}</button>;
 }
 
-function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
-  const suppliesPerDay = (upkeep || toNumber(claim.tileCost) * toNumber(claim.numTiles)) * 24;
+  const tileCost = toNumber(claim.tileCost);
+  const tileCount = toNumber(claim.numTiles);
+  const suppliesPerDay = (upkeep || tileCost * tileCount) * 24;
   const runOut = claim.suppliesRunOut ? dateLabel(claim.suppliesRunOut) : "Unknown";
   const runOutDate = parseDateValue(claim.suppliesRunOut);
   const onlineCount = data.players.filter((player) => player.signedIn).length;
@@ -1168,11 +1170,22 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
     ? (runOutDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)
     : suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
   const supplyPct = supplyCap > 0 ? Math.max(2, Math.min(100, (supplies / supplyCap) * 100)) : Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const treasuryEventsToday = activity.filter((event) => {
+    if (event.event_type !== "treasury") return false;
+    const occurredAt = parseDateValue(event.occurred_at);
+    return !!occurredAt && occurredAt >= todayStart;
+  }).map((event) => ({ event, metadata: activityMetadata(event) })).filter(({ metadata }) => metadata.before != null && metadata.after != null);
+  const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
+  const treasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
+  const treasuryEarnedToday = treasuryDeltasToday.filter((delta) => delta > 0).reduce((total, delta) => total + delta, 0);
+  const treasurySpentToday = Math.abs(treasuryDeltasToday.filter((delta) => delta < 0).reduce((total, delta) => total + delta, 0));
   const health = supplies < 2000 ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
   const attention = [
     supplies < 2000 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatNumber(supplies)} supplies remaining`, panel: "inventory" as ActivePanel } : null,
     activeProjects ? { icon: <Hammer />, title: "Construction active", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel } : null,
-    crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} active in 30s, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
+    crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} active, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
     !market.length ? { icon: <ShoppingCart />, title: "No market listings", body: "No current settlement market activity", panel: "market" as ActivePanel } : null,
   ].filter(Boolean) as Array<{ icon: React.ReactNode; title: string; body: string; panel: ActivePanel }>;
   return (
@@ -1193,7 +1206,7 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
       <div className="overview-pulse">
         <div><span>Members</span><strong><LiveValue value={members.length} /></strong><small>{onlineCount} online now</small></div>
         <div><span>Supply Status</span><strong><LiveValue value={formatDaysAndHours(supplyDays)} /></strong><small>{formatNumber(supplies)} stored</small></div>
-        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts active in 30s / {activeProjects} builds</small></div>
+        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts active / {activeProjects} builds</small></div>
         <div><span>Market Presence</span><strong><LiveValue value={market.length} /></strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
       </div>
 
@@ -1204,17 +1217,18 @@ function Overview({ data, onNavigate, logo, watches, onToggleWatch }: { data: Re
           <Info label="Current stock" value={formatNumber(supplies)} />
           {supplyCap > 0 ? <Info label="Storage cap" value={formatNumber(supplyCap)} /> : null}
           <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
-          <Info label="Runs out" value={runOut} />
+          <Info label="Runs out" value={<span className={supplyDays > 7 ? "value-good" : supplyDays < 7 ? "value-danger" : ""}>{runOut}</span>} />
         </section>
-        <section className="ops-card" title="Runway uses current supplies and the claim upkeep rate returned by BitJita.">
-          <header><CircleDollarSign /><span>Treasury</span><strong>{formatNumber(treasury)}g</strong></header>
-          <Info label="Supply upkeep per hour" value={formatNumber(upkeep, 2)} />
-          <Info label="Supply upkeep per day" value={formatNumber(suppliesPerDay, 2)} />
-          <Info label="Tiles" value={formatNumber(claim.numTiles)} />
+        <section className="ops-card" title="Treasury movement is calculated from recorded local activity for this settlement. BitJita exposes the current balance, but not a treasury run-out timestamp.">
+          <header><CircleDollarSign /><span>Treasury</span><strong className={treasuryNetToday > 0 ? "money-positive" : treasuryNetToday < 0 ? "money-negative" : ""}>{signedDelta(treasuryNetToday, 0, "g")}</strong></header>
+          <Info label="Treasury balance" value={`${formatNumber(treasury)}g`} />
+          <Info label="Net today" value={signedDelta(treasuryNetToday, 0, "g")} />
+          <Info label="Earned today" value={`+${formatNumber(treasuryEarnedToday)}g`} />
+          <Info label="Spent today" value={treasurySpentToday ? `-${formatNumber(treasurySpentToday)}g` : "0g"} />
         </section>
         <section className="ops-card">
           <header><Factory /><span>Work Queue</span><strong>{activeCrafts + activeProjects}</strong></header>
-          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active in 30s / {crafts.length} jobs</strong></button>
+          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active / {crafts.length} jobs</strong></button>
           <button className="ops-link" onClick={() => onNavigate("construction")}><span>Construction</span><strong>{activeProjects} projects</strong></button>
           <button className="ops-link" onClick={() => onNavigate("research")}><span>Research</span><strong>{researched} complete</strong></button>
         </section>
@@ -5256,7 +5270,7 @@ function DashboardApp() {
   }, [appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    overview: <Overview data={data} onNavigate={navigate} logo={appSettings.branding.logo} watches={watches} onToggleWatch={toggleWatch} />,
+    overview: <Overview data={data} activity={localHistory.activity} onNavigate={navigate} logo={appSettings.branding.logo} watches={watches} onToggleWatch={toggleWatch} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,

@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.8.36-beta.1 - 2026-06-02
+## 0.8.37-beta.1 - 2026-06-02
 
 ### Added
 
+- Updated the Overview treasury card to show today's recorded treasury income, spending and net movement instead of an unsupported treasury runway.
 - Added Discord Gateway presence support so the Timbersteel Trade bot can appear online with configurable status text.
 - Added the `/help` Discord slash command with app and feature-request links.
 - Reworked Discord role cleanup, channel checks and inactive member reports into readable dashboard views instead of raw JSON.
