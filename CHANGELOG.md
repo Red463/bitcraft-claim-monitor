@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.42-beta.1 - 2026-06-02
+
+### Fixed
+
+- Fixed Discord poll and RSVP button clicks failing with `formatNumber is not defined`.
+- Scoped Discord bot action/report output to each dashboard tab so results no longer appear under unrelated sections.
+- Reworked the Custom Commands tab so commands are always listed there and existing commands can be selected for editing.
+
 ## 0.8.41-beta.1 - 2026-06-02
 
 ### Fixed

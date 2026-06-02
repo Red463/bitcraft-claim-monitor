@@ -40,6 +40,7 @@ import {
   Palette,
   Pin,
   PinOff,
+  Plus,
   RefreshCw,
   Save,
   Search,
@@ -3986,7 +3987,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
   const [discordDiscovery, setDiscordDiscovery] = React.useState<AnyRecord | null>(null);
-  const [discordToolResult, setDiscordToolResult] = React.useState<AnyRecord | null>(null);
+  const [discordToolResults, setDiscordToolResults] = React.useState<Record<string, AnyRecord | null>>({});
   const [expandedRoleOption, setExpandedRoleOption] = React.useState<string | null>(null);
   const [roleDraft, setRoleDraft] = React.useState({ name: "", color: "#5865f2", hoist: false, mentionable: false });
   const [announcementDraft, setAnnouncementDraft] = React.useState({ channelId: "", title: "", message: "" });
@@ -3999,6 +4000,11 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [rsvpDraft, setRsvpDraft] = React.useState({ channelId: "", title: "", description: "" });
   const [embedDraft, setEmbedDraft] = React.useState({ channelId: "", title: "", description: "", color: "#f0c64f" });
   const [commandDraft, setCommandDraft] = React.useState({ name: "", description: "", response: "" });
+  const [customCommands, setCustomCommands] = React.useState<AnyRecord[]>([]);
+  const discordToolResult = discordToolResults[botSection] ?? null;
+  const setDiscordToolResult = React.useCallback((result: AnyRecord | null) => {
+    setDiscordToolResults((current) => ({ ...current, [botSection]: result }));
+  }, [botSection]);
 
   async function api(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
@@ -4053,6 +4059,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     setDiscordDiscovery(await api("/admin/discord/discovery"));
   }
 
+  async function refreshCustomCommands() {
+    setCustomCommands((await api("/admin/discord/custom-commands")).commands ?? []);
+  }
+
   React.useEffect(() => {
     api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
   }, []);
@@ -4067,13 +4077,14 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     run(async () => {
       if (tab === "status" || tab === "discord") await refreshStatus();
       if (botOnly && tab === "discord") await refreshDiscordDiscovery();
+      if (botOnly && tab === "discord" && botSection === "commands") await refreshCustomCommands();
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
       if (tab === "audit") await refreshAudit();
       if (tab === "backups") await refreshBackups();
     });
-  }, [auth?.authenticated, tab, analyticsDays]);
+  }, [auth?.authenticated, tab, analyticsDays, botSection]);
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
     const timer = window.setTimeout(() => {
@@ -5070,8 +5081,31 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
           {(!botOnly || botSection === "commands") ? <section className="form-card discord-channel-card bot-tools-card">
-            <div className="split-header"><div><h3><Command size={17} /> Custom Commands</h3><p className="legend">Create Discord slash commands that respond with static server information. Re-register slash commands after adding or removing commands.</p></div><button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }), "Custom commands loaded.")}><RefreshCw size={15} /> Load Commands</button></div>
-            <div className="discord-tool-form-card"><label className="field"><span>Command name</span><input value={commandDraft.name} onChange={(event) => setCommandDraft((current) => ({ ...current, name: event.target.value }))} placeholder="rules" /></label><label className="field"><span>Description</span><input value={commandDraft.description} onChange={(event) => setCommandDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="field"><span>Response</span><textarea value={commandDraft.response} onChange={(event) => setCommandDraft((current) => ({ ...current, response: event.target.value }))} /></label><div className="toolbar"><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }); }, "Custom command saved. Re-register slash commands to publish it.")}><Save size={14} /> Save Command</button><button className="toolbar-button danger" disabled={!commandDraft.name.trim()} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }); }, "Custom command deleted.")}><X size={14} /> Delete</button><button className="toolbar-button bot-post-button" onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.")}><Command size={14} /> Register Slash Commands</button></div></div>
+            <div className="split-header"><div><h3><Command size={17} /> Custom Commands</h3><p className="legend">Create Discord slash commands that respond with static server information. Select an existing command to edit it, then re-register slash commands after saving.</p></div><button className="toolbar-button" onClick={() => run(refreshCustomCommands, "Custom commands loaded.")}><RefreshCw size={15} /> Refresh</button></div>
+            <div className="discord-tool-forms">
+              <div className="discord-tool-form-card">
+                <h4><Save size={15} /> Command Editor</h4>
+                <label className="field"><span>Command name</span><input value={commandDraft.name} onChange={(event) => setCommandDraft((current) => ({ ...current, name: event.target.value }))} placeholder="rules" /></label>
+                <label className="field"><span>Description</span><input value={commandDraft.description} onChange={(event) => setCommandDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+                <label className="field"><span>Response</span><textarea value={commandDraft.response} onChange={(event) => setCommandDraft((current) => ({ ...current, response: event.target.value }))} /></label>
+                <div className="toolbar">
+                  <button className="toolbar-button primary" disabled={!commandDraft.name.trim() || !commandDraft.response.trim()} onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); await refreshCustomCommands(); }, "Custom command saved. Re-register slash commands to publish it.")}><Save size={14} /> Save Command</button>
+                  <button className="toolbar-button" onClick={() => setCommandDraft({ name: "", description: "", response: "" })}><Plus size={14} /> New</button>
+                  <button className="toolbar-button danger" disabled={!commandDraft.name.trim()} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setCommandDraft({ name: "", description: "", response: "" }); await refreshCustomCommands(); }, "Custom command deleted.")}><X size={14} /> Delete</button>
+                  <button className="toolbar-button bot-post-button" onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.")}><Command size={14} /> Register Slash Commands</button>
+                </div>
+              </div>
+              <div className="discord-tool-form-card">
+                <h4><Command size={15} /> Existing Commands</h4>
+                <div className="discord-report-list command-list">{customCommands.length ? customCommands.map((command) => (
+                  <button type="button" className={`discord-report-item command-list-item ${commandDraft.name === command.name ? "active" : ""}`} key={command.name} onClick={() => setCommandDraft({ name: String(command.name ?? ""), description: String(command.description ?? ""), response: String(command.response ?? "") })}>
+                    <div className="discord-report-dot ok" />
+                    <div><strong>/{command.name}</strong><span>{command.description || command.response}</span></div>
+                    <span className="role-option-status">Edit</span>
+                  </button>
+                )) : <p className="legend">No custom commands yet.</p>}</div>
+              </div>
+            </div>
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
           {(!botOnly || botSection === "tools") ? <section className="form-card discord-channel-card bot-tools-card">

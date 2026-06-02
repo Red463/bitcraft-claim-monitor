@@ -3660,7 +3660,7 @@ function discordComponentCountFields(metadata, counts) {
     const count = byKey.get(String(option.key)) ?? 0;
     return {
       name: `${index + 1}. ${option.label}`,
-      value: `${formatNumber(count)} vote${count === 1 ? "" : "s"}`,
+      value: `${count.toLocaleString("en-GB")} vote${count === 1 ? "" : "s"}`,
       inline: true,
     };
   });

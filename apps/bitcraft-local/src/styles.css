@@ -992,6 +992,8 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-report-item { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 9px; align-items: center; border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(255,255,255,.025); padding: 9px; }
 .discord-report-item strong { color: var(--text); font-size: 13px; }
 .discord-report-item span:not(.role-option-status) { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.command-list-item { width: 100%; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.command-list-item:hover, .command-list-item.active { border-color: rgba(88,101,242,.5); background: rgba(88,101,242,.12); }
 .discord-report-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
 .discord-report-dot.ok { background: var(--good); }
 .discord-report-dot.warn { background: var(--gold); }
