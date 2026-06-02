@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.23-beta.1 - 2026-06-02
+
+### Changed
+
+- Craft Watch Discord button replies now clarify that alerts always ping the configured role and the button only toggles whether the user has that role.
+
+## 0.8.22-beta.1 - 2026-06-02
+
+### Changed
+
+- Craft Watch Discord button replies now explain that clicking Watch again removes the notification role.
+
 ## 0.8.21-beta.1 - 2026-06-02
 
 ### Changed

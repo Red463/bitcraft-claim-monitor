@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.21-beta.1";
+const appVersion = "0.8.23-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -2366,7 +2366,7 @@ async function handleDiscordComponent(interaction) {
       return discordResponse(
         removing
           ? `Stopped watching ${professionName} craft notifications. The ${professionName} notification role was removed from you.`
-          : `You are now watching ${professionName} craft notifications. Future matching craft alerts will ping the ${professionName} notification role.`,
+          : `You now have the ${professionName} notification role. Craft alerts always ping this role, so you will receive those pings while you have it. Click Watch ${professionName} again to remove the role.`,
         { ephemeral: true },
       );
     }
