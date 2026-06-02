@@ -1,9 +1,11 @@
 # Changelog
 
-## 0.8.33-beta.1 - 2026-06-02
+## 0.8.35-beta.1 - 2026-06-02
 
 ### Added
 
+- Added Discord Gateway presence support so the Timbersteel Trade bot can appear online with configurable status text.
+- Added the `/help` Discord slash command with app and feature-request links.
 - Added Discord role-panel management for citizen/member, profession, event and timezone self-assign roles with reusable post/update controls.
 - Added Discord welcome-flow controls for welcome messages, rules acknowledgement and starter-role assignment.
 - Added Discord bot tools for audit logs, inactive member checks, role cleanup, channel permission checks, announcements, pinned info updates and scheduled events.
@@ -12,6 +14,8 @@
 - Added emoji presets to Discord role-panel options so profession buttons can be configured without manually typing emoji.
 - Reworked Discord role-panel options into cleaner cards with a Discord-style preview and expandable edit controls.
 - Fixed Discord role member counts so failed member-list syncs are shown as unavailable instead of misleadingly reporting zero members.
+- Cleaned up Discord notification setting fields so dropdowns and numeric inputs have consistent full-width sizing.
+- Reworked the Discord audit log tool result into a readable activity list instead of raw JSON.
 
 ## 0.8.32-beta.1 - 2026-06-02
 

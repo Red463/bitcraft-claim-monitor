@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.33-beta.1";
+const appVersion = "0.8.35-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -689,6 +689,13 @@ const defaultWelcomeFlow = {
   readyRoleId: "",
 };
 
+const defaultDiscordPresence = {
+  enabled: true,
+  status: "online",
+  activityType: "watching",
+  activityText: "app.timbersteeltrade.com",
+};
+
 const defaultDiscordSettings = {
   enabled: false,
   applicationId: "",
@@ -710,6 +717,7 @@ const defaultDiscordSettings = {
   colourRoles: defaultColourRoles,
   rolePanels: defaultRolePanels,
   welcomeFlow: defaultWelcomeFlow,
+  presence: defaultDiscordPresence,
   notify: {
     marketListings: true,
     marketSales: true,
@@ -760,6 +768,20 @@ function normalizeDiscordWelcomeFlow(value = {}) {
   };
 }
 
+function normalizeDiscordPresence(value = {}) {
+  const status = ["online", "idle", "dnd", "invisible"].includes(String(value.status)) ? String(value.status) : defaultDiscordPresence.status;
+  const activityType = ["playing", "watching", "listening", "competing"].includes(String(value.activityType)) ? String(value.activityType) : defaultDiscordPresence.activityType;
+  const activityText = String(value.activityText ?? defaultDiscordPresence.activityText).trim().slice(0, 128) || defaultDiscordPresence.activityText;
+  return {
+    ...defaultDiscordPresence,
+    ...value,
+    enabled: value.enabled !== false,
+    status,
+    activityType,
+    activityText,
+  };
+}
+
 function normalizeDiscordSettings(value = {}) {
   const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
   const savedColourRoles = Array.isArray(value.colourRoles) ? value.colourRoles : [];
@@ -800,6 +822,7 @@ function normalizeDiscordSettings(value = {}) {
     }),
     rolePanels: rolePanelSource.map((panel, index) => normalizeDiscordRolePanel(panel, defaultRolePanels[index], index)),
     welcomeFlow: normalizeDiscordWelcomeFlow(value.welcomeFlow ?? {}),
+    presence: normalizeDiscordPresence(value.presence ?? {}),
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
@@ -2688,7 +2711,7 @@ function databaseStatus() {
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: pollStatus,
-    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog },
+    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, gateway: { ...discordGatewayStatus } },
     settings: getSettings(),
   };
 }
@@ -2811,6 +2834,7 @@ async function readJson(req) {
 }
 
 const discordCommands = [
+  { name: "help", description: "Show Timbersteel Trade bot commands and app links." },
   { name: "supplies", description: "Show settlement supplies, upkeep and runway." },
   { name: "online", description: "Show which settlement members are online." },
   {
@@ -2882,6 +2906,103 @@ function discordCommandEmbed(title, description, fields = [], color = 0xf0c64f) 
   };
 }
 
+const discordPresenceActivityTypes = { playing: 0, listening: 2, watching: 3, competing: 5 };
+let discordGatewaySocket = null;
+let discordGatewayHeartbeat = null;
+let discordGatewayReconnect = null;
+let discordGatewaySessionToken = "";
+const discordGatewayStatus = { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, lastError: null, activity: "" };
+
+function discordGatewayActivity(presence) {
+  return {
+    name: presence.activityText,
+    type: discordPresenceActivityTypes[presence.activityType] ?? 3,
+  };
+}
+
+function stopDiscordGateway() {
+  if (discordGatewayHeartbeat) clearInterval(discordGatewayHeartbeat);
+  if (discordGatewayReconnect) clearTimeout(discordGatewayReconnect);
+  discordGatewayHeartbeat = null;
+  discordGatewayReconnect = null;
+  discordGatewaySessionToken = "";
+  if (discordGatewaySocket) {
+    try { discordGatewaySocket.close(); } catch {}
+  }
+  discordGatewaySocket = null;
+  discordGatewayStatus.connected = false;
+  discordGatewayStatus.lastDisconnectedAt = new Date().toISOString();
+}
+
+function scheduleDiscordGatewayReconnect(delayMs = 15000) {
+  if (discordGatewayReconnect) clearTimeout(discordGatewayReconnect);
+  discordGatewayReconnect = setTimeout(() => {
+    discordGatewayReconnect = null;
+    startDiscordGateway();
+  }, delayMs);
+}
+
+function startDiscordGateway() {
+  const settings = getDiscordSettingsRaw();
+  const presence = normalizeDiscordPresence(settings.presence ?? {});
+  if (!settings.enabled || !settings.botToken || !presence.enabled || typeof WebSocket !== "function") {
+    stopDiscordGateway();
+    discordGatewayStatus.lastError = typeof WebSocket !== "function" ? "WebSocket is not available in this Node runtime" : null;
+    return;
+  }
+  if (discordGatewaySocket && discordGatewaySessionToken === `${settings.botToken}:${presence.status}:${presence.activityType}:${presence.activityText}`) return;
+  stopDiscordGateway();
+  discordGatewaySessionToken = `${settings.botToken}:${presence.status}:${presence.activityType}:${presence.activityText}`;
+  discordGatewayStatus.activity = `${presence.status} - ${presence.activityType} ${presence.activityText}`;
+  const socket = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
+  discordGatewaySocket = socket;
+  socket.addEventListener("message", (event) => {
+    const payload = safeJson(event.data, {});
+    if (payload.op === 10) {
+      const interval = Math.max(toNumber(payload.d?.heartbeat_interval), 10000);
+      const heartbeat = () => {
+        try { socket.send(JSON.stringify({ op: 1, d: null })); } catch {}
+      };
+      discordGatewayHeartbeat = setInterval(heartbeat, interval);
+      heartbeat();
+      socket.send(JSON.stringify({
+        op: 2,
+        d: {
+          token: settings.botToken,
+          intents: 0,
+          properties: { os: "linux", browser: "timbersteel-trade", device: "timbersteel-trade" },
+          presence: {
+            status: presence.status,
+            since: null,
+            afk: false,
+            activities: [discordGatewayActivity(presence)],
+          },
+        },
+      }));
+    }
+    if (payload.op === 9) {
+      discordGatewayStatus.lastError = "Discord gateway invalid session";
+      scheduleDiscordGatewayReconnect(5000);
+    }
+  });
+  socket.addEventListener("open", () => {
+    discordGatewayStatus.connected = true;
+    discordGatewayStatus.lastConnectedAt = new Date().toISOString();
+    discordGatewayStatus.lastError = null;
+  });
+  socket.addEventListener("close", () => {
+    if (discordGatewayHeartbeat) clearInterval(discordGatewayHeartbeat);
+    discordGatewayHeartbeat = null;
+    if (discordGatewaySocket === socket) discordGatewaySocket = null;
+    discordGatewayStatus.connected = false;
+    discordGatewayStatus.lastDisconnectedAt = new Date().toISOString();
+    if (settings.enabled && settings.botToken && presence.enabled) scheduleDiscordGatewayReconnect();
+  });
+  socket.addEventListener("error", (event) => {
+    discordGatewayStatus.lastError = event?.message ? String(event.message) : "Discord gateway connection error";
+  });
+}
+
 function discordEmbedResponse(embed, options = {}) {
   return discordResponse("", { ...options, embeds: [embed] });
 }
@@ -2914,9 +3035,22 @@ async function discordAutocomplete(interaction) {
   }
 }
 
+function discordHelpCommand() {
+  const appUrl = "https://app.timbersteeltrade.com";
+  return discordCommandEmbed("Timbersteel Trade Help", `[Open the dashboard](${appUrl}) for settlement monitoring, market analytics, public craft finding and bot settings.`, [
+    { name: "/supplies", value: "Current settlement supplies, upkeep and runway.", inline: false },
+    { name: "/online", value: "Shows which settlement members are currently online.", inline: false },
+    { name: "/crafts", value: "Lists current settlement crafts. Optional skill filter supported.", inline: false },
+    { name: "/price", value: "Looks up recent BitJita sale prices for an item.", inline: false },
+    { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
+    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
+  ], 0x5865f2);
+}
+
 async function runDiscordCommand(interaction) {
   try {
     const command = String(interaction.data?.name ?? "");
+    if (command === "help") return discordEmbedResponse(discordHelpCommand());
     if (command === "supplies") return discordEmbedResponse(await discordSuppliesCommand());
     if (command === "online") return discordEmbedResponse(await discordOnlineCommand());
     if (command === "crafts") return discordEmbedResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
@@ -3460,6 +3594,7 @@ const server = createServer(async (req, res) => {
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
       }
@@ -3625,6 +3760,7 @@ const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430)
 const host = process.env.APP_HOST ?? "127.0.0.1";
 server.listen(port, host, () => {
   console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
+  startDiscordGateway();
   setTimeout(() => {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);

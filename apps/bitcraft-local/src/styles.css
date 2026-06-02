@@ -769,7 +769,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-nav-title span { color: var(--muted); font-size: 11px; }
 .bot-nav-group { display: grid; gap: 5px; }
 .bot-nav-group p { margin: 0 0 1px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.bot-section-nav button { min-height: 46px; border: 1px solid transparent; border-radius: 7px; background: rgba(0,0,0,.08); color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
+.bot-section-nav button { min-height: 46px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
 .bot-section-nav button:hover, .bot-section-nav button.active { color: var(--text); border-color: rgba(88,101,242,.42); background: rgba(88,101,242,.13); }
 .bot-section-nav button.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 999px; background: #5865f2; }
 .bot-section-nav button.active svg { color: #5865f2; }
@@ -786,6 +786,11 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-section-setup > .form-card { width: min(100%, 1180px); justify-self: center; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .bot-section-setup > .form-card h3, .bot-section-setup > .form-card .toggle-line, .bot-section-setup > .form-card .status-detail, .bot-section-setup > .form-card .toolbar-button, .bot-section-setup > .form-card .legend { grid-column: 1 / -1; }
 .bot-section-setup > .form-card .field:first-of-type { grid-column: 1 / -1; }
+.discord-presence-card { grid-column: 1 / -1; border: 1px solid rgba(88,101,242,.24); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.1), rgba(0,0,0,.1)); padding: 10px; display: grid; gap: 9px; }
+.discord-presence-card h4 { margin: 0; color: var(--gold); font-size: 14px; }
+.discord-presence-card .legend { margin: 3px 0 0; }
+.discord-presence-card .toggle-line { min-width: 180px; background: rgba(0,0,0,.12); }
+.discord-presence-grid { display: grid; grid-template-columns: 170px 190px minmax(240px, 1fr); gap: 8px; align-items: end; }
 .bot-section-tests > details { width: min(100%, 1120px); justify-self: center; }
 .bot-section-diagnostics > .form-card { width: min(100%, 1420px); justify-self: center; }
 .bot-section-notifications > .form-card { width: min(100%, 1400px); justify-self: center; }
@@ -823,15 +828,16 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-rule-market { order: 1; }
 .discord-rule-supplies { order: 2; }
 .discord-rule-application { order: 3; }
-.discord-rule-crafts { order: 4; grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.discord-rule-crafts { order: 4; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .discord-rule-crafts h4 { grid-column: 1 / -1; }
-.discord-rule-crafts .field:last-child { grid-column: 2 / -1; }
+.discord-rule-crafts .field:last-child { grid-column: 1 / -1; }
 .discord-rule-card h4 { color: var(--gold); font-size: 15px; letter-spacing: 0; margin: -2px 0 2px; padding-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.07); }
 .discord-rule-card .field input { background: rgba(0,0,0,.16); }
 .discord-rule-card .field select { background: var(--panel); }
 .discord-rule-card .toggle-line { background: rgba(255,255,255,.025); min-height: 38px; padding: 7px 9px; }
-.discord-rule-card .field { grid-template-columns: minmax(126px, .34fr) minmax(0, .66fr); align-items: center; gap: 8px; }
-.discord-rule-card .field span { margin-bottom: 0; }
+.discord-rule-card .field { grid-template-columns: 1fr; align-items: stretch; gap: 5px; }
+.discord-rule-card .field span { margin-bottom: 0; line-height: 1.25; }
+.discord-rule-card .field input, .discord-rule-card .field select { width: 100%; min-width: 0; }
 .discord-rule-crafts .field, .discord-rule-crafts .toggle-line { min-height: 40px; }
 .discord-channel-card summary { min-height: 42px; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; justify-content: flex-start; }
 .discord-channel-card summary small { margin-left: 10px; }
@@ -893,6 +899,19 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .discord-tool-grid.forms { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
 .discord-tool-result { max-height: 420px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #050608; color: #d7e4ff; padding: 10px; font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
+.discord-audit-report { border: 1px solid rgba(147,160,186,.16); border-radius: 8px; background: rgba(0,0,0,.12); padding: 10px; display: grid; gap: 9px; }
+.discord-audit-report h4 { margin: 0; color: var(--gold); font-size: 15px; }
+.discord-audit-report .legend { margin: 3px 0 0; }
+.discord-audit-list { max-height: 460px; overflow: auto; display: grid; gap: 7px; padding-right: 3px; }
+.discord-audit-entry { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: start; border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(255,255,255,.025); padding: 9px; }
+.discord-audit-entry:hover { border-color: rgba(240,198,79,.28); background: rgba(240,198,79,.035); }
+.discord-audit-icon { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(240,198,79,.26); background: rgba(240,198,79,.08); color: var(--gold); display: inline-flex; align-items: center; justify-content: center; }
+.discord-audit-entry strong { display: block; color: var(--text); font-size: 13px; line-height: 1.2; }
+.discord-audit-entry span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; }
+.discord-audit-entry p { margin: 6px 0 0; color: #ffd98a; font-size: 11px; }
+.discord-audit-entry ul { margin: 7px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; list-style: none; }
+.discord-audit-entry li { border: 1px solid rgba(147,160,186,.18); border-radius: 999px; background: rgba(255,255,255,.035); color: var(--muted); padding: 3px 8px; font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discord-audit-entry time { color: var(--muted); font-size: 11px; white-space: nowrap; justify-self: end; }
 .bot-section-tests summary { justify-content: flex-start; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; }
 .bot-section-tests summary small { margin-left: 10px; }
 .bot-section-tests summary::after { margin-left: auto; }
@@ -972,6 +991,8 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .role-option-status { grid-column: 2; justify-self: start; }
   .role-option-actions { grid-column: 3; grid-row: 1 / 3; }
   .role-option-edit { grid-template-columns: 1fr; }
+  .discord-audit-entry { grid-template-columns: 36px minmax(0, 1fr); }
+  .discord-audit-entry time { grid-column: 2; justify-self: start; }
   .app-shell { grid-template-columns: 1fr; }
   aside { min-height: auto; position: sticky; top: 0; z-index: 2; }
   nav { grid-template-columns: repeat(3, 1fr); }
@@ -993,6 +1014,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .bot-section-setup > .form-card h3, .bot-section-setup > .form-card .toggle-line, .bot-section-setup > .form-card .status-detail, .bot-section-setup > .form-card .toolbar-button, .bot-section-setup > .form-card .legend { grid-column: auto; }
   .bot-section-setup > .form-card .field:first-of-type { grid-column: auto; }
   .bot-section-setup .status-detail { grid-template-columns: 1fr; }
+  .discord-presence-grid { grid-template-columns: 1fr; }
   .bot-layout .bot-section-notifications .status-detail { grid-template-columns: 1fr; }
   .bot-section-notifications .status-detail .info-row, .bot-section-notifications .status-detail .info-row:nth-child(2n), .bot-section-notifications .status-detail .info-row:nth-child(-n+2) { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.07); }
   .bot-section-notifications .status-detail .info-row:last-child { border-bottom: 0; }

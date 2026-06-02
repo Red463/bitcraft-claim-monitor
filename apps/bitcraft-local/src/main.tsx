@@ -82,6 +82,7 @@ type ColourRoleDefinition = { key: string; label: string; roleName: string; role
 type DiscordRoleOption = { key: string; label: string; roleId: string; emoji: string };
 type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; options: DiscordRoleOption[] };
 type DiscordWelcomeFlow = { enabled: boolean; channelId: string; messageId: string; title: string; message: string; readyRoleId: string };
+type DiscordPresence = { enabled: boolean; status: "online" | "idle" | "dnd" | "invisible"; activityType: "playing" | "watching" | "listening" | "competing"; activityText: string };
 type DiscordSettings = {
   enabled: boolean;
   applicationId: string;
@@ -103,6 +104,7 @@ type DiscordSettings = {
   colourRoles: ColourRoleDefinition[];
   rolePanels: DiscordRolePanel[];
   welcomeFlow: DiscordWelcomeFlow;
+  presence: DiscordPresence;
   notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean };
   botToken?: string;
   clearBotToken?: boolean;
@@ -299,6 +301,13 @@ const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
   readyRoleId: "",
 };
 
+const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
+  enabled: true,
+  status: "online",
+  activityType: "watching",
+  activityText: "app.timbersteeltrade.com",
+};
+
 const ROLE_EMOJI_PRESETS = [
   ["", "None/custom"],
   ["🌲", "Forestry"],
@@ -386,6 +395,19 @@ function normalizeDiscordWelcomeFlow(value: AnyRecord): DiscordWelcomeFlow {
   };
 }
 
+function normalizeDiscordPresence(value: AnyRecord = {}): DiscordPresence {
+  const status = ["online", "idle", "dnd", "invisible"].includes(String(value?.status)) ? String(value.status) as DiscordPresence["status"] : DEFAULT_DISCORD_PRESENCE.status;
+  const activityType = ["playing", "watching", "listening", "competing"].includes(String(value?.activityType)) ? String(value.activityType) as DiscordPresence["activityType"] : DEFAULT_DISCORD_PRESENCE.activityType;
+  return {
+    ...DEFAULT_DISCORD_PRESENCE,
+    ...(value ?? {}),
+    enabled: value?.enabled !== false,
+    status,
+    activityType,
+    activityText: String(value?.activityText ?? DEFAULT_DISCORD_PRESENCE.activityText).trim() || DEFAULT_DISCORD_PRESENCE.activityText,
+  };
+}
+
 const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -420,6 +442,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     colourRoles: DEFAULT_COLOUR_ROLES,
     rolePanels: DEFAULT_ROLE_PANELS,
     welcomeFlow: DEFAULT_WELCOME_FLOW,
+    presence: DEFAULT_DISCORD_PRESENCE,
     notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true },
     botTokenConfigured: false,
     botTokenSource: null,
@@ -450,6 +473,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
       colourRoles: (savedColourRoles ?? DEFAULT_COLOUR_ROLES).map((entry: AnyRecord, index: number) => normalizeColourRoleDefinition(entry, DEFAULT_COLOUR_ROLES[index])),
       rolePanels: (savedRolePanels ?? DEFAULT_ROLE_PANELS).map((entry: AnyRecord, index: number) => normalizeDiscordRolePanel(entry, DEFAULT_ROLE_PANELS[index])),
       welcomeFlow: normalizeDiscordWelcomeFlow((config as AnyRecord)?.discord?.welcomeFlow ?? {}),
+      presence: normalizeDiscordPresence((config as AnyRecord)?.discord?.presence ?? {}),
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
       productionMinAgeMinutes: toNumber((config as AnyRecord)?.discord?.productionMinAgeMinutes ?? (config as AnyRecord)?.discord?.productionMinAgeMins ?? DEFAULT_SETTINGS.discord.productionMinAgeMinutes),
     },
@@ -4060,6 +4084,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     setDraft((current) => ({ ...current, discord: { ...current.discord, notify: { ...current.discord.notify, [key]: value } } }));
   }
 
+  function updateDiscordPresence(value: Partial<DiscordPresence>) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, presence: { ...current.discord.presence, ...value } } }));
+  }
+
   function updateDiscordChannel(key: string, value: string) {
     setDraft((current) => ({
       ...current,
@@ -4246,7 +4274,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const channelSelect = (key: string, value: string, allowProfession = false) => (
     <select value={value} onChange={(event) => updateNotificationChannel(key, event.target.value)}>
       {allowProfession ? <option value="profession">Profession channel</option> : null}
-      {channelOptions.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}{entry.id ? ` (${entry.id})` : ""}</option>)}
+      {channelOptions.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
     </select>
   );
   const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
@@ -4280,6 +4308,118 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
       : discordDelivery.status === "skipped"
         ? `Skipped ${dateLabel(discordDelivery.at)}: ${discordDelivery.reason ?? "Not enabled"}`
         : "No Discord deliveries recorded";
+
+  function discordSnowflakeDate(id: unknown) {
+    try {
+      const raw = String(id ?? "");
+      if (!/^\d+$/.test(raw)) return null;
+      return new Date(Number((BigInt(raw) >> 22n) + 1420070400000n));
+    } catch {
+      return null;
+    }
+  }
+
+  function discordAuditActionLabel(actionType: unknown) {
+    const labels: Record<string, string> = {
+      "1": "Guild updated",
+      "10": "Channel created",
+      "11": "Channel updated",
+      "12": "Channel deleted",
+      "13": "Channel permissions created",
+      "14": "Channel permissions updated",
+      "15": "Channel permissions deleted",
+      "20": "Member removed",
+      "21": "Member pruned",
+      "22": "Member banned",
+      "23": "Member unbanned",
+      "24": "Member updated",
+      "25": "Member roles updated",
+      "26": "Member moved",
+      "27": "Member disconnected",
+      "28": "Bot added",
+      "30": "Role created",
+      "31": "Role updated",
+      "32": "Role deleted",
+      "40": "Invite created",
+      "41": "Invite updated",
+      "42": "Invite deleted",
+      "50": "Webhook created",
+      "51": "Webhook updated",
+      "52": "Webhook deleted",
+      "60": "Emoji created",
+      "61": "Emoji updated",
+      "62": "Emoji deleted",
+      "72": "Message deleted",
+      "73": "Messages bulk deleted",
+      "74": "Message pinned",
+      "75": "Message unpinned",
+      "80": "Integration created",
+      "81": "Integration updated",
+      "82": "Integration deleted",
+      "90": "Stage instance created",
+      "91": "Stage instance updated",
+      "92": "Stage instance deleted",
+      "110": "Thread created",
+      "111": "Thread updated",
+      "112": "Thread deleted",
+      "121": "AutoMod rule created",
+      "122": "AutoMod rule updated",
+      "123": "AutoMod rule deleted",
+    };
+    const key = String(actionType ?? "");
+    return labels[key] ?? `Action ${key || "unknown"}`;
+  }
+
+  function discordAuditUserLabel(users: AnyRecord[], id: unknown) {
+    const user = users.find((entry) => String(entry.id) === String(id));
+    return String(user?.global_name ?? user?.username ?? id ?? "Unknown user");
+  }
+
+  function discordChangeLabel(change: AnyRecord) {
+    const key = String(change.key ?? "change").replaceAll("_", " ");
+    const next = change.new_value;
+    const previous = change.old_value;
+    const format = (value: unknown) => {
+      if (value === undefined) return "";
+      if (Array.isArray(value)) return `${formatNumber(value.length)} item${value.length === 1 ? "" : "s"}`;
+      if (typeof value === "object" && value !== null) return JSON.stringify(value);
+      return String(value);
+    };
+    if (next !== undefined && previous !== undefined) return `${key}: ${format(previous)} -> ${format(next)}`;
+    if (next !== undefined) return `${key}: ${format(next)}`;
+    if (previous !== undefined) return `${key}: removed ${format(previous)}`;
+    return key;
+  }
+
+  function renderDiscordToolResult(result: AnyRecord) {
+    if (Array.isArray(result.entries) && Array.isArray(result.users)) {
+      return <div className="discord-audit-report">
+        <div className="split-header">
+          <div>
+            <h4>Audit Log</h4>
+            <p className="legend">Latest Discord server actions returned by the bot.</p>
+          </div>
+          <span className="role-option-status ok">{formatNumber(result.entries.length)} entries</span>
+        </div>
+        {!result.entries.length ? <div className="empty-state"><FileText />No audit entries returned.</div> : null}
+        <div className="discord-audit-list">{result.entries.map((entry: AnyRecord) => {
+          const occurredAt = discordSnowflakeDate(entry.id);
+          const changes = Array.isArray(entry.changes) ? entry.changes : [];
+          return <article className="discord-audit-entry" key={entry.id}>
+            <div className="discord-audit-icon"><FileText size={16} /></div>
+            <div>
+              <strong>{discordAuditActionLabel(entry.actionType)}</strong>
+              <span>{discordAuditUserLabel(result.users, entry.userId)}{entry.targetId ? ` -> ${entry.targetId}` : ""}</span>
+              {entry.reason ? <p>Reason: {entry.reason}</p> : null}
+              {changes.length ? <ul>{changes.slice(0, 5).map((change: AnyRecord, index: number) => <li key={`${entry.id}-${index}`}>{discordChangeLabel(change)}</li>)}</ul> : null}
+            </div>
+            <time>{occurredAt ? dateLabel(occurredAt.toISOString()) : entry.id}</time>
+          </article>;
+        })}</div>
+      </div>;
+    }
+    return <pre className="discord-tool-result">{JSON.stringify(result, null, 2)}</pre>;
+  }
   return (
     <div className={`panel admin-console ${botOnly ? "bot-console" : ""}`}>
       <div className="split-header">
@@ -4422,6 +4562,25 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <label className="field"><span>Application ID</span><input value={draft.discord.applicationId} onChange={(event) => updateDiscord({ applicationId: event.target.value })} /></label>
             <label className="field"><span>Public Key</span><input value={draft.discord.publicKey} onChange={(event) => updateDiscord({ publicKey: event.target.value })} /></label>
             <label className="field"><span>Server/Guild ID</span><input value={draft.discord.guildId} onChange={(event) => updateDiscord({ guildId: event.target.value })} placeholder="Recommended for instant slash command updates" /></label>
+            <div className="discord-presence-card">
+              <div className="split-header">
+                <div>
+                  <h4>Bot Presence</h4>
+                  <p className="legend">Keeps the bot online in Discord and displays the status text under its username.</p>
+                </div>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.presence.enabled} onChange={(event) => updateDiscordPresence({ enabled: event.target.checked })} /><span>Show online</span></label>
+              </div>
+              <div className="discord-presence-grid">
+                <label className="field"><span>Status</span><select value={draft.discord.presence.status} onChange={(event) => updateDiscordPresence({ status: event.target.value as DiscordPresence["status"] })}><option value="online">Online</option><option value="idle">Idle</option><option value="dnd">Do not disturb</option><option value="invisible">Invisible</option></select></label>
+                <label className="field"><span>Activity</span><select value={draft.discord.presence.activityType} onChange={(event) => updateDiscordPresence({ activityType: event.target.value as DiscordPresence["activityType"] })}><option value="watching">Watching</option><option value="playing">Playing</option><option value="listening">Listening to</option><option value="competing">Competing in</option></select></label>
+                <label className="field"><span>Text</span><input value={draft.discord.presence.activityText} onChange={(event) => updateDiscordPresence({ activityText: event.target.value })} placeholder="app.timbersteeltrade.com" /></label>
+              </div>
+              <div className="status-detail">
+                <Info label="Gateway" value={status?.discord?.gateway?.connected ? "Connected" : "Not connected"} />
+                <Info label="Presence" value={status?.discord?.gateway?.activity || `${draft.discord.presence.status} - ${draft.discord.presence.activityType} ${draft.discord.presence.activityText}`} />
+                <Info label="Gateway error" value={status?.discord?.gateway?.lastError ?? "None"} />
+              </div>
+            </div>
             <div className="status-detail">
               <Info label="Discovered server" value={discordDiscovery?.guild?.name ? `${discordDiscovery.guild.name} (${discordDiscovery.guild.id})` : "Not synced yet"} />
               <Info label="Discovered bot" value={discordDiscovery?.bot?.username ? `${discordDiscovery.bot.username} (${discordDiscovery.bot.id})` : "Not synced yet"} />
@@ -4600,7 +4759,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/scheduled-event", { method: "POST", body: JSON.stringify(eventDraft) }); }, "Discord event created.")}><Bell size={14} /> Create Event</button>
               </div>
             </div>
-            {discordToolResult ? <pre className="discord-tool-result">{JSON.stringify(discordToolResult, null, 2)}</pre> : null}
+            {discordToolResult ? renderDiscordToolResult(discordToolResult) : null}
           </section> : null}
           {(!botOnly || botSection === "notifications") ? <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
@@ -4641,7 +4800,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             </div>
             <div className="status-detail">
               <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
-              <Info label="Slash commands" value="/supplies, /online, /crafts, /price, /craftwatch" />
+              <Info label="Slash commands" value="/help, /supplies, /online, /crafts, /price, /craftwatch" />
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
               <Info label="Last Discord delivery" value={discordDeliveryLabel} />
             </div>
