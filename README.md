@@ -214,8 +214,12 @@ Available commands:
 - `/online` shows online settlement members.
 - `/crafts` lists active settlement crafts, optionally filtered by skill text.
 - `/price` looks up recent BitJita sale pricing for an item, defaulting to the monitored settlement region.
+- `/craftwatch list` shows your personal craft profession watches and mutes.
+- `/craftwatch clear` removes your craft watch settings.
 
 Discord setup is managed in **Admin > Discord**. The bot token is stored in the protected `app_secrets` table or can be supplied with `DISCORD_BOT_TOKEN`; it is not returned through the settings API or shown in the admin table browser.
+
+Craft notifications include **Watch profession** and **Mute profession** buttons. Watching a profession makes future matching craft alerts mention that Discord user; muting suppresses those personal watch mentions.
 
 #### Discord Bot Terms
 

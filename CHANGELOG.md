@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.17-beta.1 - 2026-06-02
+
+### Added
+
+- Added Discord craft-watch buttons to craft notifications so users can watch or mute profession alerts.
+- Added `/craftwatch list` and `/craftwatch clear` slash commands for personal craft watch management.
+
 ## 0.8.16-beta.1 - 2026-06-02
 
 ### Added
