@@ -760,7 +760,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-overview strong { grid-column: 2; color: var(--text); font: 700 18px Rajdhani, sans-serif; line-height: 1; }
 .bot-overview span { grid-column: 2; color: var(--muted); font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
 .bot-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: start; }
-.bot-section-nav { min-height: 0; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)); padding: 6px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; box-shadow: 0 14px 28px rgba(0,0,0,.16); }
+.bot-section-nav { min-height: 0; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)); padding: 6px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; box-shadow: 0 14px 28px rgba(0,0,0,.16); }
 .bot-section-nav button { min-height: 46px; border: 1px solid transparent; border-radius: 7px; background: rgba(0,0,0,.08); color: var(--muted); padding: 7px 9px; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
 .bot-section-nav button:hover, .bot-section-nav button.active { color: var(--text); border-color: rgba(88,101,242,.42); background: rgba(88,101,242,.13); }
 .bot-section-nav button.active::before { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 999px; background: #5865f2; }
@@ -782,6 +782,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-section-diagnostics > .form-card { width: min(100%, 1420px); justify-self: center; }
 .bot-section-notifications > .form-card { width: min(100%, 1400px); justify-self: center; }
 .bot-section-channels > details, .bot-section-roles > details { width: min(100%, 1360px); justify-self: center; }
+.bot-section-colours > .form-card { width: min(100%, 1180px); justify-self: center; }
 .discord-admin .form-card { padding: 12px; gap: 10px; }
 .discord-admin .form-card h3 { font-size: 16px; }
 .discord-admin .field { gap: 4px; }
@@ -832,6 +833,22 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-section-roles .craft-channel-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .bot-section-roles .craft-channel-grid .field select { font-size: 12px; }
 .bot-section-roles .craft-channel-grid .field small { font-size: 10px; line-height: 1.25; }
+.bot-colour-card .split-header { align-items: center; }
+.colour-channel-field { width: min(100%, 520px); border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(0,0,0,.1); padding: 9px; }
+.colour-role-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.colour-role-editor { border: 1px solid rgba(255,255,255,.08); border-radius: 9px; background: rgba(0,0,0,.12); padding: 10px; display: grid; gap: 9px; min-width: 0; }
+.colour-role-editor .field { min-height: 0; border: 0; background: transparent; padding: 0; align-content: start; }
+.colour-role-editor .field span { font-size: 11px; }
+.colour-role-editor .field input[type="text"], .colour-role-editor .field input:not([type]) { min-height: 36px; }
+.colour-role-sample { min-height: 56px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 9px; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 2px 8px; align-items: center; }
+.colour-role-sample strong { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.colour-role-sample small { grid-column: 2; color: var(--muted); font-size: 10px; line-height: 1.25; overflow-wrap: anywhere; }
+.colour-picker-field { grid-template-columns: minmax(0, 1fr) 44px auto; align-items: center; }
+.colour-picker-field span { grid-column: 1 / -1; }
+.colour-picker-field input[type="color"] { width: 44px; height: 36px; padding: 2px; border-radius: 8px; cursor: pointer; }
+.colour-picker-field code { color: var(--muted); font-size: 11px; }
+.toolbar-button.danger { border-color: rgba(239,100,97,.45); color: #ffd2d1; background: rgba(239,100,97,.08); }
+.toolbar-button.danger:hover { border-color: rgba(239,100,97,.75); background: rgba(239,100,97,.14); }
 .bot-section-tests summary { justify-content: flex-start; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; }
 .bot-section-tests summary small { margin-left: 10px; }
 .bot-section-tests summary::after { margin-left: auto; }
@@ -888,6 +905,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .bot-layout .discord-rule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .craft-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bot-section-roles .craft-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .colour-role-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-rule-application { grid-column: 1 / -1; }
   .discord-rule-crafts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -921,6 +939,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .bot-layout .discord-rule-grid { grid-template-columns: 1fr; }
   .craft-channel-grid { grid-template-columns: 1fr; }
   .bot-section-roles .craft-channel-grid { grid-template-columns: 1fr; }
+  .colour-role-grid { grid-template-columns: 1fr; }
   .discord-test-grid { grid-template-columns: 1fr; }
   .discord-rule-crafts { grid-column: auto; grid-template-columns: 1fr; }
   .discord-rule-application { grid-column: auto; }

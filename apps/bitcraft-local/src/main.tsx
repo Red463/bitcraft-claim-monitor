@@ -78,6 +78,7 @@ type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: st
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
+type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };
 type DiscordSettings = {
   enabled: boolean;
   applicationId: string;
@@ -94,6 +95,8 @@ type DiscordSettings = {
   notificationChannels: Record<string, string>;
   craftChannels: Record<string, string>;
   craftRoles: Record<string, string>;
+  colourRolesChannelId: string;
+  colourRoles: ColourRoleDefinition[];
   notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean };
   botToken?: string;
   clearBotToken?: boolean;
@@ -194,6 +197,45 @@ const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
   productionCompleted: "profession",
 };
 
+const DEFAULT_COLOUR_ROLES = [
+  { key: "green1", label: "Green 1", roleName: "Green 1", roleId: "", color: 0x2be56f },
+  { key: "green2", label: "Green 2", roleName: "Green 2", roleId: "", color: 0x1fb72e },
+  { key: "blue1", label: "Blue 1", roleName: "Blue 1", roleId: "", color: 0x5fa8ff },
+  { key: "blue2", label: "Blue 2", roleName: "Blue 2", roleId: "", color: 0x244cff },
+  { key: "purple", label: "Purple", roleName: "Purple", roleId: "", color: 0x9b4acb },
+  { key: "pink", label: "Pink", roleName: "Pink", roleId: "", color: 0xff4f88 },
+  { key: "red", label: "Red", roleName: "Red", roleId: "", color: 0xff2028 },
+  { key: "yellow", label: "Yellow", roleName: "Yellow", roleId: "", color: 0xf4c430 },
+  { key: "orange", label: "Orange", roleName: "Orange", roleId: "", color: 0xff9f1c },
+  { key: "black", label: "Black", roleName: "Black", roleId: "", color: 0x111111 },
+  { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
+];
+
+function uniqueKey(prefix = "colour"): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function discordColorToHex(value: number): string {
+  return `#${Math.max(0, Math.min(0xffffff, Math.round(toNumber(value)))).toString(16).padStart(6, "0")}`;
+}
+
+function hexToDiscordColor(value: string): number {
+  const cleaned = String(value ?? "").replace(/[^0-9a-f]/gi, "").slice(0, 6);
+  return cleaned ? parseInt(cleaned.padEnd(6, "0"), 16) : 0xf4c430;
+}
+
+function normalizeColourRoleDefinition(value: AnyRecord, fallback?: ColourRoleDefinition): ColourRoleDefinition {
+  const label = String(value?.label ?? fallback?.label ?? "New Colour").trim() || "New Colour";
+  const savedRoleName = String(value?.roleName ?? "").trim();
+  return {
+    key: String(value?.key ?? fallback?.key ?? uniqueKey()).trim() || uniqueKey(),
+    label,
+    roleName: savedRoleName || fallback?.roleName || label,
+    roleId: String(value?.roleId ?? fallback?.roleId ?? "").trim(),
+    color: Math.max(toNumber(value?.color ?? fallback?.color ?? 0xf4c430), 0),
+  };
+}
+
 const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -223,6 +265,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     notificationChannels: DEFAULT_NOTIFICATION_CHANNELS,
     craftChannels: DEFAULT_CRAFT_CHANNELS,
     craftRoles: DEFAULT_CRAFT_ROLES,
+    colourRolesChannelId: "",
+    colourRoles: DEFAULT_COLOUR_ROLES,
     notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true },
     botTokenConfigured: false,
     botTokenSource: null,
@@ -233,6 +277,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true };
 
 function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
+  const savedColourRoles = Array.isArray((config as AnyRecord)?.discord?.colourRoles) ? (config as AnyRecord).discord.colourRoles : null;
   return {
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
@@ -246,6 +291,8 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
       notificationChannels: { ...DEFAULT_NOTIFICATION_CHANNELS, ...((config as AnyRecord)?.discord?.notificationChannels ?? {}) },
       craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       craftRoles: { ...DEFAULT_CRAFT_ROLES, ...((config as AnyRecord)?.discord?.craftRoles ?? {}) },
+      colourRolesChannelId: String((config as AnyRecord)?.discord?.colourRolesChannelId ?? ""),
+      colourRoles: (savedColourRoles ?? DEFAULT_COLOUR_ROLES).map((entry: AnyRecord, index: number) => normalizeColourRoleDefinition(entry, DEFAULT_COLOUR_ROLES[index])),
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
       productionMinAgeMinutes: toNumber((config as AnyRecord)?.discord?.productionMinAgeMinutes ?? (config as AnyRecord)?.discord?.productionMinAgeMins ?? DEFAULT_SETTINGS.discord.productionMinAgeMinutes),
     },
@@ -3657,7 +3704,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
 }
 
 type AdminTab = "status" | "analytics" | "configuration" | "discord" | "theme" | "database" | "users" | "audit" | "backups";
-type BotSection = "setup" | "notifications" | "channels" | "roles" | "tests" | "diagnostics";
+type BotSection = "setup" | "notifications" | "channels" | "roles" | "colours" | "tests" | "diagnostics";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -3828,6 +3875,38 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   function updateDiscordRole(key: string, value: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, craftRoles: { ...current.discord.craftRoles, [key]: value } } }));
   }
+  function updateDiscordColourRole(key: string, patch: Partial<ColourRoleDefinition>) {
+    setDraft((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        colourRoles: current.discord.colourRoles.map((entry) => entry.key === key ? { ...entry, ...patch } : entry),
+      },
+    }));
+  }
+
+  function addDiscordColourRole() {
+    const label = `Colour ${draft.discord.colourRoles.length + 1}`;
+    setDraft((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        colourRoles: [...current.discord.colourRoles, { key: uniqueKey(), label, roleName: label, roleId: "", color: 0xf4c430 }],
+      },
+    }));
+  }
+
+  function removeDiscordColourRole(key: string) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, colourRoles: current.discord.colourRoles.filter((entry) => entry.key !== key) } }));
+  }
+
+  async function syncDiscordColourRoles() {
+    const result = await api("/admin/discord/colour-roles/manage", { method: "POST", body: JSON.stringify({ colourRoles: draft.discord.colourRoles, colourRolesChannelId: draft.discord.colourRolesChannelId }) });
+    const next = normalizeAppSettings(result.settings);
+    setDraft(next);
+    onSettingsSaved(next);
+    await refreshDiscordDiscovery();
+  }
 
   function updateNotificationChannel(key: string, value: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, notificationChannels: { ...current.discord.notificationChannels, [key]: value } } }));
@@ -3879,6 +3958,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     ["notifications", "Notifications", <Bell size={15} />, "Market, craft, supply and update rules"],
     ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing"],
     ["roles", "Roles", <Users size={15} />, "Craft watch role IDs"],
+    ["colours", "Colours", <Palette size={15} />, "One-click name colour roles"],
     ["tests", "Tests", <Command size={15} />, "Slash command registration and previews"],
     ["diagnostics", "Diagnostics", <Activity size={15} />, "Delivery log and troubleshooting"],
   ];
@@ -4097,6 +4177,33 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               </div>
             ) : null}
           </details> : null}
+          {(!botOnly || botSection === "colours") ? <section className="form-card discord-channel-card bot-colour-card">
+            <div className="split-header">
+              <h3><Palette size={17} /> Colour Roles</h3>
+              <div className="toolbar">
+                <button className="toolbar-button" onClick={addDiscordColourRole}><Palette size={15} /> Add Colour</button>
+                <button className="toolbar-button" onClick={() => run(syncDiscordColourRoles, "Colour roles created and synced.")}><RefreshCw size={15} /> Create/Sync Roles</button>
+                <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/colour-roles/post", { method: "POST", body: "{}" }); }, "Colour role selector posted.")}><MessageCircle size={15} /> Post Selector</button>
+              </div>
+            </div>
+            <p className="legend">Define the name colours the bot should own. Create/sync will create missing Discord roles, update names and colours, remove deleted managed roles, and keep them below Mosswick where Discord allows it.</p>
+            <label className="field colour-channel-field"><span>Selector channel</span>{channelIdSelect(draft.discord.colourRolesChannelId, (value) => updateDiscord({ colourRolesChannelId: value }))}</label>
+            <div className="colour-role-grid">{draft.discord.colourRoles.map((entry) => {
+              const role = discoveredRoles.find((item) => String(item.id) === String(entry.roleId));
+              const hex = discordColorToHex(entry.color);
+              return <div className="colour-role-editor" key={entry.key}>
+                <div className="colour-role-sample" style={{ borderColor: hex, background: `${hex}22` }}>
+                  <span className="role-swatch" style={{ backgroundColor: hex }} />
+                  <strong>{entry.label}</strong>
+                  <small>{entry.roleId ? role ? `${formatNumber(role.memberCount)} members | ${role.botCanManage ? "Bot can manage" : role.manageabilityReason ?? "Not manageable"}` : `Synced role ${entry.roleId}` : "Not synced yet"}</small>
+                </div>
+                <label className="field"><span>Name</span><input value={entry.label} onChange={(event) => updateDiscordColourRole(entry.key, { label: event.target.value, roleName: event.target.value })} /></label>
+                <label className="field colour-picker-field"><span>Colour</span><input type="color" value={hex} onChange={(event) => updateDiscordColourRole(entry.key, { color: hexToDiscordColor(event.target.value) })} /><code>{hex}</code></label>
+                <button className="toolbar-button danger" onClick={() => removeDiscordColourRole(entry.key)}><X size={15} /> Delete</button>
+              </div>;
+            })}</div>
+            {!draft.discord.colourRoles.length ? <div className="error">No colour roles configured. Add a colour, then create/sync roles.</div> : null}
+          </section> : null}
           {(!botOnly || botSection === "notifications") ? <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
             <div className="discord-rule-grid">

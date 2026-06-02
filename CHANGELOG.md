@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.31-beta.1 - 2026-06-02
+
+### Added
+
+- Added Discord colour-role management with a dedicated bot dashboard tab, editable bot-created colour roles, selector-channel configuration and a button message that enforces one colour role per user.
+
 ## 0.8.30-beta.1 - 2026-06-02
 
 ### Changed

@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.30-beta.1";
+const appVersion = "0.8.31-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -633,6 +633,20 @@ const defaultNotificationChannels = {
   productionCompleted: "profession",
 };
 
+const defaultColourRoles = [
+  { key: "green1", label: "Green 1", roleName: "Green 1", roleId: "", color: 0x2be56f },
+  { key: "green2", label: "Green 2", roleName: "Green 2", roleId: "", color: 0x1fb72e },
+  { key: "blue1", label: "Blue 1", roleName: "Blue 1", roleId: "", color: 0x5fa8ff },
+  { key: "blue2", label: "Blue 2", roleName: "Blue 2", roleId: "", color: 0x244cff },
+  { key: "purple", label: "Purple", roleName: "Purple", roleId: "", color: 0x9b4acb },
+  { key: "pink", label: "Pink", roleName: "Pink", roleId: "", color: 0xff4f88 },
+  { key: "red", label: "Red", roleName: "Red", roleId: "", color: 0xff2028 },
+  { key: "yellow", label: "Yellow", roleName: "Yellow", roleId: "", color: 0xf4c430 },
+  { key: "orange", label: "Orange", roleName: "Orange", roleId: "", color: 0xff9f1c },
+  { key: "black", label: "Black", roleName: "Black", roleId: "", color: 0x111111 },
+  { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
+];
+
 const defaultDiscordSettings = {
   enabled: false,
   applicationId: "",
@@ -649,6 +663,8 @@ const defaultDiscordSettings = {
   notificationChannels: defaultNotificationChannels,
   craftChannels: defaultCraftChannels,
   craftRoles: defaultCraftRoles,
+  colourRolesChannelId: "",
+  colourRoles: defaultColourRoles,
   notify: {
     marketListings: true,
     marketSales: true,
@@ -663,6 +679,8 @@ const defaultDiscordSettings = {
 
 function normalizeDiscordSettings(value = {}) {
   const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
+  const savedColourRoles = Array.isArray(value.colourRoles) ? value.colourRoles : [];
+  const colourRoleSource = Array.isArray(value.colourRoles) ? savedColourRoles : defaultColourRoles;
   return {
     ...defaultDiscordSettings,
     ...value,
@@ -681,6 +699,20 @@ function normalizeDiscordSettings(value = {}) {
     notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
     craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
     craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
+    colourRolesChannelId: String(value.colourRolesChannelId ?? "").trim(),
+    colourRoles: colourRoleSource.map((item, index) => {
+      const entry = defaultColourRoles[index] ?? {};
+      const saved = item ?? {};
+      const savedRoleName = String(saved.roleName ?? "");
+      const label = String(saved.label ?? entry.label ?? "New Colour").trim() || "New Colour";
+      return {
+        key: String(saved.key ?? entry.key ?? `colour-${index + 1}`).trim() || `colour-${index + 1}`,
+        label,
+        roleName: savedRoleName.trim() || String(entry.roleName ?? label),
+        roleId: String(saved.roleId ?? "").trim(),
+        color: Math.max(toNumber(saved.color ?? entry.color), 0),
+      };
+    }),
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
@@ -1324,6 +1356,44 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   return response.json();
 }
 
+async function resolvedColourRoles(settings = getDiscordSettingsRaw()) {
+  const configured = Array.isArray(settings.colourRoles) ? settings.colourRoles : [];
+  if (!configured.length) return [];
+  return configured
+    .map((entry) => {
+      const roleId = String(entry.roleId || "").trim();
+      return { key: String(entry.key ?? ""), label: String(entry.label ?? entry.roleName ?? ""), roleName: String(entry.roleName ?? entry.label ?? ""), roleId };
+    })
+    .filter((entry) => entry.key && entry.label && entry.roleId);
+}
+
+async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
+  const channelId = String(settings.colourRolesChannelId || settings.channels?.notifications || settings.channelId || "").trim();
+  if (!channelId) throw new Error("Choose a colour-role channel before posting the selector.");
+  const roles = await resolvedColourRoles(settings);
+  if (!roles.length) throw new Error("No colour roles are ready yet. Create/sync colour roles before posting the selector.");
+  const components = [];
+  for (let index = 0; index < roles.length; index += 5) {
+    components.push({
+      type: 1,
+      components: roles.slice(index, index + 5).map((role) => ({
+        type: 2,
+        style: 2,
+        custom_id: `colourrole:select:${role.key}:${role.roleId}`,
+        label: role.label.slice(0, 80),
+      })),
+    });
+  }
+  const response = await sendDiscordMessage({
+    embeds: [discordCommandEmbed("Choose Your Colour", "Pick one name colour below. Selecting a new colour automatically removes your previous colour role.", [
+      { name: "Available colours", value: roles.map((role) => role.label).join(", "), inline: false },
+    ], 0xf0c64f)],
+    components,
+  }, settings, channelId);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "colour_role_selector", summary: "Posted colour role selector", channelId, channelKey: "colourRoles", metadata: { roles } });
+  return response;
+}
+
 async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
   const response = await fetch(`https://discord.com/api/v10${pathname}`, {
@@ -1337,6 +1407,77 @@ async function discordApiRequest(pathname, options = {}, settings = getDiscordSe
   if (response.status === 204) return null;
   const text = await response.text();
   return text ? JSON.parse(text) : null;
+}
+
+async function createDiscordRole(guildId, role, settings = getDiscordSettingsRaw()) {
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: role.roleName, color: toNumber(role.color), hoist: false, mentionable: false }),
+  }, settings);
+}
+
+async function updateDiscordRoleDefinition(guildId, roleId, role, settings = getDiscordSettingsRaw()) {
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles/${encodeURIComponent(roleId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: role.roleName, color: toNumber(role.color), hoist: false, mentionable: false }),
+  }, settings);
+}
+
+async function deleteDiscordRoleDefinition(guildId, roleId, settings = getDiscordSettingsRaw()) {
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles/${encodeURIComponent(roleId)}`, { method: "DELETE" }, settings);
+}
+
+async function moveDiscordRolesBelow(guildId, roles, anchorPosition, settings = getDiscordSettingsRaw()) {
+  if (!roles.length || !anchorPosition) return null;
+  const positions = roles.map((role, index) => ({ id: role.roleId, position: Math.max(anchorPosition - 1 - index, 1) }));
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(positions),
+  }, settings);
+}
+
+async function manageDiscordColourRoles(settings = getDiscordSettingsRaw()) {
+  settings = normalizeDiscordSettings(settings);
+  if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  const guildId = String(settings.guildId);
+  const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
+  const discovery = await discordGuildDiscovery(settings);
+  const rolesById = new Map((discovery.roles ?? []).map((role) => [String(role.id), role]));
+  const mosswickRole = (discovery.roles ?? []).find((role) => String(role.name ?? "").toLowerCase() === "mosswick");
+  const targetKeys = new Set((settings.colourRoles ?? []).map((role) => String(role.key)));
+  const targetRoleIds = new Set((settings.colourRoles ?? []).map((role) => String(role.roleId ?? "")).filter(Boolean));
+  for (const stale of stored.colourRoles ?? []) {
+    const staleRoleId = String(stale.roleId ?? "").trim();
+    if (!staleRoleId || targetKeys.has(String(stale.key)) || targetRoleIds.has(staleRoleId) || !rolesById.has(staleRoleId)) continue;
+    await deleteDiscordRoleDefinition(guildId, staleRoleId, settings).catch((error) => {
+      console.warn(`Discord colour role delete failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+  const managed = [];
+  for (const role of settings.colourRoles ?? []) {
+    const configured = { ...role, roleName: String(role.roleName || role.label), label: String(role.label || role.roleName), color: toNumber(role.color) };
+    const existing = rolesById.get(String(configured.roleId ?? ""));
+    const result = existing
+      ? await updateDiscordRoleDefinition(guildId, existing.id, configured, settings)
+      : await createDiscordRole(guildId, configured, settings);
+    managed.push({ ...configured, roleId: String(result?.id ?? existing?.id ?? configured.roleId), action: existing ? "updated" : "created" });
+  }
+  if (mosswickRole) await moveDiscordRolesBelow(guildId, managed, toNumber(mosswickRole.position), settings).catch((error) => {
+    console.warn(`Discord colour role positioning failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  const next = normalizeDiscordSettings({ ...stored, ...settings, colourRoles: managed.map(({ action, ...role }) => role) });
+  statements.upsertSetting.run("discord_json", JSON.stringify(next), new Date().toISOString());
+  recordDiscordDeliverySafe({
+    status: "sent",
+    eventType: "colour_role_manage",
+    summary: `Managed ${managed.length.toLocaleString()} colour roles`,
+    metadata: { roles: managed, anchorRole: mosswickRole ? { id: mosswickRole.id, name: mosswickRole.name, position: mosswickRole.position } : null },
+  });
+  return { roles: managed, anchorRole: mosswickRole ?? null };
 }
 
 async function addDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
@@ -2439,6 +2580,7 @@ async function runDiscordCommand(interaction) {
 async function handleDiscordComponent(interaction) {
   try {
     const customId = String(interaction.data?.custom_id ?? "");
+    if (customId.startsWith("colourrole:")) return await handleDiscordColourRoleComponent(interaction);
     if (!customId.startsWith("craftwatch:")) return discordResponse("Unknown button.", { ephemeral: true });
     const [, action, professionKeyRaw, professionNameRaw = ""] = customId.split(":");
     const professionKey = normalizeProfessionKey(professionKeyRaw);
@@ -2481,6 +2623,39 @@ async function handleDiscordComponent(interaction) {
       metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id },
     });
     return discordResponse(`Craft watch role update failed: ${message}`, { ephemeral: true });
+  }
+}
+
+async function handleDiscordColourRoleComponent(interaction) {
+  const customId = String(interaction.data?.custom_id ?? "");
+  try {
+    const [, action, colourKey, roleIdRaw = ""] = customId.split(":");
+    const settings = getDiscordSettingsRaw();
+    const guildId = String(interaction.guild_id ?? "");
+    const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
+    if (action !== "select") return discordResponse("Unknown colour action.", { ephemeral: true });
+    if (!guildId || !userId) return discordResponse("Colour roles can only be changed inside the Discord server.", { ephemeral: true });
+    if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+    const roles = await resolvedColourRoles(settings);
+    const selected = roles.find((role) => role.key === colourKey && role.roleId === roleIdRaw) ?? roles.find((role) => role.roleId === roleIdRaw);
+    if (!selected) return discordResponse("That colour role is no longer configured. Ask an admin to repost the selector.", { ephemeral: true });
+    const colourRoleIds = new Set(roles.map((role) => role.roleId));
+    const memberRoles = new Set(Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : []);
+    for (const roleId of colourRoleIds) {
+      if (roleId !== selected.roleId && memberRoles.has(roleId)) await removeDiscordMemberRole(guildId, userId, roleId, settings);
+    }
+    if (!memberRoles.has(selected.roleId)) await addDiscordMemberRole(guildId, userId, selected.roleId, settings);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "colour_role",
+      summary: `Set colour role to ${selected.label}`,
+      metadata: { guildId, userId, colourKey: selected.key, roleId: selected.roleId, removedRoleIds: [...colourRoleIds].filter((roleId) => roleId !== selected.roleId && memberRoles.has(roleId)) },
+    });
+    return discordResponse(`Your name colour is now ${selected.label}. Any previous colour role was removed.`, { ephemeral: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({ status: "failed", eventType: "colour_role", summary: "Colour role update failed", error: message, metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id } });
+    return discordResponse(`Colour role update failed: ${message}`, { ephemeral: true });
   }
 }
 
@@ -2778,6 +2953,18 @@ const server = createServer(async (req, res) => {
         await sendDiscordTestNotification(kind);
         audit(user, "discord.test_message", { kind });
         return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {
+        const response = await postDiscordColourSelector();
+        audit(user, "discord.colour_roles_post", { messageId: response?.id });
+        return send(res, 200, { ok: true, response });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/manage") {
+        const body = await readJson(req).catch(() => ({}));
+        const current = getDiscordSettingsRaw();
+        const result = await manageDiscordColourRoles({ ...current, ...body, colourRoles: Array.isArray(body.colourRoles) ? body.colourRoles : current.colourRoles });
+        audit(user, "discord.colour_roles_manage", { count: result.roles.length, anchorRole: result.anchorRole?.name ?? null });
+        return send(res, 200, { ok: true, ...result, settings: getSettings() });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
