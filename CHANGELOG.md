@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.30-beta.1 - 2026-06-02
+
+### Changed
+
+- Cleaned up the dedicated Discord bot dashboard with tighter overview cards, compact section navigation, balanced setup/status panels, denser channel/role grids, a clearer notification-test page, a rebalanced notification rules page and a more deliberate diagnostics layout.
+
 ## 0.8.29-beta.1 - 2026-06-02
 
 ### Added
