@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.40-beta.1 - 2026-06-02
+
+### Added
+
+- Expanded the Discord bot dashboard with Safety Rules, Member Records, Posts & Events, and Custom Commands sections.
+- Added Discord moderation records for warnings, mod notes, case logs, member profile lookups and temporary bans.
+- Added Discord-native safety tools for keyword auto-moderation rules, slowmode, channel lockdown and nickname format reports.
+- Added Discord-only community tools for polls, event RSVPs, clean embed posting and custom slash command responses.
+
+## 0.8.39-beta.1 - 2026-06-02
+
+### Added
+
+- Added a Discord bot moderation section with member timeouts, timeout removal, kicks, bans, unbans, channel message purges and ban-list lookup.
+- Added clearer Discord moderation result cards and audit-log reasons so actions are easier to verify.
+- Made Discord bot post/update controls more visually obvious across the bot dashboard.
+
 ## 0.8.38-beta.1 - 2026-06-02
 
 ### Added

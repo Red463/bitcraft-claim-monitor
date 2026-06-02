@@ -6,6 +6,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Ban,
   Bell,
   Box,
   Building2,
@@ -13,6 +14,7 @@ import {
   Circle,
   CircleDollarSign,
   CircleHelp,
+  Clock,
   Command,
   Crown,
   Database,
@@ -51,6 +53,7 @@ import {
   Swords,
   TrendingDown,
   TrendingUp,
+  Trash2,
   Upload,
   Users,
   User,
@@ -3947,7 +3950,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
 }
 
 type AdminTab = "status" | "analytics" | "configuration" | "discord" | "theme" | "database" | "users" | "audit" | "backups";
-type BotSection = "setup" | "notifications" | "channels" | "roleManager" | "roles" | "colours" | "community" | "tools" | "tests" | "diagnostics";
+type BotSection = "setup" | "notifications" | "channels" | "roleManager" | "roles" | "colours" | "community" | "tools" | "moderation" | "safety" | "records" | "content" | "commands" | "tests" | "diagnostics";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -3988,6 +3991,11 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [announcementDraft, setAnnouncementDraft] = React.useState({ channelId: "", title: "", message: "" });
   const [pinnedDraft, setPinnedDraft] = React.useState({ channelId: "", messageId: "", title: "", message: "" });
   const [eventDraft, setEventDraft] = React.useState({ name: "", description: "", location: "Discord", startTime: "", endTime: "" });
+  const [moderationDraft, setModerationDraft] = React.useState({ userId: "", reason: "", timeoutMinutes: "60", deleteMessageSeconds: "0", channelId: "", purgeLimit: "25", unbanUserId: "" });
+  const [safetyDraft, setSafetyDraft] = React.useState({ blockedWords: "", ruleName: "Timbersteel keyword filter", slowmodeSeconds: "10", lockdownChannelId: "", nicknamePattern: "^[A-Za-z0-9 _.-]{2,32}$" });
+  const [recordsDraft, setRecordsDraft] = React.useState({ userId: "", reason: "", note: "" });
+  const [contentDraft, setContentDraft] = React.useState({ channelId: "", title: "", description: "", options: "", color: "#f0c64f" });
+  const [commandDraft, setCommandDraft] = React.useState({ name: "", description: "", response: "" });
 
   async function api(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
@@ -4218,6 +4226,31 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     onSettingsSaved(next);
   }
 
+  async function runModerationAction(action: "timeout" | "kick" | "ban" | "unban" | "purge") {
+    const payload = action === "purge"
+      ? { channelId: moderationDraft.channelId, limit: Number(moderationDraft.purgeLimit), reason: moderationDraft.reason }
+      : action === "unban"
+        ? { userId: moderationDraft.unbanUserId || moderationDraft.userId, reason: moderationDraft.reason }
+        : {
+          userId: moderationDraft.userId,
+          reason: moderationDraft.reason,
+          minutes: action === "timeout" ? Number(moderationDraft.timeoutMinutes) : undefined,
+          deleteMessageSeconds: action === "ban" ? Number(moderationDraft.deleteMessageSeconds) : undefined,
+        };
+    const result = await api(`/admin/discord/moderation/${action}`, { method: "POST", body: JSON.stringify(payload) });
+    setDiscordToolResult({ ...result, __type: "moderationAction" });
+  }
+
+  function confirmModeration(message: string) {
+    return window.confirm(message);
+  }
+
+  async function runBotEndpoint(path: string, payload: AnyRecord, type: string) {
+    const result = await api(path, { method: "POST", body: JSON.stringify(payload) });
+    setDiscordToolResult({ ...result, __type: type });
+    return result;
+  }
+
   function updateNotificationChannel(key: string, value: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, notificationChannels: { ...current.discord.notificationChannels, [key]: value } } }));
   }
@@ -4271,7 +4304,12 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     ["roles", "Craft Watch", <Bell size={15} />, "Profession notification roles", "Roles"],
     ["colours", "Colour Roles", <Palette size={15} />, "One-click name colour roles", "Roles"],
     ["community", "Role Panels", <UserPlus size={15} />, "Self-assign roles and welcome flow", "Roles"],
-    ["tools", "Tools", <Wrench size={15} />, "Reports, announcements and events", "Management"],
+    ["moderation", "Moderation", <Shield size={15} />, "Timeouts, bans, purge and ban list", "Management"],
+    ["safety", "Safety Rules", <Lock size={15} />, "Auto-mod, slowmode, lockdown and nicknames", "Management"],
+    ["records", "Member Records", <FileText size={15} />, "Warnings, notes, cases and profiles", "Management"],
+    ["content", "Posts & Events", <MessageCircle size={15} />, "Polls, RSVPs and clean embeds", "Community"],
+    ["commands", "Commands", <Command size={15} />, "Custom slash command responses", "Community"],
+    ["tools", "Tools", <Wrench size={15} />, "Reports, announcements and events", "Community"],
     ["tests", "Tests", <Command size={15} />, "Slash command registration and previews", "Management"],
     ["diagnostics", "Diagnostics", <Activity size={15} />, "Delivery log and troubleshooting", "Management"],
   ];
@@ -4304,6 +4342,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   );
   const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
   const discoveredRoles: AnyRecord[] = discordDiscovery?.roles ?? [];
+  const discoveredMembers: AnyRecord[] = discordDiscovery?.members ?? [];
   const roleById = (id: string) => discoveredRoles.find((role) => String(role.id) === String(id));
   const roleMemberCountText = (role: AnyRecord | undefined | null) => role?.memberCountAvailable === false ? "Member count unavailable" : `${formatNumber(role?.memberCount)} members`;
   const roleStatusText = (role: AnyRecord | undefined | null) => role ? `${roleMemberCountText(role)} | ${role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}` : "";
@@ -4315,6 +4354,13 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
       <option value="">Select a channel</option>
       {value && !discoveredChannels.some((channel) => String(channel.id) === String(value)) ? <option value={value}>Unknown channel ({value})</option> : null}
       {discoveredChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.label ?? `#${channel.name}`} ({channel.id})</option>)}
+    </select>
+  );
+  const memberIdSelect = (value: string, onChange: (value: string) => void) => (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Select a member</option>
+      {value && !discoveredMembers.some((member) => String(member.id) === String(value)) ? <option value={value}>Unknown member ({value})</option> : null}
+      {discoveredMembers.map((member) => <option key={member.id} value={member.id}>{member.username ?? member.id} ({member.id})</option>)}
     </select>
   );
   const roleIdSelect = (value: string, onChange: (value: string) => void) => (
@@ -4508,6 +4554,68 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           <div><strong>{member.username}</strong><span>{member.id}</span></div>
           <span className="role-option-status warn">Inactive</span>
         </article>) : <p className="legend">No inactive members found in this scan.</p>}</div>
+      </div>;
+    }
+    if (resultType === "moderationBans" || Array.isArray(result.bans)) {
+      const bans = result.bans ?? [];
+      return <div className="discord-report">
+        <div className="split-header">
+          <div><h4>Ban List</h4><p className="legend">Current Discord server bans returned by the bot.</p></div>
+          <span className="role-option-status warn">{formatNumber(bans.length)} banned</span>
+        </div>
+        <div className="discord-report-list">{bans.length ? bans.map((entry: AnyRecord) => <article className="discord-report-item" key={entry.user?.id ?? entry.id}>
+          <div className="discord-report-dot warn" />
+          <div><strong>{entry.user?.username ?? "Unknown user"}</strong><span>{entry.user?.id ?? "-"}{entry.reason ? ` | ${entry.reason}` : ""}</span></div>
+          <span className="role-option-status warn">Banned</span>
+        </article>) : <p className="legend">No banned users returned by Discord.</p>}</div>
+      </div>;
+    }
+    if (resultType === "moderationAction") {
+      const labels: Record<string, string> = {
+        timeout: "Timeout Applied",
+        timeout_removed: "Timeout Removed",
+        kick: "Member Kicked",
+        ban: "Member Banned",
+        unban: "Member Unbanned",
+        purge: "Messages Purged",
+      };
+      return <div className="discord-report">
+        <div className="split-header">
+          <div><h4>{labels[result.action] ?? "Moderation Action"}</h4><p className="legend">Discord accepted the moderation request.</p></div>
+          <span className="role-option-status ok">Success</span>
+        </div>
+        <div className="discord-report-metrics">
+          <Info label="Action" value={labels[result.action] ?? result.action ?? "Moderation"} />
+          {result.userId ? <Info label="User ID" value={result.userId} /> : null}
+          {result.channelId ? <Info label="Channel ID" value={result.channelId} /> : null}
+          {result.minutes != null ? <Info label="Timeout" value={result.minutes ? `${formatNumber(result.minutes)} minutes` : "Removed"} /> : null}
+          {result.deleted != null ? <Info label="Deleted" value={`${formatNumber(result.deleted)} messages`} /> : null}
+        </div>
+      </div>;
+    }
+    if (resultType === "botAction") {
+      const response = result.response ?? result.rule ?? result.command ?? {};
+      return <div className="discord-report">
+        <div className="split-header"><div><h4>Action Complete</h4><p className="legend">The bot action completed successfully.</p></div><span className="role-option-status ok">Success</span></div>
+        <div className="discord-report-metrics">
+          <Info label="Result" value={result.action ?? response.name ?? response.title ?? response.id ?? "Completed"} />
+          {result.response?.id ? <Info label="Message ID" value={result.response.id} /> : null}
+          {result.rule?.id ? <Info label="Rule ID" value={result.rule.id} /> : null}
+          {result.caseId ? <Info label="Case ID" value={`#${result.caseId}`} /> : null}
+          {result.unbanAt ? <Info label="Unban At" value={dateLabel(result.unbanAt)} /> : null}
+        </div>
+      </div>;
+    }
+    if (resultType === "botReport") {
+      const rows = result.cases ?? result.warnings ?? result.notes ?? result.mismatches ?? result.commands ?? result.rules ?? [];
+      const title = result.cases ? "Case Log" : result.warnings ? "Warnings" : result.notes ? "Mod Notes" : result.mismatches ? "Nickname Report" : result.commands ? "Custom Commands" : result.rules ? "Auto-Moderation Rules" : "Report";
+      return <div className="discord-report">
+        <div className="split-header"><div><h4>{title}</h4><p className="legend">Latest bot report output.</p></div><span className="role-option-status">{formatNumber(Array.isArray(rows) ? rows.length : 0)} rows</span></div>
+        <div className="discord-report-list">{Array.isArray(rows) && rows.length ? rows.slice(0, 100).map((row: AnyRecord, index: number) => <article className="discord-report-item" key={row.id ?? row.name ?? index}>
+          <div className="discord-report-dot ok" />
+          <div><strong>{row.name ?? row.username ?? row.case_type ?? row.reason ?? row.note ?? row.user?.username ?? `Record ${index + 1}`}</strong><span>{row.description ?? row.response ?? row.user_id ?? row.user?.id ?? row.created_at ?? row.occurred_at ?? JSON.stringify(row).slice(0, 180)}</span></div>
+          <span className="role-option-status">{row.active === 0 ? "Cleared" : row.enabled === false ? "Off" : "Active"}</span>
+        </article>) : <p className="legend">No records returned.</p>}</div>
       </div>;
     }
     return <pre className="discord-tool-result">{JSON.stringify(result, null, 2)}</pre>;
@@ -4737,7 +4845,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               <div className="toolbar">
                 <button className="toolbar-button" onClick={addDiscordColourRole}><Palette size={15} /> Add Colour</button>
                 <button className="toolbar-button" onClick={() => run(syncDiscordColourRoles, "Colour roles created and synced.")}><RefreshCw size={15} /> Create/Sync Roles</button>
-                <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/colour-roles/post", { method: "POST", body: "{}" }); }, "Colour role selector posted.")}><MessageCircle size={15} /> Post Selector</button>
+                <button className="toolbar-button primary bot-post-button" onClick={() => run(async () => { await api("/admin/discord/colour-roles/post", { method: "POST", body: "{}" }); }, "Colour role selector posted.")}><MessageCircle size={15} /> Post Selector</button>
               </div>
             </div>
             <p className="legend">Define the name colours the bot should own. Create/sync will create missing Discord roles, update names and colours, remove deleted managed roles, and keep them below Mosswick where Discord allows it.</p>
@@ -4763,15 +4871,24 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <p className="legend">Create reusable self-assign role messages for access, professions, events and timezones. Posting a panel updates its existing Discord message when one has already been posted.</p>
             <div className="discord-panel-grid">{draft.discord.rolePanels.map((panel) => (
               <div className="discord-panel-editor" key={panel.key}>
-                <div className="split-header"><h4>{panel.label}</h4><button className="toolbar-button" onClick={() => run(async () => postRolePanel(panel.key), `${panel.label} posted or updated.`)}><MessageCircle size={14} /> Post/Update</button></div>
+                <div className="split-header"><h4>{panel.label}</h4><button className="toolbar-button bot-post-button" onClick={() => run(async () => postRolePanel(panel.key), `${panel.label} posted or updated.`)}><MessageCircle size={14} /> Post/Update</button></div>
                 <label className="field"><span>Channel</span>{channelIdSelect(panel.channelId, (value) => updateDiscordRolePanel(panel.key, { channelId: value }))}</label>
                 <label className="field"><span>Title</span><input value={panel.title} onChange={(event) => updateDiscordRolePanel(panel.key, { title: event.target.value })} /></label>
                 <label className="field"><span>Description</span><textarea value={panel.description} onChange={(event) => updateDiscordRolePanel(panel.key, { description: event.target.value })} /></label>
                 <label className="field"><span>Mode</span><select value={panel.mode} onChange={(event) => updateDiscordRolePanel(panel.key, { mode: event.target.value === "single" ? "single" : "multi" })}><option value="multi">Multi select</option><option value="single">Single select</option></select></label>
                 <div className="role-panel-preview">
-                  <strong>{panel.title || panel.label}</strong>
-                  <p>{panel.description || "No description set."}</p>
-                  <div>{panel.options.map((option) => <span key={option.key}>{option.emoji ? <b>{option.emoji}</b> : null}{option.label || "Unnamed"}</span>)}</div>
+                  <span className="discord-preview-label">Discord Preview</span>
+                  <div className="discord-preview-message">
+                    <div className="discord-preview-avatar">T</div>
+                    <div className="discord-preview-body">
+                      <div className="discord-preview-author">Timbersteel Trade <small>APP</small></div>
+                      <div className="discord-preview-embed">
+                        <strong>{panel.title || panel.label}</strong>
+                        <p>{panel.description || "No description set."}</p>
+                      </div>
+                      <div className="discord-preview-buttons">{panel.options.map((option) => <span key={option.key}>{option.emoji ? <b>{option.emoji}</b> : null}{option.label || "Unnamed"}</span>)}</div>
+                    </div>
+                  </div>
                 </div>
                 <div className="role-option-list">
                   {panel.options.map((option) => {
@@ -4809,13 +4926,144 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               </div>
             ))}</div>
             <div className="discord-panel-editor welcome-flow-editor">
-              <div className="split-header"><h4>Welcome Flow</h4><button className="toolbar-button" onClick={() => run(postWelcomeFlow, "Welcome message posted or updated.")}><MessageCircle size={14} /> Post/Update</button></div>
+              <div className="split-header"><h4>Welcome Flow</h4><button className="toolbar-button bot-post-button" onClick={() => run(postWelcomeFlow, "Welcome message posted or updated.")}><MessageCircle size={14} /> Post/Update</button></div>
               <label className="field"><span>Welcome channel</span>{channelIdSelect(draft.discord.welcomeFlow.channelId, (value) => updateWelcomeFlow({ channelId: value }))}</label>
               <label className="field"><span>Title</span><input value={draft.discord.welcomeFlow.title} onChange={(event) => updateWelcomeFlow({ title: event.target.value })} /></label>
               <label className="field"><span>Message</span><textarea value={draft.discord.welcomeFlow.message} onChange={(event) => updateWelcomeFlow({ message: event.target.value })} /></label>
               <label className="field"><span>Ready role</span>{roleIdSelect(draft.discord.welcomeFlow.readyRoleId, (value) => updateWelcomeFlow({ readyRoleId: value }))}</label>
+              <div className="role-panel-preview">
+                <span className="discord-preview-label">Discord Preview</span>
+                <div className="discord-preview-message">
+                  <div className="discord-preview-avatar">T</div>
+                  <div className="discord-preview-body">
+                    <div className="discord-preview-author">Timbersteel Trade <small>APP</small></div>
+                    <div className="discord-preview-embed">
+                      <strong>{draft.discord.welcomeFlow.title || "Welcome"}</strong>
+                      <p>{draft.discord.welcomeFlow.message || "No welcome message set."}</p>
+                    </div>
+                    <div className="discord-preview-buttons"><span><b>✅</b>Ready</span></div>
+                  </div>
+                </div>
+              </div>
               {draft.discord.welcomeFlow.messageId ? <p className="legend">Message ID: {draft.discord.welcomeFlow.messageId}</p> : null}
             </div>
+          </section> : null}
+          {(!botOnly || botSection === "moderation") ? <section className="form-card discord-channel-card bot-moderation-card">
+            <div className="split-header">
+              <div>
+                <h3><Shield size={17} /> Moderation</h3>
+                <p className="legend">Admin-only Discord actions for member timeouts, kicks, bans, unbans and channel cleanup.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => run(refreshDiscordDiscovery, "Discord members, channels and roles synced.")}><RefreshCw size={15} /> Sync Server</button>
+            </div>
+            {!discoveredMembers.length ? <div className="error">No Discord members synced yet. Use Setup &gt; Sync Discord Server. You can still paste a user ID manually below.</div> : null}
+            <div className="moderation-grid">
+              <div className="discord-panel-editor moderation-panel moderation-member-panel">
+                <h4><Users size={15} /> Member Actions</h4>
+                <p className="legend">Timeout is reversible. Kick and ban are stronger actions and will be recorded in Discord audit logs.</p>
+                <label className="field"><span>Member</span>{memberIdSelect(moderationDraft.userId, (value) => setModerationDraft((current) => ({ ...current, userId: value })))}</label>
+                <label className="field"><span>Manual user ID</span><input value={moderationDraft.userId} onChange={(event) => setModerationDraft((current) => ({ ...current, userId: event.target.value }))} placeholder="Paste Discord user ID if not in the list" /></label>
+                <label className="field"><span>Reason</span><textarea value={moderationDraft.reason} onChange={(event) => setModerationDraft((current) => ({ ...current, reason: event.target.value }))} placeholder="Shown in Discord audit log" /></label>
+                <div className="moderation-action-grid">
+                  <label className="field"><span>Timeout minutes</span><input type="number" min={0} max={40320} value={moderationDraft.timeoutMinutes} onChange={(event) => setModerationDraft((current) => ({ ...current, timeoutMinutes: event.target.value }))} /></label>
+                  <button className="toolbar-button primary" disabled={!moderationDraft.userId.trim()} onClick={() => run(async () => runModerationAction("timeout"), "Timeout action sent to Discord.")}><Clock size={14} /> Timeout</button>
+                  <button className="toolbar-button" disabled={!moderationDraft.userId.trim()} onClick={() => run(async () => { setModerationDraft((current) => ({ ...current, timeoutMinutes: "0" })); const result = await api("/admin/discord/moderation/timeout", { method: "POST", body: JSON.stringify({ userId: moderationDraft.userId, minutes: 0, reason: moderationDraft.reason }) }); setDiscordToolResult({ ...result, __type: "moderationAction" }); }, "Timeout removed.")}><Clock size={14} /> Remove Timeout</button>
+                  <button className="toolbar-button danger" disabled={!moderationDraft.userId.trim()} onClick={() => confirmModeration("Kick this Discord member from the server?") && run(async () => runModerationAction("kick"), "Kick sent to Discord.")}><User size={14} /> Kick</button>
+                  <label className="field"><span>Delete message seconds</span><input type="number" min={0} max={604800} value={moderationDraft.deleteMessageSeconds} onChange={(event) => setModerationDraft((current) => ({ ...current, deleteMessageSeconds: event.target.value }))} /></label>
+                  <button className="toolbar-button danger" disabled={!moderationDraft.userId.trim()} onClick={() => confirmModeration("Ban this Discord member from the server?") && run(async () => runModerationAction("ban"), "Ban sent to Discord.")}><Ban size={14} /> Ban</button>
+                  <label className="field"><span>Temporary ban hours</span><input type="number" min={1} max={8760} value={moderationDraft.timeoutMinutes} onChange={(event) => setModerationDraft((current) => ({ ...current, timeoutMinutes: event.target.value }))} /></label>
+                  <button className="toolbar-button danger" disabled={!moderationDraft.userId.trim()} onClick={() => confirmModeration("Temporarily ban this Discord member?") && run(async () => runBotEndpoint("/admin/discord/moderation/temp-ban", { userId: moderationDraft.userId, hours: Number(moderationDraft.timeoutMinutes), reason: moderationDraft.reason, deleteMessageSeconds: Number(moderationDraft.deleteMessageSeconds) }, "moderationAction"), "Temporary ban recorded.")}><Ban size={14} /> Temp Ban</button>
+                </div>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><Trash2 size={15} /> Channel Cleanup</h4>
+                <p className="legend">Deletes the newest messages in a channel. Discord bulk delete only allows messages newer than 14 days.</p>
+                <label className="field"><span>Channel</span>{channelIdSelect(moderationDraft.channelId, (value) => setModerationDraft((current) => ({ ...current, channelId: value })))}</label>
+                <label className="field"><span>Message limit</span><input type="number" min={1} max={100} value={moderationDraft.purgeLimit} onChange={(event) => setModerationDraft((current) => ({ ...current, purgeLimit: event.target.value }))} /></label>
+                <button className="toolbar-button danger" disabled={!moderationDraft.channelId.trim()} onClick={() => confirmModeration("Delete the newest messages from this Discord channel?") && run(async () => runModerationAction("purge"), "Channel cleanup sent to Discord.")}><Trash2 size={14} /> Purge Messages</button>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><Ban size={15} /> Ban List</h4>
+                <p className="legend">Review current bans or remove a ban by Discord user ID.</p>
+                <label className="field"><span>User ID to unban</span><input value={moderationDraft.unbanUserId} onChange={(event) => setModerationDraft((current) => ({ ...current, unbanUserId: event.target.value }))} placeholder="Discord user ID" /></label>
+                <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/bans"), __type: "moderationBans" }), "Ban list loaded.")}><RefreshCw size={14} /> Load Ban List</button>
+                <button className="toolbar-button danger" disabled={!(moderationDraft.unbanUserId || moderationDraft.userId).trim()} onClick={() => confirmModeration("Remove this Discord server ban?") && run(async () => runModerationAction("unban"), "Unban sent to Discord.")}><CheckCircle2 size={14} /> Unban User</button>
+              </div>
+            </div>
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
+          </section> : null}
+          {(!botOnly || botSection === "safety") ? <section className="form-card discord-channel-card bot-moderation-card">
+            <div className="split-header"><div><h3><Lock size={17} /> Safety Rules</h3><p className="legend">Configure Discord-native auto moderation, slowmode, lockdown and nickname checks.</p></div><button className="toolbar-button" onClick={() => run(refreshDiscordDiscovery, "Discord server data synced.")}><RefreshCw size={15} /> Sync Server</button></div>
+            <div className="moderation-grid">
+              <div className="discord-panel-editor moderation-panel moderation-member-panel">
+                <h4><AlertTriangle size={15} /> Auto-Moderation Rules</h4>
+                <p className="legend">Creates a Discord-native keyword filter that blocks matching messages. Existing rules can be reviewed with Load Rules.</p>
+                <label className="field"><span>Rule name</span><input value={safetyDraft.ruleName} onChange={(event) => setSafetyDraft((current) => ({ ...current, ruleName: event.target.value }))} /></label>
+                <label className="field"><span>Blocked words or phrases</span><textarea value={safetyDraft.blockedWords} onChange={(event) => setSafetyDraft((current) => ({ ...current, blockedWords: event.target.value }))} placeholder="One per line, or comma separated" /></label>
+                <div className="toolbar"><button className="toolbar-button primary" onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/automod", { name: safetyDraft.ruleName, blockedWords: safetyDraft.blockedWords }, "botAction"), "Auto-moderation rule created.")}><Shield size={14} /> Create Rule</button><button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/automod"), __type: "botReport" }), "Auto-moderation rules loaded.")}><RefreshCw size={14} /> Load Rules</button></div>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><Clock size={15} /> Slowmode</h4>
+                <label className="field"><span>Channel</span>{channelIdSelect(safetyDraft.lockdownChannelId, (value) => setSafetyDraft((current) => ({ ...current, lockdownChannelId: value })))}</label>
+                <label className="field"><span>Seconds per message</span><input type="number" min={0} max={21600} value={safetyDraft.slowmodeSeconds} onChange={(event) => setSafetyDraft((current) => ({ ...current, slowmodeSeconds: event.target.value }))} /></label>
+                <button className="toolbar-button primary" disabled={!safetyDraft.lockdownChannelId} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/slowmode", { channelId: safetyDraft.lockdownChannelId, seconds: Number(safetyDraft.slowmodeSeconds) }, "botAction"), "Slowmode updated.")}><Clock size={14} /> Apply Slowmode</button>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><Lock size={15} /> Lockdown</h4>
+                <p className="legend">Locks or unlocks sending for @everyone in the selected channel.</p>
+                <label className="field"><span>Channel</span>{channelIdSelect(safetyDraft.lockdownChannelId, (value) => setSafetyDraft((current) => ({ ...current, lockdownChannelId: value })))}</label>
+                <button className="toolbar-button danger" disabled={!safetyDraft.lockdownChannelId} onClick={() => confirmModeration("Lock this channel for @everyone?") && run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: true }, "botAction"), "Channel locked.")}><Lock size={14} /> Lock Channel</button>
+                <button className="toolbar-button" disabled={!safetyDraft.lockdownChannelId} onClick={() => confirmModeration("Unlock this channel for @everyone?") && run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: false }, "botAction"), "Channel unlocked.")}><CheckCircle2 size={14} /> Unlock Channel</button>
+              </div>
+            </div>
+            <div className="discord-panel-editor moderation-panel">
+              <h4><Users size={15} /> Nickname Format Enforcement</h4>
+              <p className="legend">Reports members whose current nickname/display name does not match the pattern. This does not rename anyone automatically.</p>
+              <label className="field"><span>Regex pattern</span><input value={safetyDraft.nicknamePattern} onChange={(event) => setSafetyDraft((current) => ({ ...current, nicknamePattern: event.target.value }))} /></label>
+              <button className="toolbar-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/nickname-report", { pattern: safetyDraft.nicknamePattern }, "botReport"), "Nickname report loaded.")}><Search size={14} /> Run Nickname Report</button>
+            </div>
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
+          </section> : null}
+          {(!botOnly || botSection === "records") ? <section className="form-card discord-channel-card bot-moderation-card">
+            <div className="split-header"><div><h3><FileText size={17} /> Member Records</h3><p className="legend">Warnings, mod notes, case log and profile cards for Discord members.</p></div><button className="toolbar-button" onClick={() => run(refreshDiscordDiscovery, "Discord members synced.")}><RefreshCw size={15} /> Sync Members</button></div>
+            <div className="moderation-grid">
+              <div className="discord-panel-editor moderation-panel">
+                <h4><AlertTriangle size={15} /> Warning System</h4>
+                <label className="field"><span>Member</span>{memberIdSelect(recordsDraft.userId, (value) => setRecordsDraft((current) => ({ ...current, userId: value })))}</label>
+                <label className="field"><span>Reason</span><textarea value={recordsDraft.reason} onChange={(event) => setRecordsDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
+                <button className="toolbar-button primary" disabled={!recordsDraft.userId || !recordsDraft.reason.trim()} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings", recordsDraft, "botAction"), "Warning recorded.")}><AlertTriangle size={14} /> Add Warning</button>
+                <button className="toolbar-button" disabled={!recordsDraft.userId} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings/list", recordsDraft, "botReport"), "Warnings loaded.")}>Load Warnings</button>
+                <button className="toolbar-button danger" disabled={!recordsDraft.userId} onClick={() => confirmModeration("Clear active warnings for this member?") && run(async () => runBotEndpoint("/admin/discord/moderation/warnings/clear", recordsDraft, "botAction"), "Warnings cleared.")}>Clear Warnings</button>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><FileText size={15} /> Mod Notes</h4>
+                <label className="field"><span>Member</span>{memberIdSelect(recordsDraft.userId, (value) => setRecordsDraft((current) => ({ ...current, userId: value })))}</label>
+                <label className="field"><span>Note</span><textarea value={recordsDraft.note} onChange={(event) => setRecordsDraft((current) => ({ ...current, note: event.target.value }))} /></label>
+                <button className="toolbar-button primary" disabled={!recordsDraft.userId || !recordsDraft.note.trim()} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes", recordsDraft, "botAction"), "Mod note saved.")}><FileText size={14} /> Add Note</button>
+                <button className="toolbar-button" disabled={!recordsDraft.userId} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes/list", recordsDraft, "botReport"), "Mod notes loaded.")}>Load Notes</button>
+              </div>
+              <div className="discord-panel-editor moderation-panel">
+                <h4><User size={15} /> Member Profile</h4>
+                <label className="field"><span>Member</span>{memberIdSelect(recordsDraft.userId, (value) => setRecordsDraft((current) => ({ ...current, userId: value })))}</label>
+                <button className="toolbar-button" disabled={!recordsDraft.userId} onClick={() => run(async () => runBotEndpoint("/admin/discord/moderation/profile", recordsDraft, "botReport"), "Member profile loaded.")}><User size={14} /> Load Profile</button>
+                <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/cases"), __type: "botReport" }), "Case log loaded.")}><FileText size={14} /> Load Case Log</button>
+              </div>
+            </div>
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
+          </section> : null}
+          {(!botOnly || botSection === "content") ? <section className="form-card discord-channel-card bot-tools-card">
+            <div className="split-header"><div><h3><MessageCircle size={17} /> Posts & Events</h3><p className="legend">Create polls, RSVP posts and clean embeds for Discord-only community management.</p></div></div>
+            <div className="discord-tool-forms">
+              <div className="discord-tool-form-card"><h4><CircleHelp size={15} /> Poll</h4><label className="field"><span>Channel</span>{channelIdSelect(contentDraft.channelId, (value) => setContentDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={contentDraft.title} onChange={(event) => setContentDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Options</span><textarea value={contentDraft.options} onChange={(event) => setContentDraft((current) => ({ ...current, options: event.target.value }))} placeholder="One option per line" /></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/poll", contentDraft, "botAction"), "Poll posted.")}><MessageCircle size={14} /> Post Poll</button></div>
+              <div className="discord-tool-form-card"><h4><Bell size={15} /> Event RSVP</h4><label className="field"><span>Channel</span>{channelIdSelect(contentDraft.channelId, (value) => setContentDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={contentDraft.title} onChange={(event) => setContentDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Description</span><textarea value={contentDraft.description} onChange={(event) => setContentDraft((current) => ({ ...current, description: event.target.value }))} /></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/rsvp", contentDraft, "botAction"), "RSVP posted.")}><Bell size={14} /> Post RSVP</button></div>
+              <div className="discord-tool-form-card"><h4><Star size={15} /> Clean Embed Builder</h4><label className="field"><span>Channel</span>{channelIdSelect(contentDraft.channelId, (value) => setContentDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={contentDraft.title} onChange={(event) => setContentDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Message</span><textarea value={contentDraft.description} onChange={(event) => setContentDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="colour-picker-field"><input type="color" value={contentDraft.color} onChange={(event) => setContentDraft((current) => ({ ...current, color: event.target.value }))} /><code>{contentDraft.color}</code></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/embed", contentDraft, "botAction"), "Embed posted.")}><Star size={14} /> Post Embed</button></div>
+            </div>
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
+          </section> : null}
+          {(!botOnly || botSection === "commands") ? <section className="form-card discord-channel-card bot-tools-card">
+            <div className="split-header"><div><h3><Command size={17} /> Custom Commands</h3><p className="legend">Create Discord slash commands that respond with static server information. Re-register slash commands after adding or removing commands.</p></div><button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }), "Custom commands loaded.")}><RefreshCw size={15} /> Load Commands</button></div>
+            <div className="discord-tool-form-card"><label className="field"><span>Command name</span><input value={commandDraft.name} onChange={(event) => setCommandDraft((current) => ({ ...current, name: event.target.value }))} placeholder="rules" /></label><label className="field"><span>Description</span><input value={commandDraft.description} onChange={(event) => setCommandDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="field"><span>Response</span><textarea value={commandDraft.response} onChange={(event) => setCommandDraft((current) => ({ ...current, response: event.target.value }))} /></label><div className="toolbar"><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }); }, "Custom command saved. Re-register slash commands to publish it.")}><Save size={14} /> Save Command</button><button className="toolbar-button danger" disabled={!commandDraft.name.trim()} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setDiscordToolResult({ ...await api("/admin/discord/custom-commands"), __type: "botReport" }); }, "Custom command deleted.")}><X size={14} /> Delete</button><button className="toolbar-button bot-post-button" onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.")}><Command size={14} /> Register Slash Commands</button></div></div>
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
           {(!botOnly || botSection === "tools") ? <section className="form-card discord-channel-card bot-tools-card">
             <div className="split-header">
@@ -4855,7 +5103,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Channel</span>{channelIdSelect(announcementDraft.channelId, (value) => setAnnouncementDraft((current) => ({ ...current, channelId: value })))}</label>
                 <label className="field"><span>Title</span><input value={announcementDraft.title} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={announcementDraft.message} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, message: event.target.value }))} /></label>
-                <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/announcement", { method: "POST", body: JSON.stringify(announcementDraft) }); }, "Announcement posted.")}><MessageCircle size={14} /> Post Announcement</button>
+                <button className="toolbar-button primary bot-post-button" onClick={() => run(async () => { await api("/admin/discord/announcement", { method: "POST", body: JSON.stringify(announcementDraft) }); }, "Announcement posted.")}><MessageCircle size={14} /> Post Announcement</button>
               </div>
               <div className="discord-tool-form-card">
                 <h4><Pin size={15} /> Pinned Info Updater</h4>
@@ -4864,7 +5112,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Existing message ID</span><input value={pinnedDraft.messageId} onChange={(event) => setPinnedDraft((current) => ({ ...current, messageId: event.target.value }))} placeholder="Blank posts a new pinned message" /></label>
                 <label className="field"><span>Title</span><input value={pinnedDraft.title} onChange={(event) => setPinnedDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={pinnedDraft.message} onChange={(event) => setPinnedDraft((current) => ({ ...current, message: event.target.value }))} /></label>
-                <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/pinned-info", { method: "POST", body: JSON.stringify(pinnedDraft) }); setPinnedDraft((current) => ({ ...current, messageId: String(result.response?.id ?? current.messageId) })); }, "Pinned info posted or updated.")}><Pin size={14} /> Post/Update Pin</button>
+                <button className="toolbar-button bot-post-button" onClick={() => run(async () => { const result = await api("/admin/discord/pinned-info", { method: "POST", body: JSON.stringify(pinnedDraft) }); setPinnedDraft((current) => ({ ...current, messageId: String(result.response?.id ?? current.messageId) })); }, "Pinned info posted or updated.")}><Pin size={14} /> Post/Update Pin</button>
               </div>
               <div className="discord-tool-form-card">
                 <h4><Bell size={15} /> Event Scheduler</h4>

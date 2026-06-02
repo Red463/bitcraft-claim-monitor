@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.38-beta.1";
+const appVersion = "0.8.40-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -183,6 +183,55 @@ db.exec(`
     updated_at TEXT NOT NULL,
     UNIQUE (guild_id, user_id, profession_key)
   );
+  CREATE TABLE IF NOT EXISTS discord_mod_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    case_type TEXT NOT NULL,
+    user_id TEXT,
+    moderator TEXT NOT NULL,
+    reason TEXT,
+    details_json TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discord_warnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    moderator TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discord_mod_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    moderator TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discord_custom_commands (
+    name TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    response TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discord_component_votes (
+    message_id TEXT NOT NULL,
+    component_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, user_id, kind)
+  );
+  CREATE TABLE IF NOT EXISTS discord_temp_bans (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    unban_at TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, user_id)
+  );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
@@ -191,6 +240,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_watches_profession ON discord_craft_watches (guild_id, profession_key, mode);
+  CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);
+  CREATE INDEX IF NOT EXISTS idx_discord_mod_notes_user ON discord_mod_notes (guild_id, user_id, created_at DESC);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -367,6 +419,23 @@ const statements = {
   clearDiscordCraftWatches: db.prepare("DELETE FROM discord_craft_watches WHERE guild_id = ? AND user_id = ?"),
   listDiscordCraftWatches: db.prepare("SELECT * FROM discord_craft_watches WHERE guild_id = ? AND user_id = ? ORDER BY profession_name"),
   matchingDiscordCraftWatches: db.prepare("SELECT user_id, mode FROM discord_craft_watches WHERE guild_id = ? AND profession_key = ?"),
+  insertDiscordModCase: db.prepare("INSERT INTO discord_mod_cases (guild_id, case_type, user_id, moderator, reason, details_json, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+  recentDiscordModCases: db.prepare("SELECT * FROM discord_mod_cases WHERE guild_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?"),
+  insertDiscordWarning: db.prepare("INSERT INTO discord_warnings (guild_id, user_id, moderator, reason, active, created_at) VALUES (?, ?, ?, ?, 1, ?)"),
+  listDiscordWarnings: db.prepare("SELECT * FROM discord_warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50"),
+  clearDiscordWarnings: db.prepare("UPDATE discord_warnings SET active = 0 WHERE guild_id = ? AND user_id = ? AND active = 1"),
+  insertDiscordModNote: db.prepare("INSERT INTO discord_mod_notes (guild_id, user_id, moderator, note, created_at) VALUES (?, ?, ?, ?, ?)"),
+  listDiscordModNotes: db.prepare("SELECT * FROM discord_mod_notes WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50"),
+  deleteDiscordModNote: db.prepare("DELETE FROM discord_mod_notes WHERE id = ? AND guild_id = ?"),
+  upsertDiscordCustomCommand: db.prepare("INSERT INTO discord_custom_commands (name, description, response, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, response = excluded.response, updated_at = excluded.updated_at"),
+  deleteDiscordCustomCommand: db.prepare("DELETE FROM discord_custom_commands WHERE name = ?"),
+  listDiscordCustomCommands: db.prepare("SELECT * FROM discord_custom_commands ORDER BY name"),
+  getDiscordCustomCommand: db.prepare("SELECT * FROM discord_custom_commands WHERE name = ?"),
+  upsertDiscordComponentVote: db.prepare("INSERT INTO discord_component_votes (message_id, component_key, user_id, kind, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(message_id, user_id, kind) DO UPDATE SET component_key = excluded.component_key, updated_at = excluded.updated_at"),
+  componentVoteCounts: db.prepare("SELECT component_key, COUNT(*) AS count FROM discord_component_votes WHERE message_id = ? AND kind = ? GROUP BY component_key"),
+  upsertDiscordTempBan: db.prepare("INSERT INTO discord_temp_bans (guild_id, user_id, unban_at, reason, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET unban_at = excluded.unban_at, reason = excluded.reason"),
+  dueDiscordTempBans: db.prepare("SELECT * FROM discord_temp_bans WHERE unban_at <= ? LIMIT 25"),
+  deleteDiscordTempBan: db.prepare("DELETE FROM discord_temp_bans WHERE guild_id = ? AND user_id = ?"),
 };
 
 function toNumber(value) {
@@ -1939,6 +2008,356 @@ async function createDiscordScheduledEvent(body, settings = getDiscordSettingsRa
   return response;
 }
 
+function discordAuditReason(reason, fallback) {
+  const value = String(reason ?? fallback ?? "Timbersteel Trade moderation action").trim().slice(0, 512);
+  return value ? { "X-Audit-Log-Reason": encodeURIComponent(value) } : {};
+}
+
+function requireDiscordModerationSettings(settings = getDiscordSettingsRaw()) {
+  settings = normalizeDiscordSettings(settings);
+  if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  return settings;
+}
+
+function snowflakeTimestampMs(id) {
+  try {
+    const raw = String(id ?? "");
+    if (!/^\d+$/.test(raw)) return 0;
+    return Number((BigInt(raw) >> 22n) + 1420070400000n);
+  } catch {
+    return 0;
+  }
+}
+
+async function discordModerationTimeout(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a Discord member to timeout.");
+  const minutes = Math.max(0, Math.min(toNumber(body.minutes) || 0, 40320));
+  const until = minutes ? new Date(Date.now() + minutes * 60 * 1000).toISOString() : null;
+  const response = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/members/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...discordAuditReason(body.reason, until ? `Timed out member for ${minutes} minutes` : "Removed member timeout") },
+    body: JSON.stringify({ communication_disabled_until: until }),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: until ? "moderation_timeout" : "moderation_timeout_clear", summary: until ? `Timed out ${userId} for ${minutes} minutes` : `Removed timeout from ${userId}`, metadata: { userId, minutes, until } });
+  return { ok: true, action: until ? "timeout" : "timeout_removed", userId, minutes, until, response };
+}
+
+async function discordModerationKick(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a Discord member to kick.");
+  await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/members/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: discordAuditReason(body.reason, "Kicked member from server"),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_kick", summary: `Kicked ${userId}`, metadata: { userId } });
+  return { ok: true, action: "kick", userId };
+}
+
+async function discordModerationBan(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a Discord member to ban.");
+  const deleteMessageSeconds = Math.max(0, Math.min(toNumber(body.deleteMessageSeconds) || 0, 604800));
+  await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/bans/${encodeURIComponent(userId)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...discordAuditReason(body.reason, "Banned member from server") },
+    body: JSON.stringify({ delete_message_seconds: deleteMessageSeconds }),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_ban", summary: `Banned ${userId}`, metadata: { userId, deleteMessageSeconds } });
+  return { ok: true, action: "ban", userId, deleteMessageSeconds };
+}
+
+async function discordModerationUnban(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Enter a Discord user ID to unban.");
+  await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/bans/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: discordAuditReason(body.reason, "Removed server ban"),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_unban", summary: `Unbanned ${userId}`, metadata: { userId } });
+  return { ok: true, action: "unban", userId };
+}
+
+async function discordModerationPurge(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? "").trim();
+  if (!/^\d+$/.test(channelId)) throw new Error("Choose a Discord channel to clean up.");
+  const limit = Math.max(1, Math.min(toNumber(body.limit) || 25, 100));
+  const messages = await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`, {}, settings);
+  const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const ids = (Array.isArray(messages) ? messages : [])
+    .filter((message) => snowflakeTimestampMs(message?.id) > cutoff)
+    .map((message) => String(message.id))
+    .filter(Boolean)
+    .slice(0, limit);
+  if (ids.length >= 2) {
+    await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/messages/bulk-delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...discordAuditReason(body.reason, `Purged ${ids.length} channel messages`) },
+      body: JSON.stringify({ messages: ids }),
+    }, settings);
+  } else if (ids.length === 1) {
+    await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(ids[0])}`, {
+      method: "DELETE",
+      headers: discordAuditReason(body.reason, "Deleted channel message"),
+    }, settings);
+  }
+  recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_purge", summary: `Purged ${ids.length} messages`, channelId, metadata: { channelId, requested: limit, deleted: ids.length } });
+  return { ok: true, action: "purge", channelId, requested: limit, deleted: ids.length, skippedOlderThan14Days: limit - ids.length };
+}
+
+async function discordModerationBans(settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const bans = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/bans?limit=100`, {}, settings);
+  return {
+    bans: (Array.isArray(bans) ? bans : []).map((entry) => ({
+      reason: String(entry.reason ?? ""),
+      user: {
+        id: String(entry.user?.id ?? ""),
+        username: String(entry.user?.global_name ?? entry.user?.username ?? entry.user?.id ?? "Unknown user"),
+        avatar: entry.user?.avatar ?? null,
+      },
+    })),
+  };
+}
+
+function recordDiscordCase(caseType, details = {}, settings = getDiscordSettingsRaw()) {
+  const at = new Date().toISOString();
+  statements.insertDiscordModCase.run(
+    String(settings.guildId ?? ""),
+    String(caseType),
+    String(details.userId ?? ""),
+    String(details.moderator ?? "dashboard"),
+    String(details.reason ?? ""),
+    JSON.stringify(details),
+    at,
+  );
+  return { caseId: db.prepare("SELECT last_insert_rowid() AS id").get()?.id, occurredAt: at };
+}
+
+function discordCaseLog(limit = 80, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  return {
+    cases: statements.recentDiscordModCases.all(settings.guildId, Math.max(1, Math.min(toNumber(limit) || 80, 200))).map((row) => ({ ...row, details: safeJson(row.details_json, {}) })),
+  };
+}
+
+async function discordWarningCreate(body, moderator = "dashboard", settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  const reason = String(body.reason ?? "").trim();
+  if (!/^\d+$/.test(userId) || !reason) throw new Error("Warning needs a member and reason.");
+  const at = new Date().toISOString();
+  statements.insertDiscordWarning.run(settings.guildId, userId, moderator, reason, at);
+  const modCase = recordDiscordCase("warning", { userId, moderator, reason }, settings);
+  return { ok: true, warningId: db.prepare("SELECT last_insert_rowid() AS id").get()?.id, ...modCase };
+}
+
+function discordWarnings(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a member to view warnings.");
+  return { warnings: statements.listDiscordWarnings.all(settings.guildId, userId) };
+}
+
+function discordWarningsClear(body, moderator = "dashboard", settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a member to clear warnings.");
+  const cleared = statements.clearDiscordWarnings.run(settings.guildId, userId).changes;
+  const modCase = recordDiscordCase("warnings_cleared", { userId, moderator, reason: body.reason ?? "", cleared }, settings);
+  return { ok: true, cleared, ...modCase };
+}
+
+function discordModNoteCreate(body, moderator = "dashboard", settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  const note = String(body.note ?? "").trim();
+  if (!/^\d+$/.test(userId) || !note) throw new Error("Mod note needs a member and note.");
+  statements.insertDiscordModNote.run(settings.guildId, userId, moderator, note, new Date().toISOString());
+  return { ok: true, noteId: db.prepare("SELECT last_insert_rowid() AS id").get()?.id };
+}
+
+function discordModNotes(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a member to view mod notes.");
+  return { notes: statements.listDiscordModNotes.all(settings.guildId, userId) };
+}
+
+async function discordSlowmode(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? "").trim();
+  const seconds = Math.max(0, Math.min(toNumber(body.seconds) || 0, 21600));
+  if (!/^\d+$/.test(channelId)) throw new Error("Choose a channel for slowmode.");
+  const response = await discordApiRequest(`/channels/${encodeURIComponent(channelId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...discordAuditReason(body.reason, `Set slowmode to ${seconds} seconds`) },
+    body: JSON.stringify({ rate_limit_per_user: seconds }),
+  }, settings);
+  recordDiscordCase("slowmode", { channelId, seconds, reason: body.reason ?? "" }, settings);
+  return { ok: true, channelId, seconds, response };
+}
+
+async function discordLockdown(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? "").trim();
+  const locked = body.locked !== false;
+  if (!/^\d+$/.test(channelId)) throw new Error("Choose a channel for lockdown.");
+  const sendMessagesBit = "2048";
+  const payload = locked
+    ? { type: 0, allow: "0", deny: sendMessagesBit }
+    : { type: 0, allow: sendMessagesBit, deny: "0" };
+  await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/permissions/${encodeURIComponent(settings.guildId)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...discordAuditReason(body.reason, locked ? "Locked channel" : "Unlocked channel") },
+    body: JSON.stringify(payload),
+  }, settings);
+  recordDiscordCase(locked ? "lockdown" : "unlock", { channelId, reason: body.reason ?? "" }, settings);
+  return { ok: true, channelId, locked };
+}
+
+async function discordTemporaryBan(body, settings = getDiscordSettingsRaw()) {
+  const result = await discordModerationBan(body, settings);
+  const hours = Math.max(1, Math.min(toNumber(body.hours) || 24, 24 * 365));
+  const unbanAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  statements.upsertDiscordTempBan.run(settings.guildId, result.userId, unbanAt, String(body.reason ?? ""), new Date().toISOString());
+  recordDiscordCase("temporary_ban", { userId: result.userId, hours, unbanAt, reason: body.reason ?? "" }, settings);
+  return { ...result, action: "temporary_ban", hours, unbanAt };
+}
+
+async function processDiscordTempBans() {
+  const settings = getDiscordSettingsRaw();
+  if (!settings.botToken || !settings.guildId) return;
+  for (const row of statements.dueDiscordTempBans.all(new Date().toISOString())) {
+    try {
+      await discordModerationUnban({ userId: row.user_id, reason: `Temporary ban expired: ${row.reason ?? ""}` }, settings);
+      statements.deleteDiscordTempBan.run(row.guild_id, row.user_id);
+    } catch (error) {
+      recordDiscordDeliverySafe({ status: "failed", eventType: "temp_ban_unban", summary: `Temporary unban failed for ${row.user_id}`, error: error instanceof Error ? error.message : String(error), metadata: row });
+    }
+  }
+}
+
+async function syncDiscordAutoModeration(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const keywords = String(body.blockedWords ?? "").split(/[\n,]/).map((word) => word.trim()).filter(Boolean).slice(0, 100);
+  if (!keywords.length) throw new Error("Add at least one blocked word or phrase.");
+  const name = String(body.name ?? "Timbersteel keyword filter").trim() || "Timbersteel keyword filter";
+  const response = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/auto-moderation/rules`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...discordAuditReason(body.reason, "Created bot-managed auto moderation rule") },
+    body: JSON.stringify({
+      name,
+      event_type: 1,
+      trigger_type: 1,
+      trigger_metadata: { keyword_filter: keywords },
+      actions: [{ type: 1 }],
+      enabled: body.enabled !== false,
+    }),
+  }, settings);
+  recordDiscordCase("automod_rule", { ruleId: response?.id, name, keywords: keywords.length }, settings);
+  return { ok: true, rule: response };
+}
+
+async function discordNativeAutoModerationRules(settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const rules = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/auto-moderation/rules`, {}, settings);
+  return { rules: Array.isArray(rules) ? rules : [] };
+}
+
+function normalizeCommandName(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 32);
+}
+
+function discordCustomCommands() {
+  return { commands: statements.listDiscordCustomCommands.all() };
+}
+
+function upsertDiscordCustomCommand(body) {
+  const name = normalizeCommandName(body.name);
+  const description = String(body.description ?? "Custom Timbersteel command").trim().slice(0, 100) || "Custom Timbersteel command";
+  const response = String(body.response ?? "").trim();
+  if (!/^[a-z0-9_-]{1,32}$/.test(name) || !response) throw new Error("Custom command needs a valid name and response.");
+  statements.upsertDiscordCustomCommand.run(name, description, response, new Date().toISOString());
+  return { ok: true, command: { name, description, response } };
+}
+
+async function postDiscordPoll(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? settings.channelId ?? "").trim();
+  const title = String(body.title ?? "Poll").trim() || "Poll";
+  const options = String(body.options ?? "").split(/\n|,/).map((entry) => entry.trim()).filter(Boolean).slice(0, 10);
+  if (!channelId || options.length < 2) throw new Error("Poll needs a channel and at least two options.");
+  const components = [];
+  for (let i = 0; i < options.length; i += 5) {
+    components.push({ type: 1, components: options.slice(i, i + 5).map((label, offset) => ({ type: 2, style: 2, label: label.slice(0, 80), custom_id: `poll:${i + offset}:${encodeURIComponent(label).slice(0, 60)}` })) });
+  }
+  const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, "Vote using the buttons below.", options.map((option, index) => ({ name: `${index + 1}. ${option}`, value: "0 votes", inline: true })), 0x5865f2)], components }, settings, channelId);
+  recordDiscordCase("poll_posted", { channelId, messageId: response?.id, title, options }, settings);
+  return { ok: true, response };
+}
+
+async function postDiscordRsvp(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? settings.channelId ?? "").trim();
+  const title = String(body.title ?? "Event RSVP").trim() || "Event RSVP";
+  const description = String(body.description ?? "").trim() || "Choose your RSVP below.";
+  if (!channelId) throw new Error("RSVP needs a channel.");
+  const response = await sendDiscordMessage({
+    embeds: [discordCommandEmbed(title, description, [
+      { name: "Going", value: "0", inline: true },
+      { name: "Maybe", value: "0", inline: true },
+      { name: "Not Going", value: "0", inline: true },
+    ], 0x4ee28a)],
+    components: [{ type: 1, components: [
+      { type: 2, style: 3, label: "Going", custom_id: "rsvp:going" },
+      { type: 2, style: 2, label: "Maybe", custom_id: "rsvp:maybe" },
+      { type: 2, style: 4, label: "Not Going", custom_id: "rsvp:not-going" },
+    ] }],
+  }, settings, channelId);
+  recordDiscordCase("rsvp_posted", { channelId, messageId: response?.id, title }, settings);
+  return { ok: true, response };
+}
+
+async function sendDiscordCleanEmbed(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const channelId = String(body.channelId ?? settings.channelId ?? "").trim();
+  const title = String(body.title ?? "Message").trim() || "Message";
+  const description = String(body.description ?? "").trim();
+  const color = String(body.color ?? "").startsWith("#") ? parseInt(String(body.color).slice(1), 16) : 0xf0c64f;
+  if (!channelId || !description) throw new Error("Embed needs a channel and message.");
+  const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, description, [], Number.isFinite(color) ? color : 0xf0c64f)] }, settings, channelId);
+  recordDiscordCase("embed_posted", { channelId, messageId: response?.id, title }, settings);
+  return { ok: true, response };
+}
+
+async function discordMemberProfile(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const userId = String(body.userId ?? "").trim();
+  if (!/^\d+$/.test(userId)) throw new Error("Choose a member.");
+  const [member, warnings, notes] = await Promise.all([
+    discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/members/${encodeURIComponent(userId)}`, {}, settings),
+    Promise.resolve(statements.listDiscordWarnings.all(settings.guildId, userId)),
+    Promise.resolve(statements.listDiscordModNotes.all(settings.guildId, userId)),
+  ]);
+  return { member, warnings, notes };
+}
+
+async function discordNicknameReport(body, settings = getDiscordSettingsRaw()) {
+  settings = requireDiscordModerationSettings(settings);
+  const pattern = String(body.pattern ?? "").trim();
+  if (!pattern) throw new Error("Enter a nickname pattern.");
+  const regex = new RegExp(pattern, "i");
+  const discovery = await discordGuildDiscovery(settings);
+  return { pattern, mismatches: (discovery.members ?? []).filter((member) => !regex.test(String(member.username ?? ""))).slice(0, 100) };
+}
+
 const discordTestEvents = {
   listing: {
     eventType: "market_new_listing",
@@ -2576,6 +2995,7 @@ async function collectServerSnapshot(force = false) {
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
+    await processDiscordTempBans().catch((error) => console.warn(`Discord temporary ban processing failed: ${error instanceof Error ? error.message : String(error)}`));
     const [claimPayload, membersPayload, buildingsPayload, inventoriesPayload, market, craftsPayload] = await Promise.all([
       fetchBitjita(`/claims/${claimId}`),
       fetchBitjita(`/claims/${claimId}/members`),
@@ -2860,6 +3280,16 @@ const discordCommands = [
   },
 ];
 
+function registeredDiscordCommands() {
+  return [
+    ...discordCommands,
+    ...statements.listDiscordCustomCommands.all().map((command) => ({
+      name: command.name,
+      description: String(command.description || "Custom Timbersteel command").slice(0, 100),
+    })),
+  ];
+}
+
 function discordOption(interaction, name) {
   return interaction?.data?.options?.find((option) => option.name === name)?.value;
 }
@@ -3056,6 +3486,8 @@ async function runDiscordCommand(interaction) {
     if (command === "crafts") return discordEmbedResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
     if (command === "price") return discordEmbedResponse(await discordPriceCommand(String(discordOption(interaction, "item") ?? ""), discordOption(interaction, "region")));
     if (command === "craftwatch") return await discordCraftWatchCommand(interaction);
+    const custom = statements.getDiscordCustomCommand.get(command);
+    if (custom) return discordResponse(custom.response, { ephemeral: false });
     return discordResponse("Unknown command.", { ephemeral: true });
   } catch (error) {
     return discordResponse(`Command failed: ${error instanceof Error ? error.message : String(error)}`, { ephemeral: true });
@@ -3065,6 +3497,8 @@ async function runDiscordCommand(interaction) {
 async function handleDiscordComponent(interaction) {
   try {
     const customId = String(interaction.data?.custom_id ?? "");
+    if (customId.startsWith("poll:")) return await handleDiscordVoteComponent(interaction, "poll");
+    if (customId.startsWith("rsvp:")) return await handleDiscordVoteComponent(interaction, "rsvp");
     if (customId.startsWith("colourrole:")) return await handleDiscordColourRoleComponent(interaction);
     if (customId.startsWith("rolepanel:")) return await handleDiscordRolePanelComponent(interaction);
     if (customId.startsWith("welcome:")) return await handleDiscordWelcomeComponent(interaction);
@@ -3111,6 +3545,18 @@ async function handleDiscordComponent(interaction) {
     });
     return discordResponse(`Craft watch role update failed: ${message}`, { ephemeral: true });
   }
+}
+
+async function handleDiscordVoteComponent(interaction, kind) {
+  const customId = String(interaction.data?.custom_id ?? "");
+  const [, key, rawLabel = key] = customId.split(":");
+  const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
+  const messageId = String(interaction.message?.id ?? "");
+  if (!userId || !messageId || !key) return discordResponse("Unable to record that selection.", { ephemeral: true });
+  statements.upsertDiscordComponentVote.run(messageId, key, userId, kind, new Date().toISOString());
+  const counts = statements.componentVoteCounts.all(messageId, kind);
+  const label = decodeURIComponent(rawLabel || key);
+  return discordResponse(`Recorded: ${label}. Current counts: ${counts.map((row) => `${row.component_key} ${row.count}`).join(", ") || "1 vote"}.`, { ephemeral: true });
 }
 
 async function handleDiscordRolePanelComponent(interaction) {
@@ -3313,7 +3759,7 @@ async function registerDiscordCommands() {
   const response = await fetch(`https://discord.com/api/v10${route}`, {
     method: "PUT",
     headers: { authorization: `Bot ${settings.botToken}`, "content-type": "application/json" },
-    body: JSON.stringify(discordCommands),
+    body: JSON.stringify(registeredDiscordCommands()),
   });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
@@ -3552,6 +3998,109 @@ const server = createServer(async (req, res) => {
         const response = await createDiscordScheduledEvent(body);
         audit(user, "discord.scheduled_event", { eventId: response?.id, name: body.name });
         return send(res, 200, { ok: true, response });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/moderation/bans") return send(res, 200, await discordModerationBans());
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/timeout") {
+        const body = await readJson(req);
+        const result = await discordModerationTimeout(body);
+        audit(user, "discord.moderation_timeout", { userId: result.userId, minutes: result.minutes });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/kick") {
+        const body = await readJson(req);
+        const result = await discordModerationKick(body);
+        audit(user, "discord.moderation_kick", { userId: result.userId });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/ban") {
+        const body = await readJson(req);
+        const result = await discordModerationBan(body);
+        audit(user, "discord.moderation_ban", { userId: result.userId, deleteMessageSeconds: result.deleteMessageSeconds });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/unban") {
+        const body = await readJson(req);
+        const result = await discordModerationUnban(body);
+        audit(user, "discord.moderation_unban", { userId: result.userId });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/purge") {
+        const body = await readJson(req);
+        const result = await discordModerationPurge(body);
+        audit(user, "discord.moderation_purge", { channelId: result.channelId, requested: result.requested, deleted: result.deleted });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/temp-ban") {
+        const body = await readJson(req);
+        const result = await discordTemporaryBan(body);
+        audit(user, "discord.moderation_temp_ban", { userId: result.userId, hours: result.hours, unbanAt: result.unbanAt });
+        return send(res, 200, result);
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/moderation/cases") return send(res, 200, discordCaseLog(url.searchParams.get("limit") ?? 80));
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/warnings") {
+        const body = await readJson(req);
+        const result = await discordWarningCreate(body, user.username);
+        audit(user, "discord.warning_create", { userId: body.userId, warningId: result.warningId });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/warnings/list") return send(res, 200, discordWarnings(await readJson(req)));
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/warnings/clear") {
+        const body = await readJson(req);
+        const result = discordWarningsClear(body, user.username);
+        audit(user, "discord.warning_clear", { userId: body.userId, cleared: result.cleared });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/notes") {
+        const body = await readJson(req);
+        const result = discordModNoteCreate(body, user.username);
+        audit(user, "discord.mod_note_create", { userId: body.userId, noteId: result.noteId });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/notes/list") return send(res, 200, discordModNotes(await readJson(req)));
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/slowmode") {
+        const result = await discordSlowmode(await readJson(req));
+        audit(user, "discord.slowmode", { channelId: result.channelId, seconds: result.seconds });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/lockdown") {
+        const result = await discordLockdown(await readJson(req));
+        audit(user, result.locked ? "discord.lockdown" : "discord.unlock", { channelId: result.channelId });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/automod") {
+        const result = await syncDiscordAutoModeration(await readJson(req));
+        audit(user, "discord.automod_create", { ruleId: result.rule?.id });
+        return send(res, 200, result);
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/moderation/automod") return send(res, 200, await discordNativeAutoModerationRules());
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/nickname-report") return send(res, 200, await discordNicknameReport(await readJson(req)));
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/moderation/profile") return send(res, 200, await discordMemberProfile(await readJson(req)));
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/custom-commands") return send(res, 200, discordCustomCommands());
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/discord/custom-commands") {
+        const result = upsertDiscordCustomCommand(await readJson(req));
+        audit(user, "discord.custom_command_upsert", { name: result.command.name });
+        return send(res, 200, result);
+      }
+      if (req.method === "DELETE" && url.pathname === "/api/local/admin/discord/custom-commands") {
+        const name = normalizeCommandName(url.searchParams.get("name"));
+        statements.deleteDiscordCustomCommand.run(name);
+        audit(user, "discord.custom_command_delete", { name });
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/poll") {
+        const result = await postDiscordPoll(await readJson(req));
+        audit(user, "discord.poll_post", { messageId: result.response?.id });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/rsvp") {
+        const result = await postDiscordRsvp(await readJson(req));
+        audit(user, "discord.rsvp_post", { messageId: result.response?.id });
+        return send(res, 200, result);
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/embed") {
+        const result = await sendDiscordCleanEmbed(await readJson(req));
+        audit(user, "discord.embed_post", { messageId: result.response?.id });
+        return send(res, 200, result);
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
