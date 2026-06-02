@@ -1729,9 +1729,18 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     .reduce((highest, role) => Math.max(highest, toNumber(role.position)), 0);
   const memberRoleCounts = new Map();
   const members = [];
+  let memberCountAvailable = true;
+  let memberCountError = "";
   let after = "0";
   for (let page = 0; page < 10; page += 1) {
-    const batch = await discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members?limit=1000&after=${encodeURIComponent(after)}`, {}, settings).catch(() => []);
+    let batch = [];
+    try {
+      batch = await discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members?limit=1000&after=${encodeURIComponent(after)}`, {}, settings);
+    } catch (error) {
+      memberCountAvailable = false;
+      memberCountError = error?.message ? String(error.message) : "Discord member list could not be fetched";
+      break;
+    }
     if (!Array.isArray(batch) || !batch.length) break;
     for (const member of batch) {
       const userId = String(member.user?.id ?? "");
@@ -1762,7 +1771,8 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
         position,
         managed,
         mentionable: Boolean(role.mentionable),
-        memberCount: memberRoleCounts.get(roleId) ?? 0,
+        memberCount: memberCountAvailable ? memberRoleCounts.get(roleId) ?? 0 : null,
+        memberCountAvailable,
         botCanManage,
         manageabilityReason: botCanManage ? "Bot can manage" : managed ? "Managed by integration" : botHighestRolePosition ? "Move bot role above this role" : "Bot role not found",
       };
@@ -1773,7 +1783,9 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     channels: sortedChannels,
     roles: normalizedRoles,
     members: members.slice(0, 1000),
-    memberCount: members.length,
+    memberCount: memberCountAvailable ? members.length : null,
+    memberCountAvailable,
+    memberCountError,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -1808,7 +1820,7 @@ async function discordRoleCleanupReport(settings = getDiscordSettingsRaw()) {
     if (role.color) colorGroups.set(String(role.color), [...(colorGroups.get(String(role.color)) ?? []), role]);
   }
   return {
-    unusedRoles: roles.filter((role) => !role.managed && !configuredRoleIds.has(String(role.id)) && toNumber(role.memberCount) === 0).slice(0, 80),
+    unusedRoles: roles.filter((role) => role.memberCountAvailable !== false && !role.managed && !configuredRoleIds.has(String(role.id)) && toNumber(role.memberCount) === 0).slice(0, 80),
     duplicateColours: [...colorGroups.values()].filter((group) => group.length > 1).map((group) => ({ color: group[0].color, roles: group.map((role) => ({ id: role.id, name: role.name, memberCount: role.memberCount })) })),
     missingConfiguredRoles: [...configuredRoleIds].filter((roleId) => !roles.some((role) => String(role.id) === roleId)),
     notManageableConfiguredRoles: roles.filter((role) => configuredRoleIds.has(String(role.id)) && !role.botCanManage),

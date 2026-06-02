@@ -4252,6 +4252,11 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
   const discoveredRoles: AnyRecord[] = discordDiscovery?.roles ?? [];
   const roleById = (id: string) => discoveredRoles.find((role) => String(role.id) === String(id));
+  const roleMemberCountText = (role: AnyRecord | undefined | null) => role?.memberCountAvailable === false ? "Member count unavailable" : `${formatNumber(role?.memberCount)} members`;
+  const roleStatusText = (role: AnyRecord | undefined | null) => role ? `${roleMemberCountText(role)} | ${role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}` : "";
+  const memberCountWarning = discordDiscovery?.memberCountAvailable === false ? (
+    <div className="error">Discord member counts are unavailable. Enable the bot's Server Members Intent in the Discord Developer Portal, then sync the server again. {discordDiscovery.memberCountError ? `Discord returned: ${discordDiscovery.memberCountError}` : ""}</div>
+  ) : null;
   const channelIdSelect = (value: string, onChange: (value: string) => void) => (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a channel</option>
@@ -4453,7 +4458,8 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                   <small>{formatNumber(discoveredRoles.length)} synced</small>
                 </div>
                 {!discoveredRoles.length ? <p className="legend">No Discord roles synced yet. Use Setup &gt; Sync Discord Server.</p> : null}
-                {discoveredRoles.slice(0, 140).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {formatNumber(role.memberCount)} members | {role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}</small></div>)}
+                {memberCountWarning}
+                {discoveredRoles.slice(0, 140).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {roleStatusText(role)}</small></div>)}
               </div>
             </div>
           </section> : null}
@@ -4461,15 +4467,16 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <summary><span><Bell size={17} /> Craft Watch Roles</span><small>Role IDs used by watch buttons and craft pings</small></summary>
             <p className="legend">Choose roles discovered by the bot. When someone clicks Watch on a craft notification, the bot toggles the matching role on that Discord member.</p>
             {!discoveredRoles.length ? <div className="error">No Discord roles synced yet. Use Setup &gt; Sync Discord Server.</div> : null}
+            {memberCountWarning}
             <div className="craft-channel-grid">{Object.keys(DEFAULT_CRAFT_ROLES).map((key) => {
               const roleId = draft.discord.craftRoles?.[key] ?? "";
               const role = discoveredRoles.find((entry) => String(entry.id) === String(roleId));
-              return <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}{role ? <small>{formatNumber(role.memberCount)} members | {role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}</small> : null}</span>{roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}</label>;
+              return <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}{role ? <small>{roleStatusText(role)}</small> : null}</span>{roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}</label>;
             })}</div>
             {discoveredRoles.length ? (
               <div className="role-directory">
                 <h4>Discovered roles</h4>
-                {discoveredRoles.slice(0, 80).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {formatNumber(role.memberCount)} members | {role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}</small></div>)}
+                {discoveredRoles.slice(0, 80).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {roleStatusText(role)}</small></div>)}
               </div>
             ) : null}
           </details> : null}
@@ -4483,6 +4490,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               </div>
             </div>
             <p className="legend">Define the name colours the bot should own. Create/sync will create missing Discord roles, update names and colours, remove deleted managed roles, and keep them below Mosswick where Discord allows it.</p>
+            {memberCountWarning}
             <label className="field colour-channel-field"><span>Selector channel</span>{channelIdSelect(draft.discord.colourRolesChannelId, (value) => updateDiscord({ colourRolesChannelId: value }))}</label>
             <div className="colour-role-grid">{draft.discord.colourRoles.map((entry) => {
               const role = discoveredRoles.find((item) => String(item.id) === String(entry.roleId));
@@ -4491,7 +4499,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <div className="colour-role-sample" style={{ borderColor: hex, background: `${hex}22` }}>
                   <span className="role-swatch" style={{ backgroundColor: hex }} />
                   <input aria-label={`${entry.label} name`} value={entry.label} onChange={(event) => updateDiscordColourRole(entry.key, { label: event.target.value, roleName: event.target.value })} />
-                  <small>{entry.roleId ? role ? `${formatNumber(role.memberCount)} members | ${role.botCanManage ? "Bot can manage" : role.manageabilityReason ?? "Not manageable"}` : `Synced role ${entry.roleId}` : "Not synced yet"}</small>
+                  <small>{entry.roleId ? role ? roleStatusText(role) : `Synced role ${entry.roleId}` : "Not synced yet"}</small>
                 </div>
                 <label className="colour-picker-field"><input type="color" value={hex} onChange={(event) => updateDiscordColourRole(entry.key, { color: hexToDiscordColor(event.target.value) })} /><code>{hex}</code></label>
                 <button className="icon-button danger" title={`Delete ${entry.label}`} onClick={() => removeDiscordColourRole(entry.key)}><X size={15} /></button>
