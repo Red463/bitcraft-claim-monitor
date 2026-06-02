@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.24-beta.1 - 2026-06-02
+
+### Changed
+
+- Discord craft notifications now include the craft tier and use the tier colour as the embed accent when available.
+
 ## 0.8.23-beta.1 - 2026-06-02
 
 ### Changed

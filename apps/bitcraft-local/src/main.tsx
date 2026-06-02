@@ -4005,6 +4005,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                   metadata?.metadata?.hasProductionBaseline !== undefined ? `hasBaseline=${metadata.metadata.hasProductionBaseline}` : "",
                   metadata?.metadata?.crafterName ? `crafter=${metadata.metadata.crafterName}` : "",
                   metadata?.metadata?.skillName ? `profession=${metadata.metadata.skillName}` : "",
+                  metadata?.metadata?.tier ? `tier=T${metadata.metadata.tier}` : "",
                   metadata?.metadata?.totalXp !== undefined ? `craftXp=${metadata.metadata.totalXp}` : "",
                   metadata?.metadata?.progressPct !== undefined ? `progress=${metadata.metadata.progressPct}%` : "",
                 ].filter(Boolean).join(" | ");

@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.23-beta.1";
+const appVersion = "0.8.24-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -430,17 +430,23 @@ function craftJobKey(job) {
   return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.claimEntityId ?? "claim"}:${job.buildingEntityId ?? job.buildingName ?? "building"}:${job.recipeId ?? job.recipe_entity_id ?? job.craftedItem?.[0]?.item_id ?? "recipe"}`);
 }
 
-function craftDisplayName(job, craftsPayload = {}) {
+function craftOutputItem(job, craftsPayload = {}) {
   const itemId = String(job.craftedItem?.[0]?.item_id ?? job.outputItemId ?? job.itemId ?? "");
-  const item = [...(craftsPayload.items ?? []), ...(craftsPayload.cargos ?? [])].find((candidate) => String(candidate.id) === itemId);
+  return [...(craftsPayload.items ?? []), ...(craftsPayload.cargos ?? [])].find((candidate) => String(candidate.id) === itemId) ?? null;
+}
+
+function craftDisplayName(job, craftsPayload = {}) {
+  const item = craftOutputItem(job, craftsPayload);
   return String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`);
 }
 
 function normalizeProductionJob(job, craftsPayload = {}) {
   const metrics = productionMetrics(job);
+  const item = craftOutputItem(job, craftsPayload);
   return {
     key: craftJobKey(job),
-    label: craftDisplayName(job, craftsPayload),
+    label: String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`),
+    tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
     buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
     crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
     ...metrics,
@@ -509,6 +515,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
         crafterName: job.crafterName,
         skillName: job.skillName,
         professionKey: job.professionKey,
+        tier: job.tier,
         totalXp: job.totalXp,
         progressPct: job.progressPct,
         totalEffort: job.totalEffort,
@@ -1247,7 +1254,21 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
 }
 
 function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
-  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : eventType.includes("production") ? 0x65b7fa : eventType === "app_update" ? 0xa349af : 0xef6461;
+  const tierColors = {
+    1: 0x838e9e,
+    2: 0xbe6327,
+    3: 0x00f630,
+    4: 0x2d6bff,
+    5: 0xa349af,
+    6: 0xd12234,
+    7: 0xc09015,
+    8: 0x5ae2e2,
+    9: 0x1f1f1f,
+    10: 0xdeffff,
+  };
+  const isProduction = eventType === "production_started" || eventType === "production_completed";
+  const tier = isProduction ? toNumber(metadata.tier ?? metadata.itemTier) : 0;
+  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : isProduction && tierColors[tier] ? tierColors[tier] : isProduction ? 0x65b7fa : eventType === "app_update" ? 0xa349af : 0xef6461;
   const fields = [];
   if (metadata.itemName) fields.push({ name: "Item", value: String(metadata.itemName), inline: true });
   if (metadata.owner) fields.push({ name: "Member", value: String(metadata.owner), inline: true });
@@ -1257,6 +1278,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (metadata.buildingName) fields.push({ name: "Structure", value: String(metadata.buildingName), inline: true });
   if (metadata.crafterName) fields.push({ name: "Crafter", value: String(metadata.crafterName), inline: true });
   if (metadata.skillName) fields.push({ name: "Profession", value: String(metadata.skillName), inline: true });
+  if (isProduction && tier) fields.push({ name: "Tier", value: `T${tier}`, inline: true });
   if (toNumber(metadata.totalXp)) fields.push({ name: "Total XP", value: toNumber(metadata.totalXp).toLocaleString(), inline: true });
   if (toNumber(metadata.progressPct)) fields.push({ name: "Progress", value: `${toNumber(metadata.progressPct).toFixed(1)}%`, inline: true });
   if (metadata.runway) fields.push({ name: "Runway", value: String(metadata.runway), inline: true });
@@ -1339,12 +1361,12 @@ const discordTestEvents = {
   craftStarted: {
     eventType: "production_started",
     summary: "Craft started: Tier 4 Scholar Workstation",
-    metadata: { label: "Tier 4 Scholar Workstation", buildingName: "Scholar Hall", crafterName: "Modular", skillName: "Scholar", professionKey: "scholar", totalXp: 82000, progressPct: 7.5 },
+    metadata: { label: "Tier 4 Scholar Workstation", tier: 4, buildingName: "Scholar Hall", crafterName: "Modular", skillName: "Scholar", professionKey: "scholar", totalXp: 82000, progressPct: 7.5 },
   },
   craftCompleted: {
     eventType: "production_completed",
     summary: "Craft completed: Refined Rough Plank",
-    metadata: { label: "Refined Rough Plank", buildingName: "Carpentry Workshop", crafterName: "Modular", skillName: "Carpentry", professionKey: "carpentry", totalXp: 64000, progressPct: 100 },
+    metadata: { label: "Refined Rough Plank", tier: 3, buildingName: "Carpentry Workshop", crafterName: "Modular", skillName: "Carpentry", professionKey: "carpentry", totalXp: 64000, progressPct: 100 },
   },
   supplies: {
     eventType: "supplies",
