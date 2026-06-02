@@ -197,6 +197,46 @@ const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
   productionCompleted: "profession",
 };
 
+const MAP_CATEGORY_ORDER = [
+  "Ancient Loot",
+  "Baitfish",
+  "Berry",
+  "Chummed Ocean Fish School",
+  "Clay",
+  "Coconut",
+  "Fiber Plant",
+  "Flower",
+  "Fruit",
+  "Huntable Animal",
+  "Hexite Meteor",
+  "Lake Fish School",
+  "Metal Outcrop",
+  "Monster Den",
+  "Mushroom",
+  "Ocean Fish School",
+  "Ore Vein",
+  "Rare Mushroom",
+  "Rare Research",
+  "Research",
+  "Rock",
+  "Rock Boulder",
+  "Rock Outcrop",
+  "Sailing Cargo",
+  "Salt",
+  "Sand",
+  "Sapling",
+  "Seasonal",
+  "Seasonal Resource",
+  "Stick",
+  "Treasure",
+  "Tree",
+  "Wild Grain",
+  "Wild Vegetable",
+  "Wonder Resource",
+  "Wood Logs",
+];
+const MAP_CATEGORY_SET = new Set(MAP_CATEGORY_ORDER);
+
 const DEFAULT_COLOUR_ROLES = [
   { key: "green1", label: "Green 1", roleName: "Green 1", roleId: "", color: 0x2be56f },
   { key: "green2", label: "Green 2", roleName: "Green 2", roleId: "", color: 0x1fb72e },
@@ -557,7 +597,7 @@ function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[]
 }
 
 function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
-  const raw = String(item?.iconAssetName ?? item?.icon_asset_name ?? "").replaceAll("\\", "/").replace(/^\/+/, "").replace(/\.webp$/i, "");
+  const raw = String(item?.iconAssetName ?? item?.icon_asset_name ?? item?.iconAddress ?? item?.icon_address ?? "").replaceAll("\\", "/").replace(/^\/+/, "").replace(/\.webp$/i, "");
   if (!raw || raw === "\uFFEE") return null;
   const path = raw.startsWith("Items/") ? `GeneratedIcons/${raw}` : raw;
   return `https://bitjita.com/${path}.webp`;
@@ -2970,13 +3010,15 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false, resourceIds: string[] = [], regionIds: string[] = []) {
+function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false, resourceIds: string[] = [], regionIds: string[] = [], enemyIds: string[] = []) {
   const params = new URLSearchParams();
   const sortedPlayers = playerIds.filter(Boolean).sort();
   const sortedResources = resourceIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
+  const sortedEnemies = enemyIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
   const sortedRegions = regionIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
   if (sortedPlayers.length) params.set("playerId", sortedPlayers.join(","));
   if (sortedResources.length) params.set("resourceId", sortedResources.join(","));
+  if (sortedEnemies.length) params.set("enemyId", sortedEnemies.join(","));
   if (sortedRegions.length) params.set("regionId", sortedRegions.join(","));
   const queryString = params.toString().replaceAll("%2C", ",");
   const query = queryString ? `?${queryString}` : "";
@@ -2996,6 +3038,24 @@ function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false,
   return `https://bitcraftmap.com/${query}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
 }
 
+function mapResourceToken(entry: AnyRecord): string {
+  const kind = String(entry.mapKind ?? "resource");
+  return kind === "enemy" ? `enemy:${entry.mapId ?? entry.enemyType ?? entry.id}` : `resource:${entry.mapId ?? entry.id}`;
+}
+
+function normalizeMapResourceToken(token: string): string {
+  const value = String(token ?? "").trim();
+  if (!value) return "";
+  return value.includes(":") ? value : `resource:${value}`;
+}
+
+function mapResourceCategory(resource: AnyRecord): string {
+  const tag = String(resource.tag ?? "");
+  if (resource.mapKind === "enemy") return "Huntable Animal";
+  if (MAP_CATEGORY_SET.has(tag)) return tag;
+  return "";
+}
+
 function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
@@ -3008,11 +3068,20 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const roster = data.players;
   React.useEffect(() => {
     const controller = new AbortController();
-    fetch(`${API}/resources`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`resources HTTP ${response.status}`)))
-      .then((payload) => {
-        const rows = unwrap<AnyRecord[]>(payload, "resources", []);
-        setResources(rows.filter((resource) => resource?.id != null && resource?.name).sort((a, b) => toNumber(a.id) - toNumber(b.id)));
+    Promise.all([
+      fetch(`${API}/resources`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`resources HTTP ${response.status}`))),
+      fetch(`${API}/creatures`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`creatures HTTP ${response.status}`))),
+    ])
+      .then(([resourcePayload, creaturePayload]) => {
+        const resourceRows: AnyRecord[] = unwrap<AnyRecord[]>(resourcePayload, "resources", [])
+          .filter((resource) => resource?.id != null && resource?.name)
+          .map((resource) => ({ ...resource, mapKind: "resource", mapId: String(resource.id), mapSortOrder: toNumber(resource.id) }));
+        const creatureRows: AnyRecord[] = unwrap<AnyRecord[]>(creaturePayload, "creatures", [])
+          .filter((creature) => creature?.enemyType != null && creature?.name && (creature.huntable === true || String(creature.tag ?? "").toLowerCase().includes("animal")))
+          .map((creature) => ({ ...creature, id: `enemy:${creature.enemyType}`, mapKind: "enemy", mapId: String(creature.enemyType), mapSortOrder: 100000 + toNumber(creature.enemyType), tag: "Huntable Animal" }));
+        setResources([...resourceRows, ...creatureRows].sort((a, b) => toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name))));
         setResourceError("");
       })
       .catch((error) => {
@@ -3030,8 +3099,9 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
     locationX: toNumber(data.claim.locationX),
     locationZ: toNumber(data.claim.locationZ),
   } : null;
-  const resourceById = React.useMemo(() => new Map(resources.map((resource) => [String(resource.id), resource])), [resources]);
-  const resourceCategories = React.useMemo(() => unique(resources.map((resource) => String(resource.tag ?? "Other")).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
+  const normalizedSelectedResources = React.useMemo(() => selectedResources.map(normalizeMapResourceToken).filter(Boolean), [selectedResources]);
+  const resourceByToken = React.useMemo(() => new Map(resources.map((resource) => [mapResourceToken(resource), resource])), [resources]);
+  const resourceCategories = React.useMemo(() => MAP_CATEGORY_ORDER.filter((category) => resources.some((resource) => mapResourceCategory(resource) === category)), [resources]);
   const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
   const regionOptions = React.useMemo(() => unique([
     ...ACTIVE_MAP_REGIONS,
@@ -3040,7 +3110,9 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [data.claim.regionId, data.regionStatus]);
   const mapMarker = focus ?? defaultFocus;
   const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
-  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResources, mapRegionIds), [current, focus, mapMarker, selectedResources, mapRegionIds.join(",")]);
+  const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
+  const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
+  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [current, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
     if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
@@ -3049,11 +3121,14 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
     const query = resourceSearch.trim().toLowerCase();
     return resources.filter((resource) => {
       const name = String(resource.name ?? "");
-      const tag = String(resource.tag ?? "Other");
+      const tag = mapResourceCategory(resource);
       if (query && !`${name} ${tag}`.toLowerCase().includes(query)) return false;
       if (resourceTier !== "All" && String(resource.tier ?? "") !== resourceTier) return false;
       if (resourceCategory !== "All" && tag !== resourceCategory) return false;
       return true;
+    }).sort((a, b) => {
+      if (resourceCategory !== "All") return toNumber(a.tier) - toNumber(b.tier) || String(a.name).localeCompare(String(b.name));
+      return toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name));
     });
   }, [resources, resourceSearch, resourceTier, resourceCategory]);
   function setResourceRegion(value: string) {
@@ -3068,12 +3143,13 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
       return nextIds;
     });
   }
-  function toggleResource(id: string) {
+  function toggleResource(token: string) {
+    const normalizedToken = normalizeMapResourceToken(token);
     setSelectedResources((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return [...next].sort((a, b) => toNumber(a) - toNumber(b));
+      const next = new Set(prev.map(normalizeMapResourceToken).filter(Boolean));
+      if (next.has(normalizedToken)) next.delete(normalizedToken);
+      else next.add(normalizedToken);
+      return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
   }
   function toggleAll() {
@@ -3125,7 +3201,8 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           {selectedResources.length ? (
             <div className="map-selected-resources">
               {selectedResources.map((id) => {
-                const resource = resourceById.get(id);
+                const token = normalizeMapResourceToken(id);
+                const resource = resourceByToken.get(token);
                 return <button key={id} onClick={() => toggleResource(id)}>{resource?.name ?? `Resource ${id}`}<X size={12} /></button>;
               })}
             </div>
@@ -3133,14 +3210,14 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
           <div className="map-resource-list">
             {visibleResources.map((resource) => {
-              const id = String(resource.id);
-              const active = selectedResources.includes(id);
+              const id = mapResourceToken(resource);
+              const active = normalizedSelectedResources.includes(id);
               const iconUrl = bitjitaIconUrl(resource);
               return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
                 <span className="map-resource-icon">{iconUrl ? <img src={iconUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <MapPin size={15} />}</span>
                 <strong>{resource.name}</strong>
                 {resource.tier != null ? <TierBadge tier={resource.tier} /> : null}
-                <small>{resource.tag ?? "Resource"}</small>
+                <small>{resource.mapKind === "enemy" ? "Animal" : mapResourceCategory(resource) || resource.tag || "Resource"}</small>
               </button>;
             })}
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}

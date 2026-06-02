@@ -1362,9 +1362,32 @@ async function resolvedColourRoles(settings = getDiscordSettingsRaw()) {
   return configured
     .map((entry) => {
       const roleId = String(entry.roleId || "").trim();
-      return { key: String(entry.key ?? ""), label: String(entry.label ?? entry.roleName ?? ""), roleName: String(entry.roleName ?? entry.label ?? ""), roleId };
+      return { key: String(entry.key ?? ""), label: String(entry.label ?? entry.roleName ?? ""), roleName: String(entry.roleName ?? entry.label ?? ""), roleId, color: toNumber(entry.color) };
     })
     .filter((entry) => entry.key && entry.label && entry.roleId);
+}
+
+function discordColourButtonEmoji(role) {
+  const label = String(role?.label ?? "").toLowerCase();
+  const color = toNumber(role?.color);
+  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return "🟢";
+  if (label.includes("blue") || color === 0x5fa8ff || color === 0x244cff) return "🔵";
+  if (label.includes("purple") || color === 0x9b4acb) return "🟣";
+  if (label.includes("pink") || color === 0xff4f88) return "🌸";
+  if (label.includes("red") || color === 0xff2028) return "🔴";
+  if (label.includes("yellow") || color === 0xf4c430) return "🟡";
+  if (label.includes("orange") || color === 0xff9f1c) return "🟠";
+  if (label.includes("black") || color === 0x111111) return "⚫";
+  if (label.includes("white") || color === 0xf4f4f4) return "⚪";
+  return "🎨";
+}
+
+function discordColourButtonStyle(role) {
+  const label = String(role?.label ?? "").toLowerCase();
+  const color = toNumber(role?.color);
+  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return 3;
+  if (label.includes("red") || color === 0xff2028) return 4;
+  return 2;
 }
 
 async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
@@ -1378,9 +1401,9 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
       type: 1,
       components: roles.slice(index, index + 5).map((role) => ({
         type: 2,
-        style: 2,
+        style: discordColourButtonStyle(role),
         custom_id: `colourrole:select:${role.key}:${role.roleId}`,
-        label: role.label.slice(0, 80),
+        label: `${discordColourButtonEmoji(role)} ${role.label}`.slice(0, 80),
       })),
     });
   }
