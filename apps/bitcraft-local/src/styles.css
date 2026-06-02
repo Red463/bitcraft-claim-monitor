@@ -863,14 +863,15 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .toolbar-button.danger { border-color: rgba(239,100,97,.45); color: #ffd2d1; background: rgba(239,100,97,.08); }
 .toolbar-button.danger:hover { border-color: rgba(239,100,97,.75); background: rgba(239,100,97,.14); }
 .bot-community-card, .bot-tools-card { display: grid; gap: 12px; }
-.discord-panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.discord-panel-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 1180px; }
 .discord-panel-editor { border: 1px solid rgba(147,160,186,.16); border-radius: 8px; background: rgba(255,255,255,.018); padding: 10px; display: grid; gap: 9px; align-content: start; min-width: 0; }
 .discord-panel-editor h4 { margin: 0; color: var(--gold); font-size: 14px; }
 .discord-panel-editor textarea { min-height: 76px; resize: vertical; }
 .role-option-list { display: grid; gap: 7px; }
-.role-option-row { display: grid; grid-template-columns: 60px minmax(120px, .7fr) minmax(180px, 1fr) 34px; gap: 7px; align-items: center; }
+.role-option-row { display: grid; grid-template-columns: 132px 70px minmax(150px, .75fr) minmax(260px, 1.25fr) 34px; gap: 7px; align-items: center; min-width: 0; }
 .role-option-row input, .role-option-row select { min-height: 34px; min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 0 9px; outline: 0; }
 .role-option-row input:focus, .role-option-row select:focus { border-color: var(--gold); }
+.role-option-row input[title="Custom emoji"] { text-align: center; padding: 0 6px; }
 .welcome-flow-editor { width: min(100%, 980px); }
 .discord-tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .discord-tool-grid.forms { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
@@ -950,6 +951,9 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 }
 
 @media (max-width: 900px) {
+  .role-option-row { grid-template-columns: minmax(0, 1fr) 64px 34px; }
+  .role-option-row input[placeholder="Label"], .role-option-row select:last-of-type { grid-column: 1 / -1; }
+  .role-option-row .icon-button { grid-column: 3; grid-row: 1; }
   .app-shell { grid-template-columns: 1fr; }
   aside { min-height: auto; position: sticky; top: 0; z-index: 2; }
   nav { grid-template-columns: repeat(3, 1fr); }

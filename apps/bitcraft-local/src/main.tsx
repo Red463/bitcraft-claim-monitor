@@ -299,6 +299,30 @@ const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
   readyRoleId: "",
 };
 
+const ROLE_EMOJI_PRESETS = [
+  ["", "None/custom"],
+  ["🌲", "Forestry"],
+  ["🪚", "Carpentry"],
+  ["🪨", "Masonry"],
+  ["⛏️", "Mining"],
+  ["🔨", "Smithing"],
+  ["🪶", "Scholar"],
+  ["🐾", "Leatherworking"],
+  ["🧵", "Tailoring"],
+  ["🌱", "Farming"],
+  ["🎣", "Fishing"],
+  ["🍳", "Cooking"],
+  ["🍄", "Foraging"],
+  ["🏹", "Hunting"],
+  ["✅", "Ready"],
+  ["🎉", "Event"],
+  ["🌍", "Timezone"],
+] as const;
+
+function roleEmojiPresetValue(value: string) {
+  return ROLE_EMOJI_PRESETS.some(([emoji]) => emoji === value) ? value : "";
+}
+
 function uniqueKey(prefix = "colour"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -4482,7 +4506,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Mode</span><select value={panel.mode} onChange={(event) => updateDiscordRolePanel(panel.key, { mode: event.target.value === "single" ? "single" : "multi" })}><option value="multi">Multi select</option><option value="single">Single select</option></select></label>
                 <div className="role-option-list">
                   {panel.options.map((option) => <div className="role-option-row" key={option.key}>
-                    <input value={option.emoji} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} placeholder="Emoji" />
+                    <select value={roleEmojiPresetValue(option.emoji)} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} title="Emoji preset">
+                      {ROLE_EMOJI_PRESETS.map(([emoji, label]) => <option key={label} value={emoji}>{emoji ? `${emoji} ${label}` : label}</option>)}
+                    </select>
+                    <input value={option.emoji} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} placeholder="Custom" title="Custom emoji" />
                     <input value={option.label} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { label: event.target.value })} placeholder="Label" />
                     {roleIdSelect(option.roleId, (value) => updateDiscordRolePanelOption(panel.key, option.key, { roleId: value }))}
                     <button className="icon-button danger" onClick={() => removeDiscordRolePanelOption(panel.key, option.key)} title="Remove option"><X size={14} /></button>

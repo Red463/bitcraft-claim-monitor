@@ -9,6 +9,7 @@
 - Added Discord bot tools for audit logs, inactive member checks, role cleanup, channel permission checks, announcements, pinned info updates and scheduled events.
 - Reworked the Discord bot dashboard navigation into a grouped sidebar so future bot features remain easier to find.
 - Split Discord role tools into a dedicated Roles category and added a Role Manager tab for creating Discord roles from the app.
+- Added emoji presets to Discord role-panel options so profession buttons can be configured without manually typing emoji.
 
 ## 0.8.32-beta.1 - 2026-06-02
 
