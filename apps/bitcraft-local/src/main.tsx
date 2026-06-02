@@ -3921,7 +3921,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a role</option>
       {value && !discoveredRoles.some((role) => String(role.id) === String(value)) ? <option value={value}>Unknown role ({value})</option> : null}
-      {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name} ({role.id}){role.botCanManage ? "" : " - cannot manage"}</option>)}
+      {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name} ({role.id}){role.botCanManage ? "" : ` - ${role.manageabilityReason ?? "not manageable"}`}</option>)}
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
@@ -4088,12 +4088,12 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <div className="craft-channel-grid">{Object.keys(DEFAULT_CRAFT_ROLES).map((key) => {
               const roleId = draft.discord.craftRoles?.[key] ?? "";
               const role = discoveredRoles.find((entry) => String(entry.id) === String(roleId));
-              return <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}{role ? <small>{formatNumber(role.memberCount)} members {role.botCanManage ? " | bot can manage" : " | bot cannot manage"}</small> : null}</span>{roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}</label>;
+              return <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}{role ? <small>{formatNumber(role.memberCount)} members | {role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}</small> : null}</span>{roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}</label>;
             })}</div>
             {discoveredRoles.length ? (
               <div className="role-directory">
                 <h4>Discovered roles</h4>
-                {discoveredRoles.slice(0, 80).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {formatNumber(role.memberCount)} members | {role.botCanManage ? "manageable" : role.managed ? "managed by integration" : "above bot role"}</small></div>)}
+                {discoveredRoles.slice(0, 80).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {formatNumber(role.memberCount)} members | {role.manageabilityReason ?? (role.botCanManage ? "Bot can manage" : "Not manageable")}</small></div>)}
               </div>
             ) : null}
           </details> : null}

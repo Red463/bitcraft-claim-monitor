@@ -828,6 +828,10 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-channel-card .error { max-width: 100%; margin: 4px 0 8px; padding: 14px 16px; }
 .discord-channel-card .craft-channel-grid .field { min-height: 76px; border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(0,0,0,.1); padding: 9px; align-content: start; }
 .discord-channel-card .craft-channel-grid .field span { font-size: 12px; }
+.bot-section-roles > details { width: min(100%, 1220px); }
+.bot-section-roles .craft-channel-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bot-section-roles .craft-channel-grid .field select { font-size: 12px; }
+.bot-section-roles .craft-channel-grid .field small { font-size: 10px; line-height: 1.25; }
 .bot-section-tests summary { justify-content: flex-start; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; }
 .bot-section-tests summary small { margin-left: 10px; }
 .bot-section-tests summary::after { margin-left: auto; }
@@ -838,7 +842,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-test-grid .toolbar-button { justify-content: center; min-width: 0; min-height: 44px; background: rgba(0,0,0,.1); }
 .role-directory { border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: 10px; display: grid; gap: 7px; max-height: 320px; overflow: auto; }
 .role-directory h4 { color: var(--gold); margin: 0 0 2px; font-size: 14px; }
-.role-directory div { display: grid; grid-template-columns: 16px minmax(0, .6fr) minmax(0, 1.4fr); align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.05); padding-bottom: 6px; }
+.role-directory div { display: grid; grid-template-columns: 16px minmax(170px, .42fr) minmax(0, 1fr); align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.05); padding-bottom: 6px; }
 .role-directory div:last-child { border-bottom: 0; padding-bottom: 0; }
 .role-directory strong { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .role-directory small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
@@ -883,6 +887,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .bot-section-setup .status-detail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bot-layout .discord-rule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .craft-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bot-section-roles .craft-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-rule-application { grid-column: 1 / -1; }
   .discord-rule-crafts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -915,6 +920,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .bot-section-notifications .status-detail .info-row:last-child { border-bottom: 0; }
   .bot-layout .discord-rule-grid { grid-template-columns: 1fr; }
   .craft-channel-grid { grid-template-columns: 1fr; }
+  .bot-section-roles .craft-channel-grid { grid-template-columns: 1fr; }
   .discord-test-grid { grid-template-columns: 1fr; }
   .discord-rule-crafts { grid-column: auto; grid-template-columns: 1fr; }
   .discord-rule-application { grid-column: auto; }

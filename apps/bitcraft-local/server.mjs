@@ -1399,6 +1399,7 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
       const roleId = String(role.id);
       const position = toNumber(role.position);
       const managed = Boolean(role.managed);
+      const botCanManage = Boolean(botHighestRolePosition && position < botHighestRolePosition && !managed);
       return {
         id: roleId,
         name: String(role.name ?? roleId),
@@ -1407,7 +1408,8 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
         managed,
         mentionable: Boolean(role.mentionable),
         memberCount: memberRoleCounts.get(roleId) ?? 0,
-        botCanManage: Boolean(botHighestRolePosition && position < botHighestRolePosition && !managed),
+        botCanManage,
+        manageabilityReason: botCanManage ? "Bot can manage" : managed ? "Managed by integration" : botHighestRolePosition ? "Move bot role above this role" : "Bot role not found",
       };
     });
   return {
