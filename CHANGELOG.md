@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.41-beta.1 - 2026-06-02
+
+### Fixed
+
+- Fixed the Discord bot Posts & Events form so Poll, RSVP and Embed title fields no longer mirror each other while typing.
+- Fixed Discord poll and RSVP button responses to show readable option names and live vote counts instead of internal option keys.
+- Updated Discord poll and RSVP messages after button votes so the visible message counts stay current.
+- Made Discord warnings send a member DM and staff mod-log message while recording delivery diagnostics for failed sends.
+- Updated Discord AutoMod rule creation to send mod-notes alerts and clarified that Discord exempts Administrator and Manage Server users.
+
 ## 0.8.40-beta.1 - 2026-06-02
 
 ### Added

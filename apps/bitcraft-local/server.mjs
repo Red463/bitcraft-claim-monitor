@@ -224,6 +224,13 @@ db.exec(`
     updated_at TEXT NOT NULL,
     PRIMARY KEY (message_id, user_id, kind)
   );
+  CREATE TABLE IF NOT EXISTS discord_component_messages (
+    message_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, kind)
+  );
   CREATE TABLE IF NOT EXISTS discord_temp_bans (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -433,6 +440,8 @@ const statements = {
   getDiscordCustomCommand: db.prepare("SELECT * FROM discord_custom_commands WHERE name = ?"),
   upsertDiscordComponentVote: db.prepare("INSERT INTO discord_component_votes (message_id, component_key, user_id, kind, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(message_id, user_id, kind) DO UPDATE SET component_key = excluded.component_key, updated_at = excluded.updated_at"),
   componentVoteCounts: db.prepare("SELECT component_key, COUNT(*) AS count FROM discord_component_votes WHERE message_id = ? AND kind = ? GROUP BY component_key"),
+  upsertDiscordComponentMessage: db.prepare("INSERT INTO discord_component_messages (message_id, kind, metadata_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id, kind) DO UPDATE SET metadata_json = excluded.metadata_json, updated_at = excluded.updated_at"),
+  getDiscordComponentMessage: db.prepare("SELECT * FROM discord_component_messages WHERE message_id = ? AND kind = ?"),
   upsertDiscordTempBan: db.prepare("INSERT INTO discord_temp_bans (guild_id, user_id, unban_at, reason, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET unban_at = excluded.unban_at, reason = excluded.reason"),
   dueDiscordTempBans: db.prepare("SELECT * FROM discord_temp_bans WHERE unban_at <= ? LIMIT 25"),
   deleteDiscordTempBan: db.prepare("DELETE FROM discord_temp_bans WHERE guild_id = ? AND user_id = ?"),
@@ -1535,6 +1544,17 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   return response.json();
 }
 
+async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw()) {
+  if (!settings.enabled || !settings.botToken || !/^\d+$/.test(String(userId))) throw new Error("Discord integration is not fully configured");
+  const channel = await discordApiRequest("/users/@me/channels", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ recipient_id: String(userId) }),
+  }, settings);
+  if (!channel?.id) throw new Error("Discord did not return a DM channel.");
+  return sendDiscordMessage(payload, settings, channel.id);
+}
+
 async function editDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
   if (!settings.enabled || !settings.botToken || !channelId || !messageId) throw new Error("Discord integration is not fully configured");
   return discordApiRequest(`/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
@@ -2155,7 +2175,38 @@ async function discordWarningCreate(body, moderator = "dashboard", settings = ge
   const at = new Date().toISOString();
   statements.insertDiscordWarning.run(settings.guildId, userId, moderator, reason, at);
   const modCase = recordDiscordCase("warning", { userId, moderator, reason }, settings);
-  return { ok: true, warningId: db.prepare("SELECT last_insert_rowid() AS id").get()?.id, ...modCase };
+  const warningId = db.prepare("SELECT last_insert_rowid() AS id").get()?.id;
+  const deliveries = [];
+  const warningEmbed = discordCommandEmbed("Discord Warning", `You have received a warning in Timbersteel Trade.`, [
+    { name: "Reason", value: reason.slice(0, 1024), inline: false },
+    { name: "Moderator", value: moderator, inline: true },
+  ], 0xef6461);
+  try {
+    const response = await sendDiscordDirectMessage(userId, { embeds: [warningEmbed] }, settings);
+    deliveries.push({ target: "member_dm", status: "sent", messageId: response?.id, channelId: response?.channel_id });
+    recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_warning_dm", summary: `Warning DM sent to ${userId}`, channelId: response?.channel_id, metadata: { userId, moderator, reason, warningId } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    deliveries.push({ target: "member_dm", status: "failed", error: message });
+    recordDiscordDeliverySafe({ status: "failed", eventType: "moderation_warning_dm", summary: `Warning DM failed for ${userId}`, error: message, metadata: { userId, moderator, reason, warningId } });
+  }
+  const logChannelId = String(settings.channels?.modNotes || settings.channelId || "").trim();
+  if (logChannelId) {
+    try {
+      const response = await sendDiscordMessage({ embeds: [discordCommandEmbed("Warning Recorded", `<@${userId}> received a warning.`, [
+        { name: "Reason", value: reason.slice(0, 1024), inline: false },
+        { name: "Moderator", value: moderator, inline: true },
+        { name: "Case", value: String(modCase.caseId ?? warningId ?? "Recorded"), inline: true },
+      ], 0xef6461)] }, settings, logChannelId);
+      deliveries.push({ target: "mod_log", status: "sent", messageId: response?.id, channelId: response?.channel_id });
+      recordDiscordDeliverySafe({ status: "sent", eventType: "moderation_warning_log", summary: `Warning logged for ${userId}`, channelId: logChannelId, channelKey: "modNotes", metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deliveries.push({ target: "mod_log", status: "failed", error: message });
+      recordDiscordDeliverySafe({ status: "failed", eventType: "moderation_warning_log", summary: `Warning log failed for ${userId}`, channelId: logChannelId, channelKey: "modNotes", error: message, metadata: { userId, moderator, reason, warningId, caseId: modCase.caseId } });
+    }
+  }
+  return { ok: true, warningId, deliveries, ...modCase };
 }
 
 function discordWarnings(body, settings = getDiscordSettingsRaw()) {
@@ -2249,6 +2300,11 @@ async function syncDiscordAutoModeration(body, settings = getDiscordSettingsRaw(
   const keywords = String(body.blockedWords ?? "").split(/[\n,]/).map((word) => word.trim()).filter(Boolean).slice(0, 100);
   if (!keywords.length) throw new Error("Add at least one blocked word or phrase.");
   const name = String(body.name ?? "Timbersteel keyword filter").trim() || "Timbersteel keyword filter";
+  const alertChannelId = String(settings.channels?.modNotes || settings.channelId || "").trim();
+  const actions = [
+    { type: 1, metadata: { custom_message: "That message was blocked by Timbersteel Trade AutoMod." } },
+    ...(/^\d+$/.test(alertChannelId) ? [{ type: 2, metadata: { channel_id: alertChannelId } }] : []),
+  ];
   const response = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/auto-moderation/rules`, {
     method: "POST",
     headers: { "content-type": "application/json", ...discordAuditReason(body.reason, "Created bot-managed auto moderation rule") },
@@ -2257,12 +2313,12 @@ async function syncDiscordAutoModeration(body, settings = getDiscordSettingsRaw(
       event_type: 1,
       trigger_type: 1,
       trigger_metadata: { keyword_filter: keywords },
-      actions: [{ type: 1 }],
+      actions,
       enabled: body.enabled !== false,
     }),
   }, settings);
-  recordDiscordCase("automod_rule", { ruleId: response?.id, name, keywords: keywords.length }, settings);
-  return { ok: true, rule: response };
+  recordDiscordCase("automod_rule", { ruleId: response?.id, name, keywords: keywords.length, alertChannelId }, settings);
+  return { ok: true, rule: response, alertChannelId: /^\d+$/.test(alertChannelId) ? alertChannelId : null };
 }
 
 async function discordNativeAutoModerationRules(settings = getDiscordSettingsRaw()) {
@@ -2294,11 +2350,13 @@ async function postDiscordPoll(body, settings = getDiscordSettingsRaw()) {
   const title = String(body.title ?? "Poll").trim() || "Poll";
   const options = String(body.options ?? "").split(/\n|,/).map((entry) => entry.trim()).filter(Boolean).slice(0, 10);
   if (!channelId || options.length < 2) throw new Error("Poll needs a channel and at least two options.");
+  const optionMeta = options.map((label, index) => ({ key: String(index), label }));
   const components = [];
   for (let i = 0; i < options.length; i += 5) {
     components.push({ type: 1, components: options.slice(i, i + 5).map((label, offset) => ({ type: 2, style: 2, label: label.slice(0, 80), custom_id: `poll:${i + offset}:${encodeURIComponent(label).slice(0, 60)}` })) });
   }
   const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, "Vote using the buttons below.", options.map((option, index) => ({ name: `${index + 1}. ${option}`, value: "0 votes", inline: true })), 0x5865f2)], components }, settings, channelId);
+  if (response?.id) statements.upsertDiscordComponentMessage.run(response.id, "poll", JSON.stringify({ title, description: "Vote using the buttons below.", color: 0x5865f2, options: optionMeta }), new Date().toISOString());
   recordDiscordCase("poll_posted", { channelId, messageId: response?.id, title, options }, settings);
   return { ok: true, response };
 }
@@ -2321,6 +2379,11 @@ async function postDiscordRsvp(body, settings = getDiscordSettingsRaw()) {
       { type: 2, style: 4, label: "Not Going", custom_id: "rsvp:not-going" },
     ] }],
   }, settings, channelId);
+  if (response?.id) statements.upsertDiscordComponentMessage.run(response.id, "rsvp", JSON.stringify({ title, description, color: 0x4ee28a, options: [
+    { key: "going", label: "Going" },
+    { key: "maybe", label: "Maybe" },
+    { key: "not-going", label: "Not Going" },
+  ] }), new Date().toISOString());
   recordDiscordCase("rsvp_posted", { channelId, messageId: response?.id, title }, settings);
   return { ok: true, response };
 }
@@ -3324,6 +3387,16 @@ function discordResponse(content, options = {}) {
   };
 }
 
+function discordUpdateMessageResponse(data) {
+  return {
+    type: 7,
+    data: {
+      allowed_mentions: { parse: [] },
+      ...data,
+    },
+  };
+}
+
 function discordCommandEmbed(title, description, fields = [], color = 0xf0c64f) {
   return {
     author: { name: "Timbersteel Trade" },
@@ -3547,6 +3620,51 @@ async function handleDiscordComponent(interaction) {
   }
 }
 
+function discordComponentOptionsFromMessage(interaction, kind) {
+  const prefix = `${kind}:`;
+  const components = Array.isArray(interaction.message?.components) ? interaction.message.components : [];
+  return components
+    .flatMap((row) => Array.isArray(row.components) ? row.components : [])
+    .map((component) => {
+      const customId = String(component.custom_id ?? "");
+      if (!customId.startsWith(prefix)) return null;
+      const [, key, rawLabel = component.label ?? key] = customId.split(":");
+      return { key, label: String(component.label ?? decodeURIComponent(rawLabel || key)) };
+    })
+    .filter(Boolean);
+}
+
+function discordComponentMessageMetadata(messageId, kind, interaction) {
+  const row = statements.getDiscordComponentMessage.get(messageId, kind);
+  if (row?.metadata_json) {
+    try {
+      const metadata = JSON.parse(row.metadata_json);
+      if (Array.isArray(metadata.options) && metadata.options.length) return metadata;
+    } catch {}
+  }
+  const options = discordComponentOptionsFromMessage(interaction, kind);
+  const embed = Array.isArray(interaction.message?.embeds) ? interaction.message.embeds[0] : null;
+  return {
+    title: String(embed?.title ?? (kind === "rsvp" ? "Event RSVP" : "Poll")),
+    description: String(embed?.description ?? (kind === "rsvp" ? "Choose your RSVP below." : "Vote using the buttons below.")),
+    color: toNumber(embed?.color) || (kind === "rsvp" ? 0x4ee28a : 0x5865f2),
+    options,
+  };
+}
+
+function discordComponentCountFields(metadata, counts) {
+  const byKey = new Map(counts.map((row) => [String(row.component_key), toNumber(row.count)]));
+  const options = Array.isArray(metadata.options) ? metadata.options : [];
+  return options.map((option, index) => {
+    const count = byKey.get(String(option.key)) ?? 0;
+    return {
+      name: `${index + 1}. ${option.label}`,
+      value: `${formatNumber(count)} vote${count === 1 ? "" : "s"}`,
+      inline: true,
+    };
+  });
+}
+
 async function handleDiscordVoteComponent(interaction, kind) {
   const customId = String(interaction.data?.custom_id ?? "");
   const [, key, rawLabel = key] = customId.split(":");
@@ -3555,8 +3673,22 @@ async function handleDiscordVoteComponent(interaction, kind) {
   if (!userId || !messageId || !key) return discordResponse("Unable to record that selection.", { ephemeral: true });
   statements.upsertDiscordComponentVote.run(messageId, key, userId, kind, new Date().toISOString());
   const counts = statements.componentVoteCounts.all(messageId, kind);
-  const label = decodeURIComponent(rawLabel || key);
-  return discordResponse(`Recorded: ${label}. Current counts: ${counts.map((row) => `${row.component_key} ${row.count}`).join(", ") || "1 vote"}.`, { ephemeral: true });
+  const metadata = discordComponentMessageMetadata(messageId, kind, interaction);
+  if (metadata.options?.length) statements.upsertDiscordComponentMessage.run(messageId, kind, JSON.stringify(metadata), new Date().toISOString());
+  const option = metadata.options?.find((entry) => String(entry.key) === key);
+  const label = String(option?.label ?? decodeURIComponent(rawLabel || key));
+  const fields = discordComponentCountFields(metadata, counts);
+  if (!fields.length) return discordResponse(`Recorded: ${label}.`, { ephemeral: true });
+  recordDiscordDeliverySafe({
+    status: "sent",
+    eventType: `${kind}_vote`,
+    summary: `${kind === "rsvp" ? "RSVP" : "Poll"} vote recorded: ${label}`,
+    metadata: { messageId, kind, componentKey: key, label, userId },
+  });
+  return discordUpdateMessageResponse({
+    embeds: [discordCommandEmbed(metadata.title, metadata.description, fields, metadata.color)],
+    components: interaction.message?.components ?? [],
+  });
 }
 
 async function handleDiscordRolePanelComponent(interaction) {
