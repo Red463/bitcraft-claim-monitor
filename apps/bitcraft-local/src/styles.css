@@ -34,9 +34,9 @@ h1, h2, h3 { font-family: Rajdhani, sans-serif; letter-spacing: 0; margin: 0; }
 .brand h1 { font-size: 16px; text-transform: uppercase; line-height: 1; }
 .brand span { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; margin-top: 3px; }
 nav { padding: 14px 10px; display: grid; gap: 3px; }
-nav button, .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
-nav button:hover, .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
-nav button.active { color: var(--gold); background: var(--gold-dim); border-color: rgba(240,198,79,.38); }
+nav a, nav button, .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
+nav a:hover, nav button:hover, .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
+nav a.active, nav button.active { color: var(--gold); background: var(--gold-dim); border-color: rgba(240,198,79,.38); }
 .command-launch { margin: 13px 10px 0; height: 37px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--muted); padding: 0 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .command-launch:hover { border-color: rgba(240,198,79,.4); color: var(--text); }
 .command-launch kbd { margin-left: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; color: var(--muted); font-size: 10px; }
@@ -469,6 +469,9 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .structure-total { display: grid; justify-items: end; flex-shrink: 0; }
 .structure-total strong { color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 40px; line-height: 1; }
 .structure-total span { color: var(--muted); text-transform: uppercase; font-size: 10px; }
+.structure-tier-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.structure-tier-strip div { min-height: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 6px 9px; display: inline-flex; align-items: center; gap: 7px; }
+.structure-tier-strip strong { color: var(--text); font-size: 13px; }
 .capacity-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--border); }
 .capacity-strip div { padding: 14px 15px; display: grid; gap: 3px; background: var(--panel); }
 .capacity-strip strong { color: var(--text); font-family: Rajdhani, sans-serif; font-size: 27px; line-height: 1; }
@@ -484,6 +487,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .building-card header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .building-card header .tier-badge { margin-left: auto; }
 .building-card p { margin: -4px 0 0 18px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.building-card small { width: fit-content; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); padding: 2px 8px; font-size: 11px; }
 .building-card > div { display: flex; gap: 5px; flex-wrap: wrap; }
 .category-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex: 0 0 auto; }
 .category-dot.crafting { background: #38bdf8; }

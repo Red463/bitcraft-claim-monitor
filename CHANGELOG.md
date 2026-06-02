@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.19-beta.1 - 2026-06-02
+
+### Changed
+
+- Simplified the Structures page into a basic overview of structures, categories and tiers, removing slot summaries and API detail controls.
+- Sidebar navigation items now use real page links so they can be opened in new tabs with middle-click or Ctrl-click.
+
 ## 0.8.18-beta.1 - 2026-06-02
 
 ### Changed

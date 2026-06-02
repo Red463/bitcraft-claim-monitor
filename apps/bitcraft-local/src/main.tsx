@@ -6,7 +6,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Bed,
   Bell,
   Box,
   Building2,
@@ -22,7 +21,6 @@ import {
   Factory,
   FileText,
   FlaskConical,
-  Flame,
   Globe2,
   Hammer,
   Home,
@@ -403,6 +401,10 @@ function updateQueryState(values: Record<string, string | null>) {
     else url.searchParams.delete(key);
   }
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function panelHref(panel: ActivePanel): string {
+  return `/?page=${encodeURIComponent(panel)}`;
 }
 
 const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent";
@@ -1567,11 +1569,9 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [category, setCategory] = usePersistedState("structures.category", "All");
   const [tier, setTier] = usePersistedState("structures.tier", "All");
   const [sort, setSort] = usePersistedState("structures.sort", "name");
-  const [selectedStructure, setSelectedStructure] = React.useState<AnyRecord | null>(null);
-  const [structureDetail, setStructureDetail] = React.useState<AnyRecord | null>(null);
   const categories = ["All", "Crafting", "Refining", "Storage", "Housing", "Trade", "Core", "Utility", "Decoration"];
-  const tiers = ["All", "1", "2", "3", "4", "5"];
   const buildings = data.buildings.map(normalizeBuilding);
+  const tiers = ["All", ...unique(buildings.map((building) => String(building.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b))];
   const filtered = buildings
     .filter((building) => {
       const text = `${building.name} ${building.nickname}`.toLowerCase();
@@ -1582,43 +1582,25 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
     })
     .sort((a, b) => {
       if (sort === "tier") return toNumber(b.tier) - toNumber(a.tier);
-      if (sort === "crafting") return b.craftingSlots - a.craftingSlots;
-      if (sort === "storage") return b.storageSlots - a.storageSlots;
+      if (sort === "category") return a.category.localeCompare(b.category) || a.name.localeCompare(b.name);
       return a.name.localeCompare(b.name);
     });
   const groupedBuildings = categories
     .filter((item) => item !== "All")
     .map((item) => ({ category: item, buildings: filtered.filter((building) => building.category === item) }))
     .filter((group) => group.buildings.length > 0);
-  const stationSummary = [
-    ["Craft", sum(buildings, "craftingSlots"), buildings.filter((building) => building.craftingSlots > 0).length],
-    ["Refine", sum(buildings, "refiningSlots"), buildings.filter((building) => building.refiningSlots > 0).length],
-    ["Store", sum(buildings, "storageSlots"), buildings.filter((building) => building.storageSlots > 0).length],
-    ["Housing", sum(buildings, "housingSlots"), buildings.filter((building) => building.housingSlots > 0).length],
-  ];
-  React.useEffect(() => {
-    if (!selectedStructure?.descriptionId) {
-      setStructureDetail(null);
-      return;
-    }
-    const controller = new AbortController();
-    fetch(`${API}/buildings/${selectedStructure.descriptionId}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`structure detail HTTP ${response.status}`)))
-      .then(setStructureDetail)
-      .catch(() => { if (!controller.signal.aborted) setStructureDetail(null); });
-    return () => controller.abort();
-  }, [selectedStructure?.descriptionId]);
+  const tierSummary = tiers
+    .filter((value) => value !== "All")
+    .map((value) => ({ tier: value, count: buildings.filter((building) => String(building.tier ?? "") === value).length }))
+    .filter((entry) => entry.count > 0);
 
   return (
     <div className="panel structures-panel">
       <div className="structure-hero">
-        <Header title="Structures">Settlement capacity and operational stations</Header>
+        <Header title="Structures">Basic overview of settlement structures and tiers</Header>
         <div className="structure-total"><strong>{buildings.length}</strong><span>structures built</span></div>
       </div>
-      <div className="capacity-strip">
-        {stationSummary.map(([label, slots, count]) => <div key={label}><strong>{formatNumber(slots)}</strong><span>{label} slots</span><small>{formatNumber(count)} structure{toNumber(count) === 1 ? "" : "s"}</small></div>)}
-        <div><strong>{formatNumber(sum(buildings, "tradeOrders"))}</strong><span>Trade slots</span><small>{buildings.filter((building) => building.tradeOrders > 0).length} structures</small></div>
-      </div>
+      {tierSummary.length ? <div className="structure-tier-strip">{tierSummary.map((entry) => <div key={entry.tier}><TierBadge tier={entry.tier} /><strong>{formatNumber(entry.count)}</strong></div>)}</div> : null}
       <div className="toolbar-row">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search structures" />
         <Segmented options={categories} value={category} onChange={setCategory} />
@@ -1626,24 +1608,9 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
         <select className="select-control" value={sort} onChange={(event) => setSort(event.target.value)}>
           <option value="name">Name</option>
           <option value="tier">Tier</option>
-          <option value="crafting">Crafting Slots</option>
-          <option value="storage">Storage Slots</option>
+          <option value="category">Category</option>
         </select>
       </div>
-      {selectedStructure && structureDetail?.building ? (
-        <section className="structure-detail">
-          <div className="split-header">
-            <h3><Home size={17} /> {selectedStructure.name}</h3>
-            <button className="mini-action" onClick={() => setSelectedStructure(null)}>Close</button>
-          </div>
-          <div className="detail-grid">
-            <Info label="Maximum health" value={formatNumber(structureDetail.building.maxHealth)} />
-            <Info label="Maintenance" value={formatNumber(structureDetail.building.maintenance)} />
-            <Info label="Defense level" value={formatNumber(structureDetail.building.defenseLevel)} />
-            <Info label="Construction inputs" value={(structureDetail.itemInfo ?? []).length + (structureDetail.cargoInfo ?? []).length} />
-          </div>
-        </section>
-      ) : null}
       <div className="building-sections">
         {groupedBuildings.map((group) => (
           <section className="building-section" key={group.category}>
@@ -1653,21 +1620,13 @@ function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
                 <article className="building-card" key={building.entityId}>
                   <header><strong>{building.name}</strong>{building.tier ? <TierBadge tier={building.tier} /> : null}</header>
                   {building.nickname ? <p>"{building.nickname}"</p> : null}
-                  <div className="slot-row">
-                    <Slot icon={<Hammer />} label="craft" value={building.craftingSlots} />
-                    <Slot icon={<Flame />} label="refine" value={building.refiningSlots} />
-                    <Slot icon={<Package />} label="store" value={building.storageSlots} />
-                    <Slot icon={<Package />} label="cargo" value={building.cargoSlots} />
-                    <Slot icon={<Bed />} label="house" value={building.housingSlots} />
-                    <Slot icon={<ShoppingBag />} label="trade" value={building.tradeOrders} />
-                    {building.terraformCapable ? <Slot icon={<MapIcon />} label="terraform" value={1} /> : null}
-                  </div>
-                  {building.descriptionId ? <button className="mini-action" onClick={() => setSelectedStructure(building)}>API Details</button> : null}
+                  <small>{building.category}</small>
                 </article>
               ))}
             </div>
           </section>
         ))}
+        {!filtered.length ? <div className="empty-state"><Home />No structures match the current filters.</div> : null}
       </div>
     </div>
   );
@@ -1712,17 +1671,8 @@ function getBuildingCategory(building: ReturnType<typeof normalizeBuilding>): st
   return "Utility";
 }
 
-function sum(rows: Array<Record<string, any>>, key: string): number {
-  return rows.reduce((total, row) => total + toNumber(row[key]), 0);
-}
-
 function getOwnerName(row: AnyRecord): string {
   return String(row.ownerPlayerUsername ?? row.ownerUsername ?? row.ownerName ?? row.owner ?? row.empireName ?? "-");
-}
-
-function Slot({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
-  if (!value) return null;
-  return <span className="slot-chip">{icon}<strong>{value}</strong>{label}</span>;
 }
 
 function Segmented({ options, value, onChange, label }: { options: string[]; value: string; onChange: (value: string) => void; label?: string }) {
@@ -4372,7 +4322,20 @@ function DashboardApp() {
         <div className="brand">{appSettings.branding.logo ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" /> : <Shield />}<div><h1>Claim Monitor</h1><span>Timbersteel</span></div></div>
         <button className="command-launch" onClick={() => setCommandOpen(true)}><Search size={15} /><span>Quick find</span><kbd>Ctrl K</kbd></button>
         <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><MessageCircle size={17} /><span>Join Discord</span><ExternalLink size={13} /></a>
-        <nav>{NAV.map(([id, label, Icon]) => <button key={id} className={active === id ? "active" : ""} onClick={() => navigate(id)}><Icon size={16} />{label}</button>)}</nav>
+        <nav>{NAV.map(([id, label, Icon]) => (
+          <a
+            key={id}
+            className={active === id ? "active" : ""}
+            href={panelHref(id)}
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              navigate(id);
+            }}
+          >
+            <Icon size={16} />{label}
+          </a>
+        ))}</nav>
         <div className="sidebar-tools">
           <button onClick={() => setUserSettingsOpen(true)} title="Browser settings"><Settings size={14} /> Browser Settings</button>
           <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }}><Bell size={14} /> Updates{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
