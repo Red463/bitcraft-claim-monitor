@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.17-beta.1";
+const appVersion = "0.8.18-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -235,7 +235,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinProgressPct: 1, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_delivery_json", JSON.stringify({ status: "none" }), now);
@@ -519,7 +519,9 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
 
   for (const job of jobs) {
     const current = existing.get(job.key);
-    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, current?.first_seen ?? occurredAt, occurredAt, JSON.stringify(job.raw));
+    const firstSeen = current?.first_seen ?? occurredAt;
+    const jobWithTiming = { ...job, firstSeen, lastSeen: occurredAt };
+    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(job.raw));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
     if (startAlreadyNotified) {
       diagnostics.push({
@@ -527,18 +529,18 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
         eventType: "production_started",
         summary: `Craft start already notified: ${job.label}`,
         reason: "Existing active craft row already has start_notified=1",
-        metadata: discordDiagnosticContext("production_started", { ...job, existingFirstSeen: current.first_seen, existingLastSeen: current.last_seen }),
+        metadata: discordDiagnosticContext("production_started", { ...jobWithTiming, existingFirstSeen: current.first_seen, existingLastSeen: current.last_seen }),
       });
     }
     if (!startAlreadyNotified && hasProductionBaseline) {
       const summary = `Craft started: ${job.label}`;
-      const skipReason = productionNotificationSkipReason("production_started", job);
+      const skipReason = productionNotificationSkipReason("production_started", jobWithTiming);
       if (skipReason) {
-        diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", job) });
+        diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", jobWithTiming) });
         continue;
       }
-      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(job));
-      pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: job });
+      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
+      pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
     }
   }
 
@@ -617,7 +619,7 @@ const defaultDiscordSettings = {
   minSaleValue: 0,
   supplyRunwayDaysThreshold: 7,
   productionMinXp: 40000,
-  productionMinProgressPct: 1,
+  productionMinAgeMinutes: 5,
   productionUsers: "",
   supplyReportIntervalDays: 3,
   channels: defaultDiscordChannels,
@@ -648,7 +650,7 @@ function normalizeDiscordSettings(value = {}) {
     minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
     supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
     productionMinXp: Math.max(toNumber(value.productionMinXp) || 40000, 0),
-    productionMinProgressPct: Math.max(Math.min(toNumber(value.productionMinProgressPct) || 1, 100), 0),
+    productionMinAgeMinutes: Math.max(toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins) || 5, 0),
     productionUsers: String(value.productionUsers ?? "").trim(),
     supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
     channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
@@ -1071,7 +1073,11 @@ function productionNotificationSkipReason(eventType, metadata = {}, settings = g
   if (!settings.notify.production) return "Craft notifications are disabled";
   if (eventType === "production_started" && !settings.notify.productionStarted) return "Craft started notifications are disabled";
   if (eventType === "production_completed" && !settings.notify.productionCompleted) return "Craft completed notifications are disabled";
-  if (eventType === "production_started" && toNumber(metadata.progressPct) < settings.productionMinProgressPct) return `Progress ${toNumber(metadata.progressPct).toFixed(1)}% is below ${settings.productionMinProgressPct}%`;
+  if (eventType === "production_started") {
+    const firstSeenMs = new Date(String(metadata.firstSeen ?? metadata.first_seen ?? metadata.firstSeenAt ?? "")).getTime();
+    const ageMinutes = Number.isFinite(firstSeenMs) ? (Date.now() - firstSeenMs) / 60000 : 0;
+    if (ageMinutes < settings.productionMinAgeMinutes) return `Craft has been present for ${ageMinutes.toFixed(1)} minutes, below ${settings.productionMinAgeMinutes} minutes`;
+  }
   if (toNumber(metadata.totalXp) < settings.productionMinXp) return `Total XP ${toNumber(metadata.totalXp).toLocaleString()} is below ${settings.productionMinXp.toLocaleString()}`;
   const allowedUsers = String(settings.productionUsers ?? "").split(/[\n,]/).map((name) => name.trim().toLowerCase()).filter(Boolean);
   if (allowedUsers.length) {
@@ -1128,7 +1134,7 @@ function discordDiagnosticContext(eventType, metadata = {}, settings = getDiscor
     minSaleValue: settings.minSaleValue,
     supplyRunwayDaysThreshold: settings.supplyRunwayDaysThreshold,
     productionMinXp: settings.productionMinXp,
-    productionMinProgressPct: settings.productionMinProgressPct,
+    productionMinAgeMinutes: settings.productionMinAgeMinutes,
     productionUsers: settings.productionUsers,
     metadata,
   };

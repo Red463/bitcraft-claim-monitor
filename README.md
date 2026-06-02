@@ -221,6 +221,8 @@ Discord setup is managed in **Admin > Discord**. The bot token is stored in the 
 
 Craft notifications include **Watch profession** and **Mute profession** buttons. Watching a profession makes future matching craft alerts mention that Discord user; muting suppresses those personal watch mentions.
 
+Craft-start notifications can be filtered by minimum total XP, allowed crafter names and a configurable time-present delay. The default delay is five minutes, so mistaken crafts that are cancelled quickly do not alert.
+
 #### Discord Bot Terms
 
 The Discord bot is optional and provided as part of this unofficial community app. It posts settlement notifications and responds to slash commands using public BitJita data and locally stored app data. Bot output is informational only and may be delayed, incomplete or inaccurate.

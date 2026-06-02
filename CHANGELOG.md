@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.18-beta.1 - 2026-06-02
+
+### Changed
+
+- Discord craft-start notifications now use a configurable minimum time-present delay instead of a progress percentage threshold, defaulting to five minutes.
+
 ## 0.8.17-beta.1 - 2026-06-02
 
 ### Added

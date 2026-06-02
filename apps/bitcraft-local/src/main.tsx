@@ -88,7 +88,7 @@ type DiscordSettings = {
   minSaleValue: number;
   supplyRunwayDaysThreshold: number;
   productionMinXp: number;
-  productionMinProgressPct: number;
+  productionMinAgeMinutes: number;
   productionUsers: string;
   supplyReportIntervalDays: number;
   channels: Record<string, string>;
@@ -200,7 +200,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     minSaleValue: 0,
     supplyRunwayDaysThreshold: 7,
     productionMinXp: 40000,
-    productionMinProgressPct: 1,
+    productionMinAgeMinutes: 5,
     productionUsers: "",
     supplyReportIntervalDays: 3,
     channels: DEFAULT_DISCORD_CHANNELS,
@@ -229,6 +229,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
       notificationChannels: { ...DEFAULT_NOTIFICATION_CHANNELS, ...((config as AnyRecord)?.discord?.notificationChannels ?? {}) },
       craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
+      productionMinAgeMinutes: toNumber((config as AnyRecord)?.discord?.productionMinAgeMinutes ?? (config as AnyRecord)?.discord?.productionMinAgeMins ?? DEFAULT_SETTINGS.discord.productionMinAgeMinutes),
     },
   } as AppSettings;
 }
@@ -3970,7 +3971,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionCompleted} onChange={(event) => updateDiscordNotify("productionCompleted", event.target.checked)} /><span>Craft completed</span></label>
                 <label className="field"><span>Completed channel</span>{channelSelect("productionCompleted", draft.discord.notificationChannels.productionCompleted, true)}</label>
                 <label className="field"><span>Minimum total XP</span><input type="number" min={0} value={draft.discord.productionMinXp} onChange={(event) => updateDiscord({ productionMinXp: Number(event.target.value) })} /></label>
-                <label className="field"><span>Start progress (%)</span><input type="number" min={0} max={100} step={0.5} value={draft.discord.productionMinProgressPct} onChange={(event) => updateDiscord({ productionMinProgressPct: Number(event.target.value) })} /></label>
+                <label className="field"><span>Start delay (minutes)</span><input type="number" min={0} step={0.5} value={draft.discord.productionMinAgeMinutes} onChange={(event) => updateDiscord({ productionMinAgeMinutes: Number(event.target.value) })} /></label>
                 <label className="field"><span>Allowed crafters</span><input value={draft.discord.productionUsers} onChange={(event) => updateDiscord({ productionUsers: event.target.value })} placeholder="Blank allows all, or comma separate usernames" /></label>
               </div>
               <div className="discord-rule-card">
@@ -4019,7 +4020,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                   entry.error ? `error=${entry.error}` : "",
                   metadata?.productionUsers ? `allowedCrafters=${metadata.productionUsers}` : "",
                   metadata?.productionMinXp !== undefined ? `minXp=${metadata.productionMinXp}` : "",
-                  metadata?.productionMinProgressPct !== undefined ? `minProgress=${metadata.productionMinProgressPct}%` : "",
+                  metadata?.productionMinAgeMinutes !== undefined ? `minAge=${metadata.productionMinAgeMinutes}m` : "",
                   metadata?.metadata?.activeCraftCount !== undefined ? `activeCrafts=${metadata.metadata.activeCraftCount}` : "",
                   metadata?.metadata?.activeKnownBeforePoll !== undefined ? `knownBeforePoll=${metadata.metadata.activeKnownBeforePoll}` : "",
                   metadata?.metadata?.hasProductionBaseline !== undefined ? `hasBaseline=${metadata.metadata.hasProductionBaseline}` : "",
