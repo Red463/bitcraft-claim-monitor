@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.32-beta.1";
+const appVersion = "0.8.33-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -647,6 +647,48 @@ const defaultColourRoles = [
   { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
 ];
 
+const defaultRolePanels = [
+  {
+    key: "access",
+    label: "Access Roles",
+    channelId: "",
+    messageId: "",
+    title: "Welcome to Timbersteel Trade!",
+    description: "Choose your access role below.",
+    mode: "single",
+    options: [
+      { key: "citizen", label: "Citizen", roleId: "", emoji: "1️⃣" },
+      { key: "visitor", label: "Visitor", roleId: "", emoji: "2️⃣" },
+    ],
+  },
+  {
+    key: "professions",
+    label: "Profession Roles",
+    channelId: "",
+    messageId: "",
+    title: "Choose Your Professions",
+    description: "Select as many profession interests as you like.",
+    mode: "multi",
+    options: Object.keys(defaultCraftRoles).map((key) => ({
+      key,
+      label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
+      roleId: defaultCraftRoles[key],
+      emoji: "",
+    })),
+  },
+  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", options: [] },
+  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", options: [] },
+];
+
+const defaultWelcomeFlow = {
+  enabled: false,
+  channelId: "",
+  messageId: "",
+  title: "Welcome to Timbersteel Trade",
+  message: "Read the welcome steps, choose your roles, then click Ready.",
+  readyRoleId: "",
+};
+
 const defaultDiscordSettings = {
   enabled: false,
   applicationId: "",
@@ -664,7 +706,10 @@ const defaultDiscordSettings = {
   craftChannels: defaultCraftChannels,
   craftRoles: defaultCraftRoles,
   colourRolesChannelId: "",
+  colourRolesMessageId: "",
   colourRoles: defaultColourRoles,
+  rolePanels: defaultRolePanels,
+  welcomeFlow: defaultWelcomeFlow,
   notify: {
     marketListings: true,
     marketSales: true,
@@ -677,10 +722,49 @@ const defaultDiscordSettings = {
   },
 };
 
+function normalizeDiscordRoleOption(value = {}, index = 0) {
+  const label = String(value.label ?? `Role ${index + 1}`).trim() || `Role ${index + 1}`;
+  return {
+    key: String(value.key ?? (label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `role-${index + 1}`)).trim(),
+    label,
+    roleId: String(value.roleId ?? "").trim(),
+    emoji: String(value.emoji ?? "").trim().slice(0, 16),
+  };
+}
+
+function normalizeDiscordRolePanel(value = {}, fallback = {}, index = 0) {
+  const label = String(value.label ?? fallback.label ?? `Panel ${index + 1}`).trim() || `Panel ${index + 1}`;
+  const options = Array.isArray(value.options) ? value.options : fallback.options ?? [];
+  return {
+    key: String(value.key ?? fallback.key ?? (label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `panel-${index + 1}`)).trim(),
+    label,
+    channelId: String(value.channelId ?? fallback.channelId ?? "").trim(),
+    messageId: String(value.messageId ?? fallback.messageId ?? "").trim(),
+    title: String(value.title ?? fallback.title ?? label).trim() || label,
+    description: String(value.description ?? fallback.description ?? "").trim(),
+    mode: String(value.mode ?? fallback.mode ?? "multi") === "single" ? "single" : "multi",
+    options: options.map((option, optionIndex) => normalizeDiscordRoleOption(option, optionIndex)).filter((option) => option.label),
+  };
+}
+
+function normalizeDiscordWelcomeFlow(value = {}) {
+  return {
+    ...defaultWelcomeFlow,
+    ...value,
+    enabled: value.enabled === true,
+    channelId: String(value.channelId ?? "").trim(),
+    messageId: String(value.messageId ?? "").trim(),
+    title: String(value.title ?? defaultWelcomeFlow.title).trim() || defaultWelcomeFlow.title,
+    message: String(value.message ?? defaultWelcomeFlow.message).trim() || defaultWelcomeFlow.message,
+    readyRoleId: String(value.readyRoleId ?? "").trim(),
+  };
+}
+
 function normalizeDiscordSettings(value = {}) {
   const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
   const savedColourRoles = Array.isArray(value.colourRoles) ? value.colourRoles : [];
   const colourRoleSource = Array.isArray(value.colourRoles) ? savedColourRoles : defaultColourRoles;
+  const rolePanelSource = Array.isArray(value.rolePanels) ? value.rolePanels : defaultRolePanels;
   return {
     ...defaultDiscordSettings,
     ...value,
@@ -700,6 +784,7 @@ function normalizeDiscordSettings(value = {}) {
     craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
     craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
     colourRolesChannelId: String(value.colourRolesChannelId ?? "").trim(),
+    colourRolesMessageId: String(value.colourRolesMessageId ?? "").trim(),
     colourRoles: colourRoleSource.map((item, index) => {
       const entry = defaultColourRoles[index] ?? {};
       const saved = item ?? {};
@@ -713,6 +798,8 @@ function normalizeDiscordSettings(value = {}) {
         color: Math.max(toNumber(saved.color ?? entry.color), 0),
       };
     }),
+    rolePanels: rolePanelSource.map((panel, index) => normalizeDiscordRolePanel(panel, defaultRolePanels[index], index)),
+    welcomeFlow: normalizeDiscordWelcomeFlow(value.welcomeFlow ?? {}),
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
@@ -1356,6 +1443,28 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   return response.json();
 }
 
+async function editDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
+  if (!settings.enabled || !settings.botToken || !channelId || !messageId) throw new Error("Discord integration is not fully configured");
+  return discordApiRequest(`/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }, settings);
+}
+
+async function sendOrUpdateDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
+  if (messageId) {
+    try {
+      const response = await editDiscordMessage(channelId, messageId, payload, settings);
+      return { response, action: "updated" };
+    } catch (error) {
+      console.warn(`Discord message update failed, posting replacement: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const response = await sendDiscordMessage(payload, settings, channelId);
+  return { response, action: "posted" };
+}
+
 async function resolvedColourRoles(settings = getDiscordSettingsRaw()) {
   const configured = Array.isArray(settings.colourRoles) ? settings.colourRoles : [];
   if (!configured.length) return [];
@@ -1399,13 +1508,17 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
       })),
     });
   }
-  const response = await sendDiscordMessage({
+  const payload = {
     embeds: [discordCommandEmbed("Choose Your Colour", "Pick one name colour below. Selecting a new colour automatically removes your previous colour role.", [
       { name: "Available colours", value: roles.map((role) => role.label).join(", "), inline: false },
     ], 0xf0c64f)],
     components,
-  }, settings, channelId);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "colour_role_selector", summary: "Posted colour role selector", channelId, channelKey: "colourRoles", metadata: { roles } });
+  };
+  const { response, action } = await sendOrUpdateDiscordMessage(channelId, settings.colourRolesMessageId, payload, settings);
+  const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
+  const next = normalizeDiscordSettings({ ...stored, colourRolesChannelId: channelId, colourRolesMessageId: String(response?.id ?? settings.colourRolesMessageId ?? "") });
+  statements.upsertSetting.run("discord_json", JSON.stringify(next), new Date().toISOString());
+  recordDiscordDeliverySafe({ status: "sent", eventType: "colour_role_selector", summary: `${action === "updated" ? "Updated" : "Posted"} colour role selector`, channelId, channelKey: "colourRoles", metadata: { roles, messageId: response?.id, action } });
   return response;
 }
 
@@ -1430,6 +1543,28 @@ async function createDiscordRole(guildId, role, settings = getDiscordSettingsRaw
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name: role.roleName, color: toNumber(role.color), hoist: false, mentionable: false }),
   }, settings);
+}
+
+async function createDiscordRoleFromAdmin(body, settings = getDiscordSettingsRaw()) {
+  settings = normalizeDiscordSettings(settings);
+  if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  const roleName = String(body.name ?? body.roleName ?? "").trim();
+  if (roleName.length < 1 || roleName.length > 100) throw new Error("Role name must be 1-100 characters");
+  const colorInput = String(body.color ?? "").trim();
+  const color = colorInput.startsWith("#") ? parseInt(colorInput.slice(1), 16) : toNumber(body.color);
+  const response = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/roles`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: roleName,
+      color: Number.isFinite(color) ? Math.max(0, Math.min(0xffffff, color)) : 0,
+      hoist: body.hoist === true,
+      mentionable: body.mentionable === true,
+    }),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "role_create", summary: `Created Discord role: ${roleName}`, metadata: { roleId: response?.id, roleName, color } });
+  return response;
 }
 
 async function updateDiscordRoleDefinition(guildId, roleId, role, settings = getDiscordSettingsRaw()) {
@@ -1495,6 +1630,68 @@ async function manageDiscordColourRoles(settings = getDiscordSettingsRaw()) {
   return { roles: managed, anchorRole: mosswickRole ?? null };
 }
 
+function discordButtonRows(buttons) {
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 5) rows.push({ type: 1, components: buttons.slice(index, index + 5) });
+  return rows;
+}
+
+function rolePanelPayload(panel) {
+  const options = (panel.options ?? []).filter((option) => option.roleId);
+  const buttons = options.map((option) => ({
+    type: 2,
+    style: 1,
+    custom_id: `rolepanel:${panel.key}:${option.key}`,
+    label: `${option.emoji ? `${option.emoji} ` : ""}${option.label}`.slice(0, 80),
+  }));
+  return {
+    embeds: [discordCommandEmbed(panel.title, panel.description || (panel.mode === "single" ? "Choose one role below." : "Choose any roles below."), [
+      { name: panel.mode === "single" ? "Selection" : "Selections", value: panel.mode === "single" ? "Only one role from this panel can be active at once." : "Click again to remove a role.", inline: false },
+    ], 0x5865f2)],
+    components: discordButtonRows(buttons),
+  };
+}
+
+function updateStoredDiscordPanel(panel) {
+  const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
+  const panels = stored.rolePanels.map((entry) => entry.key === panel.key ? normalizeDiscordRolePanel(panel, entry) : entry);
+  statements.upsertSetting.run("discord_json", JSON.stringify(normalizeDiscordSettings({ ...stored, rolePanels: panels })), new Date().toISOString());
+}
+
+async function postDiscordRolePanel(panelKey, settings = getDiscordSettingsRaw()) {
+  settings = normalizeDiscordSettings(settings);
+  const panel = settings.rolePanels.find((entry) => entry.key === panelKey);
+  if (!panel) throw new Error("Role panel not found");
+  const channelId = String(panel.channelId || settings.channelId || "").trim();
+  if (!channelId) throw new Error(`Choose a channel for ${panel.label} before posting.`);
+  const payload = rolePanelPayload(panel);
+  if (!payload.components.length) throw new Error(`${panel.label} needs at least one option with a role.`);
+  const { response, action } = await sendOrUpdateDiscordMessage(channelId, panel.messageId, payload, settings);
+  const nextPanel = { ...panel, channelId, messageId: String(response?.id ?? panel.messageId ?? "") };
+  updateStoredDiscordPanel(nextPanel);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "role_panel", summary: `${action === "updated" ? "Updated" : "Posted"} ${panel.label}`, channelId, channelKey: "rolePanel", metadata: { panel: nextPanel, action } });
+  return { panel: nextPanel, response, action };
+}
+
+async function postDiscordWelcomeFlow(settings = getDiscordSettingsRaw()) {
+  settings = normalizeDiscordSettings(settings);
+  const flow = settings.welcomeFlow;
+  const channelId = String(flow.channelId || settings.channelId || "").trim();
+  if (!channelId) throw new Error("Choose a welcome channel before posting.");
+  const payload = {
+    embeds: [discordCommandEmbed(flow.title, flow.message, [
+      { name: "Next step", value: flow.readyRoleId ? "Click Ready when you have read the welcome steps." : "Configure a Ready role if you want the button to assign access.", inline: false },
+    ], 0xf0c64f)],
+    components: discordButtonRows([{ type: 2, style: 3, custom_id: "welcome:ready", label: "Ready" }]),
+  };
+  const { response, action } = await sendOrUpdateDiscordMessage(channelId, flow.messageId, payload, settings);
+  const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
+  const welcomeFlow = normalizeDiscordWelcomeFlow({ ...flow, channelId, messageId: String(response?.id ?? flow.messageId ?? "") });
+  statements.upsertSetting.run("discord_json", JSON.stringify(normalizeDiscordSettings({ ...stored, welcomeFlow })), new Date().toISOString());
+  recordDiscordDeliverySafe({ status: "sent", eventType: "welcome_flow", summary: `${action === "updated" ? "Updated" : "Posted"} welcome flow`, channelId, channelKey: "welcome", metadata: { welcomeFlow, action } });
+  return { welcomeFlow, response, action };
+}
+
 async function addDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
   return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`, { method: "PUT" }, settings);
 }
@@ -1524,6 +1721,7 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
       type: toNumber(channel.type),
       parentId: channel.parent_id ? String(channel.parent_id) : "",
       label: `#${String(channel.name ?? channel.id)}`,
+      permissionOverwrites: Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [],
     }));
   const botRoleIds = new Set(Array.isArray(botMember?.roles) ? botMember.roles.map(String) : []);
   const botHighestRolePosition = (Array.isArray(roles) ? roles : [])
@@ -1578,6 +1776,132 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     memberCount: members.length,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+async function discordAuditLogReport(settings = getDiscordSettingsRaw()) {
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  const payload = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/audit-logs?limit=25`, {}, settings);
+  return {
+    entries: (payload.audit_log_entries ?? []).map((entry) => ({
+      id: String(entry.id),
+      actionType: entry.action_type,
+      userId: String(entry.user_id ?? ""),
+      targetId: String(entry.target_id ?? ""),
+      reason: String(entry.reason ?? ""),
+      changes: entry.changes ?? [],
+    })),
+    users: payload.users ?? [],
+  };
+}
+
+async function discordRoleCleanupReport(settings = getDiscordSettingsRaw()) {
+  const discovery = await discordGuildDiscovery(settings);
+  const configuredRoleIds = new Set([
+    ...Object.values(settings.craftRoles ?? {}),
+    ...(settings.colourRoles ?? []).map((role) => role.roleId),
+    ...(settings.rolePanels ?? []).flatMap((panel) => (panel.options ?? []).map((option) => option.roleId)),
+    settings.welcomeFlow?.readyRoleId,
+  ].map(String).filter(Boolean));
+  const roles = discovery.roles ?? [];
+  const colorGroups = new Map();
+  for (const role of roles) {
+    if (role.color) colorGroups.set(String(role.color), [...(colorGroups.get(String(role.color)) ?? []), role]);
+  }
+  return {
+    unusedRoles: roles.filter((role) => !role.managed && !configuredRoleIds.has(String(role.id)) && toNumber(role.memberCount) === 0).slice(0, 80),
+    duplicateColours: [...colorGroups.values()].filter((group) => group.length > 1).map((group) => ({ color: group[0].color, roles: group.map((role) => ({ id: role.id, name: role.name, memberCount: role.memberCount })) })),
+    missingConfiguredRoles: [...configuredRoleIds].filter((roleId) => !roles.some((role) => String(role.id) === roleId)),
+    notManageableConfiguredRoles: roles.filter((role) => configuredRoleIds.has(String(role.id)) && !role.botCanManage),
+  };
+}
+
+async function discordChannelPermissionReport(settings = getDiscordSettingsRaw()) {
+  const discovery = await discordGuildDiscovery(settings);
+  const channels = discovery.channels ?? [];
+  const configuredRoles = new Set([
+    ...Object.values(settings.craftRoles ?? {}),
+    ...(settings.rolePanels ?? []).flatMap((panel) => (panel.options ?? []).map((option) => option.roleId)),
+    settings.welcomeFlow?.readyRoleId,
+  ].map(String).filter(Boolean));
+  return {
+    channels: Object.entries(settings.channels ?? {}).filter(([, id]) => id).map(([key, id]) => {
+      const channel = channels.find((entry) => String(entry.id) === String(id));
+      const roleOverwrites = (channel?.permissionOverwrites ?? []).filter((overwrite) => configuredRoles.has(String(overwrite.id)));
+      return {
+        key,
+        id: String(id),
+        name: channel?.label ?? `Unknown channel (${id})`,
+        found: Boolean(channel),
+        configuredRoleOverwrites: roleOverwrites.length,
+        deniedConfiguredRoles: roleOverwrites.filter((overwrite) => BigInt(overwrite.deny ?? 0) > 0n).map((overwrite) => String(overwrite.id)),
+      };
+    }),
+  };
+}
+
+async function discordInactiveMemberReport(days = 30, settings = getDiscordSettingsRaw()) {
+  const discovery = await discordGuildDiscovery(settings);
+  const cutoffMs = Date.now() - Math.max(toNumber(days) || 30, 1) * 24 * 60 * 60 * 1000;
+  const activeUserIds = new Set();
+  let reactionChecks = 0;
+  const textChannels = (discovery.channels ?? []).filter((channel) => [0, 5].includes(toNumber(channel.type))).slice(0, 30);
+  for (const channel of textChannels) {
+    const messages = await discordApiRequest(`/channels/${encodeURIComponent(channel.id)}/messages?limit=100`, {}, settings).catch(() => []);
+    if (!Array.isArray(messages)) continue;
+    for (const message of messages) {
+      if (Date.parse(message.timestamp ?? "") < cutoffMs) continue;
+      if (message.author?.id) activeUserIds.add(String(message.author.id));
+      for (const reaction of Array.isArray(message.reactions) ? message.reactions.slice(0, 5) : []) {
+        if (reactionChecks >= 150) break;
+        const emoji = reaction.emoji?.id ? `${reaction.emoji.name}:${reaction.emoji.id}` : reaction.emoji?.name;
+        if (!emoji) continue;
+        reactionChecks += 1;
+        const users = await discordApiRequest(`/channels/${encodeURIComponent(channel.id)}/messages/${encodeURIComponent(message.id)}/reactions/${encodeURIComponent(emoji)}?limit=100`, {}, settings).catch(() => []);
+        if (Array.isArray(users)) users.forEach((user) => user?.id ? activeUserIds.add(String(user.id)) : null);
+      }
+    }
+  }
+  const inactive = (discovery.members ?? []).filter((member) => !activeUserIds.has(String(member.id)));
+  return { days: Math.max(toNumber(days) || 30, 1), scannedChannels: textChannels.length, reactionChecks, activeCount: activeUserIds.size, inactive: inactive.slice(0, 100), totalMembers: discovery.memberCount };
+}
+
+async function sendDiscordAnnouncement(body, settings = getDiscordSettingsRaw()) {
+  const channelId = String(body.channelId ?? settings.channelId ?? "").trim();
+  const title = String(body.title ?? "Announcement").trim() || "Announcement";
+  const message = String(body.message ?? "").trim();
+  if (!channelId || !message) throw new Error("Announcement needs a channel and message.");
+  const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, message, [], 0xf0c64f)] }, settings, channelId);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: { id: response?.id, channel_id: response?.channel_id } });
+  return response;
+}
+
+async function updateDiscordPinnedInfo(body, settings = getDiscordSettingsRaw()) {
+  const channelId = String(body.channelId ?? "").trim();
+  const title = String(body.title ?? "Information").trim() || "Information";
+  const message = String(body.message ?? "").trim();
+  const messageId = String(body.messageId ?? "").trim();
+  if (!channelId || !message) throw new Error("Pinned info needs a channel and message.");
+  const { response, action } = await sendOrUpdateDiscordMessage(channelId, messageId, { embeds: [discordCommandEmbed(title, message, [], 0x5865f2)] }, settings);
+  if (response?.id) await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(response.id)}`, { method: "PUT" }, settings).catch(() => null);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: { id: response?.id, channel_id: response?.channel_id } });
+  return { response, action };
+}
+
+async function createDiscordScheduledEvent(body, settings = getDiscordSettingsRaw()) {
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  const name = String(body.name ?? "").trim();
+  const description = String(body.description ?? "").trim();
+  const startTime = new Date(String(body.startTime ?? ""));
+  const endTime = new Date(String(body.endTime ?? ""));
+  const location = String(body.location ?? "Discord").trim() || "Discord";
+  if (!name || Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) throw new Error("Event needs a name, start time and end time.");
+  const response = await discordApiRequest(`/guilds/${encodeURIComponent(settings.guildId)}/scheduled-events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, description, privacy_level: 2, entity_type: 3, scheduled_start_time: startTime.toISOString(), scheduled_end_time: endTime.toISOString(), entity_metadata: { location } }),
+  }, settings);
+  recordDiscordDeliverySafe({ status: "sent", eventType: "scheduled_event", summary: name, metadata: { eventId: response?.id, startTime: startTime.toISOString(), endTime: endTime.toISOString() } });
+  return response;
 }
 
 const discordTestEvents = {
@@ -2596,6 +2920,8 @@ async function handleDiscordComponent(interaction) {
   try {
     const customId = String(interaction.data?.custom_id ?? "");
     if (customId.startsWith("colourrole:")) return await handleDiscordColourRoleComponent(interaction);
+    if (customId.startsWith("rolepanel:")) return await handleDiscordRolePanelComponent(interaction);
+    if (customId.startsWith("welcome:")) return await handleDiscordWelcomeComponent(interaction);
     if (!customId.startsWith("craftwatch:")) return discordResponse("Unknown button.", { ephemeral: true });
     const [, action, professionKeyRaw, professionNameRaw = ""] = customId.split(":");
     const professionKey = normalizeProfessionKey(professionKeyRaw);
@@ -2638,6 +2964,64 @@ async function handleDiscordComponent(interaction) {
       metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id },
     });
     return discordResponse(`Craft watch role update failed: ${message}`, { ephemeral: true });
+  }
+}
+
+async function handleDiscordRolePanelComponent(interaction) {
+  const customId = String(interaction.data?.custom_id ?? "");
+  try {
+    const [, panelKey, optionKey] = customId.split(":");
+    const settings = getDiscordSettingsRaw();
+    const guildId = String(interaction.guild_id ?? "");
+    const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
+    if (!guildId || !userId) return discordResponse("Role panels can only be used inside the Discord server.", { ephemeral: true });
+    if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+    const panel = settings.rolePanels.find((entry) => entry.key === panelKey);
+    const option = panel?.options?.find((entry) => entry.key === optionKey);
+    if (!panel || !option?.roleId) return discordResponse("That role option is no longer configured. Ask an admin to update the panel.", { ephemeral: true });
+    const memberRoles = new Set(Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : []);
+    const removing = memberRoles.has(option.roleId);
+    if (panel.mode === "single") {
+      for (const other of panel.options ?? []) {
+        if (other.roleId && other.roleId !== option.roleId && memberRoles.has(other.roleId)) await removeDiscordMemberRole(guildId, userId, other.roleId, settings);
+      }
+      if (!removing) await addDiscordMemberRole(guildId, userId, option.roleId, settings);
+    } else {
+      if (removing) await removeDiscordMemberRole(guildId, userId, option.roleId, settings);
+      else await addDiscordMemberRole(guildId, userId, option.roleId, settings);
+    }
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "role_panel_toggle",
+      summary: `${removing ? "Removed" : "Added"} ${option.label}`,
+      metadata: { guildId, userId, panelKey, optionKey, roleId: option.roleId, mode: panel.mode, action: removing ? "remove" : "add" },
+    });
+    return discordResponse(removing ? `Removed ${option.label}.` : `Added ${option.label}.`, { ephemeral: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({ status: "failed", eventType: "role_panel_toggle", summary: "Role panel update failed", error: message, metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id } });
+    return discordResponse(`Role update failed: ${message}`, { ephemeral: true });
+  }
+}
+
+async function handleDiscordWelcomeComponent(interaction) {
+  const customId = String(interaction.data?.custom_id ?? "");
+  try {
+    const [, action] = customId.split(":");
+    const settings = getDiscordSettingsRaw();
+    const flow = settings.welcomeFlow;
+    const guildId = String(interaction.guild_id ?? "");
+    const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
+    if (action !== "ready") return discordResponse("Unknown welcome action.", { ephemeral: true });
+    if (!guildId || !userId) return discordResponse("This button can only be used inside the Discord server.", { ephemeral: true });
+    if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+    if (flow.readyRoleId) await addDiscordMemberRole(guildId, userId, flow.readyRoleId, settings);
+    recordDiscordDeliverySafe({ status: "sent", eventType: "welcome_ready", summary: "Welcome Ready clicked", metadata: { guildId, userId, roleId: flow.readyRoleId } });
+    return discordResponse(flow.readyRoleId ? "You are marked as ready and your access role has been applied." : "You are marked as ready.", { ephemeral: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({ status: "failed", eventType: "welcome_ready", summary: "Welcome ready failed", error: message, metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id } });
+    return discordResponse(`Welcome update failed: ${message}`, { ephemeral: true });
   }
 }
 
@@ -2980,6 +3364,48 @@ const server = createServer(async (req, res) => {
         const result = await manageDiscordColourRoles({ ...current, ...body, colourRoles: Array.isArray(body.colourRoles) ? body.colourRoles : current.colourRoles });
         audit(user, "discord.colour_roles_manage", { count: result.roles.length, anchorRole: result.anchorRole?.name ?? null });
         return send(res, 200, { ok: true, ...result, settings: getSettings() });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/roles/create") {
+        const body = await readJson(req);
+        const role = await createDiscordRoleFromAdmin(body);
+        audit(user, "discord.role_create", { roleId: role?.id, name: body.name ?? body.roleName });
+        return send(res, 201, { ok: true, role });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/role-panel/post") {
+        const body = await readJson(req);
+        const result = await postDiscordRolePanel(String(body.panelKey ?? ""));
+        audit(user, "discord.role_panel_post", { panelKey: result.panel.key, messageId: result.response?.id, action: result.action });
+        return send(res, 200, { ok: true, ...result, settings: getSettings() });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/welcome/post") {
+        const result = await postDiscordWelcomeFlow();
+        audit(user, "discord.welcome_post", { messageId: result.response?.id, action: result.action });
+        return send(res, 200, { ok: true, ...result, settings: getSettings() });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/audit-log") return send(res, 200, await discordAuditLogReport());
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/role-cleanup") return send(res, 200, await discordRoleCleanupReport());
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/channel-permissions") return send(res, 200, await discordChannelPermissionReport());
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/inactive-report") {
+        const body = await readJson(req).catch(() => ({}));
+        return send(res, 200, await discordInactiveMemberReport(toNumber(body.days) || 30));
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/announcement") {
+        const body = await readJson(req);
+        const response = await sendDiscordAnnouncement(body);
+        audit(user, "discord.announcement", { channelId: body.channelId, messageId: response?.id });
+        return send(res, 200, { ok: true, response });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/pinned-info") {
+        const body = await readJson(req);
+        const result = await updateDiscordPinnedInfo(body);
+        audit(user, "discord.pinned_info", { channelId: body.channelId, messageId: result.response?.id, action: result.action });
+        return send(res, 200, { ok: true, ...result });
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/scheduled-event") {
+        const body = await readJson(req);
+        const response = await createDiscordScheduledEvent(body);
+        audit(user, "discord.scheduled_event", { eventId: response?.id, name: body.name });
+        return send(res, 200, { ok: true, response });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
