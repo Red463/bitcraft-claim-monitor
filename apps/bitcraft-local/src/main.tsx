@@ -509,7 +509,7 @@ function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[]
 }
 
 function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
-  const raw = String(item?.iconAssetName ?? "").replaceAll("\\", "/").replace(/^\/+/, "");
+  const raw = String(item?.iconAssetName ?? item?.icon_asset_name ?? "").replaceAll("\\", "/").replace(/^\/+/, "").replace(/\.webp$/i, "");
   if (!raw || raw === "\uFFEE") return null;
   const path = raw.startsWith("Items/") ? `GeneratedIcons/${raw}` : raw;
   return `https://bitjita.com/${path}.webp`;
@@ -2922,8 +2922,16 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
-function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false) {
-  const playerQuery = playerIds.length ? `?playerId=${playerIds.sort().join(",")}` : "";
+function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false, resourceIds: string[] = [], regionIds: string[] = []) {
+  const params = new URLSearchParams();
+  const sortedPlayers = playerIds.filter(Boolean).sort();
+  const sortedResources = resourceIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
+  const sortedRegions = regionIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
+  if (sortedPlayers.length) params.set("playerId", sortedPlayers.join(","));
+  if (sortedResources.length) params.set("resourceId", sortedResources.join(","));
+  if (sortedRegions.length) params.set("regionId", sortedRegions.join(","));
+  const queryString = params.toString().replaceAll("%2C", ",");
+  const query = queryString ? `?${queryString}` : "";
   const waypoint = mapMarker ? {
     type: "FeatureCollection",
     features: [{
@@ -2937,13 +2945,33 @@ function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false)
       geometry: { type: "Point", coordinates: [mapMarker.locationX, mapMarker.locationZ] },
     }],
   } : null;
-  return `https://bitcraftmap.com/${playerQuery}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
+  return `https://bitcraftmap.com/${query}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
 }
 
 function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
-  const [frameUrl, setFrameUrl] = usePersistedState("map.url", "");
+  const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
+  const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
+  const [resourceTier, setResourceTier] = usePersistedState("map.resource-tier", "All");
+  const [resourceCategory, setResourceCategory] = usePersistedState("map.resource-category", "All");
+  const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
+  const [resources, setResources] = React.useState<AnyRecord[]>([]);
+  const [resourceError, setResourceError] = React.useState("");
   const roster = data.players;
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/resources`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`resources HTTP ${response.status}`)))
+      .then((payload) => {
+        const rows = unwrap<AnyRecord[]>(payload, "resources", []);
+        setResources(rows.filter((resource) => resource?.id != null && resource?.name).sort((a, b) => toNumber(a.id) - toNumber(b.id)));
+        setResourceError("");
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setResourceError(error instanceof Error ? error.message : String(error));
+      });
+    return () => controller.abort();
+  }, []);
   const defaultSelection = React.useMemo(() => {
     const online = roster.filter((player) => player.signedIn).map((player) => String(player.entityId)).filter(Boolean);
     return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
@@ -2955,37 +2983,66 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
     locationZ: toNumber(data.claim.locationZ),
   } : null;
   const mapMarker = focus ?? defaultFocus;
-  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus)), [current, focus, mapMarker]);
+  const mapRegionIds = resourceRegions;
+  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResources, mapRegionIds), [current, focus, mapMarker, selectedResources, mapRegionIds.join(",")]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
-    if (!frameUrl) setFrameUrl(mapUrl);
-  }, [frameUrl, mapUrl, setFrameUrl]);
-  React.useEffect(() => {
-    if (focus) setFrameUrl(bitcraftMapUrl([...current], focus, true));
-  }, [focusKey, setFrameUrl]);
+    if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
+  }, [focusKey]);
+  const resourceById = React.useMemo(() => new Map(resources.map((resource) => [String(resource.id), resource])), [resources]);
+  const resourceCategories = React.useMemo(() => unique(resources.map((resource) => String(resource.tag ?? "Other")).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
+  const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
+  const regionOptions = React.useMemo(() => unique([
+    "7", "8", "9", "12", "13", "14", "17", "18", "19",
+    String(data.claim.regionId ?? ""),
+    ...data.regionStatus.map((region) => String(region.regionId ?? "")),
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [data.claim.regionId, data.regionStatus]);
+  const visibleResources = React.useMemo(() => {
+    const query = resourceSearch.trim().toLowerCase();
+    return resources.filter((resource) => {
+      const name = String(resource.name ?? "");
+      const tag = String(resource.tag ?? "Other");
+      if (query && !`${name} ${tag}`.toLowerCase().includes(query)) return false;
+      if (resourceTier !== "All" && String(resource.tier ?? "") !== resourceTier) return false;
+      if (resourceCategory !== "All" && tag !== resourceCategory) return false;
+      return true;
+    });
+  }, [resources, resourceSearch, resourceTier, resourceCategory]);
+  function setResourceRegion(value: string) {
+    setResourceRegions(value === "All" ? [] : [value]);
+  }
   function toggle(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev === null ? [...defaultSelection] : prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       const nextIds = [...next].sort();
-      setFrameUrl(bitcraftMapUrl(nextIds, mapMarker, false));
       return nextIds;
+    });
+  }
+  function toggleResource(id: string) {
+    setSelectedResources((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return [...next].sort((a, b) => toNumber(a) - toNumber(b));
     });
   }
   function toggleAll() {
     const nextIds = current.size === roster.length ? [] : roster.map((player) => String(player.entityId)).filter(Boolean).sort();
     setSelectedIds(nextIds);
-    setFrameUrl(bitcraftMapUrl(nextIds, mapMarker, false));
   }
   function resetMapFilters() {
-    const nextIds = [...defaultSelection].sort();
     setSelectedIds(null);
+    setSelectedResources([]);
+    setResourceSearch("");
+    setResourceTier("All");
+    setResourceCategory("All");
+    setResourceRegions(data.claim.regionId != null ? [String(data.claim.regionId)] : []);
     onClearFocus();
-    setFrameUrl(bitcraftMapUrl(nextIds, defaultFocus, false));
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
-  const currentFrameUrl = frameUrl || mapUrl;
+  const currentFrameUrl = mapUrl;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
       <div className="split-header">
@@ -3008,7 +3065,41 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
-      <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
+      <div className="map-workspace">
+        <aside className="map-resource-panel">
+          <div className="map-resource-heading"><Search size={16} /><div><strong>Resource Finder</strong><span>{selectedResources.length ? `${formatNumber(selectedResources.length)} tracked` : "Track resources on the map"}</span></div></div>
+          <div className="map-resource-controls">
+            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => <option key={id} value={id}>Region {id}{String(id) === String(data.claim.regionId) ? " - settlement" : ""}</option>)}</select></label>
+            <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
+            <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
+            <SearchBox value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
+          </div>
+          {selectedResources.length ? (
+            <div className="map-selected-resources">
+              {selectedResources.map((id) => {
+                const resource = resourceById.get(id);
+                return <button key={id} onClick={() => toggleResource(id)}>{resource?.name ?? `Resource ${id}`}<X size={12} /></button>;
+              })}
+            </div>
+          ) : null}
+          {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
+          <div className="map-resource-list">
+            {visibleResources.map((resource) => {
+              const id = String(resource.id);
+              const active = selectedResources.includes(id);
+              const iconUrl = bitjitaIconUrl(resource);
+              return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
+                <span className="map-resource-icon">{iconUrl ? <img src={iconUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <MapPin size={15} />}</span>
+                <strong>{resource.name}</strong>
+                {resource.tier != null ? <TierBadge tier={resource.tier} /> : null}
+                <small>{resource.tag ?? "Resource"}</small>
+              </button>;
+            })}
+            {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
+          </div>
+        </aside>
+        <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
+      </div>
     </div>
   );
 }
@@ -3965,7 +4056,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               ))}
             </aside>
           ) : null}
-        <div className="admin-grid discord-admin">
+        <div className={`admin-grid discord-admin${botOnly ? ` bot-admin-section bot-section-${botSection}` : ""}`}>
           {(!botOnly || botSection === "setup") ? <section className="form-card">
             <h3><MessageCircle size={17} /> Discord Bot</h3>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.enabled} onChange={(event) => updateDiscord({ enabled: event.target.checked })} /><span>Enable Discord notifications and slash commands</span></label>
@@ -4008,7 +4099,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           {(!botOnly || botSection === "notifications") ? <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
             <div className="discord-rule-grid">
-              <div className="discord-rule-card">
+              <div className="discord-rule-card discord-rule-market">
                 <h4>Market</h4>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.marketListings} onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)} /><span>New listings</span></label>
                 <label className="field"><span>Listings channel</span>{channelSelect("marketListings", draft.discord.notificationChannels.marketListings)}</label>
@@ -4016,7 +4107,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Sales channel</span>{channelSelect("marketSales", draft.discord.notificationChannels.marketSales)}</label>
                 <label className="field"><span>Minimum sale value</span><input type="number" min={0} value={draft.discord.minSaleValue} onChange={(event) => updateDiscord({ minSaleValue: Number(event.target.value) })} /></label>
               </div>
-              <div className="discord-rule-card">
+              <div className="discord-rule-card discord-rule-crafts">
                 <h4>Crafts</h4>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.production} onChange={(event) => updateDiscordNotify("production", event.target.checked)} /><span>Enable craft alerts</span></label>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.productionStarted} onChange={(event) => updateDiscordNotify("productionStarted", event.target.checked)} /><span>Craft started</span></label>
@@ -4027,7 +4118,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Start delay (minutes)</span><input type="number" min={0} step={0.5} value={draft.discord.productionMinAgeMinutes} onChange={(event) => updateDiscord({ productionMinAgeMinutes: Number(event.target.value) })} /></label>
                 <label className="field"><span>Allowed crafters</span><input value={draft.discord.productionUsers} onChange={(event) => updateDiscord({ productionUsers: event.target.value })} placeholder="Blank allows all, or comma separate usernames" /></label>
               </div>
-              <div className="discord-rule-card">
+              <div className="discord-rule-card discord-rule-supplies">
                 <h4>Supplies</h4>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
                 <label className="field"><span>Low supplies channel</span>{channelSelect("lowSupplies", draft.discord.notificationChannels.lowSupplies)}</label>
@@ -4036,7 +4127,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Report channel</span>{channelSelect("supplyReport", draft.discord.notificationChannels.supplyReport)}</label>
                 <label className="field"><span>Report interval (days)</span><input type="number" min={1} step={1} value={draft.discord.supplyReportIntervalDays} onChange={(event) => updateDiscord({ supplyReportIntervalDays: Number(event.target.value) })} /></label>
               </div>
-              <div className="discord-rule-card">
+              <div className="discord-rule-card discord-rule-application">
                 <h4>Application</h4>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.appUpdates} onChange={(event) => updateDiscordNotify("appUpdates", event.target.checked)} /><span>App update announcements</span></label>
                 <label className="field"><span>Updates channel</span>{channelSelect("appUpdates", draft.discord.notificationChannels.appUpdates)}</label>

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.29-beta.1 - 2026-06-02
+
+### Added
+
+- Added a BitJita-powered resource finder sidebar to the Map page, with resource search, tier/category filters, region selection and resource tracking through BitCraft Map `resourceId` URLs while retaining default online-player tracking.
+- Changed the Map page region selector back to a compact dropdown and expanded the map workspace so more of the viewport is used for the map and resource finder.
+
+## 0.8.28-beta.1 - 2026-06-02
+
+### Changed
+
+- Reworked the Discord bot dashboard for 1080p desktop displays with a horizontal category bar and cleaner notification rule groups, while keeping the compact narrow-screen layout readable.
+
 ## 0.8.27-beta.1 - 2026-06-02
 
 ### Added

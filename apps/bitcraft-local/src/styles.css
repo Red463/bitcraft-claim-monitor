@@ -632,16 +632,41 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .sort-button { border: 0; background: transparent; color: inherit; padding: 0; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; text-transform: inherit; font: inherit; }
 .sort-button:disabled { cursor: default; }
 .full-height { min-height: calc(100vh - 57px); grid-template-rows: auto auto auto minmax(520px, 1fr); }
-.map-panel.full-height.has-focus { grid-template-rows: auto auto auto auto minmax(520px, 1fr); }
+.map-panel.full-height { min-height: calc(100vh - 57px); grid-template-rows: auto auto auto minmax(0, 1fr); gap: 10px; padding: 16px; }
+.map-panel.full-height.has-focus { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
+.map-panel .split-header { margin-bottom: -4px; }
+.map-panel .online-summary { margin: -3px 0 0; }
 .player-pills { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.map-panel .player-pills { gap: 5px; max-height: 74px; overflow: auto; padding-right: 2px; }
 .player-pills button { display: inline-flex; align-items: center; gap: 6px; }
+.map-panel .player-pills button { min-height: 27px; padding: 0 8px; }
 .player-pills .online-dot { margin: 0; width: 7px; height: 7px; }
-.map-frame { width: 100%; min-height: 620px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.map-frame { width: 100%; min-height: 0; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .map-focus { min-height: 54px; border: 1px solid rgba(240,198,79,.42); border-radius: 8px; background: var(--gold-dim); padding: 9px 12px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .map-focus svg, .map-focus strong { color: var(--gold); }
 .map-focus div { min-width: 0; display: grid; gap: 2px; }
 .map-focus strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-focus span { color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 11px; }
+.map-workspace { min-height: min(760px, calc(100vh - 220px)); height: calc(100vh - 220px); display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 10px; align-items: stretch; }
+.map-panel.has-focus .map-workspace { min-height: min(700px, calc(100vh - 280px)); height: calc(100vh - 280px); }
+.map-resource-panel { min-height: 0; height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.map-resource-heading { display: flex; align-items: center; gap: 9px; color: var(--gold); }
+.map-resource-heading div { display: grid; gap: 2px; min-width: 0; }
+.map-resource-heading strong { color: var(--text); font: 700 16px Rajdhani, sans-serif; }
+.map-resource-heading span { color: var(--muted); font-size: 11px; }
+.map-resource-controls { display: grid; gap: 7px; }
+.map-resource-controls .field { gap: 4px; }
+.map-resource-controls .select-control { width: 100%; background: var(--panel-2); }
+.map-selected-resources { display: flex; flex-wrap: wrap; gap: 6px; }
+.map-selected-resources button { min-height: 28px; border: 1px solid rgba(240,198,79,.38); border-radius: 999px; background: var(--gold-dim); color: var(--gold); padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
+.map-resource-list { flex: 1 1 220px; min-height: 180px; overflow: auto; display: grid; gap: 6px; align-content: start; padding-right: 2px; }
+.map-resource-list > button { min-height: 48px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 7px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 2px 8px; align-items: center; cursor: pointer; text-align: left; }
+.map-resource-list > button:hover, .map-resource-list > button.active { border-color: rgba(240,198,79,.46); background: var(--gold-dim); }
+.map-resource-icon { grid-row: 1 / 3; width: 34px; height: 34px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; background: rgba(0,0,0,.18); display: grid; place-items: center; overflow: hidden; color: var(--muted); }
+.map-resource-list img { width: 100%; height: 100%; object-fit: contain; }
+.map-resource-list strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.map-resource-list small { color: var(--muted); font-size: 11px; }
+.map-resource-list .tier-badge { grid-column: 3; grid-row: 1 / 3; }
 .sync-panel { min-height: 100vh; grid-template-rows: auto minmax(720px, 1fr); }
 .sync-frame { width: 100%; min-height: 720px; height: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .activity-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -726,23 +751,36 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .toggle-line input[type="checkbox"] { order: 2; }
 .toggle-line span { min-width: 0; overflow-wrap: anywhere; }
 .discord-admin { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 10px; }
-.bot-control-page { min-height: 100vh; padding: 22px; background: radial-gradient(circle at top left, rgba(88,101,242,.16), transparent 34%), var(--bg); }
-.bot-console { max-width: 1480px; margin: 0 auto; }
-.bot-dashboard { gap: 12px; }
-.bot-overview { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; }
-.bot-overview div { border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.12), rgba(255,255,255,.025)); padding: 13px; display: grid; gap: 5px; min-height: 96px; }
+.bot-control-page { min-height: 100vh; padding: 26px; background: radial-gradient(circle at top left, rgba(88,101,242,.16), transparent 34%), var(--bg); }
+.bot-console { max-width: 1640px; margin: 0 auto; }
+.bot-dashboard { gap: 14px; }
+.bot-overview { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 10px; }
+.bot-overview div { border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.14), rgba(255,255,255,.025)); padding: 13px; display: grid; gap: 5px; min-height: 92px; box-shadow: 0 10px 24px rgba(0,0,0,.14); }
 .bot-overview svg { color: #5865f2; }
 .bot-overview strong { color: var(--text); font: 700 18px Rajdhani, sans-serif; }
 .bot-overview span { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
-.bot-layout { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 12px; align-items: start; }
-.bot-section-nav { position: sticky; top: 16px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: 8px; display: grid; gap: 5px; }
-.bot-section-nav button { min-height: 54px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.bot-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.bot-section-nav { min-height: 0; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)); padding: 8px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; box-shadow: 0 14px 28px rgba(0,0,0,.16); }
+.bot-section-nav button { min-height: 58px; max-height: 64px; border: 1px solid transparent; border-radius: 7px; background: rgba(0,0,0,.08); color: var(--muted); padding: 9px 10px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
 .bot-section-nav button:hover, .bot-section-nav button.active { color: var(--text); border-color: rgba(88,101,242,.42); background: rgba(88,101,242,.13); }
+.bot-section-nav button.active::before { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 999px; background: #5865f2; }
 .bot-section-nav button.active svg { color: #5865f2; }
 .bot-section-nav span { display: grid; gap: 2px; min-width: 0; }
 .bot-section-nav strong { font-size: 13px; color: inherit; }
 .bot-section-nav small { color: var(--muted); font-size: 11px; line-height: 1.25; }
-.discord-admin .form-card { padding: 12px; gap: 10px; }
+.bot-layout .discord-admin { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.bot-layout .discord-preview-card, .bot-layout .discord-channel-card, .bot-layout .discord-terminal-card { grid-column: auto; }
+.bot-layout .discord-admin > .form-card, .bot-layout .discord-admin > details { width: 100%; }
+.bot-layout .discord-admin .status-detail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bot-layout .discord-rule-grid { grid-template-columns: repeat(2, minmax(360px, 1fr)); }
+.bot-layout .discord-actions .toolbar-button { flex: 0 1 auto; }
+.bot-admin-section > .form-card, .bot-admin-section > details { justify-self: center; }
+.bot-section-setup > .form-card { max-width: 1120px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bot-section-setup > .form-card h3, .bot-section-setup > .form-card .toggle-line, .bot-section-setup > .form-card .status-detail, .bot-section-setup > .form-card .toolbar-button, .bot-section-setup > .form-card .legend { grid-column: 1 / -1; }
+.bot-section-tests > details { max-width: 1120px; }
+.bot-section-diagnostics > .form-card { max-width: 1360px; }
+.bot-section-notifications > .form-card, .bot-section-channels > details, .bot-section-roles > details { max-width: none; justify-self: stretch; }
+.discord-admin .form-card { padding: 14px; gap: 12px; }
 .discord-admin .form-card h3 { font-size: 16px; }
 .discord-admin .field { gap: 4px; }
 .discord-admin .field small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; font-weight: 400; }
@@ -751,18 +789,29 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-admin .status-detail { grid-template-columns: 1fr; gap: 8px; }
 .discord-admin .info { min-width: 0; }
 .discord-admin .info strong, .discord-admin .info span { overflow-wrap: anywhere; }
+.bot-layout .bot-section-notifications .status-detail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bot-section-diagnostics .discord-terminal { max-height: 460px; }
 .discord-actions .toolbar-button { flex: 1 1 210px; justify-content: center; }
 .discord-preview-card { grid-column: 1 / -1; }
 .discord-channel-card { grid-column: 1 / -1; }
 .discord-terminal-card { grid-column: 1 / -1; }
-.discord-rule-grid { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 8px; align-items: start; }
-.discord-rule-card { border: 1px solid var(--border); background: var(--panel-2); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
-.discord-rule-card h4 { color: var(--gold); font-size: 14px; letter-spacing: 0; margin: 0; }
+.discord-rule-grid { display: grid; grid-template-columns: repeat(2, minmax(320px, 1fr)); gap: 10px; align-items: start; }
+.discord-rule-card { border: 1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)); border-radius: 8px; padding: 12px; display: grid; gap: 9px; align-content: start; }
+.discord-rule-market { order: 1; }
+.discord-rule-supplies { order: 2; }
+.discord-rule-crafts { order: 3; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.discord-rule-application { order: 4; grid-column: 1 / -1; }
+.discord-rule-crafts h4 { grid-column: 1 / -1; }
+.discord-rule-crafts .field:last-child { grid-column: 1 / -1; }
+.discord-rule-card h4 { color: var(--gold); font-size: 15px; letter-spacing: 0; margin: -2px 0 2px; padding-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.07); }
 .discord-rule-card .field input { background: rgba(0,0,0,.16); }
 .discord-rule-card .field select { background: var(--panel); }
-.discord-rule-card .toggle-line { background: rgba(255,255,255,.025); min-height: 36px; padding: 7px 9px; }
-.craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
-.discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 7px; }
+.discord-rule-card .toggle-line { background: rgba(255,255,255,.025); min-height: 38px; padding: 7px 9px; }
+.discord-rule-card .field { grid-template-columns: minmax(140px, .34fr) minmax(0, .66fr); align-items: center; gap: 8px; }
+.discord-rule-card .field span { margin-bottom: 0; }
+.discord-rule-crafts .field, .discord-rule-crafts .toggle-line { min-height: 40px; }
+.craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; }
+.discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 7px; }
 .discord-test-grid .toolbar-button { justify-content: center; min-width: 0; }
 .role-directory { border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: 10px; display: grid; gap: 7px; max-height: 360px; overflow: auto; }
 .role-directory h4 { color: var(--gold); margin: 0 0 2px; font-size: 14px; }
@@ -771,7 +820,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .role-directory strong { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .role-directory small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .role-swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: transparent; }
-.discord-terminal { max-height: 360px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #050608; padding: 10px; display: grid; gap: 7px; font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+.discord-terminal { max-height: 520px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #050608; padding: 10px; display: grid; gap: 7px; font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
 .discord-log-entry { border-left: 3px solid var(--muted); background: rgba(255,255,255,.035); border-radius: 6px; padding: 8px 10px; display: grid; gap: 4px; }
 .discord-log-entry.sent { border-left-color: var(--good); }
 .discord-log-entry.failed { border-left-color: var(--danger); }
@@ -812,8 +861,22 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-overview, .bot-layout { grid-template-columns: 1fr; }
-  .bot-section-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-layout { grid-template-columns: 1fr; }
+  .bot-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .bot-overview div { min-height: 64px; padding: 9px; }
+  .bot-overview span { display: none; }
+  .bot-section-nav { position: static; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow-x: visible; }
+  .bot-section-nav button { min-height: 40px; padding: 6px 7px; }
+  .bot-section-nav strong { font-size: 12px; }
+  .bot-section-nav small { display: none; }
+  .bot-section-setup > .form-card { grid-template-columns: 1fr; }
+  .bot-section-setup > .form-card h3, .bot-section-setup > .form-card .toggle-line, .bot-section-setup > .form-card .status-detail, .bot-section-setup > .form-card .toolbar-button, .bot-section-setup > .form-card .legend { grid-column: auto; }
+  .bot-layout .bot-section-notifications .status-detail { grid-template-columns: 1fr; }
+  .bot-layout .discord-rule-grid { grid-template-columns: 1fr; }
+  .discord-rule-crafts { grid-column: auto; grid-template-columns: 1fr; }
+  .discord-rule-application { grid-column: auto; }
+  .discord-rule-crafts h4, .discord-rule-crafts .field:last-child { grid-column: auto; }
+  .discord-rule-card .field { grid-template-columns: 1fr; align-items: stretch; }
   .cookie-banner, .cookie-actions { display: grid; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-pulse div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.06); }
@@ -832,12 +895,20 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .activity-event { grid-template-columns: 38px minmax(0, 1fr); }
   .activity-event-date { grid-column: 2; }
   .activity-member-filter .select-control { min-width: 0; flex: 1; }
+  .map-panel.full-height { padding: 14px; }
+  .map-workspace, .map-panel.has-focus .map-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(420px, 1fr); height: auto; min-height: 900px; }
+  .map-resource-panel { max-height: 420px; }
+  .map-frame { min-height: 420px; }
   .floating-help { right: 12px; bottom: 12px; }
   .toast-stack { right: 12px; bottom: 69px; width: calc(100vw - 24px); }
   .floating-save { bottom: 12px; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .floating-save div { grid-column: 1 / -1; }
   .floating-save .toolbar-button { justify-content: center; }
   .database-toolbar, .backup-list > div { align-items: stretch; flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+  .bot-overview, .bot-section-nav { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
