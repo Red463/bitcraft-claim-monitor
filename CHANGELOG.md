@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.27-beta.1 - 2026-06-02
+
+### Added
+
+- Added Discord server discovery from the configured bot token, including channels, roles, members, role counts and bot role manageability checks.
+- Bot dashboard channel and craft-watch role settings now use discovered Discord dropdowns instead of manual ID entry.
+- Added a discovered role directory showing role colours, member counts and whether the bot can manage each role.
+
+## 0.8.26-beta.1 - 2026-06-02
+
+### Changed
+
+- Reworked the Discord Bot Control dashboard into sectioned categories for setup, notifications, channels, roles, tests and diagnostics.
+- Removed the duplicate save button from the bot setup card so bot settings rely on the floating unsaved-changes save bar.
+
 ## 0.8.25-beta.1 - 2026-06-02
 
 ### Added

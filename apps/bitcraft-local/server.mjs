@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.25-beta.1";
+const appVersion = "0.8.27-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -1345,6 +1345,80 @@ async function addDiscordMemberRole(guildId, userId, roleId, settings = getDisco
 
 async function removeDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
   return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`, { method: "DELETE" }, settings);
+}
+
+async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
+  if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  if (!settings.guildId) throw new Error("Discord guild/server ID is not configured");
+  const guildId = String(settings.guildId);
+  const [botUser, guild, channels, roles, botMember] = await Promise.all([
+    discordApiRequest("/users/@me", {}, settings),
+    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}`, {}, settings),
+    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/channels`, {}, settings),
+    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles`, {}, settings),
+    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/@me`, {}, settings).catch(() => null),
+  ]);
+  const sortedChannels = (Array.isArray(channels) ? channels : [])
+    .filter((channel) => [0, 5, 10, 11, 12, 15].includes(Number(channel.type)))
+    .sort((a, b) => String(a.parent_id ?? "").localeCompare(String(b.parent_id ?? "")) || toNumber(a.position) - toNumber(b.position) || String(a.name).localeCompare(String(b.name)))
+    .map((channel) => ({
+      id: String(channel.id),
+      name: String(channel.name ?? channel.id),
+      type: toNumber(channel.type),
+      parentId: channel.parent_id ? String(channel.parent_id) : "",
+      label: `#${String(channel.name ?? channel.id)}`,
+    }));
+  const botRoleIds = new Set(Array.isArray(botMember?.roles) ? botMember.roles.map(String) : []);
+  const botHighestRolePosition = (Array.isArray(roles) ? roles : [])
+    .filter((role) => botRoleIds.has(String(role.id)))
+    .reduce((highest, role) => Math.max(highest, toNumber(role.position)), 0);
+  const memberRoleCounts = new Map();
+  const members = [];
+  let after = "0";
+  for (let page = 0; page < 10; page += 1) {
+    const batch = await discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members?limit=1000&after=${encodeURIComponent(after)}`, {}, settings).catch(() => []);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const member of batch) {
+      const userId = String(member.user?.id ?? "");
+      if (!userId) continue;
+      after = userId;
+      const roleIds = Array.isArray(member.roles) ? member.roles.map(String) : [];
+      for (const roleId of roleIds) memberRoleCounts.set(roleId, (memberRoleCounts.get(roleId) ?? 0) + 1);
+      members.push({
+        id: userId,
+        username: String(member.user?.global_name ?? member.nick ?? member.user?.username ?? userId),
+        roles: roleIds,
+      });
+    }
+    if (batch.length < 1000) break;
+  }
+  const normalizedRoles = (Array.isArray(roles) ? roles : [])
+    .filter((role) => String(role.id) !== guildId)
+    .sort((a, b) => toNumber(b.position) - toNumber(a.position) || String(a.name).localeCompare(String(b.name)))
+    .map((role) => {
+      const roleId = String(role.id);
+      const position = toNumber(role.position);
+      const managed = Boolean(role.managed);
+      return {
+        id: roleId,
+        name: String(role.name ?? roleId),
+        color: toNumber(role.color),
+        position,
+        managed,
+        mentionable: Boolean(role.mentionable),
+        memberCount: memberRoleCounts.get(roleId) ?? 0,
+        botCanManage: Boolean(botHighestRolePosition && position < botHighestRolePosition && !managed),
+      };
+    });
+  return {
+    guild: { id: guildId, name: String(guild?.name ?? guildId) },
+    bot: { id: String(botUser?.id ?? ""), username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
+    channels: sortedChannels,
+    roles: normalizedRoles,
+    members: members.slice(0, 1000),
+    memberCount: members.length,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 const discordTestEvents = {
@@ -2689,6 +2763,11 @@ const server = createServer(async (req, res) => {
         const commands = await registerDiscordCommands();
         audit(user, "discord.register_commands", { count: Array.isArray(commands) ? commands.length : 0 });
         return send(res, 200, { commands });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/discovery") {
+        const discovery = await discordGuildDiscovery();
+        audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, members: discovery.memberCount });
+        return send(res, 200, discovery);
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
         const body = await readJson(req);

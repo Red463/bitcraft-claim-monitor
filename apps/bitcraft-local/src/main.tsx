@@ -23,6 +23,7 @@ import {
   FlaskConical,
   Globe2,
   Hammer,
+  Hash,
   Home,
   KeyRound,
   Lock,
@@ -3564,6 +3565,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
 }
 
 type AdminTab = "status" | "analytics" | "configuration" | "discord" | "theme" | "database" | "users" | "audit" | "backups";
+type BotSection = "setup" | "notifications" | "channels" | "roles" | "tests" | "diagnostics";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -3579,6 +3581,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [password, setPassword] = React.useState("");
   const [setupKey, setSetupKey] = React.useState("");
   const [tab, setTab] = React.useState<AdminTab>(botOnly ? "discord" : "status");
+  const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
@@ -3596,6 +3599,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
+  const [discordDiscovery, setDiscordDiscovery] = React.useState<AnyRecord | null>(null);
 
   async function api(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
@@ -3646,6 +3650,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     setAnalyticsData(await api(`/admin/analytics?days=${encodeURIComponent(analyticsDays)}`));
   }
 
+  async function refreshDiscordDiscovery() {
+    setDiscordDiscovery(await api("/admin/discord/discovery"));
+  }
+
   React.useEffect(() => {
     api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
   }, []);
@@ -3659,6 +3667,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     if (!auth?.authenticated) return;
     run(async () => {
       if (tab === "status" || tab === "discord") await refreshStatus();
+      if (botOnly && tab === "discord") await refreshDiscordDiscovery();
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
@@ -3773,6 +3782,14 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     ["supplies", "Supplies"],
     ["appUpdate", "App Update"],
   ];
+  const botSections: Array<[BotSection, string, React.ReactNode, string]> = [
+    ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs"],
+    ["notifications", "Notifications", <Bell size={15} />, "Market, craft, supply and update rules"],
+    ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing"],
+    ["roles", "Roles", <Users size={15} />, "Craft watch role IDs"],
+    ["tests", "Tests", <Command size={15} />, "Slash command registration and previews"],
+    ["diagnostics", "Diagnostics", <Activity size={15} />, "Delivery log and troubleshooting"],
+  ];
 
   if (authLoading) return <div className="panel"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
   if (!auth?.authenticated) {
@@ -3797,6 +3814,22 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     <select value={value} onChange={(event) => updateNotificationChannel(key, event.target.value)}>
       {allowProfession ? <option value="profession">Profession channel</option> : null}
       {channelOptions.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}{entry.id ? ` (${entry.id})` : ""}</option>)}
+    </select>
+  );
+  const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
+  const discoveredRoles: AnyRecord[] = discordDiscovery?.roles ?? [];
+  const channelIdSelect = (value: string, onChange: (value: string) => void) => (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Select a channel</option>
+      {value && !discoveredChannels.some((channel) => String(channel.id) === String(value)) ? <option value={value}>Unknown channel ({value})</option> : null}
+      {discoveredChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.label ?? `#${channel.name}`} ({channel.id})</option>)}
+    </select>
+  );
+  const roleIdSelect = (value: string, onChange: (value: string) => void) => (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Select a role</option>
+      {value && !discoveredRoles.some((role) => String(role.id) === String(value)) ? <option value={value}>Unknown role ({value})</option> : null}
+      {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name} ({role.id}){role.botCanManage ? "" : " - cannot manage"}</option>)}
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
@@ -3921,8 +3954,19 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               <div><Activity size={19} /><strong>{discordDelivery.status ?? "No delivery"}</strong><span>{discordDeliveryLabel}</span></div>
             </div>
           ) : null}
+          <div className={botOnly ? "bot-layout" : ""}>
+          {botOnly ? (
+            <aside className="bot-section-nav" aria-label="Bot settings sections">
+              {botSections.map(([key, label, icon, description]) => (
+                <button key={key} className={botSection === key ? "active" : ""} onClick={() => setBotSection(key)}>
+                  {icon}
+                  <span><strong>{label}</strong><small>{description}</small></span>
+                </button>
+              ))}
+            </aside>
+          ) : null}
         <div className="admin-grid discord-admin">
-          <section className="form-card">
+          {(!botOnly || botSection === "setup") ? <section className="form-card">
             <h3><MessageCircle size={17} /> Discord Bot</h3>
             <label className="toggle-line"><input type="checkbox" checked={draft.discord.enabled} onChange={(event) => updateDiscord({ enabled: event.target.checked })} /><span>Enable Discord notifications and slash commands</span></label>
             <label className="field"><span>Bot Token</span><input type="password" value={draft.discord.botToken ?? ""} onChange={(event) => updateDiscord({ botToken: event.target.value, clearBotToken: false })} placeholder={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Paste token from Discord Developer Portal"} /></label>
@@ -3930,19 +3974,38 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <label className="field"><span>Application ID</span><input value={draft.discord.applicationId} onChange={(event) => updateDiscord({ applicationId: event.target.value })} /></label>
             <label className="field"><span>Public Key</span><input value={draft.discord.publicKey} onChange={(event) => updateDiscord({ publicKey: event.target.value })} /></label>
             <label className="field"><span>Server/Guild ID</span><input value={draft.discord.guildId} onChange={(event) => updateDiscord({ guildId: event.target.value })} placeholder="Recommended for instant slash command updates" /></label>
-            <div className="toolbar discord-actions"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Discord Settings</button><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
-          </section>
-          <details className="form-card discord-channel-card">
+            <div className="status-detail">
+              <Info label="Discovered server" value={discordDiscovery?.guild?.name ? `${discordDiscovery.guild.name} (${discordDiscovery.guild.id})` : "Not synced yet"} />
+              <Info label="Discovered bot" value={discordDiscovery?.bot?.username ? `${discordDiscovery.bot.username} (${discordDiscovery.bot.id})` : "Not synced yet"} />
+              <Info label="Channels" value={formatNumber(discoveredChannels.length)} />
+              <Info label="Roles" value={formatNumber(discoveredRoles.length)} />
+            </div>
+            <button className="toolbar-button" onClick={() => run(refreshDiscordDiscovery, "Discord server data synced.")}><RefreshCw size={15} /> Sync Discord Server</button>
+            <p className="legend">Use the floating save bar to apply setup changes.</p>
+          </section> : null}
+          {(!botOnly || botSection === "channels") ? <details className="form-card discord-channel-card" open={botOnly}>
             <summary><span><MessageCircle size={17} /> Channel List</span><small>Channel IDs and profession routing</small></summary>
-            <p className="legend">Configure each Discord channel ID once. Profession channels here are also used when craft notifications route by profession.</p>
-            <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.channels?.[key] ?? ""} onChange={(event) => updateDiscordChannel(key, event.target.value)} /></label>)}</div>
-          </details>
-          <details className="form-card discord-channel-card">
+            <p className="legend">Choose channels discovered by the bot. Profession channels here are also used when craft notifications route by profession.</p>
+            {!discoveredChannels.length ? <div className="error">No Discord channels synced yet. Use Setup &gt; Sync Discord Server.</div> : null}
+            <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1)}</span>{channelIdSelect(draft.discord.channels?.[key] ?? "", (value) => updateDiscordChannel(key, value))}</label>)}</div>
+          </details> : null}
+          {(!botOnly || botSection === "roles") ? <details className="form-card discord-channel-card" open={botOnly}>
             <summary><span><Bell size={17} /> Craft Watch Roles</span><small>Role IDs used by watch buttons and craft pings</small></summary>
-            <p className="legend">When someone clicks Watch on a craft notification, the bot toggles the matching role on that Discord member. Craft notifications ping the configured role.</p>
-            <div className="craft-channel-grid">{Object.keys(DEFAULT_CRAFT_ROLES).map((key) => <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.craftRoles?.[key] ?? ""} onChange={(event) => updateDiscordRole(key, event.target.value)} /></label>)}</div>
-          </details>
-          <section className="form-card discord-preview-card">
+            <p className="legend">Choose roles discovered by the bot. When someone clicks Watch on a craft notification, the bot toggles the matching role on that Discord member.</p>
+            {!discoveredRoles.length ? <div className="error">No Discord roles synced yet. Use Setup &gt; Sync Discord Server.</div> : null}
+            <div className="craft-channel-grid">{Object.keys(DEFAULT_CRAFT_ROLES).map((key) => {
+              const roleId = draft.discord.craftRoles?.[key] ?? "";
+              const role = discoveredRoles.find((entry) => String(entry.id) === String(roleId));
+              return <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}{role ? <small>{formatNumber(role.memberCount)} members {role.botCanManage ? " | bot can manage" : " | bot cannot manage"}</small> : null}</span>{roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}</label>;
+            })}</div>
+            {discoveredRoles.length ? (
+              <div className="role-directory">
+                <h4>Discovered roles</h4>
+                {discoveredRoles.slice(0, 80).map((role) => <div key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /> <strong>{role.name}</strong><small>{role.id} | {formatNumber(role.memberCount)} members | {role.botCanManage ? "manageable" : role.managed ? "managed by integration" : "above bot role"}</small></div>)}
+              </div>
+            ) : null}
+          </details> : null}
+          {(!botOnly || botSection === "notifications") ? <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
             <div className="discord-rule-grid">
               <div className="discord-rule-card">
@@ -3985,14 +4048,15 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
               <Info label="Last Discord delivery" value={discordDeliveryLabel} />
             </div>
-            <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
-          </section>
-          <details className="form-card discord-preview-card">
+          </section> : null}
+          {(!botOnly || botSection === "tests") ? <details className="form-card discord-preview-card" open={botOnly}>
             <summary><span><MessageCircle size={17} /> Notification Tests</span><small>Preview Discord message formats</small></summary>
+            <div className="toolbar discord-actions"><button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`); })}><Command size={15} /> Register Commands</button></div>
+            <p className="legend">Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global commands can take longer to appear.</p>
             <p className="legend">Send sample messages to the configured channel to preview how each alert type will look in Discord.</p>
             <div className="discord-test-grid">{discordTestButtons.map(([kind, label]) => <button key={kind} className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) }); }, `${label} Discord test sent.`)}><MessageCircle size={14} /> {label}</button>)}</div>
-          </details>
-          <section className="form-card discord-terminal-card">
+          </details> : null}
+          {(!botOnly || botSection === "diagnostics") ? <section className="form-card discord-terminal-card">
             <div className="split-header">
               <h3><Activity size={17} /> Discord Diagnostics</h3>
               <button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh Log</button>
@@ -4032,7 +4096,8 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 );
               }) : <div className="discord-log-empty">No Discord diagnostics recorded yet.</div>}
             </div>
-          </section>
+          </section> : null}
+        </div>
         </div>
         </div>
       ) : null}

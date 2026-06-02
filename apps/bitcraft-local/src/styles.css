@@ -734,9 +734,18 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-overview svg { color: #5865f2; }
 .bot-overview strong { color: var(--text); font: 700 18px Rajdhani, sans-serif; }
 .bot-overview span { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+.bot-layout { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 12px; align-items: start; }
+.bot-section-nav { position: sticky; top: 16px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: 8px; display: grid; gap: 5px; }
+.bot-section-nav button { min-height: 54px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.bot-section-nav button:hover, .bot-section-nav button.active { color: var(--text); border-color: rgba(88,101,242,.42); background: rgba(88,101,242,.13); }
+.bot-section-nav button.active svg { color: #5865f2; }
+.bot-section-nav span { display: grid; gap: 2px; min-width: 0; }
+.bot-section-nav strong { font-size: 13px; color: inherit; }
+.bot-section-nav small { color: var(--muted); font-size: 11px; line-height: 1.25; }
 .discord-admin .form-card { padding: 12px; gap: 10px; }
 .discord-admin .form-card h3 { font-size: 16px; }
 .discord-admin .field { gap: 4px; }
+.discord-admin .field small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; font-weight: 400; }
 .discord-admin .field input, .discord-admin .field select { height: 34px; }
 .discord-admin .field input { min-width: 0; width: 100%; }
 .discord-admin .status-detail { grid-template-columns: 1fr; gap: 8px; }
@@ -755,6 +764,13 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .craft-channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 .discord-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 7px; }
 .discord-test-grid .toolbar-button { justify-content: center; min-width: 0; }
+.role-directory { border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); padding: 10px; display: grid; gap: 7px; max-height: 360px; overflow: auto; }
+.role-directory h4 { color: var(--gold); margin: 0 0 2px; font-size: 14px; }
+.role-directory div { display: grid; grid-template-columns: 16px minmax(0, .6fr) minmax(0, 1.4fr); align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.05); padding-bottom: 6px; }
+.role-directory div:last-child { border-bottom: 0; padding-bottom: 0; }
+.role-directory strong { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.role-directory small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.role-swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: transparent; }
 .discord-terminal { max-height: 360px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #050608; padding: 10px; display: grid; gap: 7px; font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
 .discord-log-entry { border-left: 3px solid var(--muted); background: rgba(255,255,255,.035); border-radius: 6px; padding: 8px 10px; display: grid; gap: 4px; }
 .discord-log-entry.sent { border-left-color: var(--good); }
@@ -796,7 +812,8 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-overview { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-overview, .bot-layout { grid-template-columns: 1fr; }
+  .bot-section-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cookie-banner, .cookie-actions { display: grid; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-pulse div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.06); }
