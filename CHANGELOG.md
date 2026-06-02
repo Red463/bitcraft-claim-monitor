@@ -10,6 +10,7 @@
 - Reworked the Discord bot dashboard navigation into a grouped sidebar so future bot features remain easier to find.
 - Split Discord role tools into a dedicated Roles category and added a Role Manager tab for creating Discord roles from the app.
 - Added emoji presets to Discord role-panel options so profession buttons can be configured without manually typing emoji.
+- Reworked Discord role-panel options into cleaner cards with a Discord-style preview and expandable edit controls.
 
 ## 0.8.32-beta.1 - 2026-06-02
 

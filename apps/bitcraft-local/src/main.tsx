@@ -3934,6 +3934,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
   const [discordDiscovery, setDiscordDiscovery] = React.useState<AnyRecord | null>(null);
   const [discordToolResult, setDiscordToolResult] = React.useState<AnyRecord | null>(null);
+  const [expandedRoleOption, setExpandedRoleOption] = React.useState<string | null>(null);
   const [roleDraft, setRoleDraft] = React.useState({ name: "", color: "#5865f2", hoist: false, mentionable: false });
   const [announcementDraft, setAnnouncementDraft] = React.useState({ channelId: "", title: "", message: "" });
   const [pinnedDraft, setPinnedDraft] = React.useState({ channelId: "", messageId: "", title: "", message: "" });
@@ -4115,17 +4116,20 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   function addDiscordRolePanelOption(panelKey: string) {
     const label = "New Role";
+    const key = uniqueKey("role");
     setDraft((current) => ({
       ...current,
       discord: {
         ...current.discord,
-        rolePanels: current.discord.rolePanels.map((panel) => panel.key === panelKey ? { ...panel, options: [...panel.options, { key: uniqueKey("role"), label, roleId: "", emoji: "" }] } : panel),
+        rolePanels: current.discord.rolePanels.map((panel) => panel.key === panelKey ? { ...panel, options: [...panel.options, { key, label, roleId: "", emoji: "" }] } : panel),
       },
     }));
+    setExpandedRoleOption(`${panelKey}:${key}`);
   }
 
   function removeDiscordRolePanelOption(panelKey: string, optionKey: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, rolePanels: current.discord.rolePanels.map((panel) => panel.key === panelKey ? { ...panel, options: panel.options.filter((option) => option.key !== optionKey) } : panel) } }));
+    setExpandedRoleOption((current) => current === `${panelKey}:${optionKey}` ? null : current);
   }
 
   function updateWelcomeFlow(patch: Partial<DiscordWelcomeFlow>) {
@@ -4247,6 +4251,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   );
   const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
   const discoveredRoles: AnyRecord[] = discordDiscovery?.roles ?? [];
+  const roleById = (id: string) => discoveredRoles.find((role) => String(role.id) === String(id));
   const channelIdSelect = (value: string, onChange: (value: string) => void) => (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a channel</option>
@@ -4258,7 +4263,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a role</option>
       {value && !discoveredRoles.some((role) => String(role.id) === String(value)) ? <option value={value}>Unknown role ({value})</option> : null}
-      {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name} ({role.id}){role.botCanManage ? "" : ` - ${role.manageabilityReason ?? "not manageable"}`}</option>)}
+      {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name}{role.botCanManage ? "" : ` - ${role.manageabilityReason ?? "not manageable"}`}</option>)}
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
@@ -4504,16 +4509,41 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <label className="field"><span>Title</span><input value={panel.title} onChange={(event) => updateDiscordRolePanel(panel.key, { title: event.target.value })} /></label>
                 <label className="field"><span>Description</span><textarea value={panel.description} onChange={(event) => updateDiscordRolePanel(panel.key, { description: event.target.value })} /></label>
                 <label className="field"><span>Mode</span><select value={panel.mode} onChange={(event) => updateDiscordRolePanel(panel.key, { mode: event.target.value === "single" ? "single" : "multi" })}><option value="multi">Multi select</option><option value="single">Single select</option></select></label>
+                <div className="role-panel-preview">
+                  <strong>{panel.title || panel.label}</strong>
+                  <p>{panel.description || "No description set."}</p>
+                  <div>{panel.options.map((option) => <span key={option.key}>{option.emoji ? <b>{option.emoji}</b> : null}{option.label || "Unnamed"}</span>)}</div>
+                </div>
                 <div className="role-option-list">
-                  {panel.options.map((option) => <div className="role-option-row" key={option.key}>
-                    <select value={roleEmojiPresetValue(option.emoji)} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} title="Emoji preset">
-                      {ROLE_EMOJI_PRESETS.map(([emoji, label]) => <option key={label} value={emoji}>{emoji ? `${emoji} ${label}` : label}</option>)}
-                    </select>
-                    <input value={option.emoji} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} placeholder="Custom" title="Custom emoji" />
-                    <input value={option.label} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { label: event.target.value })} placeholder="Label" />
-                    {roleIdSelect(option.roleId, (value) => updateDiscordRolePanelOption(panel.key, option.key, { roleId: value }))}
-                    <button className="icon-button danger" onClick={() => removeDiscordRolePanelOption(panel.key, option.key)} title="Remove option"><X size={14} /></button>
-                  </div>)}
+                  {panel.options.map((option) => {
+                    const editKey = `${panel.key}:${option.key}`;
+                    const role = roleById(option.roleId);
+                    const isExpanded = expandedRoleOption === editKey;
+                    const status = role ? "Linked" : option.roleId ? "Unknown role" : "No role";
+                    return <div className={`role-option-card ${isExpanded ? "expanded" : ""}`} key={option.key}>
+                      <div className="role-option-summary">
+                        <span className="role-option-emoji">{option.emoji || <Hash size={15} />}</span>
+                        <div>
+                          <strong>{option.label || "Unnamed role"}</strong>
+                          <small>{role?.name ?? (option.roleId ? "Role not found in latest sync" : "Choose a Discord role")}</small>
+                        </div>
+                        <span className={`role-option-status ${role ? "ok" : option.roleId ? "warn" : ""}`}>{status}</span>
+                        <div className="role-option-actions">
+                          <button className="icon-button" onClick={() => setExpandedRoleOption(isExpanded ? null : editKey)} title={isExpanded ? "Close editor" : "Edit option"}><Settings size={14} /></button>
+                          <button className="icon-button danger" onClick={() => removeDiscordRolePanelOption(panel.key, option.key)} title="Remove option"><X size={14} /></button>
+                        </div>
+                      </div>
+                      {isExpanded ? <div className="role-option-edit">
+                        <label className="field"><span>Emoji preset</span><select value={roleEmojiPresetValue(option.emoji)} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} title="Emoji preset">
+                          {ROLE_EMOJI_PRESETS.map(([emoji, label]) => <option key={label} value={emoji}>{emoji ? `${emoji} ${label}` : label}</option>)}
+                        </select></label>
+                        <label className="field"><span>Custom emoji</span><input value={option.emoji} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { emoji: event.target.value })} placeholder="Optional" title="Custom emoji" /></label>
+                        <label className="field"><span>Button label</span><input value={option.label} onChange={(event) => updateDiscordRolePanelOption(panel.key, option.key, { label: event.target.value })} placeholder="Label" /></label>
+                        <label className="field"><span>Discord role</span>{roleIdSelect(option.roleId, (value) => updateDiscordRolePanelOption(panel.key, option.key, { roleId: value }))}</label>
+                        {option.roleId ? <p className="role-option-meta">Role ID: {option.roleId}</p> : null}
+                      </div> : null}
+                    </div>;
+                  })}
                   <button className="toolbar-button" onClick={() => addDiscordRolePanelOption(panel.key)}><UserPlus size={14} /> Add option</button>
                 </div>
                 {panel.messageId ? <p className="legend">Message ID: {panel.messageId}</p> : null}
