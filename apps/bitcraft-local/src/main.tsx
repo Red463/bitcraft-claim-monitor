@@ -92,6 +92,7 @@ type DiscordSettings = {
   channels: Record<string, string>;
   notificationChannels: Record<string, string>;
   craftChannels: Record<string, string>;
+  craftRoles: Record<string, string>;
   notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean };
   botToken?: string;
   clearBotToken?: boolean;
@@ -166,6 +167,22 @@ const DEFAULT_DISCORD_CHANNELS: Record<string, string> = {
   ...DEFAULT_CRAFT_CHANNELS,
 };
 
+const DEFAULT_CRAFT_ROLES: Record<string, string> = {
+  forestry: "1511297282769944596",
+  carpentry: "1511297283386249358",
+  masonry: "1511297283931639808",
+  mining: "1511297284724494399",
+  smithing: "1511297285772804206",
+  scholar: "1511297286469324890",
+  leatherworking: "1511297288511815751",
+  tailoring: "1511297287157055632",
+  farming: "1511297288176144425",
+  fishing: "1511297635665969222",
+  cooking: "1511297639269011486",
+  foraging: "1511297639868665966",
+  hunting: "1511297640866906153",
+};
+
 const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
   marketListings: "notifications",
   marketSales: "notifications",
@@ -204,6 +221,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     channels: DEFAULT_DISCORD_CHANNELS,
     notificationChannels: DEFAULT_NOTIFICATION_CHANNELS,
     craftChannels: DEFAULT_CRAFT_CHANNELS,
+    craftRoles: DEFAULT_CRAFT_ROLES,
     notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true },
     botTokenConfigured: false,
     botTokenSource: null,
@@ -226,6 +244,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
       channels: { ...DEFAULT_DISCORD_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), notifications: (config as AnyRecord)?.discord?.channelId ?? (config as AnyRecord)?.discord?.channels?.notifications ?? "" },
       notificationChannels: { ...DEFAULT_NOTIFICATION_CHANNELS, ...((config as AnyRecord)?.discord?.notificationChannels ?? {}) },
       craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
+      craftRoles: { ...DEFAULT_CRAFT_ROLES, ...((config as AnyRecord)?.discord?.craftRoles ?? {}) },
       notify: { ...DEFAULT_SETTINGS.discord.notify, ...((config as AnyRecord)?.discord?.notify ?? {}) },
       productionMinAgeMinutes: toNumber((config as AnyRecord)?.discord?.productionMinAgeMinutes ?? (config as AnyRecord)?.discord?.productionMinAgeMins ?? DEFAULT_SETTINGS.discord.productionMinAgeMinutes),
     },
@@ -3705,6 +3724,10 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     }));
   }
 
+  function updateDiscordRole(key: string, value: string) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, craftRoles: { ...current.discord.craftRoles, [key]: value } } }));
+  }
+
   function updateNotificationChannel(key: string, value: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, notificationChannels: { ...current.discord.notificationChannels, [key]: value } } }));
   }
@@ -3902,6 +3925,11 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             <p className="legend">Configure each Discord channel ID once. Profession channels here are also used when craft notifications route by profession.</p>
             <div className="craft-channel-grid">{DISCORD_CHANNEL_FIELDS.map((key) => <label className="field" key={key}><span>{key === "notifications" ? "Default notifications" : key === "modNotes" ? "Mod notes" : key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.channels?.[key] ?? ""} onChange={(event) => updateDiscordChannel(key, event.target.value)} /></label>)}</div>
           </details>
+          <details className="form-card discord-channel-card">
+            <summary><span><Bell size={17} /> Craft Watch Roles</span><small>Role IDs used by watch buttons and craft pings</small></summary>
+            <p className="legend">When someone clicks Watch on a craft notification, the bot toggles the matching role on that Discord member. Craft notifications ping the configured role.</p>
+            <div className="craft-channel-grid">{Object.keys(DEFAULT_CRAFT_ROLES).map((key) => <label className="field" key={key}><span>{key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1)}</span><input value={draft.discord.craftRoles?.[key] ?? ""} onChange={(event) => updateDiscordRole(key, event.target.value)} /></label>)}</div>
+          </details>
           <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
             <div className="discord-rule-grid">
@@ -3941,7 +3969,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
             </div>
             <div className="status-detail">
               <Info label="Interaction endpoint" value={draft.discord.interactionUrl ? `${window.location.origin}${draft.discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`} />
-              <Info label="Slash commands" value="/supplies, /online, /crafts, /price" />
+              <Info label="Slash commands" value="/supplies, /online, /crafts, /price, /craftwatch" />
               <Info label="Token status" value={draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Not configured"} />
               <Info label="Last Discord delivery" value={discordDeliveryLabel} />
             </div>
@@ -3971,6 +3999,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
                   metadata?.productionUsers ? `allowedCrafters=${metadata.productionUsers}` : "",
                   metadata?.productionMinXp !== undefined ? `minXp=${metadata.productionMinXp}` : "",
                   metadata?.productionMinAgeMinutes !== undefined ? `minAge=${metadata.productionMinAgeMinutes}m` : "",
+                  metadata?.craftRoleId ? `roleId=${metadata.craftRoleId}` : "",
                   metadata?.metadata?.activeCraftCount !== undefined ? `activeCrafts=${metadata.metadata.activeCraftCount}` : "",
                   metadata?.metadata?.activeKnownBeforePoll !== undefined ? `knownBeforePoll=${metadata.metadata.activeKnownBeforePoll}` : "",
                   metadata?.metadata?.hasProductionBaseline !== undefined ? `hasBaseline=${metadata.metadata.hasProductionBaseline}` : "",

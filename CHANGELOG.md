@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.20-beta.1 - 2026-06-02
+
+### Changed
+
+- Craft notification Watch buttons now toggle configurable Discord profession roles instead of storing local watch/mute settings.
+- Craft notifications now ping the configured profession role when a matching alert fires.
+- Added configurable craft notification role IDs to the Discord admin settings.
+
 ## 0.8.19-beta.1 - 2026-06-02
 
 ### Changed

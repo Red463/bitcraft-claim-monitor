@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.19-beta.1";
+const appVersion = "0.8.20-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -594,6 +594,22 @@ const defaultCraftChannels = {
   foraging: "1509932609378058412",
 };
 
+const defaultCraftRoles = {
+  forestry: "1511297282769944596",
+  carpentry: "1511297283386249358",
+  masonry: "1511297283931639808",
+  mining: "1511297284724494399",
+  smithing: "1511297285772804206",
+  scholar: "1511297286469324890",
+  leatherworking: "1511297288511815751",
+  tailoring: "1511297287157055632",
+  farming: "1511297288176144425",
+  fishing: "1511297635665969222",
+  cooking: "1511297639269011486",
+  foraging: "1511297639868665966",
+  hunting: "1511297640866906153",
+};
+
 const defaultDiscordChannels = {
   notifications: "",
   modNotes: "1509972023927902218",
@@ -625,6 +641,7 @@ const defaultDiscordSettings = {
   channels: defaultDiscordChannels,
   notificationChannels: defaultNotificationChannels,
   craftChannels: defaultCraftChannels,
+  craftRoles: defaultCraftRoles,
   notify: {
     marketListings: true,
     marketSales: true,
@@ -656,6 +673,7 @@ function normalizeDiscordSettings(value = {}) {
     channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
     notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
     craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
+    craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
     notify: {
       marketListings: notify.marketListings !== false,
       marketSales: notify.marketSales !== false,
@@ -1136,6 +1154,7 @@ function discordDiagnosticContext(eventType, metadata = {}, settings = getDiscor
     productionMinXp: settings.productionMinXp,
     productionMinAgeMinutes: settings.productionMinAgeMinutes,
     productionUsers: settings.productionUsers,
+    craftRoleId: craftWatchRole(metadata, settings)?.roleId ?? "",
     metadata,
   };
 }
@@ -1173,14 +1192,17 @@ function craftWatchProfession(metadata = {}) {
   return { key, name };
 }
 
-function craftWatchMentions(metadata = {}, settings = getDiscordSettingsRaw()) {
+function professionLabel(key) {
+  const normalized = normalizeProfessionKey(key);
+  if (!normalized) return "Profession";
+  if (normalized === "leatherworking") return "Leatherworking";
+  return `${normalized[0].toUpperCase()}${normalized.slice(1)}`;
+}
+
+function craftWatchRole(metadata = {}, settings = getDiscordSettingsRaw()) {
   const { key } = craftWatchProfession(metadata);
-  if (!key || !settings.guildId) return [];
-  const rows = statements.matchingDiscordCraftWatches.all(String(settings.guildId), key);
-  const muted = new Set(rows.filter((row) => row.mode === "mute").map((row) => String(row.user_id)));
-  return rows
-    .filter((row) => row.mode === "watch" && !muted.has(String(row.user_id)))
-    .map((row) => `<@${String(row.user_id)}>`);
+  const roleId = key ? String(settings.craftRoles?.[key] ?? "").trim() : "";
+  return roleId ? { key, roleId, mention: `<@&${roleId}>` } : null;
 }
 
 function discordCraftWatchComponents(eventType, metadata = {}) {
@@ -1192,7 +1214,6 @@ function discordCraftWatchComponents(eventType, metadata = {}) {
     type: 1,
     components: [
       { type: 2, style: 1, custom_id: `craftwatch:watch:${key}:${encodeURIComponent(name).slice(0, 80)}`, label: `Watch ${label}` },
-      { type: 2, style: 2, custom_id: `craftwatch:mute:${key}:${encodeURIComponent(name).slice(0, 80)}`, label: `Mute ${label}` },
     ],
   }];
 }
@@ -1209,12 +1230,12 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     return { ok: true, skipped: true };
   }
   try {
-    const mentions = craftWatchMentions(metadata, settings);
+    const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
-      content: mentions.length ? mentions.join(" ") : undefined,
+      content: role?.mention,
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
       components: discordCraftWatchComponents(eventType, metadata),
-      allowed_mentions: { users: mentions.map((mention) => mention.replace(/\D/g, "")), parse: [] },
+      allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
     }, settings, channelId);
     recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
     return { ok: true, skipped: false };
@@ -1279,6 +1300,29 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
+}
+
+async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
+  if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  const response = await fetch(`https://discord.com/api/v10${pathname}`, {
+    ...options,
+    headers: {
+      authorization: `Bot ${settings.botToken}`,
+      ...(options.headers ?? {}),
+    },
+  });
+  if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function addDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`, { method: "PUT" }, settings);
+}
+
+async function removeDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
+  return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`, { method: "DELETE" }, settings);
 }
 
 const discordTestEvents = {
@@ -2193,10 +2237,10 @@ const discordCommands = [
   },
   {
     name: "craftwatch",
-    description: "Manage your craft profession watches.",
+    description: "Manage your craft profession notification roles.",
     options: [
-      { type: 1, name: "list", description: "List your current craft watches and mutes." },
-      { type: 1, name: "clear", description: "Clear all of your craft watches and mutes." },
+      { type: 1, name: "list", description: "List your current craft notification roles." },
+      { type: 1, name: "clear", description: "Remove all of your craft notification roles." },
     ],
   },
 ];
@@ -2301,24 +2345,19 @@ async function handleDiscordComponent(interaction) {
   const professionName = decodeURIComponent(professionNameRaw || professionKey || "Profession");
   const guildId = String(interaction.guild_id ?? "");
   const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
-  if (!guildId || !userId || !professionKey) return discordResponse("Unable to save this watch. Discord did not provide enough context.", { ephemeral: true });
-  const existing = statements.getDiscordCraftWatch.get(guildId, userId, professionKey);
-  const now = new Date().toISOString();
+  const settings = getDiscordSettingsRaw();
+  const roleId = String(settings.craftRoles?.[professionKey] ?? "").trim();
+  if (!guildId || !userId || !professionKey) return discordResponse("Unable to update this watch. Discord did not provide enough context.", { ephemeral: true });
+  if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+  if (!roleId) return discordResponse(`${professionName} does not have a configured notification role yet.`, { ephemeral: true });
+  const memberRoles = Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : [];
   if (action === "watch") {
-    if (existing?.mode === "watch") {
-      statements.deleteDiscordCraftWatch.run(guildId, userId, professionKey);
-      return discordResponse(`Stopped watching ${professionName} craft notifications.`, { ephemeral: true });
+    if (memberRoles.includes(roleId)) {
+      await removeDiscordMemberRole(guildId, userId, roleId, settings);
+      return discordResponse(`Stopped watching ${professionName} craft notifications. The ${professionName} notification role was removed from you.`, { ephemeral: true });
     }
-    statements.upsertDiscordCraftWatch.run(guildId, userId, professionKey, professionName, "watch", now);
-    return discordResponse(`You are now watching ${professionName} craft notifications. Future matching craft alerts will mention you.`, { ephemeral: true });
-  }
-  if (action === "mute") {
-    if (existing?.mode === "mute") {
-      statements.deleteDiscordCraftWatch.run(guildId, userId, professionKey);
-      return discordResponse(`Removed your ${professionName} mute.`, { ephemeral: true });
-    }
-    statements.upsertDiscordCraftWatch.run(guildId, userId, professionKey, professionName, "mute", now);
-    return discordResponse(`Muted ${professionName} craft watch mentions for you.`, { ephemeral: true });
+    await addDiscordMemberRole(guildId, userId, roleId, settings);
+    return discordResponse(`You are now watching ${professionName} craft notifications. Future matching craft alerts will ping the ${professionName} notification role.`, { ephemeral: true });
   }
   return discordResponse("Unknown craft watch action.", { ephemeral: true });
 }
@@ -2327,18 +2366,19 @@ async function discordCraftWatchCommand(interaction) {
   const guildId = String(interaction.guild_id ?? "");
   const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
   if (!guildId || !userId) return discordResponse("Craft watches can only be managed inside a Discord server.", { ephemeral: true });
+  const settings = getDiscordSettingsRaw();
+  const memberRoles = Array.isArray(interaction.member?.roles) ? new Set(interaction.member.roles.map(String)) : new Set();
+  const roleEntries = Object.entries(settings.craftRoles ?? {}).filter(([, roleId]) => String(roleId ?? "").trim());
   const subcommand = discordSubcommand(interaction) || "list";
   if (subcommand === "clear") {
-    const result = statements.clearDiscordCraftWatches.run(guildId, userId);
-    return discordResponse(`Cleared ${Number(result.changes ?? 0).toLocaleString()} craft watch setting${Number(result.changes ?? 0) === 1 ? "" : "s"}.`, { ephemeral: true });
+    if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+    const removable = roleEntries.filter(([, roleId]) => memberRoles.has(String(roleId)));
+    for (const [, roleId] of removable) await removeDiscordMemberRole(guildId, userId, String(roleId), settings);
+    return discordResponse(`Removed ${removable.length.toLocaleString()} craft notification role${removable.length === 1 ? "" : "s"} from you.`, { ephemeral: true });
   }
-  const rows = statements.listDiscordCraftWatches.all(guildId, userId);
-  if (!rows.length) return discordResponse("You do not have any craft watches or mutes yet. Use the buttons on craft notifications to watch or mute a profession.", { ephemeral: true });
-  const watches = rows.filter((row) => row.mode === "watch").map((row) => row.profession_name);
-  const mutes = rows.filter((row) => row.mode === "mute").map((row) => row.profession_name);
-  return discordEmbedResponse(discordCommandEmbed("Craft Watches", "Your personal craft notification settings.", [
+  const watches = roleEntries.filter(([, roleId]) => memberRoles.has(String(roleId))).map(([key]) => professionLabel(key));
+  return discordEmbedResponse(discordCommandEmbed("Craft Watches", "Your personal craft notification roles.", [
     { name: "Watching", value: watches.length ? watches.join(", ") : "None", inline: false },
-    { name: "Muted", value: mutes.length ? mutes.join(", ") : "None", inline: false },
   ]), { ephemeral: true });
 }
 
