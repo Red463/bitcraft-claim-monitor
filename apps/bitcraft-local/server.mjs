@@ -1382,14 +1382,6 @@ function discordColourButtonEmoji(role) {
   return "🎨";
 }
 
-function discordColourButtonStyle(role) {
-  const label = String(role?.label ?? "").toLowerCase();
-  const color = toNumber(role?.color);
-  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return 3;
-  if (label.includes("red") || color === 0xff2028) return 4;
-  return 2;
-}
-
 async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   const channelId = String(settings.colourRolesChannelId || settings.channels?.notifications || settings.channelId || "").trim();
   if (!channelId) throw new Error("Choose a colour-role channel before posting the selector.");
@@ -1401,7 +1393,7 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
       type: 1,
       components: roles.slice(index, index + 5).map((role) => ({
         type: 2,
-        style: discordColourButtonStyle(role),
+        style: 2,
         custom_id: `colourrole:select:${role.key}:${role.roleId}`,
         label: `${discordColourButtonEmoji(role)} ${role.label}`.slice(0, 80),
       })),
