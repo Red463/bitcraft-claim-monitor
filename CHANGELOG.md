@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.21-beta.1 - 2026-06-02
+
+### Changed
+
+- Craft Watch Discord button failures now return a private diagnostic message instead of Discord's generic interaction failure.
+- Craft Watch role add/remove attempts are now recorded in the Discord diagnostics log.
+
 ## 0.8.20-beta.1 - 2026-06-02
 
 ### Changed

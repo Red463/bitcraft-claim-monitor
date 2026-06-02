@@ -15,7 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.20-beta.1";
+const appVersion = "0.8.21-beta.1";
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -2338,28 +2338,51 @@ async function runDiscordCommand(interaction) {
 }
 
 async function handleDiscordComponent(interaction) {
-  const customId = String(interaction.data?.custom_id ?? "");
-  if (!customId.startsWith("craftwatch:")) return discordResponse("Unknown button.", { ephemeral: true });
-  const [, action, professionKeyRaw, professionNameRaw = ""] = customId.split(":");
-  const professionKey = normalizeProfessionKey(professionKeyRaw);
-  const professionName = decodeURIComponent(professionNameRaw || professionKey || "Profession");
-  const guildId = String(interaction.guild_id ?? "");
-  const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
-  const settings = getDiscordSettingsRaw();
-  const roleId = String(settings.craftRoles?.[professionKey] ?? "").trim();
-  if (!guildId || !userId || !professionKey) return discordResponse("Unable to update this watch. Discord did not provide enough context.", { ephemeral: true });
-  if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
-  if (!roleId) return discordResponse(`${professionName} does not have a configured notification role yet.`, { ephemeral: true });
-  const memberRoles = Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : [];
-  if (action === "watch") {
-    if (memberRoles.includes(roleId)) {
-      await removeDiscordMemberRole(guildId, userId, roleId, settings);
-      return discordResponse(`Stopped watching ${professionName} craft notifications. The ${professionName} notification role was removed from you.`, { ephemeral: true });
+  try {
+    const customId = String(interaction.data?.custom_id ?? "");
+    if (!customId.startsWith("craftwatch:")) return discordResponse("Unknown button.", { ephemeral: true });
+    const [, action, professionKeyRaw, professionNameRaw = ""] = customId.split(":");
+    const professionKey = normalizeProfessionKey(professionKeyRaw);
+    const professionName = decodeURIComponent(professionNameRaw || professionKey || "Profession");
+    const guildId = String(interaction.guild_id ?? "");
+    const userId = String(interaction.member?.user?.id ?? interaction.user?.id ?? "");
+    const settings = getDiscordSettingsRaw();
+    const roleId = String(settings.craftRoles?.[professionKey] ?? "").trim();
+    if (!guildId || !userId || !professionKey) return discordResponse("Unable to update this watch. Discord did not provide enough context.", { ephemeral: true });
+    if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
+    if (!roleId) return discordResponse(`${professionName} does not have a configured notification role yet.`, { ephemeral: true });
+    const memberRoles = Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : [];
+    if (action === "watch") {
+      const removing = memberRoles.includes(roleId);
+      if (removing) await removeDiscordMemberRole(guildId, userId, roleId, settings);
+      else await addDiscordMemberRole(guildId, userId, roleId, settings);
+      recordDiscordDeliverySafe({
+        status: "sent",
+        eventType: "craftwatch_role",
+        summary: `${removing ? "Removed" : "Added"} ${professionName} notification role`,
+        reason: removing ? "Watch button toggled off" : "Watch button toggled on",
+        metadata: { guildId, userId, professionKey, professionName, roleId, action: removing ? "remove" : "add" },
+      });
+      return discordResponse(
+        removing
+          ? `Stopped watching ${professionName} craft notifications. The ${professionName} notification role was removed from you.`
+          : `You are now watching ${professionName} craft notifications. Future matching craft alerts will ping the ${professionName} notification role.`,
+        { ephemeral: true },
+      );
     }
-    await addDiscordMemberRole(guildId, userId, roleId, settings);
-    return discordResponse(`You are now watching ${professionName} craft notifications. Future matching craft alerts will ping the ${professionName} notification role.`, { ephemeral: true });
+    return discordResponse("Unknown craft watch action.", { ephemeral: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const customId = String(interaction.data?.custom_id ?? "");
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: "craftwatch_role",
+      summary: "Craft watch role update failed",
+      error: message,
+      metadata: { customId, guildId: interaction.guild_id, userId: interaction.member?.user?.id ?? interaction.user?.id },
+    });
+    return discordResponse(`Craft watch role update failed: ${message}`, { ephemeral: true });
   }
-  return discordResponse("Unknown craft watch action.", { ephemeral: true });
 }
 
 async function discordCraftWatchCommand(interaction) {
