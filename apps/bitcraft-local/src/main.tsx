@@ -307,6 +307,7 @@ const SKILL_IDS = Object.keys(SKILL_NAMES).map(Number).sort((a, b) => a - b);
 const PROFESSION_IDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14];
 const ADVENTURE_SKILL_IDS = [13, 15, 17, 18, 19, 21];
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
+const ACTIVE_MAP_REGIONS = ["7", "8", "9", "12", "13", "14", "17", "18", "19"];
 const TIER_COLORS: Record<number, string> = {
   1: "#838e9e",
   2: "#be6327",
@@ -2982,21 +2983,21 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
     locationX: toNumber(data.claim.locationX),
     locationZ: toNumber(data.claim.locationZ),
   } : null;
+  const resourceById = React.useMemo(() => new Map(resources.map((resource) => [String(resource.id), resource])), [resources]);
+  const resourceCategories = React.useMemo(() => unique(resources.map((resource) => String(resource.tag ?? "Other")).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
+  const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
+  const regionOptions = React.useMemo(() => unique([
+    ...ACTIVE_MAP_REGIONS,
+    String(data.claim.regionId ?? ""),
+    ...data.regionStatus.map((region) => String(region.regionId ?? "")),
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [data.claim.regionId, data.regionStatus]);
   const mapMarker = focus ?? defaultFocus;
-  const mapRegionIds = resourceRegions;
+  const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
   const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResources, mapRegionIds), [current, focus, mapMarker, selectedResources, mapRegionIds.join(",")]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
     if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
   }, [focusKey]);
-  const resourceById = React.useMemo(() => new Map(resources.map((resource) => [String(resource.id), resource])), [resources]);
-  const resourceCategories = React.useMemo(() => unique(resources.map((resource) => String(resource.tag ?? "Other")).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
-  const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
-  const regionOptions = React.useMemo(() => unique([
-    "7", "8", "9", "12", "13", "14", "17", "18", "19",
-    String(data.claim.regionId ?? ""),
-    ...data.regionStatus.map((region) => String(region.regionId ?? "")),
-  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [data.claim.regionId, data.regionStatus]);
   const visibleResources = React.useMemo(() => {
     const query = resourceSearch.trim().toLowerCase();
     return resources.filter((resource) => {
@@ -3098,7 +3099,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
           </div>
         </aside>
-        <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
+        <iframe key={currentFrameUrl} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
       </div>
     </div>
   );
