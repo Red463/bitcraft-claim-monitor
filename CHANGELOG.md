@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.32-beta.1 - 2026-06-02
+
+### Changed
+
+- Added huntable animals to the map resource finder and aligned map resource categories with the BC Codex category set.
+- Compactly redesigned the Discord colour-role editor and made colour selector buttons use consistent neutral Discord styling with emoji colour markers.
+
 ## 0.8.31-beta.1 - 2026-06-02
 
 ### Added

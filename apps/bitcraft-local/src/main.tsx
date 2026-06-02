@@ -4271,12 +4271,11 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               return <div className="colour-role-editor" key={entry.key}>
                 <div className="colour-role-sample" style={{ borderColor: hex, background: `${hex}22` }}>
                   <span className="role-swatch" style={{ backgroundColor: hex }} />
-                  <strong>{entry.label}</strong>
+                  <input aria-label={`${entry.label} name`} value={entry.label} onChange={(event) => updateDiscordColourRole(entry.key, { label: event.target.value, roleName: event.target.value })} />
                   <small>{entry.roleId ? role ? `${formatNumber(role.memberCount)} members | ${role.botCanManage ? "Bot can manage" : role.manageabilityReason ?? "Not manageable"}` : `Synced role ${entry.roleId}` : "Not synced yet"}</small>
                 </div>
-                <label className="field"><span>Name</span><input value={entry.label} onChange={(event) => updateDiscordColourRole(entry.key, { label: event.target.value, roleName: event.target.value })} /></label>
-                <label className="field colour-picker-field"><span>Colour</span><input type="color" value={hex} onChange={(event) => updateDiscordColourRole(entry.key, { color: hexToDiscordColor(event.target.value) })} /><code>{hex}</code></label>
-                <button className="toolbar-button danger" onClick={() => removeDiscordColourRole(entry.key)}><X size={15} /> Delete</button>
+                <label className="colour-picker-field"><input type="color" value={hex} onChange={(event) => updateDiscordColourRole(entry.key, { color: hexToDiscordColor(event.target.value) })} /><code>{hex}</code></label>
+                <button className="icon-button danger" title={`Delete ${entry.label}`} onClick={() => removeDiscordColourRole(entry.key)}><X size={15} /></button>
               </div>;
             })}</div>
             {!draft.discord.colourRoles.length ? <div className="error">No colour roles configured. Add a colour, then create/sync roles.</div> : null}
