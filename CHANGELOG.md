@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.8.37-beta.1 - 2026-06-02
+## 0.8.38-beta.1 - 2026-06-02
 
 ### Added
 
+- Added a persisted collapsible sidebar mode that switches the main navigation to an icon-only rail for more page space.
 - Updated the Overview treasury card to show today's recorded treasury income, spending and net movement instead of an unsupported treasury runway.
 - Added Discord Gateway presence support so the Timbersteel Trade bot can appear online with configurable status text.
 - Added the `/help` Discord slash command with app and feature-request links.
