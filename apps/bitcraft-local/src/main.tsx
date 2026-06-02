@@ -3572,13 +3572,13 @@ function bytesLabel(value: unknown) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSettingsSaved: (settings: AppSettings) => void }) {
+function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: AppSettings; onSettingsSaved: (settings: AppSettings) => void; botOnly?: boolean }) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [username, setUsername] = React.useState("admin");
   const [password, setPassword] = React.useState("");
   const [setupKey, setSetupKey] = React.useState("");
-  const [tab, setTab] = React.useState<AdminTab>("status");
+  const [tab, setTab] = React.useState<AdminTab>(botOnly ? "discord" : "status");
   const [message, setMessage] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
@@ -3758,7 +3758,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["discord", "Discord"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
+  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
   const themePresets: Array<[string, typeof DEFAULT_THEME]> = [
     ["Default", DEFAULT_THEME],
     ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
@@ -3778,7 +3778,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
   if (!auth?.authenticated) {
     return (
       <div className="panel admin-login">
-        <Header title="Admin">{auth?.setupRequired ? "Create the first administrator account" : "Sign in to manage this installation"}</Header>
+        <Header title={botOnly ? "Discord Bot Control" : "Admin"}>{auth?.setupRequired ? "Create the first administrator account" : botOnly ? "Sign in to manage bot settings and notifications" : "Sign in to manage this installation"}</Header>
         <form className="form-card" onSubmit={submitAuth}>
           <label className="field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
           {auth?.setupKeyRequired ? <label className="field"><span>Server Setup Key</span><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} autoComplete="one-time-code" /></label> : null}
@@ -3809,12 +3809,15 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
         ? `Skipped ${dateLabel(discordDelivery.at)}: ${discordDelivery.reason ?? "Not enabled"}`
         : "No Discord deliveries recorded";
   return (
-    <div className="panel admin-console">
+    <div className={`panel admin-console ${botOnly ? "bot-console" : ""}`}>
       <div className="split-header">
-        <Header title="Admin Console">Configuration and operational controls for this installation</Header>
-        <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+        <Header title={botOnly ? "Discord Bot Control" : "Admin Console"}>{botOnly ? "Manage bot setup, notifications, role watches, tests and diagnostics" : "Configuration and operational controls for this installation"}</Header>
+        <div className="toolbar">
+          {!botOnly ? <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a> : <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>}
+          <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+        </div>
       </div>
-      <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>
+      {tabs.length ? <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div> : null}
       {message ? <div className="admin-message">{message}</div> : null}
 
       {tab === "status" ? (
@@ -3909,6 +3912,15 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
       ) : null}
 
       {tab === "discord" ? (
+        <div className="admin-section bot-dashboard">
+          {botOnly ? (
+            <div className="bot-overview">
+              <div><MessageCircle size={19} /><strong>{draft.discord.enabled ? "Bot Enabled" : "Bot Disabled"}</strong><span>Slash commands and notification delivery</span></div>
+              <div><Bell size={19} /><strong>{Object.values(draft.discord.notify).filter(Boolean).length} Rules On</strong><span>Notification categories currently enabled</span></div>
+              <div><Command size={19} /><strong>{draft.discord.botTokenConfigured ? "Token Set" : "Token Missing"}</strong><span>{draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Add a bot token to send messages"}</span></div>
+              <div><Activity size={19} /><strong>{discordDelivery.status ?? "No delivery"}</strong><span>{discordDeliveryLabel}</span></div>
+            </div>
+          ) : null}
         <div className="admin-grid discord-admin">
           <section className="form-card">
             <h3><MessageCircle size={17} /> Discord Bot</h3>
@@ -4021,6 +4033,7 @@ function AdminPanel({ settings, onSettingsSaved }: { settings: AppSettings; onSe
               }) : <div className="discord-log-empty">No Discord diagnostics recorded yet.</div>}
             </div>
           </section>
+        </div>
         </div>
       ) : null}
 
@@ -4408,9 +4421,36 @@ function DashboardApp() {
   );
 }
 
+function BotControlApp() {
+  const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    fetch(`${LOCAL_API}/config`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((config) => {
+        const next = normalizeAppSettings(config);
+        setSettings(next);
+        applyTheme(next.theme);
+      })
+      .catch(() => applyTheme(DEFAULT_THEME))
+      .finally(() => setLoading(false));
+  }, []);
+  return loading ? <main><AppSkeleton /></main> : (
+    <main className="bot-control-page">
+      <AdminPanel settings={settings} onSettingsSaved={(next) => {
+        setSettings(next);
+        applyTheme(next.theme);
+      }} botOnly />
+    </main>
+  );
+}
+
 function App() {
   const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
-  return dedicatedLegalPath ? <DedicatedLegalPage type={dedicatedLegalPath} /> : <DashboardApp />;
+  const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
+  if (dedicatedLegalPath) return <DedicatedLegalPage type={dedicatedLegalPath} />;
+  if (dedicatedBotPath) return <BotControlApp />;
+  return <DashboardApp />;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

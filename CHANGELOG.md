@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.25-beta.1 - 2026-06-02
+
+### Added
+
+- Added a dedicated Discord Bot Control dashboard available from `/bot` and `bot.*` hostnames for bot setup, notification rules, channel routing, role watches, test messages and diagnostics.
+
+### Changed
+
+- Moved Discord bot settings out of the main Admin Console tab list and linked Admin to the dedicated bot dashboard.
+
 ## 0.8.24-beta.1 - 2026-06-02
 
 ### Changed

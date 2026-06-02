@@ -726,6 +726,14 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .toggle-line input[type="checkbox"] { order: 2; }
 .toggle-line span { min-width: 0; overflow-wrap: anywhere; }
 .discord-admin { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 10px; }
+.bot-control-page { min-height: 100vh; padding: 22px; background: radial-gradient(circle at top left, rgba(88,101,242,.16), transparent 34%), var(--bg); }
+.bot-console { max-width: 1480px; margin: 0 auto; }
+.bot-dashboard { gap: 12px; }
+.bot-overview { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; }
+.bot-overview div { border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.12), rgba(255,255,255,.025)); padding: 13px; display: grid; gap: 5px; min-height: 96px; }
+.bot-overview svg { color: #5865f2; }
+.bot-overview strong { color: var(--text); font: 700 18px Rajdhani, sans-serif; }
+.bot-overview span { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
 .discord-admin .form-card { padding: 12px; gap: 10px; }
 .discord-admin .form-card h3 { font-size: 16px; }
 .discord-admin .field { gap: 4px; }
@@ -788,7 +796,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   nav { grid-template-columns: repeat(3, 1fr); }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .building-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .capacity-strip, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-overview { grid-template-columns: 1fr; }
   .cookie-banner, .cookie-actions { display: grid; }
   .hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-pulse div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.06); }
