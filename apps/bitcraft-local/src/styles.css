@@ -896,6 +896,27 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .role-option-edit input[title="Custom emoji"] { text-align: center; }
 .role-option-meta { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .welcome-flow-editor { width: min(100%, 980px); }
+.bot-tools-card > .split-header { align-items: start; border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 3px; }
+.bot-tools-card h3 { margin: 0; }
+.discord-tool-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.discord-tool-action { min-width: 0; min-height: 118px; border: 1px solid rgba(147,160,186,.18); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.08), rgba(255,255,255,.018)); color: var(--text); padding: 11px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.discord-tool-action:hover { border-color: rgba(240,198,79,.42); background: linear-gradient(135deg, rgba(240,198,79,.09), rgba(88,101,242,.06)); transform: translateY(-1px); }
+.discord-tool-action-icon { width: 34px; height: 34px; border: 1px solid rgba(240,198,79,.24); border-radius: 8px; background: rgba(240,198,79,.08); color: var(--gold); display: inline-flex; align-items: center; justify-content: center; }
+.discord-tool-action strong { display: block; color: var(--text); font-size: 14px; line-height: 1.2; }
+.discord-tool-action small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; margin-top: 5px; }
+.discord-tool-action em { display: inline-flex; width: fit-content; margin-top: 9px; border: 1px solid rgba(240,198,79,.25); border-radius: 999px; background: rgba(240,198,79,.08); color: var(--gold); padding: 3px 8px; font-style: normal; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0; }
+.discord-tool-section-header { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
+.discord-tool-section-header h4 { margin: 0; color: var(--gold); font-size: 15px; }
+.discord-tool-section-header .legend { margin-top: 3px; }
+.discord-tool-forms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.discord-tool-form-card { min-width: 0; border: 1px solid rgba(147,160,186,.16); border-radius: 8px; background: rgba(255,255,255,.018); padding: 11px; display: grid; gap: 9px; align-content: start; }
+.discord-tool-form-card h4 { margin: 0; color: var(--gold); font-size: 14px; display: inline-flex; gap: 7px; align-items: center; }
+.discord-tool-form-card .legend { margin: -2px 0 2px; font-size: 11px; }
+.discord-tool-form-card textarea { min-height: 82px; resize: vertical; }
+.discord-tool-form-card > .toolbar-button { width: 100%; justify-content: center; border-color: rgba(147,160,186,.18); background: rgba(255,255,255,.035); color: var(--text); }
+.discord-tool-form-card > .toolbar-button:hover { border-color: rgba(240,198,79,.38); background: rgba(240,198,79,.08); color: var(--gold); }
+.discord-tool-form-card > .toolbar-button.primary { color: var(--gold); border-color: rgba(240,198,79,.45); background: var(--gold-dim); }
+.discord-tool-output { display: grid; gap: 8px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
 .discord-tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .discord-tool-grid.forms { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
 .discord-tool-result { max-height: 420px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #050608; color: #d7e4ff; padding: 10px; font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
@@ -912,6 +933,24 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-audit-entry ul { margin: 7px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; list-style: none; }
 .discord-audit-entry li { border: 1px solid rgba(147,160,186,.18); border-radius: 999px; background: rgba(255,255,255,.035); color: var(--muted); padding: 3px 8px; font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .discord-audit-entry time { color: var(--muted); font-size: 11px; white-space: nowrap; justify-self: end; }
+.discord-report { border: 1px solid rgba(147,160,186,.16); border-radius: 8px; background: rgba(0,0,0,.12); padding: 10px; display: grid; gap: 10px; }
+.discord-report h4 { margin: 0; color: var(--gold); font-size: 15px; }
+.discord-report h5 { margin: 0; color: var(--text); font-size: 13px; }
+.discord-report .legend { margin: 3px 0 0; }
+.discord-report-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.discord-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.discord-report-grid section { border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(255,255,255,.02); padding: 9px; display: grid; gap: 7px; align-content: start; }
+.discord-report-row { display: grid; grid-template-columns: 18px minmax(110px, .45fr) minmax(0, 1fr); gap: 8px; align-items: center; border-bottom: 1px solid rgba(255,255,255,.05); padding-bottom: 6px; }
+.discord-report-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.discord-report-row strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discord-report-row small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.discord-report-list { max-height: 420px; overflow: auto; display: grid; gap: 7px; padding-right: 3px; }
+.discord-report-item { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 9px; align-items: center; border: 1px solid rgba(255,255,255,.07); border-radius: 8px; background: rgba(255,255,255,.025); padding: 9px; }
+.discord-report-item strong { color: var(--text); font-size: 13px; }
+.discord-report-item span:not(.role-option-status) { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.discord-report-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
+.discord-report-dot.ok { background: var(--good); }
+.discord-report-dot.warn { background: var(--gold); }
 .bot-section-tests summary { justify-content: flex-start; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; }
 .bot-section-tests summary small { margin-left: 10px; }
 .bot-section-tests summary::after { margin-left: auto; }
@@ -977,6 +1016,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   .discord-panel-grid, .discord-tool-grid.forms { grid-template-columns: 1fr; }
   .role-manager-layout { grid-template-columns: 1fr; }
   .discord-tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discord-tool-actions, .discord-tool-forms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discord-rule-application { grid-column: 1 / -1; }
   .discord-rule-crafts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -987,12 +1027,16 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 }
 
 @media (max-width: 900px) {
+  .discord-tool-actions, .discord-tool-forms { grid-template-columns: 1fr; }
   .role-option-summary { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .role-option-status { grid-column: 2; justify-self: start; }
   .role-option-actions { grid-column: 3; grid-row: 1 / 3; }
   .role-option-edit { grid-template-columns: 1fr; }
   .discord-audit-entry { grid-template-columns: 36px minmax(0, 1fr); }
   .discord-audit-entry time { grid-column: 2; justify-self: start; }
+  .discord-report-grid { grid-template-columns: 1fr; }
+  .discord-report-item { grid-template-columns: 12px minmax(0, 1fr); }
+  .discord-report-item .role-option-status { grid-column: 2; justify-self: start; }
   .app-shell { grid-template-columns: 1fr; }
   aside { min-height: auto; position: sticky; top: 0; z-index: 2; }
   nav { grid-template-columns: repeat(3, 1fr); }

@@ -4392,6 +4392,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   }
 
   function renderDiscordToolResult(result: AnyRecord) {
+    const resultType = String(result.__type ?? "");
     if (Array.isArray(result.entries) && Array.isArray(result.users)) {
       return <div className="discord-audit-report">
         <div className="split-header">
@@ -4416,6 +4417,72 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <time>{occurredAt ? dateLabel(occurredAt.toISOString()) : entry.id}</time>
           </article>;
         })}</div>
+      </div>;
+    }
+    if (resultType === "roleCleanup" || (Array.isArray(result.unusedRoles) && Array.isArray(result.duplicateColours))) {
+      const unusedRoles = result.unusedRoles ?? [];
+      const duplicateColours = result.duplicateColours ?? [];
+      const missingConfiguredRoles = result.missingConfiguredRoles ?? [];
+      const notManageableConfiguredRoles = result.notManageableConfiguredRoles ?? [];
+      return <div className="discord-report">
+        <div className="split-header">
+          <div><h4>Role Cleanup</h4><p className="legend">Potential Discord role issues found from the latest server sync.</p></div>
+          <span className="role-option-status warn">{formatNumber(unusedRoles.length + duplicateColours.length + missingConfiguredRoles.length + notManageableConfiguredRoles.length)} findings</span>
+        </div>
+        <div className="discord-report-metrics">
+          <Info label="Unused roles" value={formatNumber(unusedRoles.length)} />
+          <Info label="Duplicate colours" value={formatNumber(duplicateColours.length)} />
+          <Info label="Missing configured" value={formatNumber(missingConfiguredRoles.length)} />
+          <Info label="Not manageable" value={formatNumber(notManageableConfiguredRoles.length)} />
+        </div>
+        <div className="discord-report-grid">
+          <section><h5>Unused Roles</h5>{unusedRoles.length ? unusedRoles.map((role: AnyRecord) => <div className="discord-report-row" key={role.id}><span className="role-swatch" style={{ backgroundColor: role.color ? `#${Number(role.color).toString(16).padStart(6, "0")}` : "transparent" }} /><strong>{role.name}</strong><small>{roleMemberCountText(role)} | {role.manageabilityReason ?? "Role can be reviewed"}</small></div>) : <p className="legend">No unused roles found.</p>}</section>
+          <section><h5>Duplicate Colours</h5>{duplicateColours.length ? duplicateColours.map((group: AnyRecord) => <div className="discord-report-row" key={group.color}><span className="role-swatch" style={{ backgroundColor: group.color ? `#${Number(group.color).toString(16).padStart(6, "0")}` : "transparent" }} /><strong>#{Number(group.color ?? 0).toString(16).padStart(6, "0")}</strong><small>{(group.roles ?? []).map((role: AnyRecord) => role.name).join(", ")}</small></div>) : <p className="legend">No duplicate role colours found.</p>}</section>
+          <section><h5>Missing Configured Roles</h5>{missingConfiguredRoles.length ? missingConfiguredRoles.map((roleId: string) => <div className="discord-report-row" key={roleId}><AlertTriangle size={15} /><strong>Missing role</strong><small>{roleId}</small></div>) : <p className="legend">All configured roles exist.</p>}</section>
+          <section><h5>Not Manageable</h5>{notManageableConfiguredRoles.length ? notManageableConfiguredRoles.map((role: AnyRecord) => <div className="discord-report-row" key={role.id}><Lock size={15} /><strong>{role.name}</strong><small>{role.manageabilityReason ?? "Bot cannot manage this role"}</small></div>) : <p className="legend">Configured roles are manageable.</p>}</section>
+        </div>
+      </div>;
+    }
+    if (resultType === "channelPermissions" || Array.isArray(result.channels)) {
+      const channels = result.channels ?? [];
+      const missing = channels.filter((channel: AnyRecord) => !channel.found);
+      const denied = channels.filter((channel: AnyRecord) => (channel.deniedConfiguredRoles ?? []).length);
+      return <div className="discord-report">
+        <div className="split-header">
+          <div><h4>Channel Checks</h4><p className="legend">Configured channels and role permission overwrite warnings.</p></div>
+          <span className={`role-option-status ${missing.length || denied.length ? "warn" : "ok"}`}>{missing.length || denied.length ? `${missing.length + denied.length} warnings` : "Looks good"}</span>
+        </div>
+        <div className="discord-report-metrics">
+          <Info label="Configured channels" value={formatNumber(channels.length)} />
+          <Info label="Missing channels" value={formatNumber(missing.length)} />
+          <Info label="Denied role overwrites" value={formatNumber(denied.length)} />
+        </div>
+        <div className="discord-report-list">{channels.map((channel: AnyRecord) => <article className="discord-report-item" key={`${channel.key}-${channel.id}`}>
+          <div className={`discord-report-dot ${channel.found ? "ok" : "warn"}`} />
+          <div><strong>{channel.name}</strong><span>{channel.key} | {channel.id}</span></div>
+          <span className={`role-option-status ${channel.found && !(channel.deniedConfiguredRoles ?? []).length ? "ok" : "warn"}`}>{!channel.found ? "Missing" : (channel.deniedConfiguredRoles ?? []).length ? "Denied role overwrite" : "Found"}</span>
+        </article>)}</div>
+      </div>;
+    }
+    if (resultType === "inactiveReport" || Array.isArray(result.inactive)) {
+      const inactive = result.inactive ?? [];
+      return <div className="discord-report">
+        <div className="split-header">
+          <div><h4>Inactive Members</h4><p className="legend">Members with no recent messages or sampled reactions in the checked channels.</p></div>
+          <span className="role-option-status warn">{formatNumber(inactive.length)} inactive</span>
+        </div>
+        <div className="discord-report-metrics">
+          <Info label="Period" value={`${formatNumber(result.days)} days`} />
+          <Info label="Members scanned" value={result.totalMembers === null ? "Unavailable" : formatNumber(result.totalMembers)} />
+          <Info label="Active found" value={formatNumber(result.activeCount)} />
+          <Info label="Channels checked" value={formatNumber(result.scannedChannels)} />
+          <Info label="Reaction checks" value={formatNumber(result.reactionChecks)} />
+        </div>
+        <div className="discord-report-list">{inactive.length ? inactive.map((member: AnyRecord) => <article className="discord-report-item" key={member.id}>
+          <div className="discord-report-dot warn" />
+          <div><strong>{member.username}</strong><span>{member.id}</span></div>
+          <span className="role-option-status warn">Inactive</span>
+        </article>) : <p className="legend">No inactive members found in this scan.</p>}</div>
       </div>;
     }
     return <pre className="discord-tool-result">{JSON.stringify(result, null, 2)}</pre>;
@@ -4726,31 +4793,57 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             </div>
           </section> : null}
           {(!botOnly || botSection === "tools") ? <section className="form-card discord-channel-card bot-tools-card">
-            <h3><Wrench size={17} /> Server Management Tools</h3>
-            <div className="discord-tool-grid">
-              <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult(await api("/admin/discord/audit-log")), "Audit log loaded.")}><FileText size={14} /> Audit Log</button>
-              <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult(await api("/admin/discord/role-cleanup")), "Role cleanup report loaded.")}><Users size={14} /> Role Cleanup</button>
-              <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult(await api("/admin/discord/channel-permissions")), "Channel permission report loaded.")}><Lock size={14} /> Channel Checks</button>
-              <button className="toolbar-button" onClick={() => run(async () => setDiscordToolResult(await api("/admin/discord/inactive-report", { method: "POST", body: JSON.stringify({ days: 30 }) })), "Inactive member report loaded.")}><Activity size={14} /> Inactive 30d</button>
+            <div className="split-header">
+              <div>
+                <h3><Wrench size={17} /> Server Management Tools</h3>
+                <p className="legend">Run Discord health reports, post managed announcements, maintain pinned information and schedule events from one place.</p>
+              </div>
             </div>
-            <div className="discord-tool-grid forms">
-              <div className="discord-panel-editor">
-                <h4>Announcement Builder</h4>
+            <div className="discord-tool-actions">
+              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/audit-log"), __type: "auditLog" }), "Audit log loaded.")}>
+                <span className="discord-tool-action-icon"><FileText size={18} /></span>
+                <span><strong>Audit Log</strong><small>Review recent bot and Discord management actions in a readable timeline.</small><em>Run report</em></span>
+              </button>
+              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/role-cleanup"), __type: "roleCleanup" }), "Role cleanup report loaded.")}>
+                <span className="discord-tool-action-icon"><Users size={18} /></span>
+                <span><strong>Role Cleanup</strong><small>Find unused roles, duplicate colours and role manageability problems.</small><em>Run report</em></span>
+              </button>
+              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/channel-permissions"), __type: "channelPermissions" }), "Channel permission report loaded.")}>
+                <span className="discord-tool-action-icon"><Lock size={18} /></span>
+                <span><strong>Channel Checks</strong><small>Check whether key roles can read and post in important channels.</small><em>Run report</em></span>
+              </button>
+              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/inactive-report", { method: "POST", body: JSON.stringify({ days: 30 }) }), __type: "inactiveReport" }), "Inactive member report loaded.")}>
+                <span className="discord-tool-action-icon"><Activity size={18} /></span>
+                <span><strong>Inactive Members</strong><small>List synced Discord members with no recent observed activity.</small><em>Run 30 day report</em></span>
+              </button>
+            </div>
+            <div className="discord-tool-section-header">
+              <div>
+                <h4>Post & Maintain Content</h4>
+                <p className="legend">Use these for clean server messages without manually formatting Discord embeds.</p>
+              </div>
+            </div>
+            <div className="discord-tool-forms">
+              <div className="discord-tool-form-card">
+                <h4><MessageCircle size={15} /> Announcement Builder</h4>
+                <p className="legend">Post a formatted announcement to any configured channel.</p>
                 <label className="field"><span>Channel</span>{channelIdSelect(announcementDraft.channelId, (value) => setAnnouncementDraft((current) => ({ ...current, channelId: value })))}</label>
                 <label className="field"><span>Title</span><input value={announcementDraft.title} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={announcementDraft.message} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, message: event.target.value }))} /></label>
                 <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/discord/announcement", { method: "POST", body: JSON.stringify(announcementDraft) }); }, "Announcement posted.")}><MessageCircle size={14} /> Post Announcement</button>
               </div>
-              <div className="discord-panel-editor">
-                <h4>Pinned Info Updater</h4>
+              <div className="discord-tool-form-card">
+                <h4><Pin size={15} /> Pinned Info Updater</h4>
+                <p className="legend">Create or update one maintained information post for a channel.</p>
                 <label className="field"><span>Channel</span>{channelIdSelect(pinnedDraft.channelId, (value) => setPinnedDraft((current) => ({ ...current, channelId: value })))}</label>
                 <label className="field"><span>Existing message ID</span><input value={pinnedDraft.messageId} onChange={(event) => setPinnedDraft((current) => ({ ...current, messageId: event.target.value }))} placeholder="Blank posts a new pinned message" /></label>
                 <label className="field"><span>Title</span><input value={pinnedDraft.title} onChange={(event) => setPinnedDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={pinnedDraft.message} onChange={(event) => setPinnedDraft((current) => ({ ...current, message: event.target.value }))} /></label>
                 <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/discord/pinned-info", { method: "POST", body: JSON.stringify(pinnedDraft) }); setPinnedDraft((current) => ({ ...current, messageId: String(result.response?.id ?? current.messageId) })); }, "Pinned info posted or updated.")}><Pin size={14} /> Post/Update Pin</button>
               </div>
-              <div className="discord-panel-editor">
-                <h4>Event Scheduler</h4>
+              <div className="discord-tool-form-card">
+                <h4><Bell size={15} /> Event Scheduler</h4>
+                <p className="legend">Create a Discord event for planned gathering or crafting sessions.</p>
                 <label className="field"><span>Name</span><input value={eventDraft.name} onChange={(event) => setEventDraft((current) => ({ ...current, name: event.target.value }))} /></label>
                 <label className="field"><span>Location</span><input value={eventDraft.location} onChange={(event) => setEventDraft((current) => ({ ...current, location: event.target.value }))} /></label>
                 <label className="field"><span>Start</span><input type="datetime-local" value={eventDraft.startTime} onChange={(event) => setEventDraft((current) => ({ ...current, startTime: event.target.value }))} /></label>
@@ -4759,7 +4852,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
                 <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/scheduled-event", { method: "POST", body: JSON.stringify(eventDraft) }); }, "Discord event created.")}><Bell size={14} /> Create Event</button>
               </div>
             </div>
-            {discordToolResult ? renderDiscordToolResult(discordToolResult) : null}
+            {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
           {(!botOnly || botSection === "notifications") ? <section className="form-card discord-preview-card">
             <h3><Bell size={17} /> Notifications</h3>
