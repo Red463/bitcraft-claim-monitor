@@ -843,7 +843,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .bot-section-notifications .status-detail .info-row:last-child { border-right: 0; }
 .bot-section-notifications .status-detail .info-row span { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
 .bot-section-notifications .status-detail .info-row strong { text-align: left; font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
-.bot-section-diagnostics .discord-terminal { max-height: calc(100vh - 390px); min-height: 420px; }
+.bot-section-diagnostics .discord-diagnostics-list { max-height: calc(100vh - 430px); min-height: 420px; }
 .discord-actions .toolbar-button { flex: 1 1 210px; justify-content: center; }
 .discord-preview-card { grid-column: 1 / -1; }
 .discord-channel-card { grid-column: 1 / -1; }
@@ -1026,6 +1026,29 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .discord-log-entry strong { color: var(--text); font: 700 12px Outfit, sans-serif; }
 .discord-log-entry code { white-space: pre-wrap; overflow-wrap: anywhere; color: #d7e4ff; font-size: 11px; line-height: 1.45; }
 .discord-log-empty { color: var(--muted); font-size: 12px; padding: 16px; text-align: center; }
+.discord-diagnostics-toolbar select { min-width: 190px; height: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 0 10px; }
+.discord-diagnostics-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.discord-diagnostics-summary .info-row { min-height: 62px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.12); padding: 10px 12px; display: grid; align-content: center; gap: 4px; }
+.discord-diagnostics-summary .info-row span { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.discord-diagnostics-list { overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(0,0,0,.16); padding: 10px; display: grid; align-content: start; gap: 9px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
+.discord-diagnostic-card { border: 1px solid rgba(255,255,255,.09); border-left: 3px solid var(--muted); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.018)); padding: 10px; display: grid; gap: 9px; }
+.discord-diagnostic-card.sent { border-left-color: var(--good); }
+.discord-diagnostic-card.failed { border-left-color: var(--danger); }
+.discord-diagnostic-card.skipped { border-left-color: var(--gold); }
+.discord-diagnostic-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; }
+.discord-diagnostic-top strong { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.discord-diagnostic-top time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.discord-diagnostic-status { min-height: 22px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--muted); background: rgba(255,255,255,.04); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.discord-diagnostic-status.sent { border-color: rgba(78,226,138,.34); color: var(--good); background: rgba(78,226,138,.1); }
+.discord-diagnostic-status.failed { border-color: rgba(239,100,97,.4); color: #ff9a97; background: rgba(239,100,97,.11); }
+.discord-diagnostic-status.skipped { border-color: rgba(240,198,79,.4); color: var(--gold); background: rgba(240,198,79,.11); }
+.discord-diagnostic-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 7px; }
+.discord-diagnostic-meta .info-row { min-height: 54px; border: 1px solid rgba(255,255,255,.07); border-radius: 7px; background: rgba(0,0,0,.11); padding: 8px 9px; display: grid; align-content: start; gap: 4px; }
+.discord-diagnostic-meta .info-row span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.discord-diagnostic-meta .info-row strong { color: var(--text); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+.discord-diagnostic-details { border-top: 1px solid rgba(255,255,255,.07); padding-top: 8px; display: grid; gap: 7px; }
+.discord-diagnostic-details summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+.discord-diagnostic-details code { display: block; max-height: 180px; overflow: auto; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: #050608; color: #d7e4ff; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace; }
 .diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .diagnostics div { display: grid; gap: 4px; border: 1px solid var(--border); background: var(--panel-2); padding: 10px; border-radius: 7px; font-size: 12px; }
 .diagnostics .ok strong { color: var(--good); }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.43-beta.1 - 2026-06-02
+
+### Fixed
+
+- Fixed Discord app-update notifications by reading the server version from package metadata instead of a stale hardcoded value.
+- Added release-key tracking for app-update announcements using version plus git revision when available, so deploys are not silently skipped after code-only changes.
+- Tightened app-update delivery bookkeeping so a release is only marked announced after the Discord send succeeds.
+- Audited Discord notification routing and filters for market, craft, supplies, scheduled reports, app updates and test notifications.
+- Limited low-supply Discord alerts to one successful post per 24 hours while supplies remain below the configured runway threshold.
+- Reworked the Discord diagnostics panel into readable cards with delivery counts and event-type filtering.
+
 ## 0.8.42-beta.1 - 2026-06-02
 
 ### Fixed

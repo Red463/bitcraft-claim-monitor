@@ -4001,6 +4001,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [embedDraft, setEmbedDraft] = React.useState({ channelId: "", title: "", description: "", color: "#f0c64f" });
   const [commandDraft, setCommandDraft] = React.useState({ name: "", description: "", response: "" });
   const [customCommands, setCustomCommands] = React.useState<AnyRecord[]>([]);
+  const [discordDiagnosticsFilter, setDiscordDiagnosticsFilter] = React.useState("all");
   const discordToolResult = discordToolResults[botSection] ?? null;
   const setDiscordToolResult = React.useCallback((result: AnyRecord | null) => {
     setDiscordToolResults((current) => ({ ...current, [botSection]: result }));
@@ -4392,6 +4393,16 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
   const discordLog: AnyRecord[] = status?.discord?.deliveryLog ?? [];
+  const discordDiagnosticTypes = React.useMemo(() => Array.from(new Set(discordLog.map((entry) => String(entry.event_type ?? "")).filter(Boolean))).sort(), [discordLog]);
+  const filteredDiscordLog = React.useMemo(() => discordDiagnosticsFilter === "all"
+    ? discordLog
+    : discordLog.filter((entry) => String(entry.event_type ?? "") === discordDiagnosticsFilter), [discordDiagnosticsFilter, discordLog]);
+  const discordDiagnosticCounts = React.useMemo(() => ({
+    total: filteredDiscordLog.length,
+    sent: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "sent").length,
+    skipped: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "skipped").length,
+    failed: filteredDiscordLog.filter((entry) => String(entry.status ?? "").toLowerCase() === "failed").length,
+  }), [filteredDiscordLog]);
   const discordDeliveryLabel = discordDelivery.status === "failed"
     ? `Failed ${dateLabel(discordDelivery.at)}: ${discordDelivery.error ?? "Unknown Discord error"}`
     : discordDelivery.status === "sent"
@@ -5194,7 +5205,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               </div>
               <div className="discord-rule-card discord-rule-supplies">
                 <h4>Supplies</h4>
-                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supplies changes</span></label>
+                <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.lowSupplies} onChange={(event) => updateDiscordNotify("lowSupplies", event.target.checked)} /><span>Low supply alert</span></label>
                 <label className="field"><span>Low supplies channel</span>{channelSelect("lowSupplies", draft.discord.notificationChannels.lowSupplies)}</label>
                 <label className="field"><span>Runway threshold (days)</span><input type="number" min={0.25} step={0.25} value={draft.discord.supplyRunwayDaysThreshold} onChange={(event) => updateDiscord({ supplyRunwayDaysThreshold: Number(event.target.value) })} /></label>
                 <label className="toggle-line"><input type="checkbox" checked={draft.discord.notify.supplyReports} onChange={(event) => updateDiscordNotify("supplyReports", event.target.checked)} /><span>Scheduled report</span></label>
@@ -5224,39 +5235,60 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           {(!botOnly || botSection === "diagnostics") ? <section className="form-card discord-terminal-card">
             <div className="split-header">
               <h3><Activity size={17} /> Discord Diagnostics</h3>
-              <button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh Log</button>
+              <div className="toolbar discord-diagnostics-toolbar">
+                <select value={discordDiagnosticsFilter} onChange={(event) => setDiscordDiagnosticsFilter(event.target.value)}>
+                  <option value="all">All types</option>
+                  {discordDiagnosticTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+                <button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh Log</button>
+              </div>
             </div>
             <p className="legend">Newest entries are shown first. This records sent, skipped and failed Discord notifications with routing and filter details so notification issues can be diagnosed.</p>
-            <div className="discord-terminal" role="log" aria-label="Discord diagnostics log">
-              {discordLog.length ? discordLog.map((entry) => {
+            <div className="discord-diagnostics-summary" aria-label="Discord diagnostics summary">
+              <Info label="Showing" value={formatNumber(discordDiagnosticCounts.total)} />
+              <Info label="Sent" value={formatNumber(discordDiagnosticCounts.sent)} />
+              <Info label="Skipped" value={formatNumber(discordDiagnosticCounts.skipped)} />
+              <Info label="Failed" value={formatNumber(discordDiagnosticCounts.failed)} />
+            </div>
+            <div className="discord-diagnostics-list" role="log" aria-label="Discord diagnostics log">
+              {filteredDiscordLog.length ? filteredDiscordLog.map((entry) => {
                 const metadata = entry.metadata ?? {};
-                const detailLines = [
-                  `event=${entry.event_type}`,
-                  `status=${entry.status}`,
-                  entry.channel_key ? `channelKey=${entry.channel_key}` : "",
-                  entry.channel_id ? `channelId=${entry.channel_id}` : "",
-                  entry.reason ? `reason=${entry.reason}` : "",
-                  entry.error ? `error=${entry.error}` : "",
-                  metadata?.productionUsers ? `allowedCrafters=${metadata.productionUsers}` : "",
-                  metadata?.productionMinXp !== undefined ? `minXp=${metadata.productionMinXp}` : "",
-                  metadata?.productionMinAgeMinutes !== undefined ? `minAge=${metadata.productionMinAgeMinutes}m` : "",
-                  metadata?.craftRoleId ? `roleId=${metadata.craftRoleId}` : "",
-                  metadata?.metadata?.activeCraftCount !== undefined ? `activeCrafts=${metadata.metadata.activeCraftCount}` : "",
-                  metadata?.metadata?.activeKnownBeforePoll !== undefined ? `knownBeforePoll=${metadata.metadata.activeKnownBeforePoll}` : "",
-                  metadata?.metadata?.hasProductionBaseline !== undefined ? `hasBaseline=${metadata.metadata.hasProductionBaseline}` : "",
-                  metadata?.metadata?.crafterName ? `crafter=${metadata.metadata.crafterName}` : "",
-                  metadata?.metadata?.skillName ? `profession=${metadata.metadata.skillName}` : "",
-                  metadata?.metadata?.tier ? `tier=T${metadata.metadata.tier}` : "",
-                  metadata?.metadata?.totalXp !== undefined ? `craftXp=${metadata.metadata.totalXp}` : "",
-                  metadata?.metadata?.progressPct !== undefined ? `progress=${metadata.metadata.progressPct}%` : "",
-                ].filter(Boolean).join(" | ");
+                const statusName = String(entry.status ?? "unknown").toLowerCase();
+                const detailRows = [
+                  ["Type", entry.event_type],
+                  ["Status", entry.status],
+                  entry.channel_key ? ["Channel key", entry.channel_key] : null,
+                  entry.channel_id ? ["Channel ID", entry.channel_id] : null,
+                  entry.reason ? ["Reason", entry.reason] : null,
+                  entry.error ? ["Error", entry.error] : null,
+                  metadata?.productionUsers ? ["Allowed crafters", metadata.productionUsers] : null,
+                  metadata?.productionMinXp !== undefined ? ["Minimum XP", formatNumber(metadata.productionMinXp)] : null,
+                  metadata?.productionMinAgeMinutes !== undefined ? ["Minimum age", `${metadata.productionMinAgeMinutes}m`] : null,
+                  metadata?.craftRoleId ? ["Craft role", metadata.craftRoleId] : null,
+                  metadata?.metadata?.crafterName ? ["Crafter", metadata.metadata.crafterName] : null,
+                  metadata?.metadata?.skillName ? ["Profession", metadata.metadata.skillName] : null,
+                  metadata?.metadata?.tier ? ["Tier", `T${metadata.metadata.tier}`] : null,
+                  metadata?.metadata?.totalXp !== undefined ? ["Craft XP", formatNumber(metadata.metadata.totalXp)] : null,
+                  metadata?.metadata?.progressPct !== undefined ? ["Progress", `${metadata.metadata.progressPct}%`] : null,
+                  metadata?.metadata?.activeCraftCount !== undefined ? ["Active crafts", metadata.metadata.activeCraftCount] : null,
+                ].filter(Boolean) as [string, unknown][];
                 return (
-                  <article className={`discord-log-entry ${String(entry.status ?? "unknown").toLowerCase()}`} key={entry.id}>
-                    <time>{dateLabel(entry.occurred_at)}</time>
-                    <strong>{entry.summary ?? entry.event_type}</strong>
-                    <code>{detailLines}</code>
-                    {Array.isArray(metadata?.metadata?.crafts) && metadata.metadata.crafts.length ? <code>crafts={JSON.stringify(metadata.metadata.crafts)}</code> : null}
-                    {entry.response ? <code>response={JSON.stringify(entry.response)}</code> : null}
+                  <article className={`discord-diagnostic-card ${statusName}`} key={entry.id}>
+                    <div className="discord-diagnostic-top">
+                      <span className={`discord-diagnostic-status ${statusName}`}>{statusName}</span>
+                      <strong>{entry.summary ?? entry.event_type}</strong>
+                      <time>{dateLabel(entry.occurred_at)}</time>
+                    </div>
+                    <div className="discord-diagnostic-meta">
+                      {detailRows.map(([label, value]) => <Info key={label} label={label} value={String(value ?? "-")} />)}
+                    </div>
+                    {(Array.isArray(metadata?.metadata?.crafts) && metadata.metadata.crafts.length) || entry.response ? (
+                      <details className="discord-diagnostic-details">
+                        <summary>Raw details</summary>
+                        {Array.isArray(metadata?.metadata?.crafts) && metadata.metadata.crafts.length ? <code>crafts={JSON.stringify(metadata.metadata.crafts, null, 2)}</code> : null}
+                        {entry.response ? <code>response={JSON.stringify(entry.response, null, 2)}</code> : null}
+                      </details>
+                    ) : null}
                   </article>
                 );
               }) : <div className="discord-log-empty">No Discord diagnostics recorded yet.</div>}

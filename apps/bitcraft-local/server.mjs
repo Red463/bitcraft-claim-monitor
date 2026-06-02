@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { promisify } from "node:util";
@@ -15,10 +15,12 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
-const appVersion = "0.8.40-beta.1";
+const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
+const repoRoot = path.resolve(root, "..", "..");
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 mkdirSync(dataDir, { recursive: true });
@@ -297,6 +299,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_low_supplies_at", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_delivery_json", JSON.stringify({ status: "none" }), now);
 db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
 
@@ -450,6 +453,27 @@ const statements = {
 function toNumber(value) {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function currentAppBuildId() {
+  const envRevision = String(process.env.SOURCE_VERSION ?? process.env.RENDER_GIT_COMMIT ?? process.env.GITHUB_SHA ?? "").trim();
+  if (envRevision) return envRevision.slice(0, 12);
+  try {
+    const gitDir = path.join(repoRoot, ".git");
+    const head = readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+    if (head.startsWith("ref:")) {
+      const refPath = head.slice(5).trim();
+      const full = readFileSync(path.join(gitDir, refPath), "utf8").trim();
+      return full.slice(0, 12);
+    }
+    if (/^[a-f0-9]{40}$/i.test(head)) return head.slice(0, 12);
+  } catch {}
+  return "";
+}
+
+function currentAppReleaseKey() {
+  const buildId = currentAppBuildId();
+  return buildId ? `${appVersion}+${buildId}` : appVersion;
 }
 
 function unwrap(payload, key, fallback) {
@@ -1310,9 +1334,25 @@ function discordEnabledFor(eventType, settings, metadata) {
   }
   if (eventType === "production_started") return settings.notify.production && settings.notify.productionStarted && productionNotificationAllowed(eventType, metadata, settings);
   if (eventType === "production_completed") return settings.notify.production && settings.notify.productionCompleted && productionNotificationAllowed(eventType, metadata, settings);
-  if (eventType === "supplies") return settings.notify.lowSupplies && toNumber(metadata?.runwayDays) > 0 && toNumber(metadata.runwayDays) < settings.supplyRunwayDaysThreshold;
+  if (eventType === "supplies") return !lowSupplyNotificationSkipReason(metadata, settings);
   if (eventType === "app_update") return settings.notify.appUpdates;
   return false;
+}
+
+function lowSupplyNotificationSkipReason(metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (!settings.notify.lowSupplies) return "Low supply notifications are disabled";
+  const runwayDays = toNumber(metadata?.runwayDays);
+  if (runwayDays <= 0) return "Supply runway is unknown";
+  if (runwayDays >= settings.supplyRunwayDaysThreshold) {
+    return `Supply runway ${runwayDays.toFixed(1)} days is above ${settings.supplyRunwayDaysThreshold} day threshold`;
+  }
+  const lastSent = statements.getSetting.get("discord_last_low_supplies_at")?.value ?? "";
+  const lastSentMs = new Date(lastSent).getTime();
+  if (Number.isFinite(lastSentMs) && Date.now() - lastSentMs < 24 * 60 * 60 * 1000) {
+    const next = new Date(lastSentMs + 24 * 60 * 60 * 1000).toISOString();
+    return `Low supply alert already sent today. Next alert available after ${next}`;
+  }
+  return "";
 }
 
 function productionNotificationSkipReason(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
@@ -1453,6 +1493,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   if (!discordEnabledFor(eventType, settings, metadata)) {
     const reason = eventType === "production_started" || eventType === "production_completed"
       ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
+      : eventType === "supplies" ? lowSupplyNotificationSkipReason(metadata, settings) || "Low supply notification disabled or above threshold"
       : eventType === "app_update" ? "App update notifications are disabled" : "Notification disabled or below configured threshold";
     recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true };
@@ -1466,6 +1507,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
     }, settings, channelId);
     recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+    if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
     return { ok: true, skipped: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -2451,7 +2493,7 @@ const discordTestEvents = {
   appUpdate: {
     eventType: "app_update",
     summary: `Version ${appVersion} is live with the latest changes`,
-    metadata: { version: appVersion, changelogUrl },
+    metadata: { version: appVersion, releaseKey: currentAppReleaseKey(), changelogUrl },
   },
 };
 
@@ -2521,24 +2563,25 @@ async function sendDiscordTestNotification(kind = "basic") {
 
 async function announceDiscordAppUpdateIfNeeded() {
   const settings = getDiscordSettingsRaw();
+  const releaseKey = currentAppReleaseKey();
   if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) {
-    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl }, settings) });
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl }, settings) });
     return;
   }
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
-  if (lastAnnounced === appVersion) {
-    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${appVersion} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, changelogUrl, lastAnnounced }, settings) });
+  if (lastAnnounced === releaseKey) {
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Release ${releaseKey} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl, lastAnnounced }, settings) });
     return;
   }
   const updateDetails = await currentAppUpdateDetails();
-  await sendDiscordActivity(
+  const result = await sendDiscordActivity(
     "app_update",
     updateDetails.summary,
     new Date().toISOString(),
-    { version: appVersion, changelogUrl, changeNotes: updateDetails.changeNotes },
+    { version: appVersion, releaseKey, changelogUrl, changeNotes: updateDetails.changeNotes },
     settings,
   );
-  statements.upsertSetting.run("discord_last_announced_version", appVersion, new Date().toISOString());
+  if (result.ok && !result.skipped) statements.upsertSetting.run("discord_last_announced_version", releaseKey, new Date().toISOString());
 }
 
 function discordSupplyEmbed(claim) {
