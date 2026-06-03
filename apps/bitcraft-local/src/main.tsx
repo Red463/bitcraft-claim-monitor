@@ -152,7 +152,6 @@ const NAV = [
   ["publiccrafts", "Public Craft Finder", Search],
   ["inventory", "Inventory", Package],
   ["construction", "Construction", Hammer],
-  ["buildings", "Structures", Home],
   ["research", "Research", FlaskConical],
   ["market", "Market", CircleDollarSign],
   ["empire", "Region", Globe2],
@@ -455,9 +454,14 @@ const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, m
 function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
   const savedColourRoles = Array.isArray((config as AnyRecord)?.discord?.colourRoles) ? (config as AnyRecord).discord.colourRoles : null;
   const savedRolePanels = Array.isArray((config as AnyRecord)?.discord?.rolePanels) ? (config as AnyRecord).discord.rolePanels : null;
+  const configuredDefaultPage = String((config as AnyRecord)?.defaultPage ?? DEFAULT_SETTINGS.defaultPage);
+  const defaultPage = configuredDefaultPage === "buildings" || !NAV.some(([id]) => id === configuredDefaultPage && id !== "admin")
+    ? DEFAULT_SETTINGS.defaultPage
+    : configuredDefaultPage as ActivePanel;
   return {
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
+    defaultPage,
     theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
     toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
     branding: (config as AnyRecord)?.branding ?? {},
@@ -628,6 +632,7 @@ function legacyDefaultWatchlist(): WatchEntry[] {
 
 function urlPanel(): ActivePanel | null {
   const panel = new URLSearchParams(window.location.search).get("page");
+  if (panel === "buildings") return "overview";
   return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
 }
 
@@ -1154,7 +1159,7 @@ function DiscordIcon({ size = 17 }: { size?: number }) {
 }
 
 function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
-  const { claim, members, buildings, market, construction, crafts, research, recruitment } = data;
+  const { claim, members, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
   const treasury = toNumber(claim.treasury);
@@ -1207,7 +1212,7 @@ function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: 
         </div>
         <div className="hero-metrics">
           <button onClick={() => onNavigate("members")}><strong><LiveValue value={onlineCount} /></strong><span>Online</span></button>
-          <button onClick={() => onNavigate("buildings")}><strong><LiveValue value={buildings.length} /></strong><span>Structures</span></button>
+          <button onClick={() => onNavigate("construction")}><strong><LiveValue value={activeProjects} /></strong><span>Construction</span></button>
           <button onClick={() => onNavigate("market")}><strong><LiveValue value={market.length} /></strong><span>Market</span></button>
         </div>
       </section>
@@ -1834,113 +1839,6 @@ function getRarityClass(rarity: unknown): string {
     default:
       return "";
   }
-}
-
-function Buildings({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [category, setCategory] = usePersistedState("structures.category", "All");
-  const [tier, setTier] = usePersistedState("structures.tier", "All");
-  const [sort, setSort] = usePersistedState("structures.sort", "name");
-  const categories = ["All", "Crafting", "Refining", "Storage", "Housing", "Trade", "Core", "Utility", "Decoration"];
-  const buildings = data.buildings.map(normalizeBuilding);
-  const tiers = ["All", ...unique(buildings.map((building) => String(building.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b))];
-  const filtered = buildings
-    .filter((building) => {
-      const text = `${building.name} ${building.nickname}`.toLowerCase();
-      if (searchTerm && !text.includes(searchTerm.toLowerCase())) return false;
-      if (category !== "All" && building.category !== category) return false;
-      if (tier !== "All" && String(building.tier ?? "") !== tier) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      if (sort === "tier") return toNumber(b.tier) - toNumber(a.tier);
-      if (sort === "category") return a.category.localeCompare(b.category) || a.name.localeCompare(b.name);
-      return a.name.localeCompare(b.name);
-    });
-  const groupedBuildings = categories
-    .filter((item) => item !== "All")
-    .map((item) => ({ category: item, buildings: filtered.filter((building) => building.category === item) }))
-    .filter((group) => group.buildings.length > 0);
-  const tierSummary = tiers
-    .filter((value) => value !== "All")
-    .map((value) => ({ tier: value, count: buildings.filter((building) => String(building.tier ?? "") === value).length }))
-    .filter((entry) => entry.count > 0);
-
-  return (
-    <div className="panel structures-panel">
-      <div className="structure-hero">
-        <Header title="Structures">Basic overview of settlement structures and tiers</Header>
-        <div className="structure-total"><strong>{buildings.length}</strong><span>structures built</span></div>
-      </div>
-      {tierSummary.length ? <div className="structure-tier-strip">{tierSummary.map((entry) => <div key={entry.tier}><TierBadge tier={entry.tier} /><strong>{formatNumber(entry.count)}</strong></div>)}</div> : null}
-      <div className="toolbar-row">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search structures" />
-        <Segmented options={categories} value={category} onChange={setCategory} />
-        <Segmented options={tiers} value={tier} onChange={setTier} label="Tier" />
-        <select className="select-control" value={sort} onChange={(event) => setSort(event.target.value)}>
-          <option value="name">Name</option>
-          <option value="tier">Tier</option>
-          <option value="category">Category</option>
-        </select>
-      </div>
-      <div className="building-sections">
-        {groupedBuildings.map((group) => (
-          <section className="building-section" key={group.category}>
-            <h3><span className={`category-dot ${group.category.toLowerCase()}`} />{group.category}<small>{group.buildings.length}</small></h3>
-            <div className="building-grid">
-              {group.buildings.map((building) => (
-                <article className="building-card" key={building.entityId}>
-                  <header><strong>{building.name}</strong>{building.tier ? <TierBadge tier={building.tier} /> : null}</header>
-                  {building.nickname ? <p>"{building.nickname}"</p> : null}
-                  <small>{building.category}</small>
-                </article>
-              ))}
-            </div>
-          </section>
-        ))}
-        {!filtered.length ? <div className="empty-state"><Home />No structures match the current filters.</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function inferTierNumber(item: AnyRecord): number | null {
-  const icon = String(item.iconAssetName ?? "");
-  const match = icon.match(/T(10|[1-9])/i);
-  return match ? Number(match[1]) : item.tier ? Number(item.tier) : null;
-}
-
-function normalizeBuilding(building: AnyRecord) {
-  const fn = building.functions?.[0] ?? {};
-  const normalized = {
-    entityId: String(building.entityId ?? building.buildingEntityId ?? building.name),
-    descriptionId: building.buildingDescriptionId ?? building.descriptionId ?? null,
-    name: String(building.name ?? building.buildingName ?? "Unknown"),
-    nickname: building.nickname ?? building.buildingNickname ?? null,
-    tier: inferTierNumber(building),
-    craftingSlots: toNumber(building.craftingSlots ?? fn.crafting_slots),
-    refiningSlots: toNumber(building.refiningSlots ?? fn.refining_slots),
-    storageSlots: toNumber(building.storageSlots ?? fn.storage_slots),
-    cargoSlots: toNumber(building.cargoSlots ?? fn.cargo_slots),
-    housingSlots: toNumber(building.housingSlots ?? fn.housing_slots),
-    tradeOrders: toNumber(building.tradeOrders ?? fn.trade_orders),
-    terraformCapable: Boolean(building.terraformCapable ?? fn.terraform),
-    category: "Utility",
-  };
-  normalized.category = getBuildingCategory(normalized);
-  return normalized;
-}
-
-function getBuildingCategory(building: ReturnType<typeof normalizeBuilding>): string {
-  const name = building.name.toLowerCase();
-  if (building.storageSlots > 0) return "Storage";
-  if (building.housingSlots > 0) return "Housing";
-  if (building.tradeOrders > 0) return "Trade";
-  if (building.refiningSlots > 0) return "Refining";
-  if (building.craftingSlots > 0) return "Crafting";
-  if (name.includes("totem") || name.includes("settlement")) return "Core";
-  if (name.includes("statue") || name.includes("shrine")) return "Decoration";
-  return "Utility";
 }
 
 function getOwnerName(row: AnyRecord): string {
@@ -5149,6 +5047,14 @@ function DashboardApp() {
     toastTimersRef.current.clear();
   }, []);
   React.useEffect(() => {
+    if (String(active) === "buildings") {
+      setActive("overview");
+      updateQueryState({ page: "overview" });
+    }
+  }, [active, setActive]);
+  React.useEffect(() => {
+    const rawPanel = new URLSearchParams(window.location.search).get("page");
+    if (rawPanel === "buildings") updateQueryState({ page: "overview" });
     const requested = urlPanel();
     const requestedMapFocus = urlMapFocus();
     if (requestedMapFocus) setMapFocus(requestedMapFocus);
@@ -5315,7 +5221,6 @@ function DashboardApp() {
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
-    buildings: <Buildings data={data} />,
     research: <Research data={data} />,
     market: <Market data={data} history={localHistory.market} claimId={claimId} watches={watches} onToggleWatch={toggleWatch} />,
     empire: <Region data={data} />,
@@ -5324,6 +5229,7 @@ function DashboardApp() {
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
+  const activePanel = panels[active] ?? panels.overview;
 
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -5364,7 +5270,7 @@ function DashboardApp() {
         </div>
       </aside>
       <main ref={mainRef}>
-        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{panels[active]}</div>}
+        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{activePanel}</div>}
         <footer className="app-footer">
           <div className="footer-legal">
             <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.53-beta.1] - 2026-06-03
+
+### Removed
+
+- Removed the main app Structures page, sidebar entry, default-page option, and related page-specific styling.
+
+### Changed
+
+- Redirected old Structures page links and saved browser/default-page settings back to Overview so existing users do not land on a blank removed page.
+- Replaced the Overview Structures shortcut with a Construction shortcut.
+
 ## [0.8.52-beta.1] - 2026-06-03
 
 ### Changed

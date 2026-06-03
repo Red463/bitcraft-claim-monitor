@@ -976,12 +976,13 @@ function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
+  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "overview";
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
-    defaultPage: statements.getSetting.get("default_page")?.value ?? "overview",
+    defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "overview",
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
@@ -1015,7 +1016,7 @@ function validSyncUrl(value) {
 }
 
 function validPage(value) {
-  return ["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "buildings", "research", "market", "empire", "map", "sync", "activity"].includes(value);
+  return ["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"].includes(value);
 }
 
 const scryptAsync = promisify(scrypt);
@@ -1230,7 +1231,7 @@ const analyticsEvents = new Set([
   "activity_member_filter_used",
   "activity_category_filter_used",
 ]);
-const analyticsPages = new Set(["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "buildings", "research", "market", "empire", "map", "sync", "activity"]);
+const analyticsPages = new Set(["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"]);
 const analyticsRetentionDays = 90;
 let lastAnalyticsPruneAt = 0;
 
