@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.45-beta.1] - 2026-06-03
+
+### Changed
+
+- Refined the app-wide CSS tokens for more consistent card, input, focus, disabled and compact-control styling.
+- Improved responsive behaviour for the main sidebar, bot dashboard navigation and map layout on desktop, tablet and mobile screens.
+- Reduced visible refresh jitter by disabling row re-entry animations during background data updates.
+
+### Fixed
+
+- Fixed small-label readability, long-name wrapping and touch-target sizing across dense dashboard controls.
+- Added stronger keyboard focus states and clearer scroll cues for wide tables and map resource lists.
+
 ## [0.8.44-beta.1] - 2026-06-02
 
 ### Fixed
