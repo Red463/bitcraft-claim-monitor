@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.54-beta.1] - 2026-06-03
+
+### Changed
+
+- Removed the Members table View column so member details open only by clicking a member row.
+- Replaced the Professions sword icon with a graduation-cap icon in navigation and profession summary cards.
+- Moved Browser Settings and Updates out of the sidebar into floating app action buttons.
+- Added a collapsible Resource Finder panel on the Map page to free more space for the map.
+- Reset the Resource Finder collapse preference so the Map page opens expanded by default after this update.
+
+### Fixed
+
+- Tightened Overview hero metric sizing to prevent the top-right metric labels from overflowing.
+- Matched paired card heights on the Professions and Region pages for a cleaner layout.
+
 ## [0.8.53-beta.1] - 2026-06-03
 
 ### Removed

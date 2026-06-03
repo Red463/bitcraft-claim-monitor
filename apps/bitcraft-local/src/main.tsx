@@ -24,6 +24,7 @@ import {
   FileText,
   FlaskConical,
   Globe2,
+  GraduationCap,
   Hammer,
   Home,
   KeyRound,
@@ -50,7 +51,6 @@ import {
   ShoppingBag,
   ShoppingCart,
   Star,
-  Swords,
   TrendingDown,
   TrendingUp,
   Trash2,
@@ -147,7 +147,7 @@ type AppSettings = {
 const NAV = [
   ["overview", "Overview", Shield],
   ["members", "Members", Users],
-  ["skills", "Professions", Swords],
+  ["skills", "Professions", GraduationCap],
   ["production", "Production", Factory],
   ["publiccrafts", "Public Craft Finder", Search],
   ["inventory", "Inventory", Package],
@@ -1495,7 +1495,6 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
           ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
           ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
           ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-          ["Details", (m) => <button className="mini-action" onClick={(event) => { event.stopPropagation(); setSelectedId(String(m.playerEntityId)); onSelectMember(String(m.playerEntityId)); trackAnalyticsEvent("member_details_opened"); }}>View</button>],
         ]}
       />
       {selectedMember ? (
@@ -1688,7 +1687,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<TrendingUp />} label="Profession Levels" value={formatNumber(settlementTotalLevel)} />
         <MiniStat icon={<Star />} label="Highest Profession" value={settlementBest} />
         <MiniStat icon={<Activity />} label="Avg Profession Total" value={formatNumber(averageTotal, 1)} />
-        <MiniStat icon={<Swords />} label="Top Professional" value={topMemberName} />
+        <MiniStat icon={<GraduationCap />} label="Top Professional" value={topMemberName} />
       </div>
       <div className="skills-dashboard">
         <section className="focus-panel">
@@ -1712,7 +1711,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
         </section>
         <section className="coverage-panel">
-          <h3><Swords size={17} /> Profession Coverage</h3>
+          <h3><GraduationCap size={17} /> Profession Coverage</h3>
           <div className="coverage-list">
             {coverage.slice(0, 8).map((skill) => (
               <button key={skill.id} className={focusedProfession === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
@@ -3125,6 +3124,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const [resourceTier, setResourceTier] = usePersistedState("map.resource-tier", "All");
   const [resourceCategory, setResourceCategory] = usePersistedState("map.resource-category", "All");
   const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
+  const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
   const roster = data.players;
@@ -3251,10 +3251,16 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
-      <div className="map-workspace">
-        <aside className="map-resource-panel">
-          <div className="map-resource-heading"><Search size={16} /><div><strong>Resource Finder</strong><span>{selectedResources.length ? `${formatNumber(selectedResources.length)} tracked` : "Track resources on the map"}</span></div></div>
-          <div className="map-resource-controls">
+      <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
+        <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
+          <div className="map-resource-heading">
+            <Search size={16} />
+            <div><strong>Resource Finder</strong><span>{selectedResources.length ? `${formatNumber(selectedResources.length)} tracked` : "Track resources on the map"}</span></div>
+            <button className="icon-button" type="button" onClick={() => setResourcePanelCollapsed((current) => !current)} title={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"} aria-label={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"}>
+              {resourcePanelCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
+          </div>
+          {!resourcePanelCollapsed ? <><div className="map-resource-controls">
             <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => <option key={id} value={id}>Region {id}{String(id) === String(data.claim.regionId) ? " - settlement" : ""}</option>)}</select></label>
             <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
             <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
@@ -3283,7 +3289,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
               </button>;
             })}
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
-          </div>
+          </div></> : null}
         </aside>
         <iframe key={currentFrameUrl} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
       </div>
@@ -5257,10 +5263,6 @@ function DashboardApp() {
             <Icon size={16} /><span className="nav-label">{label}</span>
           </a>
         ))}</nav>
-        <div className="sidebar-tools">
-          <button onClick={() => setUserSettingsOpen(true)} title="Browser settings"><Settings size={14} /><span>Browser Settings</span></button>
-          <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }} title="Updates"><Bell size={14} /><span>Updates</span>{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
-        </div>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
           <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
           <span>
@@ -5286,7 +5288,11 @@ function DashboardApp() {
           </div>
         </footer>
       </main>
-      <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
+      <div className="floating-actions" aria-label="Application tools">
+        <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
+        <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
+        <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
+      </div>
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
