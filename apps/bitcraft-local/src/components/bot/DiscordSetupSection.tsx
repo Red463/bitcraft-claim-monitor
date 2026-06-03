@@ -5,7 +5,7 @@ type DiscordSettings = Record<string, any>;
 
 function StatusInfo({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div>
+    <div className="info-row">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

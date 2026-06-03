@@ -8,7 +8,6 @@ function professionLabel(key: string) {
 }
 
 export function DiscordCraftWatchRolesSection({
-  botOnly,
   craftRoleKeys,
   craftRoles,
   discoveredRoles,
@@ -27,13 +26,15 @@ export function DiscordCraftWatchRolesSection({
   updateDiscordRole: (key: string, value: string) => void;
 }) {
   return (
-    <details className="form-card discord-channel-card" open={botOnly}>
-      <summary>
-        <span>
-          <Bell size={17} /> Craft Watch Roles
-        </span>
-        <small>Role IDs used by watch buttons and craft pings</small>
-      </summary>
+    <section className="form-card discord-channel-card bot-routing-card">
+      <div className="split-header">
+        <div>
+          <h3>
+            <Bell size={17} /> Craft Watch Roles
+          </h3>
+          <p className="legend">Role IDs used by watch buttons and craft pings</p>
+        </div>
+      </div>
       <p className="legend">
         Choose roles discovered by the bot. When someone clicks Watch on a craft notification, the bot toggles the matching role on that Discord member.
       </p>
@@ -47,7 +48,7 @@ export function DiscordCraftWatchRolesSection({
             <label className="field" key={key}>
               <span>
                 {professionLabel(key)}
-                {role ? <small>{roleStatusText(role)}</small> : null}
+                <small>{role ? roleStatusText(role) : roleId ? "Role not found in latest sync" : "No role selected"}</small>
               </span>
               {roleIdSelect(roleId, (value) => updateDiscordRole(key, value))}
             </label>
@@ -71,6 +72,6 @@ export function DiscordCraftWatchRolesSection({
           ))}
         </div>
       ) : null}
-    </details>
+    </section>
   );
 }

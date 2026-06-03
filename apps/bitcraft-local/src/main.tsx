@@ -98,8 +98,8 @@ type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
 type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };
 type DiscordRoleOption = { key: string; label: string; roleId: string; emoji: string };
-type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; options: DiscordRoleOption[] };
-type DiscordWelcomeFlow = { enabled: boolean; channelId: string; messageId: string; title: string; message: string; readyRoleId: string };
+type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; showHelperText: boolean; options: DiscordRoleOption[] };
+type DiscordWelcomeFlow = { enabled: boolean; channelId: string; messageId: string; title: string; message: string; readyRoleId: string; showNextStep: boolean };
 type DiscordPresence = { enabled: boolean; status: "online" | "idle" | "dnd" | "invisible"; activityType: "playing" | "watching" | "listening" | "competing"; activityText: string };
 type DiscordSettings = {
   enabled: boolean;
@@ -287,6 +287,7 @@ const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = [
     title: "Welcome to Timbersteel Trade!",
     description: "Choose your access role below.",
     mode: "single",
+    showHelperText: true,
     options: [
       { key: "citizen", label: "Citizen", roleId: "", emoji: "1" },
       { key: "visitor", label: "Visitor", roleId: "", emoji: "2" },
@@ -300,6 +301,7 @@ const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = [
     title: "Choose Your Professions",
     description: "Select as many profession interests as you like.",
     mode: "multi",
+    showHelperText: true,
     options: Object.keys(DEFAULT_CRAFT_ROLES).map((key) => ({
       key,
       label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
@@ -307,8 +309,8 @@ const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = [
       emoji: "",
     })),
   },
-  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", options: [] },
-  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", options: [] },
+  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", showHelperText: true, options: [] },
+  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", showHelperText: true, options: [] },
 ];
 
 const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
@@ -318,6 +320,7 @@ const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
   title: "Welcome to Timbersteel Trade",
   message: "Read the welcome steps, choose your roles, then click Ready.",
   readyRoleId: "",
+  showNextStep: true,
 };
 
 const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
@@ -373,6 +376,7 @@ function normalizeDiscordRolePanel(value: AnyRecord, fallback?: DiscordRolePanel
     title: String(value?.title ?? fallback?.title ?? label).trim() || label,
     description: String(value?.description ?? fallback?.description ?? "").trim(),
     mode: String(value?.mode ?? fallback?.mode ?? "multi") === "single" ? "single" : "multi",
+    showHelperText: value?.showHelperText ?? fallback?.showHelperText ?? true,
     options: options.map((option: AnyRecord, index: number) => normalizeDiscordRoleOption(option, fallback?.options?.[index])),
   };
 }
@@ -387,6 +391,7 @@ function normalizeDiscordWelcomeFlow(value: AnyRecord): DiscordWelcomeFlow {
     title: String(value?.title ?? DEFAULT_WELCOME_FLOW.title).trim() || DEFAULT_WELCOME_FLOW.title,
     message: String(value?.message ?? DEFAULT_WELCOME_FLOW.message).trim() || DEFAULT_WELCOME_FLOW.message,
     readyRoleId: String(value?.readyRoleId ?? "").trim(),
+    showNextStep: value?.showNextStep !== false,
   };
 }
 

@@ -5,7 +5,7 @@ type DiscordSettings = Record<string, any>;
 
 function StatusInfo({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div>
+    <div className="info-row">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -192,7 +192,7 @@ export function DiscordNotificationsSection({
           </label>
         </div>
       </div>
-      <div className="status-detail">
+      <div className="status-detail discord-notification-status">
         <StatusInfo
           label="Interaction endpoint"
           value={discord.interactionUrl ? `${window.location.origin}${discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`}

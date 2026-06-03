@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.52-beta.1] - 2026-06-03
+
+### Changed
+
+- Renamed Discord craft notification buttons from `Watch <profession>` to `Toggle <profession> Notifications` so the action is clearer after notifications are already enabled.
+
+### Fixed
+
+- Made Discord craft notification toggle buttons check the member's current server roles before adding or removing notification roles.
+
+## [0.8.51-beta.1] - 2026-06-03
+
+### Fixed
+
+- Standardised Discord bot dashboard tab alignment so capped-width sections start from the same left edge instead of some tabs appearing centred and others left-aligned.
+
+## [0.8.50-beta.1] - 2026-06-03
+
+### Fixed
+
+- Fixed Discord app-update notifications so they read the current Keep a Changelog version section and include actual release notes instead of a vague fallback message.
+- Reduced long app-update note lists before sending to Discord, with a pointer to the full changelog when extra notes are omitted.
+
+## [0.8.49-beta.1] - 2026-06-03
+
+### Added
+
+- Added Discord role-panel controls to hide the helper `Selection` / `Selections` embed section from self-assign role messages.
+- Added a Discord welcome-flow control to hide the `Next step` embed section from welcome messages.
+
+## [0.8.48-beta.1] - 2026-06-03
+
+### Fixed
+
+- Fixed Discord self-assign single-role panels so clicking an active option actually removes that role instead of only reporting it as removed.
+- Made Discord self-assign role buttons check the member's current server roles before adding or removing roles, reducing stale interaction state issues.
+
+## [0.8.47-beta.1] - 2026-06-03
+
+### Changed
+
+- Reworked the Discord bot Channels and Craft Watch pages into cleaner centred routing panels that match the Colour Roles layout.
+- Tightened Discord bot moderation and role-manager card sizing for a more consistent 1080p desktop layout.
+
+### Fixed
+
+- Fixed the Discord notification settings footer so endpoint, slash command, token and delivery text no longer runs together.
+
+## [0.8.46-beta.1] - 2026-06-03
+
+### Changed
+
+- Polished the Discord bot dashboard layout with clearer status cards, compact colour-role rows and theme-matched toggle controls.
+- Collapsed Discord role-panel editors into readable expandable sections so the Role Panels page is easier to navigate.
+- Improved bot dashboard mobile behaviour to avoid clipped setup controls on narrow screens.
+
+### Fixed
+
+- Fixed Discord bot setup status fields visually running together.
+- Fixed broken emoji preset display in the Discord role-panel editor.
+
 ## [0.8.45-beta.1] - 2026-06-03
 
 ### Changed

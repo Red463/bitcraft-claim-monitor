@@ -759,6 +759,7 @@ const defaultRolePanels = [
     title: "Welcome to Timbersteel Trade!",
     description: "Choose your access role below.",
     mode: "single",
+    showHelperText: true,
     options: [
       { key: "citizen", label: "Citizen", roleId: "", emoji: "1️⃣" },
       { key: "visitor", label: "Visitor", roleId: "", emoji: "2️⃣" },
@@ -772,6 +773,7 @@ const defaultRolePanels = [
     title: "Choose Your Professions",
     description: "Select as many profession interests as you like.",
     mode: "multi",
+    showHelperText: true,
     options: Object.keys(defaultCraftRoles).map((key) => ({
       key,
       label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
@@ -779,8 +781,8 @@ const defaultRolePanels = [
       emoji: "",
     })),
   },
-  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", options: [] },
-  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", options: [] },
+  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", showHelperText: true, options: [] },
+  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", showHelperText: true, options: [] },
 ];
 
 const defaultWelcomeFlow = {
@@ -790,6 +792,7 @@ const defaultWelcomeFlow = {
   title: "Welcome to Timbersteel Trade",
   message: "Read the welcome steps, choose your roles, then click Ready.",
   readyRoleId: "",
+  showNextStep: true,
 };
 
 const defaultDiscordPresence = {
@@ -854,6 +857,7 @@ function normalizeDiscordRolePanel(value = {}, fallback = {}, index = 0) {
     title: String(value.title ?? fallback.title ?? label).trim() || label,
     description: String(value.description ?? fallback.description ?? "").trim(),
     mode: String(value.mode ?? fallback.mode ?? "multi") === "single" ? "single" : "multi",
+    showHelperText: value.showHelperText !== undefined ? value.showHelperText !== false : fallback.showHelperText !== false,
     options: options.map((option, optionIndex) => normalizeDiscordRoleOption(option, optionIndex)).filter((option) => option.label),
   };
 }
@@ -868,6 +872,7 @@ function normalizeDiscordWelcomeFlow(value = {}) {
     title: String(value.title ?? defaultWelcomeFlow.title).trim() || defaultWelcomeFlow.title,
     message: String(value.message ?? defaultWelcomeFlow.message).trim() || defaultWelcomeFlow.message,
     readyRoleId: String(value.readyRoleId ?? "").trim(),
+    showNextStep: value.showNextStep !== false,
   };
 }
 
@@ -1481,7 +1486,7 @@ function discordCraftWatchComponents(eventType, metadata = {}) {
   return [{
     type: 1,
     components: [
-      { type: 2, style: 1, custom_id: `craftwatch:watch:${key}:${encodeURIComponent(name).slice(0, 80)}`, label: `Watch ${label}` },
+      { type: 2, style: 1, custom_id: `craftwatch:watch:${key}:${encodeURIComponent(name).slice(0, 80)}`, label: `Toggle ${label} Notifications` },
     ],
   }];
 }
@@ -1793,6 +1798,10 @@ function discordButtonRows(buttons) {
 
 function rolePanelPayload(panel) {
   const options = (panel.options ?? []).filter((option) => option.roleId);
+  const fields = [];
+  if (panel.showHelperText !== false) {
+    fields.push({ name: panel.mode === "single" ? "Selection" : "Selections", value: panel.mode === "single" ? "Only one role from this panel can be active at once." : "Click again to remove a role.", inline: false });
+  }
   const buttons = options.map((option) => ({
     type: 2,
     style: 1,
@@ -1800,9 +1809,7 @@ function rolePanelPayload(panel) {
     label: `${option.emoji ? `${option.emoji} ` : ""}${option.label}`.slice(0, 80),
   }));
   return {
-    embeds: [discordCommandEmbed(panel.title, panel.description || (panel.mode === "single" ? "Choose one role below." : "Choose any roles below."), [
-      { name: panel.mode === "single" ? "Selection" : "Selections", value: panel.mode === "single" ? "Only one role from this panel can be active at once." : "Click again to remove a role.", inline: false },
-    ], 0x5865f2)],
+    embeds: [discordCommandEmbed(panel.title, panel.description || (panel.mode === "single" ? "Choose one role below." : "Choose any roles below."), fields, 0x5865f2)],
     components: discordButtonRows(buttons),
   };
 }
@@ -1833,10 +1840,11 @@ async function postDiscordWelcomeFlow(settings = getDiscordSettingsRaw()) {
   const flow = settings.welcomeFlow;
   const channelId = String(flow.channelId || settings.channelId || "").trim();
   if (!channelId) throw new Error("Choose a welcome channel before posting.");
+  const fields = flow.showNextStep === false ? [] : [
+    { name: "Next step", value: flow.readyRoleId ? "Click Ready when you have read the welcome steps." : "Configure a Ready role if you want the button to assign access.", inline: false },
+  ];
   const payload = {
-    embeds: [discordCommandEmbed(flow.title, flow.message, [
-      { name: "Next step", value: flow.readyRoleId ? "Click Ready when you have read the welcome steps." : "Configure a Ready role if you want the button to assign access.", inline: false },
-    ], 0xf0c64f)],
+    embeds: [discordCommandEmbed(flow.title, flow.message, fields, 0xf0c64f)],
     components: discordButtonRows([{ type: 2, style: 3, custom_id: "welcome:ready", label: "Ready" }]),
   };
   const { response, action } = await sendOrUpdateDiscordMessage(channelId, flow.messageId, payload, settings);
@@ -1853,6 +1861,15 @@ async function addDiscordMemberRole(guildId, userId, roleId, settings = getDisco
 
 async function removeDiscordMemberRole(guildId, userId, roleId, settings = getDiscordSettingsRaw()) {
   return discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`, { method: "DELETE" }, settings);
+}
+
+async function getDiscordMemberRoleSet(guildId, userId, settings = getDiscordSettingsRaw(), fallbackRoles = []) {
+  try {
+    const member = await discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`, {}, settings);
+    return new Set(Array.isArray(member?.roles) ? member.roles.map(String) : []);
+  } catch {
+    return new Set(Array.isArray(fallbackRoles) ? fallbackRoles.map(String) : []);
+  }
 }
 
 async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
@@ -2498,10 +2515,22 @@ const discordTestEvents = {
 };
 
 async function currentAppUpdateDetails() {
+  const reduceNotes = (notes, maxLength = 900) => {
+    const reduced = [];
+    let total = 0;
+    for (const note of notes) {
+      const line = `- ${note}`;
+      if (total + line.length + (reduced.length ? 1 : 0) > maxLength) break;
+      reduced.push(line);
+      total += line.length + (reduced.length > 1 ? 1 : 0);
+    }
+    if (reduced.length < notes.length) reduced.push(`- Plus ${notes.length - reduced.length} more change${notes.length - reduced.length === 1 ? "" : "s"} in the changelog.`);
+    return reduced.join("\n");
+  };
   try {
     const changelog = await readFile(changelogPath, "utf8");
     const escapedVersion = appVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = changelog.match(new RegExp(`## ${escapedVersion}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
+    const match = changelog.match(new RegExp(`## \\[?${escapedVersion}\\]?[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
     const section = match?.[1] ?? "";
     const notes = section
       .split("\n")
@@ -2509,11 +2538,11 @@ async function currentAppUpdateDetails() {
       .filter((line) => line.startsWith("- "))
       .map((line) => line.slice(2).trim())
       .filter(Boolean)
-      .slice(0, 6);
+      .slice(0, 12);
     if (notes.length) {
       return {
         summary: `Version ${appVersion} is live: ${notes[0].replace(/\.$/, "")}.`,
-        changeNotes: notes.map((note) => `- ${note}`).join("\n"),
+        changeNotes: reduceNotes(notes),
       };
     }
   } catch (error) {
@@ -3630,9 +3659,9 @@ async function handleDiscordComponent(interaction) {
     if (!guildId || !userId || !professionKey) return discordResponse("Unable to update this watch. Discord did not provide enough context.", { ephemeral: true });
     if (!settings.botToken) return discordResponse("The Discord bot token is not configured, so I cannot update roles yet.", { ephemeral: true });
     if (!roleId) return discordResponse(`${professionName} does not have a configured notification role yet.`, { ephemeral: true });
-    const memberRoles = Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : [];
+    const memberRoles = await getDiscordMemberRoleSet(guildId, userId, settings, interaction.member?.roles);
     if (action === "watch") {
-      const removing = memberRoles.includes(roleId);
+      const removing = memberRoles.has(roleId);
       if (removing) await removeDiscordMemberRole(guildId, userId, roleId, settings);
       else await addDiscordMemberRole(guildId, userId, roleId, settings);
       recordDiscordDeliverySafe({
@@ -3645,7 +3674,7 @@ async function handleDiscordComponent(interaction) {
       return discordResponse(
         removing
           ? `Stopped watching ${professionName} craft notifications. The ${professionName} notification role was removed from you.`
-          : `You now have the ${professionName} notification role. Craft alerts always ping this role, so you will receive those pings while you have it. Click Watch ${professionName} again to remove the role.`,
+          : `You now have the ${professionName} notification role. Craft alerts always ping this role, so you will receive those pings while you have it. Click Toggle ${professionName} Notifications again to remove the role.`,
         { ephemeral: true },
       );
     }
@@ -3747,13 +3776,14 @@ async function handleDiscordRolePanelComponent(interaction) {
     const panel = settings.rolePanels.find((entry) => entry.key === panelKey);
     const option = panel?.options?.find((entry) => entry.key === optionKey);
     if (!panel || !option?.roleId) return discordResponse("That role option is no longer configured. Ask an admin to update the panel.", { ephemeral: true });
-    const memberRoles = new Set(Array.isArray(interaction.member?.roles) ? interaction.member.roles.map(String) : []);
+    const memberRoles = await getDiscordMemberRoleSet(guildId, userId, settings, interaction.member?.roles);
     const removing = memberRoles.has(option.roleId);
     if (panel.mode === "single") {
       for (const other of panel.options ?? []) {
         if (other.roleId && other.roleId !== option.roleId && memberRoles.has(other.roleId)) await removeDiscordMemberRole(guildId, userId, other.roleId, settings);
       }
-      if (!removing) await addDiscordMemberRole(guildId, userId, option.roleId, settings);
+      if (removing) await removeDiscordMemberRole(guildId, userId, option.roleId, settings);
+      else await addDiscordMemberRole(guildId, userId, option.roleId, settings);
     } else {
       if (removing) await removeDiscordMemberRole(guildId, userId, option.roleId, settings);
       else await addDiscordMemberRole(guildId, userId, option.roleId, settings);

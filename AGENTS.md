@@ -10,7 +10,7 @@ The maintained application is `apps/bitcraft-local`. The `artifacts/` directory 
 
 - Package manager: `pnpm` via Corepack. Use the pinned workspace version.
 - Runtime target: Node.js 24+.
-- Active frontend: React + TypeScript + Vite in `apps/bitcraft-local/src/main.tsx`.
+- Active frontend: React + TypeScript + Vite in `apps/bitcraft-local/src/main.tsx`, with extracted feature components under `apps/bitcraft-local/src/components/`.
 - Active styling: plain CSS in `apps/bitcraft-local/src/styles.css`.
 - Active backend: Node HTTP server in `apps/bitcraft-local/server.mjs`.
 - Database: Node built-in SQLite (`node:sqlite`), stored locally under `apps/bitcraft-local/data/` in development and `/var/lib/bitcraft-claim-monitor` in production.
@@ -110,11 +110,29 @@ Maintain `CHANGELOG.md` using [Keep a Changelog 1.1.0](https://keepachangelog.co
 
 ### Frontend
 
-Most UI lives in one large React file:
+The frontend is still anchored by one large React file:
 
 - `apps/bitcraft-local/src/main.tsx`
 
-Be careful with React hooks in this file. The admin/bot pages use conditional render paths. Do not add hooks inside conditional branches or after early returns. Prefer ordinary derived constants for render-only calculations unless they are placed safely with the rest of the top-level hooks.
+The Discord bot dashboard has been refactored into focused components:
+
+- `apps/bitcraft-local/src/components/bot/BotSectionNav.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordChannelsSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordColourRolesSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordCraftWatchRolesSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordDiagnosticsPanel.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordMemberRecordsSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordModerationSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordNotificationsSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordRoleManagerSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordRolePanelsSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordSafetySection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordSetupSection.tsx`
+- `apps/bitcraft-local/src/components/bot/DiscordTestsPanel.tsx`
+
+For bot dashboard UI changes, edit or add files in `src/components/bot/` rather than adding more JSX to `main.tsx`. Keep each bot section self-contained and pass state/actions through explicit props until a broader state refactor is intentionally planned.
+
+Be careful with React hooks in `main.tsx` and extracted components. The admin/bot pages use conditional render paths. Do not add hooks inside conditional branches or after early returns. Prefer ordinary derived constants for render-only calculations unless they are placed safely with the rest of the top-level hooks.
 
 Keep UI dense, readable, and operational. This app is a dashboard, not a marketing site. Avoid oversized hero sections, decorative card nesting, or washed-out one-note palettes.
 
@@ -127,7 +145,8 @@ Use existing local patterns:
 ### Code Organization Preference
 
 - Keep small fixes in the existing files when that is the cleanest route.
-- For larger or messy features, prefer proposing a sensible split into smaller focused modules before implementing.
+- For larger or messy features, prefer a sensible split into smaller focused modules before implementing. The bot dashboard split under `src/components/bot/` is the current pattern to follow.
+- Avoid re-centralising extracted bot UI back into `main.tsx`.
 - Do not introduce a new framework, state library, styling system, or heavy dependency without first explaining the tradeoff.
 
 ### Backend
@@ -183,7 +202,13 @@ Schema changes are currently handled directly in `server.mjs` with `CREATE TABLE
 
 ## Discord Bot Notes
 
-The Discord bot is managed from `/bot` and implemented mostly in `server.mjs` and `main.tsx`.
+The Discord bot is managed from `/bot`.
+
+- Backend, persistence, Discord delivery, slash commands, and interaction handlers live in `apps/bitcraft-local/server.mjs`.
+- The bot dashboard shell and shared state still live in `apps/bitcraft-local/src/main.tsx`.
+- Individual dashboard tabs live in `apps/bitcraft-local/src/components/bot/`.
+
+When adding Discord settings, keep the frontend defaults/types, server-side defaults, normalization, persistence, and Discord interaction logic in sync. A setting shown in `/bot` should normally survive refresh, render in diagnostics where useful, and be respected by `server.mjs`.
 
 Keep these behaviours intact:
 

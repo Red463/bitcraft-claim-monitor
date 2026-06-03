@@ -2,7 +2,6 @@ import React from "react";
 import { MessageCircle } from "lucide-react";
 
 export function DiscordChannelsSection({
-  botOnly,
   channelFields,
   channelIdSelect,
   discordChannelLabel,
@@ -19,13 +18,15 @@ export function DiscordChannelsSection({
   updateDiscordChannel: (key: string, value: string) => void;
 }) {
   return (
-    <details className="form-card discord-channel-card" open={botOnly}>
-      <summary>
-        <span>
-          <MessageCircle size={17} /> Channel List
-        </span>
-        <small>Channel IDs and profession routing</small>
-      </summary>
+    <section className="form-card discord-channel-card bot-routing-card">
+      <div className="split-header">
+        <div>
+          <h3>
+            <MessageCircle size={17} /> Channel List
+          </h3>
+          <p className="legend">Channel IDs and profession routing</p>
+        </div>
+      </div>
       <p className="legend">
         Choose channels discovered by the bot. Profession channels here are also used when craft notifications route by profession.
       </p>
@@ -33,11 +34,14 @@ export function DiscordChannelsSection({
       <div className="craft-channel-grid">
         {channelFields.map((key) => (
           <label className="field" key={key}>
-            <span>{discordChannelLabel(key)}</span>
+            <span>
+              {discordChannelLabel(key)}
+              <small>{discordChannels?.[key] ? "Channel selected" : "No channel selected"}</small>
+            </span>
             {channelIdSelect(discordChannels?.[key] ?? "", (value) => updateDiscordChannel(key, value))}
           </label>
         ))}
       </div>
-    </details>
+    </section>
   );
 }
