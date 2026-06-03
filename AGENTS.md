@@ -1,0 +1,338 @@
+# AGENTS.md
+
+## Project Overview
+
+BitCraft Claim Monitor is a local-first settlement operations dashboard for BitCraft. It uses the public BitJita API, records local SQLite history, and includes a Discord bot/admin dashboard.
+
+The maintained application is `apps/bitcraft-local`. The `artifacts/` directory is historical Replit-exported code and should not be treated as the active app unless the user explicitly asks about it.
+
+## Tech Stack
+
+- Package manager: `pnpm` via Corepack. Use the pinned workspace version.
+- Runtime target: Node.js 24+.
+- Active frontend: React + TypeScript + Vite in `apps/bitcraft-local/src/main.tsx`.
+- Active styling: plain CSS in `apps/bitcraft-local/src/styles.css`.
+- Active backend: Node HTTP server in `apps/bitcraft-local/server.mjs`.
+- Database: Node built-in SQLite (`node:sqlite`), stored locally under `apps/bitcraft-local/data/` in development and `/var/lib/bitcraft-claim-monitor` in production.
+
+## Useful Commands
+
+Run from the repository root unless stated otherwise.
+
+```sh
+corepack pnpm install
+corepack pnpm --filter @workspace/bitcraft-local run dev
+corepack pnpm --filter @workspace/bitcraft-local run build
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+The local dev command starts:
+
+- frontend: `http://localhost:18428` unless `PORT` is set
+- local API: `http://127.0.0.1:18430` unless `LOCAL_API_PORT` is set
+
+When a user is already testing a different local port, inspect the running process or logs before assuming the default port.
+
+## Verification Expectations
+
+For app changes, run:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+For documentation-only changes, tests are usually not required, but still inspect the diff before finishing.
+
+After significant UI changes, open the relevant local page and visually verify layout at desktop size where possible. The app has had regressions from spacing, hook-order errors, and blank pages, so browser verification is valuable.
+
+### Testing Discipline
+
+- Add or update focused tests when changing backend notification, polling, database, market-history, Discord delivery, or admin-auth logic.
+- For narrow UI-only changes, a build plus browser verification is usually enough unless behaviour is being changed.
+- Prefer small, targeted regression tests over broad brittle snapshots.
+
+### Browser Verification
+
+- Use the in-app browser for local UI checks after frontend changes when a local server is available.
+- If a page is blank or behaving strangely, inspect console errors before guessing.
+- For bot/admin UI work, check the relevant `/bot` or Admin tab at desktop size and verify there are no obvious spacing, overflow, or blank-page errors.
+- When the Vite dev process is unreliable, build first and run the production-style local server on a known port:
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+$env:SERVE_STATIC = "true"
+$env:LOCAL_API_PORT = "18449"
+$env:ENABLE_SERVER_POLLING = "false"
+$env:BITCRAFT_LOCAL_DATA_DIR = "$PWD\.dev-data"
+node apps/bitcraft-local/server.mjs
+```
+
+- Then smoke test the target URL, for example `http://127.0.0.1:18449/bot`, in the in-app browser and check console errors.
+
+## Git and Versioning
+
+- The main branch is `main`.
+- Keep unrelated local files out of commits. Log files such as `vite-*.log`, `bitcraft-*.log`, and dev server logs should remain untracked.
+- Update `apps/bitcraft-local/package.json` and `CHANGELOG.md` when making user-visible fixes or features.
+- Use beta semver, for example `0.8.44-beta.1`.
+- Do not rewrite published changelog history unless the user specifically asks.
+
+### Changelog Rules
+
+Maintain `CHANGELOG.md` using [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) principles:
+
+- Changelog entries are for humans, not machines. Do not dump commit logs, internal refactor noise, branch names, hashes, or vague entries like "updates".
+- Keep the latest version at the top. Every released app version should have an entry.
+- Use version headings with ISO dates: `## [0.8.45-beta.1] - 2026-06-03`.
+- Keep an `## [Unreleased]` section at the top when accumulating changes that have not been versioned yet. Move those notes into the new version section when bumping `apps/bitcraft-local/package.json`.
+- Group changes by type using these headings when relevant:
+  - `Added` for new features.
+  - `Changed` for changes to existing behavior or UX.
+  - `Deprecated` for features planned for removal.
+  - `Removed` for removed features.
+  - `Fixed` for bug fixes.
+  - `Security` for vulnerability or sensitive-data fixes.
+- Omit empty type sections. Do not add placeholder headings.
+- Write entries from the user's point of view, focused on what changed in the app or bot. Prefer "Added Discord colour-role management" over "Created DiscordColourRolesSection component".
+- Mention breaking changes, removals, data migrations, deployment-impacting changes, or admin action required clearly in the relevant entry.
+- If a version was published without notes, add a minimal entry such as `### Fixed` / `- General bug fixes.` rather than leaving a missing version.
+- Use concise bullets, but include enough context that a user can understand whether the change matters to them.
+
+### Commit and Push Rules
+
+- For user-visible fixes and features, update `CHANGELOG.md` and bump `apps/bitcraft-local/package.json`.
+- Use clear commit messages that describe the user-facing change or bug fixed.
+- Push only after the relevant build/tests pass, unless the user explicitly asks for a work-in-progress push.
+- In final updates, state what changed, what was tested, whether it was pushed, and any VPS commands the user needs.
+
+## App Architecture Notes
+
+### Frontend
+
+Most UI lives in one large React file:
+
+- `apps/bitcraft-local/src/main.tsx`
+
+Be careful with React hooks in this file. The admin/bot pages use conditional render paths. Do not add hooks inside conditional branches or after early returns. Prefer ordinary derived constants for render-only calculations unless they are placed safely with the rest of the top-level hooks.
+
+Keep UI dense, readable, and operational. This app is a dashboard, not a marketing site. Avoid oversized hero sections, decorative card nesting, or washed-out one-note palettes.
+
+Use existing local patterns:
+
+- `Info` for small label/value stats.
+- `toolbar-button`, `field`, `toggle-line`, `form-card`, and existing bot dashboard classes for admin controls.
+- Lucide icons are already used throughout the app.
+
+### Code Organization Preference
+
+- Keep small fixes in the existing files when that is the cleanest route.
+- For larger or messy features, prefer proposing a sensible split into smaller focused modules before implementing.
+- Do not introduce a new framework, state library, styling system, or heavy dependency without first explaining the tradeoff.
+
+### Backend
+
+The production server is:
+
+- `apps/bitcraft-local/server.mjs`
+
+It serves the production frontend, proxies/restricts BitJita API access, manages admin sessions, stores SQLite data, runs server polling, and sends Discord notifications.
+
+Important backend constraints:
+
+- Do not expose bot tokens or admin secrets in API responses.
+- Keep admin mutations behind authenticated admin routes and CSRF checks.
+- Public BitCraft/BitJita game data can be shown to ordinary users unless it is app configuration, secrets, or admin-only testing data.
+- Production polling should continue without any browser open.
+- Settlement-specific history should be filtered to the configured claim/settlement where relevant.
+
+### Database
+
+Development data lives in:
+
+```txt
+apps/bitcraft-local/data/bitcraft-local.sqlite
+```
+
+Production data lives outside the Git checkout:
+
+```txt
+/var/lib/bitcraft-claim-monitor/bitcraft-local.sqlite
+```
+
+Do not commit SQLite databases, uploaded branding, backups, or generated runtime data.
+
+Schema changes are currently handled directly in `server.mjs` with `CREATE TABLE IF NOT EXISTS` and `ensureColumn`. Follow the existing pattern for small migrations.
+
+### Backups Before Risky Operations
+
+- Recommend or create a SQLite backup before migrations, destructive admin/data operations, or production database changes.
+- Never run destructive database operations on production data without an explicit user request and a backup plan.
+
+## BitJita and BitCraft Data Notes
+
+- The app relies on BitJita public API data. Check `BITJITA_API_AUDIT.md` and existing endpoint helpers before inventing assumptions.
+- Prefer API fields over inferred values when available.
+- If an API field is missing or ambiguous, show a conservative label rather than implying certainty.
+- Verify BitJita/public API fields before changing calculations, labels, filters, or eligibility logic.
+- Clearly distinguish API facts from app inference in code comments, UI labels, or user explanations when ambiguity matters.
+- Terminology matters:
+  - Use `Structures`, not `Buildings`, in user-facing current UI where players expect stations/containers/structures.
+  - Use `Professions` for core crafting/gathering levels; skills are separate gameplay abilities.
+  - Supply upkeep/runway should use BitJita's run-out/upkeep data when available.
+
+## Discord Bot Notes
+
+The Discord bot is managed from `/bot` and implemented mostly in `server.mjs` and `main.tsx`.
+
+Keep these behaviours intact:
+
+- App update notifications should use the app version plus git revision release key when possible.
+- Do not mark an app update as announced until the Discord send succeeds.
+- Low-supply alerts should fire only when supplies are below the configured runway threshold and no more than once per 24 hours after a successful send.
+- Craft notifications have configurable enabled state, channels, minimum total XP, start delay, allowed crafters, and role pings.
+- Diagnostics should record sent, skipped, and failed notifications with enough routing/filter detail to debug issues.
+- Discord role/color features should avoid duplicate selector messages where an update/edit path exists.
+
+When changing Discord interactions, test both:
+
+- admin dashboard actions
+- Discord interaction handlers in `server.mjs`
+
+Common failure modes to watch for:
+
+- Discord HTTP 403 from missing channel or role access.
+- Roles above the bot's highest manageable role.
+- Component custom IDs becoming too long.
+- Missing helper functions in interaction code paths.
+- React blank pages from hook-order changes in the bot dashboard.
+
+### Discord Bot Safety
+
+- Do not send test messages, register slash commands, create/edit roles, post/update selector panels, or otherwise mutate the live Discord server unless the user explicitly asks for that action.
+- Admin UI changes may be tested locally without live Discord mutations where possible.
+- If a Discord action is necessary, explain which server/channel/role will be affected before doing it.
+
+## Styling and UI Guidelines
+
+- Keep dashboard pages compact and readable on 1920x1080.
+- Avoid nested cards unless the inner card is a real repeated item or modal-like surface.
+- Form inputs in the bot/admin area should use the existing dark field style: full width, dark panel background, `var(--border)`, 7px radius.
+- Prefer theme-appropriate toggles over raw checkboxes in visible settings UI.
+- For Discord previews, clearly label them as previews and make them resemble Discord where practical.
+- Keep buttons keyboard-accessible and use real `<button>`/`<a>` elements rather than clickable `div`s where possible.
+- Avoid icon-only controls without accessible labels or tooltips.
+- Keep contrast readable against the dark theme.
+- Preserve tier colour conventions across the app:
+  - T1 `#838e9e`
+  - T2 `#be6327`
+  - T3 `#00f630`
+  - T4 `#2d6bff`
+  - T5 `#a349af`
+  - T6 `#d12234`
+  - T7 `#c09015`
+  - T8 `#5ae2e2`
+  - T9 `#1f1f1f`
+  - T10 `#deffff`
+
+### UI Review Checklist
+
+Before finishing UI work, check:
+
+- 1920x1080 desktop layout.
+- no overlapping text or controls.
+- no unexpected scrollbars in panels that should fit.
+- no blank page or console errors.
+- bot/admin forms match the existing input and toggle styling.
+
+### Performance
+
+- Avoid unnecessary full-page refreshes and preserve existing data during background polling.
+- Avoid expensive per-item browser/API loops; prefer batched data, server-side helpers, or one scoped extraction.
+- Be careful with render work on large tables/lists.
+- Keep refresh jitter low, especially for pages intended to stay open on a second monitor.
+
+## Security and Privacy
+
+- Never commit real Discord bot tokens, admin passwords, session cookies, setup keys, or production database files.
+- Never read, print, commit, or expose Discord bot tokens, admin session cookies, SQLite database contents, uploaded branding, analytics records, or user records unless the task specifically requires inspecting them.
+- Keep analytics first-party and consent-aware. If a user declines analytics cookies, do not track behavioural analytics for that browser.
+- Admin authentication uses server-side sessions and HttpOnly cookies; preserve that model.
+- Admin setup keys are one-time production bootstrap values and should be removed after setup.
+
+## Do Not Touch Unless Asked
+
+- Do not work in `artifacts/` unless the user specifically asks about the old Replit export.
+- Do not change deployment domains, Caddy config, systemd config, or VPS update instructions unless the request involves deployment.
+- Do not change database schema unless the feature or fix requires it.
+- Do not reset admin passwords, clear production settings, or alter Discord live configuration without explicit permission.
+
+## Deployment Notes
+
+Production runs from:
+
+```txt
+/opt/bitcraft-claim-monitor
+```
+
+Service:
+
+```txt
+bitcraft-claim-monitor.service
+```
+
+Production update flow:
+
+```bash
+cd /opt/bitcraft-claim-monitor
+sudo -u bitcraft git pull --ff-only
+sudo -u bitcraft corepack pnpm install --frozen-lockfile
+sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
+systemctl restart bitcraft-claim-monitor
+systemctl status bitcraft-claim-monitor --no-pager -l
+curl -s http://127.0.0.1:18430/api/local/health
+```
+
+Caddy serves the public domain and reverse-proxies to the local Node server. See `deploy/Caddyfile.example` and `DEPLOYMENT.md`.
+
+Current canonical production domain is:
+
+```txt
+https://app.timbersteeltrade.com
+```
+
+### Live Production Caution
+
+When the user reports a live-site issue:
+
+- Prioritize a minimal hotfix over broad refactors.
+- Reproduce or identify the failure from logs/console/build output where possible.
+- Verify locally with build/tests.
+- Bump version and changelog for the hotfix.
+- Push only after verification.
+- Provide VPS update commands or tell the user to run the existing update script if that is what they use.
+
+## Issue Tracker Workflow
+
+If the user asks to review GitHub issues or feature requests:
+
+- Fetch the current open issues from GitHub.
+- Summarize the findings and propose an implementation plan first.
+- Wait for user approval before implementing issue-driven changes.
+- Reference issue numbers in summaries and commits when useful.
+
+## User Communication
+
+- Keep updates concise and practical.
+- Explain what changed, what was tested, whether it was pushed, and any deployment steps needed.
+- If something could not be tested, say so directly.
+- Prefer concrete file/command references over broad descriptions.
+
+## Working Safely
+
+- Read the existing code before changing behaviour; many app features encode BitCraft-specific assumptions from prior testing.
+- Keep changes narrowly scoped to the user's request.
+- Do not revert unrelated user changes.
+- If a production bug caused a blank page or failed deployment, prioritize a small hotfix, build/test it, bump version/changelog, and push only after verification.
+- Prefer clear diagnostics and readable failure reasons over silent skips, especially for Discord notifications and polling.
+- Follow this file by default. If a user request conflicts with these rules, briefly explain the conflict and ask before overriding risky rules.

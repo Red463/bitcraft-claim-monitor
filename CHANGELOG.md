@@ -1,13 +1,19 @@
 # Changelog
 
-## 0.8.44-beta.1 - 2026-06-02
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses beta semantic versioning.
+
+## [Unreleased]
+
+## [0.8.44-beta.1] - 2026-06-02
 
 ### Fixed
 
 - Fixed the Discord bot page rendering blank by removing hook-order-sensitive diagnostics calculations from the admin render path.
 - Hardened Discord diagnostics log handling when the status payload is missing or not yet loaded.
 
-## 0.8.43-beta.1 - 2026-06-02
+## [0.8.43-beta.1] - 2026-06-02
 
 ### Fixed
 
@@ -18,7 +24,7 @@
 - Limited low-supply Discord alerts to one successful post per 24 hours while supplies remain below the configured runway threshold.
 - Reworked the Discord diagnostics panel into readable cards with delivery counts and event-type filtering.
 
-## 0.8.42-beta.1 - 2026-06-02
+## [0.8.42-beta.1] - 2026-06-02
 
 ### Fixed
 
@@ -26,7 +32,7 @@
 - Scoped Discord bot action/report output to each dashboard tab so results no longer appear under unrelated sections.
 - Reworked the Custom Commands tab so commands are always listed there and existing commands can be selected for editing.
 
-## 0.8.41-beta.1 - 2026-06-02
+## [0.8.41-beta.1] - 2026-06-02
 
 ### Fixed
 
@@ -37,7 +43,7 @@
 - Updated Discord AutoMod rule creation to send mod-notes alerts and clarified that Discord exempts Administrator and Manage Server users.
 - Added a configurable Discord mod-log channel and routed moderation warning logs and AutoMod alerts through it.
 
-## 0.8.40-beta.1 - 2026-06-02
+## [0.8.40-beta.1] - 2026-06-02
 
 ### Added
 
@@ -46,7 +52,7 @@
 - Added Discord-native safety tools for keyword auto-moderation rules, slowmode, channel lockdown and nickname format reports.
 - Added Discord-only community tools for polls, event RSVPs, clean embed posting and custom slash command responses.
 
-## 0.8.39-beta.1 - 2026-06-02
+## [0.8.39-beta.1] - 2026-06-02
 
 ### Added
 
@@ -54,14 +60,14 @@
 - Added clearer Discord moderation result cards and audit-log reasons so actions are easier to verify.
 - Made Discord bot post/update controls more visually obvious across the bot dashboard.
 
-## 0.8.38-beta.1 - 2026-06-02
+## [0.8.38-beta.1] - 2026-06-02
 
 ### Added
 
 - Added a persisted collapsible sidebar mode that switches the main navigation to an icon-only rail for more page space.
 - Updated the sidebar brand to use the monitored settlement name and refreshed the Discord CTA icon/text.
 
-## 0.8.37-beta.1 - 2026-06-02
+## [0.8.37-beta.1] - 2026-06-02
 
 ### Changed
 
@@ -69,7 +75,7 @@
 - Colour-coded the Overview supply run-out date by runway health and tightened Overview production wording.
 - Matched the Overview attention card height to the adjacent settlement details card.
 
-## 0.8.36-beta.1 - 2026-06-02
+## [0.8.36-beta.1] - 2026-06-02
 
 ### Changed
 
@@ -77,7 +83,7 @@
 - Reworked the Discord bot Tools tab with clearer report cards, posting tools and readable report output.
 - Reworked the Discord audit log tool result into a readable activity list instead of raw JSON.
 
-## 0.8.35-beta.1 - 2026-06-02
+## [0.8.35-beta.1] - 2026-06-02
 
 ### Added
 
@@ -93,32 +99,32 @@
 - Fixed Discord role member counts so failed member-list syncs are shown as unavailable instead of misleadingly reporting zero members.
 - Cleaned up Discord notification setting fields so dropdowns and numeric inputs have consistent full-width sizing.
 
-## 0.8.34-beta.1 - 2026-06-02
+## [0.8.34-beta.1] - 2026-06-02
 
 ### Changed
 
 - General bug fixes.
 
-## 0.8.33-beta.1 - 2026-06-02
+## [0.8.33-beta.1] - 2026-06-02
 
 ### Changed
 
 - General bug fixes.
 
-## 0.8.32-beta.1 - 2026-06-02
+## [0.8.32-beta.1] - 2026-06-02
 
 ### Changed
 
 - Added huntable animals to the map resource finder and aligned map resource categories with the BC Codex category set.
 - Compactly redesigned the Discord colour-role editor and made colour selector buttons use consistent neutral Discord styling with emoji colour markers.
 
-## 0.8.31-beta.1 - 2026-06-02
+## [0.8.31-beta.1] - 2026-06-02
 
 ### Added
 
 - Added Discord colour-role management with a dedicated bot dashboard tab, editable bot-created colour roles, selector-channel configuration and a button message that enforces one colour role per user.
 
-## 0.8.30-beta.1 - 2026-06-02
+## [0.8.30-beta.1] - 2026-06-02
 
 ### Changed
 
@@ -126,20 +132,20 @@
 - Improved Discord role manageability labels so roles explain whether the bot can manage them, whether they are integration-managed, or whether the bot role needs moving higher in Discord.
 - Fixed Discord discovery so the app fetches the bot's guild member record by bot user ID, allowing role hierarchy checks to detect the bot's highest role correctly.
 
-## 0.8.29-beta.1 - 2026-06-02
+## [0.8.29-beta.1] - 2026-06-02
 
 ### Added
 
 - Added a BitJita-powered resource finder sidebar to the Map page, with resource search, tier/category filters, region selection and resource tracking through BitCraft Map `resourceId` URLs while retaining default online-player tracking.
 - Changed the Map page region selector back to a compact dropdown and expanded the map workspace so more of the viewport is used for the map and resource finder.
 
-## 0.8.28-beta.1 - 2026-06-02
+## [0.8.28-beta.1] - 2026-06-02
 
 ### Changed
 
 - Reworked the Discord bot dashboard for 1080p desktop displays with a horizontal category bar and cleaner notification rule groups, while keeping the compact narrow-screen layout readable.
 
-## 0.8.27-beta.1 - 2026-06-02
+## [0.8.27-beta.1] - 2026-06-02
 
 ### Added
 
@@ -147,14 +153,14 @@
 - Bot dashboard channel and craft-watch role settings now use discovered Discord dropdowns instead of manual ID entry.
 - Added a discovered role directory showing role colours, member counts and whether the bot can manage each role.
 
-## 0.8.26-beta.1 - 2026-06-02
+## [0.8.26-beta.1] - 2026-06-02
 
 ### Changed
 
 - Reworked the Discord Bot Control dashboard into sectioned categories for setup, notifications, channels, roles, tests and diagnostics.
 - Removed the duplicate save button from the bot setup card so bot settings rely on the floating unsaved-changes save bar.
 
-## 0.8.25-beta.1 - 2026-06-02
+## [0.8.25-beta.1] - 2026-06-02
 
 ### Added
 
@@ -164,32 +170,32 @@
 
 - Moved Discord bot settings out of the main Admin Console tab list and linked Admin to the dedicated bot dashboard.
 
-## 0.8.24-beta.1 - 2026-06-02
+## [0.8.24-beta.1] - 2026-06-02
 
 ### Changed
 
 - Discord craft notifications now include the craft tier and use the tier colour as the embed accent when available.
 
-## 0.8.23-beta.1 - 2026-06-02
+## [0.8.23-beta.1] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button replies now clarify that alerts always ping the configured role and the button only toggles whether the user has that role.
 
-## 0.8.22-beta.1 - 2026-06-02
+## [0.8.22-beta.1] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button replies now explain that clicking Watch again removes the notification role.
 
-## 0.8.21-beta.1 - 2026-06-02
+## [0.8.21-beta.1] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button failures now return a private diagnostic message instead of Discord's generic interaction failure.
 - Craft Watch role add/remove attempts are now recorded in the Discord diagnostics log.
 
-## 0.8.20-beta.1 - 2026-06-02
+## [0.8.20-beta.1] - 2026-06-02
 
 ### Changed
 
@@ -197,64 +203,64 @@
 - Craft notifications now ping the configured profession role when a matching alert fires.
 - Added configurable craft notification role IDs to the Discord admin settings.
 
-## 0.8.19-beta.1 - 2026-06-02
+## [0.8.19-beta.1] - 2026-06-02
 
 ### Changed
 
 - Simplified the Structures page into a basic overview of structures, categories and tiers, removing slot summaries and API detail controls.
 - Sidebar navigation items now use real page links so they can be opened in new tabs with middle-click or Ctrl-click.
 
-## 0.8.18-beta.1 - 2026-06-02
+## [0.8.18-beta.1] - 2026-06-02
 
 ### Changed
 
 - Discord craft-start notifications now use a configurable minimum time-present delay instead of a progress percentage threshold, defaulting to five minutes.
 
-## 0.8.17-beta.1 - 2026-06-02
+## [0.8.17-beta.1] - 2026-06-02
 
 ### Added
 
 - Added Discord craft-watch buttons to craft notifications so users can watch or mute profession alerts.
 - Added `/craftwatch list` and `/craftwatch clear` slash commands for personal craft watch management.
 
-## 0.8.16-beta.1 - 2026-06-02
+## [0.8.16-beta.1] - 2026-06-02
 
 ### Added
 
 - Added dedicated `/terms` and `/privacy` pages for Discord application submission, linked from the in-app Legal & Bot Terms and Privacy popups.
 
-## 0.8.15-beta.1 - 2026-06-02
+## [0.8.15-beta.1] - 2026-06-02
 
 ### Added
 
 - Added in-app Legal & Bot Terms covering the optional Discord bot, community-app status, data source disclaimer, and bot usage expectations.
 - Added Discord bot data processing notes to the Privacy & Analytics dialog and README.
 
-## 0.8.14-beta.1 - 2026-06-01
+## [0.8.14-beta.1] - 2026-06-01
 
 ### Fixed
 
 - The embedded map URL is now persisted per browser and only changed by explicit map actions, preventing normal app refreshes from reloading the map and wiping map-side filters.
 
-## 0.8.13-beta.1 - 2026-06-01
+## [0.8.13-beta.1] - 2026-06-01
 
 ### Fixed
 
 - Map focus from Public Craft Finder is now stored per browser and reflected in the page URL, so refreshing the Map page keeps the selected settlement/location.
 
-## 0.8.12-beta.1 - 2026-06-01
+## [0.8.12-beta.1] - 2026-06-01
 
 ### Changed
 
 - App update Discord notifications now include the current release notes from the changelog directly in the embed.
 
-## 0.8.11-beta.1 - 2026-06-01
+## [0.8.11-beta.1] - 2026-06-01
 
 ### Fixed
 
 - Discord craft notification filters now calculate production XP from the same BitJita fields as the Production page, including `totalActionsRequired` and `progress`.
 
-## 0.8.10-beta.1 - 2026-06-01
+## [0.8.10-beta.1] - 2026-06-01
 
 ### Fixed
 
@@ -265,14 +271,14 @@
 - Discord diagnostics now include production poll rows showing active crafts returned by BitJita, baseline state and known craft counts.
 - Scheduled supply reports no longer flood diagnostics with routine "not due yet" skips every polling cycle.
 
-## 0.8.9-beta.1 - 2026-06-01
+## [0.8.9-beta.1] - 2026-06-01
 
 ### Added
 
 - Added an Admin > Discord diagnostics console that records sent, skipped and failed Discord notification attempts with routing, thresholds, allowed crafters, payload context and Discord response details.
 - Discord test messages, app update checks and scheduled supply reports now write diagnostic records as well as live notifications.
 
-## 0.8.8-beta.1 - 2026-06-01
+## [0.8.8-beta.1] - 2026-06-01
 
 ### Fixed
 
@@ -285,26 +291,26 @@
 
 - Craft notification defaults are now 40,000 total XP and 1% start progress.
 
-## 0.8.7-beta.1 - 2026-06-01
+## [0.8.7-beta.1] - 2026-06-01
 
 ### Fixed
 
 - App update Discord notifications now use the configured Updates channel instead of always posting to the default notifications channel.
 
-## 0.8.6-beta.1 - 2026-06-01
+## [0.8.6-beta.1] - 2026-06-01
 
 ### Changed
 
 - Craft-start Discord notifications are now only marked as delivered after Discord accepts the message, so permission failures can be retried.
 - Admin now shows the latest Discord notification delivery status, including channel errors such as missing access.
 
-## 0.8.5-beta.1 - 2026-06-01
+## [0.8.5-beta.1] - 2026-06-01
 
 ### Added
 
 - Added a floating Admin save prompt that appears when settings have unsaved changes, with Save and Revert actions.
 
-## 0.8.4-beta.1 - 2026-06-01
+## [0.8.4-beta.1] - 2026-06-01
 
 ### Changed
 
@@ -312,7 +318,7 @@
 - Reworked Discord notification settings into grouped cards to reduce clutter.
 - Replaced checkbox styling across the app with theme-matched toggle switches.
 
-## 0.8.3-beta.1 - 2026-06-01
+## [0.8.3-beta.1] - 2026-06-01
 
 ### Added
 
@@ -323,7 +329,7 @@
 
 - Admin > Discord is grouped around bot credentials, channel configuration, notification routing, craft channels, and test previews.
 
-## 0.8.2-beta.1 - 2026-06-01
+## [0.8.2-beta.1] - 2026-06-01
 
 ### Added
 
@@ -331,14 +337,14 @@
 - Added configurable Discord craft notification filters for minimum total XP, minimum start progress, and allowed crafter usernames.
 - Added configurable per-profession Discord channel routing for craft notifications, with Timbersteel's current craft channel IDs as defaults.
 
-## 0.8.1-beta.1 - 2026-06-01
+## [0.8.1-beta.1] - 2026-06-01
 
 ### Changed
 
 - Low-supplies Discord notifications now use configurable supply runway days, defaulting to alerts below seven days of supplies.
 - Supply-change activity metadata now includes calculated runway, daily upkeep, and run-out time for more accurate Discord alerts.
 
-## 0.8.0-beta.1 - 2026-06-01
+## [0.8.0-beta.1] - 2026-06-01
 
 ### Added
 
@@ -347,38 +353,38 @@
 - Discord notifications for new listings, confirmed sales, craft starts, craft completions, and optional low-supplies changes.
 - Server-side production job tracking so craft start/completion events can be recorded consistently.
 
-## 0.7.9-beta.1 - 2026-06-01
+## [0.7.9-beta.1] - 2026-06-01
 
 ### Changed
 
 - Member Toolbelt cards now use the shared colour-coded rarity badge.
 
-## 0.7.8-beta.1 - 2026-06-01
+## [0.7.8-beta.1] - 2026-06-01
 
 ### Changed
 
 - Price Finder suggestions now mirror BitJita's available-item market filtering by hiding output/input pseudo-items and items with no buy or sell orders.
 - Item rarity is now displayed as a consistent colour-coded badge across market, inventory, price finder and member equipment views.
 
-## 0.7.7-beta.1 - 2026-06-01
+## [0.7.7-beta.1] - 2026-06-01
 
 ### Changed
 
 - Gear preset slot labels now match in-game terminology: Heart, Jewellery, Head, Hands, Torso, Belt, Legs and Feet.
 
-## 0.7.6-beta.1 - 2026-06-01
+## [0.7.6-beta.1] - 2026-06-01
 
 ### Changed
 
 - Gear presets now render a curated set of visible in-game equipment slots, including empty placeholders, while still hiding unused/internal server slots.
 
-## 0.7.5-beta.1 - 2026-06-01
+## [0.7.5-beta.1] - 2026-06-01
 
 ### Changed
 
 - Gear preset cards now show only equipped items instead of rendering BitJita's empty placeholder slots as visible equipment slots.
 
-## 0.7.4-beta.1 - 2026-06-01
+## [0.7.4-beta.1] - 2026-06-01
 
 ### Changed
 
@@ -386,7 +392,7 @@
 - Pinned overview items, filters, density and notification preferences now persist in local browser storage without requiring analytics cookie consent.
 - Added a browser settings reset action for clearing local app preferences without touching admin settings or settlement data.
 
-## 0.7.3-beta.1 - 2026-06-01
+## [0.7.3-beta.1] - 2026-06-01
 
 ### Changed
 
@@ -399,7 +405,7 @@
 - Professions now prefer BitJita skill metadata when available instead of relying only on local static skill groupings.
 - Price Finder now shows a simple confidence label based on available completed-trade count.
 
-## 0.7.2-beta.1 - 2026-06-01
+## [0.7.2-beta.1] - 2026-06-01
 
 ### Added
 
@@ -419,7 +425,7 @@
 - Price Finder suggestions now hide BitJita output/input pseudo-items that are not valid market items.
 - Member table rows are vertically centered for cleaner roster readability.
 
-## 0.7.1-beta.1 - 2026-05-27
+## [0.7.1-beta.1] - 2026-05-27
 
 ### Added
 
@@ -431,7 +437,7 @@
 - Gear preset detection now compares actual equipped item slots instead of trusting BitJita's active flag, so members with differently flagged alternate presets still show Preset 2.
 - The member gear "Current" marker now follows BitJita's active preset flag when the saved alternate preset is the selected one.
 
-## 0.7.0-beta.1 - 2026-05-27
+## [0.7.0-beta.1] - 2026-05-27
 
 ### Changed
 
@@ -439,7 +445,7 @@
 - Added a cookie notice requesting development-supporting analytics consent, with equally accessible decline and persistent preference controls.
 - Added an Admin Analytics dashboard for visitor, session, page-view, engagement-time and feature-usage aggregates.
 
-## 0.6.6-beta.1 - 2026-05-27
+## [0.6.6-beta.1] - 2026-05-27
 
 ### Added
 
@@ -447,13 +453,13 @@
 - Manual, sanitized section page views and anonymous high-level feature events for Market, Price Finder, Production filtering, member details, Public Craft Finder and Activity controls.
 - A Privacy & Analytics dialog accessible from the footer and help panel that discloses tracking state and excluded data.
 
-## 0.6.5-beta.1 - 2026-05-27
+## [0.6.5-beta.1] - 2026-05-27
 
 ### Changed
 
 - Renamed the Production passive-craft history panel to Member Passive Crafts and clarified that the API identifies the member, but not the settlement location where the craft occurred.
 
-## 0.6.4-beta.1 - 2026-05-27
+## [0.6.4-beta.1] - 2026-05-27
 
 ### Changed
 
@@ -461,7 +467,7 @@
 - Activity loads its locally stored feed every 10 seconds; its member selector roster updates separately without blocking timeline display.
 - Admin endpoint diagnostics now identify response times for each settlement storage container, with storage sync status visible in Collection Status.
 
-## 0.6.3-beta.1 - 2026-05-27
+## [0.6.3-beta.1] - 2026-05-27
 
 ### Changed
 
@@ -469,20 +475,20 @@
 - Storage deposit and withdrawal entries now show the settlement container nickname when one is configured, falling back to its structure name.
 - Added an Activity member selector for filtering attributed storage and market events by settlement member.
 
-## 0.6.2-beta.1 - 2026-05-26
+## [0.6.2-beta.1] - 2026-05-26
 
 ### Fixed
 
 - Activity storage movements are now loaded from the monitored settlement's known storage structures rather than each member's global storage history.
 - Storage activity excludes deployable containers such as carts, wagons, boats, ships and goats.
 
-## 0.6.1-beta.1 - 2026-05-26
+## [0.6.1-beta.1] - 2026-05-26
 
 ### Fixed
 
 - Price Finder recent trades now display buyers returned by BitJita's live price-history payload under `buyerUsername`, while retaining support for `purchaserUsername`.
 
-## 0.6.0-beta.1 - 2026-05-26
+## [0.6.0-beta.1] - 2026-05-26
 
 ### Added
 
@@ -499,7 +505,7 @@
 - Active production jobs now have animated effort progress cues and can be pinned to Overview.
 - Table controls and headers remain accessible while reviewing longer data sets.
 
-## 0.5.0-beta.1 - 2026-05-26
+## [0.5.0-beta.1] - 2026-05-26
 
 ### Added
 
@@ -513,7 +519,7 @@
 - Price Finder now provides a populated region dropdown rather than requiring users to enter region IDs.
 - The last visited page and Market tab are restored after refreshing the app.
 
-## 0.4.0-beta.1 - 2026-05-26
+## [0.4.0-beta.1] - 2026-05-26
 
 ### Added
 
@@ -526,7 +532,7 @@
 - On first successful collection for a member, completed sell orders belonging to this market are backfilled; later verified tracked sales are retained in the same trade history.
 - Admin status now reports retained confirmed trades separately from listing lifecycle events.
 
-## 0.3.1-beta.1 - 2026-05-26
+## [0.3.1-beta.1] - 2026-05-26
 
 ### Fixed
 
@@ -542,13 +548,13 @@
 - Password hashing no longer blocks the Node event loop, and session lookup uses SHA-256 token hashes. Existing signed-in sessions expire after this update and administrators must sign in again.
 - Admin status no longer exposes the host filesystem path of persistent storage.
 
-### Maintenance
+### Changed
 
 - Removed the obsolete legacy admin panel implementation.
 - Added regression tests for market pagination, production snapshot protection, and administrator cross-origin request rejection.
 - Added baseline security response headers to the Caddy deployment example.
 
-## 0.3.0-beta.1 - 2026-05-26
+## [0.3.0-beta.1] - 2026-05-26
 
 ### Added
 
@@ -564,7 +570,7 @@
 - Added per-address and username login throttling after repeated failed sign-in attempts.
 - Branding uploads are limited to authenticated administrators, supported image types and a 1 MB size cap.
 
-## 0.2.0-beta.1 - 2026-05-26
+## [0.2.0-beta.1] - 2026-05-26
 
 ### Added
 
@@ -606,3 +612,4 @@
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
+

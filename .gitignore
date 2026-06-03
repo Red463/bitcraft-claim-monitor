@@ -38,9 +38,11 @@ testem.log
 bitcraft-*-dev*.log
 bitcraft-*.log
 dev-server*.log
+vite-*.log
 /typings
 
 # local app/runtime data
+.dev-data/
 apps/bitcraft-local/data/
 apps/bitcraft-local/.test-data-*/
 apps/bitcraft-local/.preview-data*/
