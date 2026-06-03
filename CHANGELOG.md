@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.55-beta.1] - 2026-06-03
+
+### Added
+
+- Added a stable local smoke-server launcher and agent instructions for browser testing on `http://127.0.0.1:18449/`.
+
+### Fixed
+
+- Matched the floating help button styling to the Settings and Updates action buttons.
+- Fixed Construction project materials by reading BitJita's full consumed item/cargo requirement stacks instead of only already-added project materials.
+- Fixed Construction material labels so project contributions and storage quantities are shown separately.
+- Widened Overview hero metric sizing so the Online, Construction and Market labels no longer crowd or overlap.
+
 ## [0.8.54-beta.1] - 2026-06-03
 
 ### Changed

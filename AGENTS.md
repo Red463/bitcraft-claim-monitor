@@ -46,6 +46,52 @@ For documentation-only changes, tests are usually not required, but still inspec
 
 After significant UI changes, open the relevant local page and visually verify layout at desktop size where possible. The app has had regressions from spacing, hook-order errors, and blank pages, so browser verification is valuable.
 
+### Local Browser Smoke Server
+
+Use this exact process when the user is testing in the in-app browser at `http://127.0.0.1:18449/`, or when ordinary Vite dev startup is unreliable. Do not improvise with `Start-Process`; this Windows environment can fail with a `Path/PATH` collision and silently waste time.
+
+1. Build the frontend:
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+2. Start or reuse the stable production-style local smoke server:
+
+```powershell
+node scripts/start-bitcraft-local-smoke.mjs
+```
+
+This starts `apps/bitcraft-local/server.mjs` detached on `http://127.0.0.1:18449/` with:
+
+- `APP_HOST=127.0.0.1`
+- `APP_PORT=18449`
+- `SERVE_STATIC=true`
+- `ENABLE_SERVER_POLLING=false`
+- `BITCRAFT_LOCAL_DATA_DIR=.dev-data`
+
+The launcher writes:
+
+- `.codex-dev/bitcraft-local-smoke.pid`
+- `.codex-dev/bitcraft-local-smoke.out.log`
+- `.codex-dev/bitcraft-local-smoke.err.log`
+
+3. Confirm it is alive before browser testing:
+
+```powershell
+curl.exe -s http://127.0.0.1:18449/api/local/health
+```
+
+4. Open or reload the target page in the in-app browser, for example:
+
+```txt
+http://127.0.0.1:18449/?page=overview
+http://127.0.0.1:18449/?page=map
+http://127.0.0.1:18449/bot
+```
+
+If the page is still stale after code changes, rerun the build, rerun `node scripts/start-bitcraft-local-smoke.mjs` if needed, then reload the browser tab.
+
 ### Testing Discipline
 
 - Add or update focused tests when changing backend notification, polling, database, market-history, Discord delivery, or admin-auth logic.

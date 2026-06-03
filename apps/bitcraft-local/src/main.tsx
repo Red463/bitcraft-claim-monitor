@@ -2065,27 +2065,47 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
       storedTotals.set(key, (storedTotals.get(key) ?? 0) + toNumber(contents.quantity));
     }
   }
-  const materialRows = (materials: AnyRecord[], type: "item" | "cargo") => materials.map((mat: AnyRecord) => {
+  const addContributions = (totals: Map<string, number>, materials: AnyRecord[] = [], type: "item" | "cargo") => {
+    for (const mat of materials) {
+      const itemId = mat.item_id ?? mat.itemId ?? mat.id;
+      if (itemId == null) continue;
+      const key = `${type}:${itemId}`;
+      totals.set(key, (totals.get(key) ?? 0) + toNumber(mat.quantity ?? mat.amount));
+    }
+  };
+  const materialRows = (materials: AnyRecord[], type: "item" | "cargo", contributions: Map<string, number>) => materials.map((mat: AnyRecord) => {
     const itemId = mat.item_id ?? mat.itemId ?? mat.id;
     const lookup = type === "cargo" ? cargoLookup.get(String(itemId)) : itemLookup.get(String(itemId));
     const required = toNumber(mat.required ?? mat.quantityRequired ?? mat.quantity ?? mat.amount);
+    const key = `${type}:${itemId}`;
+    const contributed = contributions.get(key) ?? 0;
+    const stored = storedTotals.get(key) ?? 0;
     return {
       type,
       itemId,
       name: lookup?.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${itemId}`,
       required,
-      available: storedTotals.get(`${type}:${itemId}`) ?? 0,
+      contributed,
+      stored,
     };
   }).filter((mat: AnyRecord) => mat.itemId != null && mat.required > 0);
-  const projects: AnyRecord[] = (data.construction.projects ?? []).map((project: AnyRecord) => ({
-    ...project,
-    name: project.recipeName ?? project.buildingName ?? project.entityId,
-    materials: [...materialRows(project.items ?? [], "item"), ...materialRows(project.cargos ?? [], "cargo")],
-  }));
+  const projects: AnyRecord[] = (data.construction.projects ?? []).map((project: AnyRecord) => {
+    const contributions = new Map<string, number>();
+    addContributions(contributions, project.items ?? [], "item");
+    addContributions(contributions, project.cargos ?? [], "cargo");
+    return {
+      ...project,
+      name: project.recipeName ?? project.buildingName ?? project.entityId,
+      materials: [
+        ...materialRows(project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [], "item", contributions),
+        ...materialRows(project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [], "cargo", contributions),
+      ],
+    };
+  });
   const needed = Object.entries((projects.flatMap((project: AnyRecord) => project.materials) as AnyRecord[]).reduce((acc: Record<string, number>, mat: AnyRecord) => {
-    acc[mat.name] = (acc[mat.name] ?? 0) + Math.max(0, mat.required - mat.available);
+    acc[mat.name] = (acc[mat.name] ?? 0) + Math.max(0, mat.required - mat.contributed - mat.stored);
     return acc;
-  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  }, {})).filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]).slice(0, 10);
   return (
     <div className="panel">
       <Header title="Construction Projects">{projects.length} active project{projects.length === 1 ? "" : "s"}</Header>
@@ -2106,8 +2126,9 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
               <div className="progress"><div style={{ width: `${pct}%` }} /></div>
               <div className="material-grid">
                 {project.materials.map((mat: AnyRecord, index: number) => {
-                  const remaining = Math.max(0, mat.required - mat.available);
-                  return <div key={`${mat.type}-${mat.itemId}-${index}`}><strong>{mat.name}</strong><span>{formatNumber(mat.required)} required - {formatNumber(mat.available)} in storage{remaining ? ` - need ${formatNumber(remaining)}` : ""}</span></div>;
+                  const projectRemaining = Math.max(0, mat.required - mat.contributed);
+                  const uncovered = Math.max(0, projectRemaining - mat.stored);
+                  return <div key={`${mat.type}-${mat.itemId}-${index}`}><strong>{mat.name}</strong><span>{formatNumber(mat.contributed)} / {formatNumber(mat.required)} added{projectRemaining ? ` - ${formatNumber(mat.stored)} in storage` : ""}{uncovered ? ` - need ${formatNumber(uncovered)}` : ""}</span></div>;
                 })}
               </div>
             </article>

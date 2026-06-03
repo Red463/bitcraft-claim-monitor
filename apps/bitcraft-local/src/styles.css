@@ -108,8 +108,8 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .floating-actions button { position: relative; width: 43px; height: 43px; border-radius: 50%; border: 1px solid rgba(255,255,255,.13); background: rgba(17,20,26,.94); color: var(--muted); display: grid; place-items: center; cursor: pointer; box-shadow: 0 10px 24px rgba(0,0,0,.34); backdrop-filter: blur(10px); }
 .floating-actions button:hover { color: var(--text); border-color: rgba(240,198,79,.48); background: rgba(240,198,79,.12); }
 .floating-actions .notification-button b { position: absolute; top: -4px; right: -4px; min-width: 18px; border-radius: 99px; padding: 1px 5px; background: var(--gold); color: #15120b; font-size: var(--font-micro); text-align: center; }
-.floating-actions .floating-help { width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(240,198,79,.5); background: var(--gold); color: #18130a; font: 700 23px Rajdhani, sans-serif; }
-.floating-help:hover { background: #f5d268; border-color: #f5d268; }
+.floating-actions .floating-help { width: 43px; height: 43px; border-color: rgba(255,255,255,.13); background: rgba(17,20,26,.94); color: var(--muted); font: 700 21px Rajdhani, sans-serif; }
+.floating-help:hover { color: var(--text); border-color: rgba(240,198,79,.48); background: rgba(240,198,79,.12); }
 .floating-help:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 .help-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: rgba(4,6,9,.7); display: grid; place-items: center; padding: 20px; animation: overlay-enter .18s ease-out; }
 .help-dialog { width: min(480px, 100%); border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 20px 55px rgba(0,0,0,.55); padding: 18px; display: grid; gap: 15px; animation: dialog-enter .2s ease-out; }
@@ -229,7 +229,7 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .info-row strong { text-align: right; font-weight: 500; }
 .value-good { color: var(--good); }
 .value-danger { color: var(--danger); }
-.overview-hero { border: 1px solid rgba(240,198,79,.27); background: linear-gradient(100deg, rgba(240,198,79,.13), rgba(24,27,33,.86) 46%, rgba(116,182,255,.09)), var(--panel); border-radius: 8px; padding: 25px 24px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 22px; align-items: end; }
+.overview-hero { border: 1px solid rgba(240,198,79,.27); background: linear-gradient(100deg, rgba(240,198,79,.13), rgba(24,27,33,.86) 46%, rgba(116,182,255,.09)), var(--panel); border-radius: 8px; padding: 25px 24px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, auto); gap: 22px; align-items: end; }
 .overview-kicker { display: block; color: var(--gold); text-transform: uppercase; font: 600 11px Rajdhani, sans-serif; letter-spacing: .08em; margin-bottom: 9px; }
 .overview-title { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
 .overview-logo { width: 48px; height: 48px; object-fit: contain; border-radius: 7px; border: 1px solid rgba(240,198,79,.32); background: rgba(0,0,0,.18); padding: 4px; }
@@ -239,11 +239,11 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .health-pill { display: inline-flex; align-items: center; min-height: 25px; border: 1px solid rgba(78,226,138,.42); border-radius: 999px; color: var(--good); background: rgba(78,226,138,.1); padding: 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .health-pill.active { color: var(--gold); border-color: rgba(240,198,79,.44); background: var(--gold-dim); }
 .health-pill.warn { color: #ffb4ae; border-color: rgba(239,100,97,.48); background: rgba(239,100,97,.12); }
-.hero-metrics { display: grid; grid-template-columns: repeat(3, minmax(92px, 96px)); gap: 8px; justify-content: end; min-width: 0; }
-.hero-metrics button { min-height: 78px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.18); color: var(--muted); cursor: pointer; display: grid; place-items: center; align-content: center; gap: 4px; }
+.hero-metrics { display: grid; grid-template-columns: repeat(3, minmax(112px, 1fr)); gap: 8px; justify-content: end; min-width: 0; }
+.hero-metrics button { min-height: 78px; min-width: 0; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.18); color: var(--muted); cursor: pointer; display: grid; place-items: center; align-content: center; gap: 4px; padding: 0 10px; }
 .hero-metrics button:hover { border-color: rgba(240,198,79,.5); background: rgba(240,198,79,.09); }
 .hero-metrics strong { color: var(--text); font-family: Rajdhani, sans-serif; font-size: 28px; line-height: 1; }
-.hero-metrics button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.hero-metrics button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; text-transform: uppercase; letter-spacing: .035em; }
 .overview-pulse { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; }
 .overview-pulse div { min-height: 80px; padding: 13px 16px; border-right: 1px solid rgba(255,255,255,.06); display: grid; gap: 2px; align-content: center; }
 .overview-pulse div:last-child { border-right: 0; }
