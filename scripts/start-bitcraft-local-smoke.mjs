@@ -54,6 +54,7 @@ const child = spawn(process.execPath, ["server.mjs"], {
     APP_PORT: port,
     SERVE_STATIC: "true",
     ENABLE_SERVER_POLLING: "false",
+    ENABLE_DISCORD_STARTUP: "false",
     BITCRAFT_LOCAL_DATA_DIR: path.join(repoRoot, ".dev-data"),
   },
 });

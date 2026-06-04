@@ -97,7 +97,7 @@ const APP_VERSION = packageJson.version;
 
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
-type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; error: string | null; refreshToken: number };
+type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; snapshots: AnyRecord[]; error: string | null; refreshToken: number };
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
@@ -154,7 +154,7 @@ type AppSettings = {
 };
 
 const NAV = [
-  ["overview", "Overview", Shield],
+  ["dashboard", "Dashboard", Home],
   ["members", "Members", Users],
   ["skills", "Professions", GraduationCap],
   ["production", "Production", Factory],
@@ -423,7 +423,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   syncUrl: DEFAULT_SYNC_URL,
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
-  defaultPage: "overview",
+  defaultPage: "dashboard",
   defaultRegion: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
@@ -636,7 +636,7 @@ function legacyDefaultWatchlist(): WatchEntry[] {
 
 function urlPanel(): ActivePanel | null {
   const panel = new URLSearchParams(window.location.search).get("page");
-  if (panel === "buildings") return "overview";
+  if (panel === "buildings" || panel === "overview") return "dashboard";
   return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
 }
 
@@ -713,7 +713,7 @@ function analyticsSessionId(): string | null {
 function trackAnalyticsEvent(eventName: string, properties?: Record<string, string | number | boolean>, durationSeconds?: number, pageOverride?: ActivePanel) {
   const sessionId = analyticsSessionId();
   if (!sessionId) return;
-  const page = pageOverride ?? urlPanel() ?? "overview";
+  const page = pageOverride ?? urlPanel() ?? "dashboard";
   if (page === "admin") return;
   void fetch(`${LOCAL_API}/analytics/event`, {
     method: "POST",
@@ -875,8 +875,8 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel !== "activity";
-        const readsProductionDetail = activePanel === "production" || activePanel === "overview";
-        const readsRegionDetail = activePanel === "overview" || activePanel === "empire";
+        const readsProductionDetail = activePanel === "production" || activePanel === "dashboard";
+        const readsRegionDetail = activePanel === "dashboard" || activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
           readsPlayerDetail ? Promise.allSettled(memberIds.map(async (id) => {
             const payload = await request(`/players/${id}`);
@@ -918,20 +918,23 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
 }
 
 function useLocalHistory(refreshToken: number, claimId: string): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, error: null, refreshToken: 0 });
+  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], error: null, refreshToken: 0 });
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
       try {
-        const [marketRes, activityRes] = await Promise.all([
+        const [marketRes, activityRes, snapshotsRes] = await Promise.all([
           fetch(`${LOCAL_API}/market/history?claimId=${claimId}&limit=120`, { signal: controller.signal }),
           fetch(`${LOCAL_API}/activity?claimId=${claimId}&limit=2000`, { signal: controller.signal }),
+          fetch(`${LOCAL_API}/snapshots?claimId=${claimId}&limit=96`, { signal: controller.signal }),
         ]);
         if (!marketRes.ok) throw new Error(`market history HTTP ${marketRes.status}`);
         if (!activityRes.ok) throw new Error(`activity history HTTP ${activityRes.status}`);
+        if (!snapshotsRes.ok) throw new Error(`snapshot history HTTP ${snapshotsRes.status}`);
         const market = await marketRes.json();
         const activity = await activityRes.json();
-        setState((prev) => ({ market, activity: activity.events ?? [], activityTotal: toNumber(activity.total ?? activity.events?.length), error: null, refreshToken: prev.refreshToken + 1 }));
+        const snapshots = await snapshotsRes.json();
+        setState((prev) => ({ market, activity: activity.events ?? [], activityTotal: toNumber(activity.total ?? activity.events?.length), snapshots: snapshots.snapshots ?? [], error: null, refreshToken: prev.refreshToken + 1 }));
       } catch (err) {
         if (!controller.signal.aborted) {
           setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
@@ -971,6 +974,12 @@ function dateLabel(value: unknown): string {
   const date = parseDateValue(value);
   if (!date) return String(value);
   return date.toLocaleString();
+}
+
+function shortDateLabel(value: unknown): string {
+  const date = parseDateValue(value);
+  if (!date) return String(value ?? "");
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function timeAgo(value: unknown): string {
@@ -1133,7 +1142,267 @@ function DiscordIcon({ size = 17 }: { size?: number }) {
   );
 }
 
-function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+  const { claim, members, market, construction, crafts, research } = data;
+  const supplies = toNumber(claim.supplies);
+  const supplyCap = claimSupplyCap(claim);
+  const treasury = toNumber(claim.treasury);
+  const upkeep = toNumber(claim.upkeepCost);
+  const tileCost = toNumber(claim.tileCost);
+  const tileCount = toNumber(claim.numTiles);
+  const suppliesPerDay = (upkeep || tileCost * tileCount) * 24;
+  const supplyRunOutAt = claimSupplyRunOutAt(claim);
+  const runOutDate = parseDateValue(supplyRunOutAt);
+  const supplyDays = runOutDate && runOutDate.getTime() > Date.now()
+    ? (runOutDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+    : suppliesPerDay > 0 ? supplies / suppliesPerDay : 0;
+  const supplyPct = supplyCap > 0 ? Math.max(2, Math.min(100, (supplies / supplyCap) * 100)) : Math.max(4, Math.min(100, supplyDays ? (Math.min(supplyDays, 14) / 14) * 100 : 0));
+  const onlinePlayers = data.players.filter((player) => player.signedIn);
+  const onlineCount = onlinePlayers.length;
+  const constructionProjects = Array.isArray(construction) ? construction : (construction.projects ?? []);
+  const activeProjects = constructionProjects.filter((project: AnyRecord) => toNumber(project.progress) < toNumber(project.actionsRequired || 0)).length;
+  const activeCrafts = crafts.filter((job) => {
+    const progress = toNumber(job.progress);
+    const total = toNumber(job.totalActionsRequired);
+    return total > 0 && progress < total && hasRecentCraftContribution(data.contributions[String(job.entityId)] ?? []);
+  }).length;
+  const marketListingValue = market.reduce((total, listing) => {
+    const explicitTotal = toNumber(listing.totalValue ?? listing.total_value);
+    return total + (explicitTotal || toNumber(listing.price) * Math.max(1, toNumber(listing.quantity || 1)));
+  }, 0);
+  const regionSettlements = data.region;
+  const regionWealth = regionSettlements.reduce((total, row) => total + toNumber(row.treasury), 0);
+  const regionWealthDetail = regionSettlements.length
+    ? `${formatNumber(regionSettlements.length)} settlement${regionSettlements.length === 1 ? "" : "s"} in region`
+    : "Region data loading";
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const treasuryEventsToday = activity.filter((event) => {
+    if (event.event_type !== "treasury") return false;
+    const occurredAt = parseDateValue(event.occurred_at);
+    return !!occurredAt && occurredAt >= todayStart;
+  }).map((event) => ({ event, metadata: activityMetadata(event) })).filter(({ metadata }) => metadata.before != null && metadata.after != null);
+  const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
+  const treasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
+  const treasuryTrend = [...snapshots]
+    .map((snapshot) => ({ at: String(snapshot.captured_at ?? snapshot.capturedAt ?? ""), value: toNumber(snapshot.treasury) }))
+    .filter((point) => point.at && point.value > 0)
+    .sort((a, b) => timestampMs(a.at) - timestampMs(b.at))
+    .slice(-48);
+  const recentActivity = [...activity].sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at)).slice(0, 5);
+  const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
+  const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
+    const member = memberByPlayerId.get(String(player.entityId));
+    return {
+      ...player,
+      displayName: player.username ?? player.userName ?? member?.userName ?? "Unknown member",
+      regionName: player.regionName ?? claim.regionName,
+    };
+  }).slice(0, 4);
+  const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
+  const craftItemLookup = new Map([...(rawData?.crafts?.items ?? []), ...(rawData?.crafts?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
+  const currentCrafts = crafts.map((job) => {
+    const item = craftItemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
+    const progress = toNumber(job.progress);
+    const total = toNumber(job.totalActionsRequired);
+    const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
+    const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
+    const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity ?? job.experiencePerEffort);
+    const totalXp = toNumber(job.totalXp ?? job.totalXP) || total * experiencePerEffort;
+    const name = String(item.name ?? job.recipeName ?? job.craftName ?? job.buildingName ?? "Craft");
+    return {
+      id: String(job.entityId ?? `${job.recipeName}-${job.buildingName}`),
+      item: Object.keys(item).length ? item : { name },
+      name,
+      detail: job.buildingName ?? "Production",
+      pct,
+      totalXp,
+    };
+  }).sort((a, b) => b.pct - a.pct || b.totalXp - a.totalXp || a.name.localeCompare(b.name));
+  const currentCraftsDisplay = currentCrafts.slice(0, 5);
+  const totalProductionXp = currentCrafts.reduce((sum, job) => sum + job.totalXp, 0);
+  const attention = [
+    supplyDays > 0 && supplyDays < 7 ? { icon: <AlertTriangle />, count: "!", title: "Low Supplies", body: `${formatDaysAndHours(supplyDays)} remaining`, panel: "inventory" as ActivePanel, tone: "danger" } : null,
+    activeProjects ? { icon: <Hammer />, count: activeProjects, title: "Construction Projects", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel, tone: "warn" } : null,
+    crafts.length ? { icon: <Factory />, count: crafts.length, title: "Production Queue", body: `${activeCrafts} active, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel, tone: "blue" } : null,
+  ].filter(Boolean).slice(0, 4) as Array<{ icon: React.ReactNode; count: React.ReactNode; title: string; body: string; panel: ActivePanel; tone: string }>;
+  return (
+    <div className="dashboard-page">
+      <header className="dashboard-topbar">
+        <div>
+          <h2>Dashboard</h2>
+          <p>Real-time summary of {claim.name ?? "the monitored settlement"}</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span className="dashboard-region-line"><Globe2 size={15} /> {claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{claim.regionId ?? "?"}</span></span>
+            <span className="dashboard-refresh-line"><span className="online-dot is-online" /> Last updated {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "waiting"}</span>
+          </div>
+          <span className="dashboard-claim-link"><TierBadge tier={claim.tier} /> {claim.name ?? "Monitored Settlement"}</span>
+        </div>
+      </header>
+
+      <section className="dashboard-kpis">
+        <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
+        <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
+        <DashboardMetric icon={<Hammer />} label="Construction" value={activeProjects} detail={`${activeProjects} current project${activeProjects === 1 ? "" : "s"}`} onClick={() => onNavigate("construction")} />
+        <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatNumber(marketListingValue)}g total listing value`} tone="green" onClick={() => onNavigate("market")} />
+        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? `${formatNumber(regionWealth)}g` : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
+      </section>
+
+      <section className="dashboard-main-grid">
+        <article className="dashboard-card dashboard-card-chart">
+          <DashboardCardHeader title="Treasury Over Time" action="7 Days" />
+          <div className="dashboard-money-row">
+            <strong>{formatNumber(treasury)}g</strong>
+            <span className={treasuryNetToday < 0 ? "negative" : treasuryNetToday > 0 ? "positive" : ""}>{signedDelta(treasuryNetToday, 0, "g")} net today</span>
+          </div>
+          <DashboardTrend points={treasuryTrend} suffix="g" />
+        </article>
+
+        <article className="dashboard-card dashboard-card-supply">
+          <DashboardCardHeader title="Supply Status" />
+          <div className="dashboard-supply-lead"><strong>{formatDaysAndHours(supplyDays)}</strong><span>until full depletion</span></div>
+          <div className="dashboard-supply-cap"><span>{formatNumber(supplies)}{supplyCap ? ` / ${formatNumber(supplyCap)}` : ""}</span><span>{supplyCap ? `${Math.round((supplies / supplyCap) * 100)}% capacity` : "Runway estimate"}</span></div>
+          <div className="dashboard-progress"><div style={{ width: `${supplyPct}%` }} /></div>
+          <div className="dashboard-supply-breakdown">
+            <ul>
+              <li><span className="yellow" /> Supplies per day <b>{formatNumber(suppliesPerDay, 0)}</b></li>
+              <li><span className="green" /> Storage cap <b>{supplyCap ? formatNumber(supplyCap) : "Unknown"}</b></li>
+              <li><span className="blue" /> Current stock <b>{formatNumber(supplies)}</b></li>
+            </ul>
+          </div>
+        </article>
+
+        <article className="dashboard-card dashboard-card-activity">
+          <DashboardCardHeader title="Recent Activity" action="View all" onClick={() => onNavigate("activity")} />
+          <div className="dashboard-feed">
+            {recentActivity.length ? recentActivity.map((event) => {
+              const style = activityStyle(event);
+              return (
+                <button key={event.id ?? `${event.event_type}-${event.occurred_at}`} className={`dashboard-feed-row ${style.tone}`} onClick={() => onNavigate("activity")}>
+                  <span>{style.icon}</span>
+                  <strong>{style.label}</strong>
+                  <small>{activitySummary(event)}</small>
+                  <time>{timeAgo(event.occurred_at)}</time>
+                </button>
+              );
+            }) : <div className="dashboard-empty">No local activity history has been recorded yet.</div>}
+          </div>
+        </article>
+
+        <article className="dashboard-card dashboard-card-members">
+          <DashboardCardHeader title={`Online Members (${onlineCount})`} action="View all" onClick={() => onNavigate("members")} />
+          <div className="dashboard-member-list">
+            {dashboardMembers.length ? dashboardMembers.map((player) => (
+              <button key={player.entityId} onClick={() => onNavigate("members")}>
+                <span className="dashboard-avatar">{String(player.displayName ?? "?").slice(0, 1).toUpperCase()}<i className="online-dot is-online" /></span>
+                <span className="dashboard-member-copy">
+                  <strong>{player.displayName}</strong>
+                  <small>{player.regionName ?? "Online"}</small>
+                </span>
+                <span className="dashboard-member-session">
+                  <em>Online</em>
+                  <small>{player.sessionSeconds != null ? `Playing ${formatDuration(player.sessionSeconds)}` : "Session active"}</small>
+                </span>
+              </button>
+            )) : <div className="dashboard-empty">No members are currently online.</div>}
+          </div>
+        </article>
+
+        <article className="dashboard-card dashboard-card-production">
+          <DashboardCardHeader title="Current Crafts" action="View production" onClick={() => onNavigate("production")} />
+          <div className="dashboard-production-list">
+            {currentCraftsDisplay.length ? currentCraftsDisplay.map((job) => (
+              <button key={job.id} onClick={() => onNavigate("production")}>
+                <span className="dashboard-item-icon"><ItemIcon item={job.item} /></span>
+                <strong>{job.name}</strong>
+                <b>{job.pct}%</b>
+                <i><span style={{ width: `${Math.max(4, job.pct)}%` }} /></i>
+              </button>
+            )) : <div className="dashboard-empty">No current production jobs in the API snapshot.</div>}
+          </div>
+          <div className="dashboard-total-row"><span>Total Production XP</span><strong>{formatNumber(totalProductionXp)}</strong></div>
+        </article>
+
+        <article className="dashboard-card dashboard-card-attention">
+          <DashboardCardHeader title="Needs Attention" />
+          <div className="dashboard-alert-list">
+            {attention.length ? attention.map((item) => (
+              <button key={item.title} className={item.tone} onClick={() => onNavigate(item.panel)}>
+                <span>{item.count}</span>
+                <strong>{item.title}</strong>
+                <small>{item.body}</small>
+                <ArrowUp size={14} />
+              </button>
+            )) : <div className="dashboard-empty">No urgent settlement issues detected.</div>}
+          </div>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function DashboardMetric({ icon, label, value, detail, progress, trend, tone, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; detail: React.ReactNode; progress?: number; trend?: string; tone?: string; onClick?: () => void }) {
+  return (
+    <button className={`dashboard-metric ${tone ?? ""}`} onClick={onClick}>
+      <span className="dashboard-metric-icon">{icon}</span>
+      <span className="dashboard-metric-label">{label}</span>
+      <strong><LiveValue value={value} /></strong>
+      <small>{detail}</small>
+      {trend ? <em>{trend}</em> : null}
+      {progress != null ? <i className="dashboard-mini-progress"><span style={{ width: `${progress}%` }} /></i> : null}
+    </button>
+  );
+}
+
+function DashboardCardHeader({ title, action, onClick }: { title: string; action?: string; onClick?: () => void }) {
+  return (
+    <header className="dashboard-card-header">
+      <h3>{title}</h3>
+      {action ? onClick ? <button onClick={onClick}>{action}</button> : <span className="dashboard-card-range">{action}</span> : null}
+    </header>
+  );
+}
+
+function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; value: number }>; suffix?: string }) {
+  if (points.length < 2) {
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Trend appears after local snapshots are recorded.</span></div>;
+  }
+  const width = 560;
+  const height = 230;
+  const pad = 18;
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const path = points.map((point, index) => {
+    const x = pad + (index / Math.max(points.length - 1, 1)) * (width - pad * 2);
+    const y = height - pad - ((point.value - min) / range) * (height - pad * 2);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const areaPath = `${path} L${width - pad},${height - pad} L${pad},${height - pad} Z`;
+  const latest = points[points.length - 1];
+  return (
+    <div className="dashboard-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} aria-label={`Treasury trend ending at ${formatNumber(latest.value)}${suffix}`}>
+        <defs>
+          <linearGradient id="dashboardAreaGold" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(247, 200, 54, .46)" />
+            <stop offset="100%" stopColor="rgba(247, 200, 54, 0)" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75].map((y) => <line key={y} x1="0" x2={width} y1={height * y} y2={height * y} className="dashboard-chart-grid" />)}
+        <path d={areaPath} className="dashboard-chart-area" />
+        <path d={path} className="dashboard-chart-line" />
+        <circle cx={width - pad} cy={height - pad - ((latest.value - min) / range) * (height - pad * 2)} r="5" className="dashboard-chart-dot" />
+      </svg>
+      <div>{[points[0], points[Math.floor(points.length / 2)], latest].map((point, index) => <span key={`${point.at}-${index}`}>{shortDateLabel(point.at)}</span>)}</div>
+    </div>
+  );
+}
+
+function Overview({ data, activity, snapshots, onNavigate, logo, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; onNavigate: (panel: ActivePanel, marketTab?: string) => void; logo?: BrandingAsset; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const { claim, members, market, construction, crafts, research, recruitment } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
@@ -1171,85 +1440,280 @@ function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: 
   const treasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryEarnedToday = treasuryDeltasToday.filter((delta) => delta > 0).reduce((total, delta) => total + delta, 0);
   const treasurySpentToday = Math.abs(treasuryDeltasToday.filter((delta) => delta < 0).reduce((total, delta) => total + delta, 0));
+  const treasuryTrend = [...snapshots]
+    .map((snapshot) => ({
+      at: String(snapshot.captured_at ?? snapshot.capturedAt ?? ""),
+      value: toNumber(snapshot.treasury),
+    }))
+    .filter((point) => point.at && point.value > 0)
+    .sort((a, b) => timestampMs(a.at) - timestampMs(b.at))
+    .slice(-48);
   const health = supplies < 2000 ? "Needs Attention" : activeProjects || activeCrafts ? "Active" : "Stable";
+  const recentActivity = [...activity]
+    .sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at))
+    .slice(0, 5);
+  const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
+  const onlinePlayers: AnyRecord[] = data.players.filter((player) => player.signedIn).map((player: AnyRecord) => {
+    const member = memberByPlayerId.get(String(player.entityId));
+    return {
+      ...player,
+      displayName: player.username ?? player.userName ?? member?.userName ?? "Unknown member",
+      regionName: player.regionName ?? claim.regionName,
+    };
+  }).slice(0, 5);
+  const workQueue = crafts.map((job) => {
+    const progress = toNumber(job.progress);
+    const total = toNumber(job.totalActionsRequired);
+    const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
+    const totalXp = toNumber(job.experiencePerEffort) * total;
+    return {
+      id: String(job.entityId ?? `${job.recipeName}-${job.buildingName}`),
+      name: job.recipeName ?? job.craftName ?? job.buildingName ?? "Craft",
+      detail: job.buildingName ?? "Production",
+      pct,
+      totalXp,
+    };
+  }).sort((a, b) => b.totalXp - a.totalXp).slice(0, 5);
+  const topProductionTotal = workQueue.reduce((total, job) => total + job.totalXp, 0);
+  const commandStats = [
+    { label: "Online", value: onlineCount, detail: `${members.length} members`, icon: <Users />, panel: "members" as ActivePanel },
+    { label: "Construction", value: activeProjects, detail: `${constructionProjects.length} projects`, icon: <Hammer />, panel: "construction" as ActivePanel },
+    { label: "Market", value: market.length, detail: "Listings", icon: <ShoppingCart />, panel: "market" as ActivePanel },
+  ];
   const attention = [
-    supplies < 2000 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatNumber(supplies)} supplies remaining`, panel: "inventory" as ActivePanel } : null,
+    supplyDays > 0 && supplyDays < 7 ? { icon: <AlertTriangle />, title: "Low supplies", body: `${formatDaysAndHours(supplyDays)} remaining`, panel: "inventory" as ActivePanel, tone: "danger" } : null,
     activeProjects ? { icon: <Hammer />, title: "Construction active", body: `${activeProjects} project${activeProjects === 1 ? "" : "s"} in progress`, panel: "construction" as ActivePanel } : null,
     crafts.length ? { icon: <Factory />, title: "Production queue", body: `${activeCrafts} active, ${crafts.length} total job${crafts.length === 1 ? "" : "s"}`, panel: "production" as ActivePanel } : null,
     !market.length ? { icon: <ShoppingCart />, title: "No market listings", body: "No current settlement market activity", panel: "market" as ActivePanel } : null,
-  ].filter(Boolean) as Array<{ icon: React.ReactNode; title: string; body: string; panel: ActivePanel }>;
+  ].filter(Boolean) as Array<{ icon: React.ReactNode; title: string; body: string; panel: ActivePanel; tone?: string }>;
   return (
-    <div className="panel">
-      <section className="overview-hero">
-        <div>
-          <span className="overview-kicker">Settlement Command Center</span>
-          <div className="overview-title">{logo ? <img className="overview-logo" src={`${logo.url}?v=${encodeURIComponent(logo.updatedAt)}`} alt="" /> : null}<h2>{claim.name ?? "Claim"}</h2><span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span></div>
-          <p><TierBadge tier={claim.tier} /> {claim.regionName ?? "Unknown region"} <span className="metadata-divider" /> Owner {claim.ownerPlayerUsername ?? "Unknown"}</p>
+    <div className="panel overview-command">
+      <section className="command-centre-hero">
+        <div className="command-centre-identity">
+          {logo ? <img className="overview-logo command-logo" src={`${logo.url}?v=${encodeURIComponent(logo.updatedAt)}`} alt="" /> : <Shield className="command-logo-fallback" />}
+          <div>
+            <span className="overview-kicker">Settlement Command Centre</span>
+            <h2>{claim.name ?? "Monitored Settlement"}</h2>
+            <p>
+              <TierBadge tier={claim.tier} />
+              <span>{claim.regionName ?? "Unknown region"}</span>
+              <span className="metadata-divider" />
+              <span>Owner {claim.ownerPlayerUsername ?? "Unknown"}</span>
+              {claim.empireName ? <><span className="metadata-divider" /><span>{claim.empireName}</span></> : null}
+            </p>
+          </div>
         </div>
-        <div className="hero-metrics">
-          <button onClick={() => onNavigate("members")}><strong><LiveValue value={onlineCount} /></strong><span>Online</span></button>
-          <button onClick={() => onNavigate("construction")}><strong><LiveValue value={activeProjects} /></strong><span>Construction</span></button>
-          <button onClick={() => onNavigate("market")}><strong><LiveValue value={market.length} /></strong><span>Market</span></button>
+        <div className="command-centre-status">
+          <span className={`health-pill ${health === "Needs Attention" ? "warn" : health === "Active" ? "active" : ""}`}>{health}</span>
+          <span><Globe2 size={15} /> R{claim.regionId ?? "?"}</span>
+          <span className="status-dot-label"><span className="online-dot is-online" /> Live API snapshot</span>
+        </div>
+        <div className="command-centre-pods">
+          {commandStats.map((stat) => (
+            <button key={stat.label} onClick={() => onNavigate(stat.panel)}>
+              <span>{stat.icon}</span>
+              <strong><LiveValue value={stat.value} /></strong>
+              <small>{stat.label}</small>
+              <em>{stat.detail}</em>
+            </button>
+          ))}
         </div>
       </section>
 
-      <div className="overview-pulse">
-        <div><span>Members</span><strong><LiveValue value={members.length} /></strong><small>{onlineCount} online now</small></div>
-        <div><span>Supply Status</span><strong><LiveValue value={formatDaysAndHours(supplyDays)} /></strong><small>{formatNumber(supplies)} stored</small></div>
-        <div><span>Work in Progress</span><strong><LiveValue value={activeCrafts + activeProjects} /></strong><small>{activeCrafts} crafts active / {activeProjects} builds</small></div>
-        <div><span>Market Presence</span><strong><LiveValue value={market.length} /></strong><small>{marketDay ? `${formatNumber(marketDay.totalValue)}g regional daily value` : "No regional trade figure"}</small></div>
-      </div>
+      <section className="command-kpi-strip">
+        <OverviewKpiCard icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
+        <OverviewKpiCard icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored${supplyCap ? ` / ${formatNumber(supplyCap)}` : ""}`} tone={supplyDays > 0 && supplyDays < 7 ? "danger" : "good"} onClick={() => onNavigate("inventory")} />
+        <OverviewKpiCard icon={<Hammer />} label="Work In Progress" value={activeCrafts + activeProjects} detail={`${activeCrafts} active craft${activeCrafts === 1 ? "" : "s"} / ${activeProjects} build${activeProjects === 1 ? "" : "s"}`} onClick={() => onNavigate("production")} />
+        <OverviewKpiCard icon={<ShoppingCart />} label="Trade Listings" value={market.length} detail={marketDay ? `${formatNumber(marketDay.totalValue)}g regional trade/day` : "Current settlement listings"} onClick={() => onNavigate("market")} />
+        <OverviewKpiCard icon={<CircleDollarSign />} label="Treasury" value={`${formatNumber(treasury)}g`} detail={`Net today ${signedDelta(treasuryNetToday, 0, "g")}`} tone={treasuryNetToday > 0 ? "good" : treasuryNetToday < 0 ? "danger" : undefined} onClick={() => onNavigate("activity")} />
+      </section>
 
-      <div className="ops-grid">
-        <section className="ops-card">
-          <header><Box /><span>Supply Runway</span><strong>{formatDaysAndHours(supplyDays)}</strong></header>
-          <div className="progress"><div style={{ width: `${supplyPct}%` }} /></div>
-          <Info label="Current stock" value={formatNumber(supplies)} />
-          {supplyCap > 0 ? <Info label="Storage cap" value={formatNumber(supplyCap)} /> : null}
-          <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
-          <Info label="Runs out" value={<span className={supplyDays > 7 ? "value-good" : supplyDays < 7 ? "value-danger" : ""}>{runOut}</span>} />
-        </section>
-        <section className="ops-card" title="Treasury movement is calculated from recorded local activity for this settlement. BitJita exposes the current balance, but not a treasury run-out timestamp.">
-          <header><CircleDollarSign /><span>Treasury</span><strong className={treasuryNetToday > 0 ? "money-positive" : treasuryNetToday < 0 ? "money-negative" : ""}>{signedDelta(treasuryNetToday, 0, "g")}</strong></header>
-          <Info label="Treasury balance" value={`${formatNumber(treasury)}g`} />
-          <Info label="Net today" value={signedDelta(treasuryNetToday, 0, "g")} />
-          <Info label="Earned today" value={`+${formatNumber(treasuryEarnedToday)}g`} />
-          <Info label="Spent today" value={treasurySpentToday ? `-${formatNumber(treasurySpentToday)}g` : "0g"} />
-        </section>
-        <section className="ops-card">
-          <header><Factory /><span>Work Queue</span><strong>{activeCrafts + activeProjects}</strong></header>
-          <button className="ops-link" onClick={() => onNavigate("production")}><span>Production</span><strong>{activeCrafts} active / {crafts.length} jobs</strong></button>
-          <button className="ops-link" onClick={() => onNavigate("construction")}><span>Construction</span><strong>{activeProjects} projects</strong></button>
-          <button className="ops-link" onClick={() => onNavigate("research")}><span>Research</span><strong>{researched} complete</strong></button>
-        </section>
-      </div>
+      <section className="command-dashboard">
+        <article className="command-panel command-panel-chart" title="Treasury movement is calculated from recorded local activity for this settlement. BitJita exposes the current balance, but not a treasury run-out timestamp.">
+          <OverviewCardHeader icon={<CircleDollarSign />} title="Treasury & Economy" action="Activity" onClick={() => onNavigate("activity")} />
+          <div className="overview-moneyline command-moneyline">
+            <strong>{formatNumber(treasury)}g</strong>
+            <span className={treasuryNetToday > 0 ? "money-positive" : treasuryNetToday < 0 ? "money-negative" : ""}>{signedDelta(treasuryNetToday, 0, "g")} net today</span>
+          </div>
+          <OverviewTrendChart points={treasuryTrend} suffix="g" />
+          <div className="overview-stat-pair">
+            <Info label="Earned today" value={`+${formatNumber(treasuryEarnedToday)}g`} />
+            <Info label="Spent today" value={treasurySpentToday ? `-${formatNumber(treasurySpentToday)}g` : "0g"} />
+          </div>
+        </article>
 
-      <div className="overview-layout">
-        <section className="attention-panel">
-          <h3><AlertTriangle size={17} /> What Needs Attention</h3>
-          {attention.length ? attention.map((item) => (
-            <button key={item.title} onClick={() => onNavigate(item.panel)}>
-              <span>{item.icon}</span>
-              <strong>{item.title}</strong>
-              <small>{item.body}</small>
-            </button>
-          )) : <p className="legend">No urgent settlement issues detected from the current snapshot.</p>}
-        </section>
-        <section className="detail-grid overview-details">
+        <article className="command-panel command-panel-supply">
+          <OverviewCardHeader icon={<Package />} title="Supply Status" action="Inventory" onClick={() => onNavigate("inventory")} />
+          <div className="overview-supply-head">
+            <strong>{formatDaysAndHours(supplyDays)}</strong>
+            <span>until depletion</span>
+          </div>
+          <div className="overview-supply-capacity">
+            <span>{supplyCap > 0 ? `${Math.round((supplies / supplyCap) * 100)}% capacity` : "Runway estimate"}</span>
+            <b>{formatNumber(supplies)}{supplyCap ? ` / ${formatNumber(supplyCap)}` : ""}</b>
+          </div>
+          <div className="progress overview-progress"><div style={{ width: `${supplyPct}%` }} /></div>
+          <div className="command-supply-grid">
+            <Info label="Current stock" value={formatNumber(supplies)} />
+            {supplyCap > 0 ? <Info label="Storage cap" value={formatNumber(supplyCap)} /> : null}
+            <Info label="Supplies per day" value={formatNumber(suppliesPerDay, 2)} />
+            <Info label="Runs out" value={<span className={supplyDays > 7 ? "value-good" : supplyDays < 7 ? "value-danger" : ""}>{runOut}</span>} />
+          </div>
+        </article>
+
+        <article className="command-panel command-panel-activity">
+          <OverviewCardHeader icon={<Activity />} title="Recent Activity" action="View all" onClick={() => onNavigate("activity")} />
+          <div className="overview-activity-list">
+            {recentActivity.length ? recentActivity.map((event) => {
+              const style = activityStyle(event);
+              return (
+                <button key={event.id ?? `${event.event_type}-${event.occurred_at}`} className={`overview-activity-item ${style.tone}`} onClick={() => onNavigate("activity")}>
+                  <span>{style.icon}</span>
+                  <strong>{style.label}</strong>
+                  <small>{activitySummary(event)}</small>
+                  <time>{timeAgo(event.occurred_at)}</time>
+                </button>
+              );
+            }) : <p className="overview-note">No local activity history has been recorded yet.</p>}
+          </div>
+        </article>
+
+        <article className="command-panel command-panel-members">
+          <OverviewCardHeader icon={<Users />} title="Online Members" action="Members" onClick={() => onNavigate("members")} />
+          <div className="overview-member-list">
+            {onlinePlayers.length ? onlinePlayers.map((player) => (
+              <button key={player.entityId} onClick={() => onNavigate("members")}>
+                <span className="overview-member-avatar">
+                  {String(player.displayName ?? "?").slice(0, 1).toUpperCase()}
+                  <i className="online-dot is-online" />
+                </span>
+                <strong>{player.displayName}</strong>
+                <small>{player.sessionSeconds ? `Playing ${formatDuration(player.sessionSeconds)}` : "Online"}{player.regionName ? ` - ${player.regionName}` : ""}</small>
+              </button>
+            )) : <p className="overview-note">No members are currently online.</p>}
+          </div>
+        </article>
+
+        <article className="command-panel command-panel-production">
+          <OverviewCardHeader icon={<Factory />} title="Production Queue" action="Production" onClick={() => onNavigate("production")} />
+          <div className="overview-work-list">
+            {workQueue.length ? workQueue.map((job) => (
+              <button key={job.id} onClick={() => onNavigate("production")}>
+                <span><strong>{job.name}</strong><small>{job.detail}</small></span>
+                <b>{job.totalXp ? `${formatNumber(job.totalXp)} XP` : `${job.pct}%`}</b>
+                <div className="progress"><div style={{ width: `${Math.max(2, job.pct)}%` }} /></div>
+              </button>
+            )) : <p className="overview-note">No current production jobs in the API snapshot.</p>}
+          </div>
+          {topProductionTotal > 0 ? <p className="command-panel-foot">Tracked queue XP: <strong>{formatNumber(topProductionTotal)}</strong></p> : null}
+        </article>
+
+        <article className="command-panel command-panel-attention">
+          <OverviewCardHeader icon={<AlertTriangle />} title="Needs Attention" action="Review" onClick={() => attention[0] ? onNavigate(attention[0].panel) : onNavigate("dashboard")} />
+          <div className="overview-attention-list">
+            {attention.length ? attention.map((item) => (
+              <button key={item.title} className={item.tone ?? ""} onClick={() => onNavigate(item.panel)}>
+                <span>{item.icon}</span>
+                <strong>{item.title}</strong>
+                <small>{item.body}</small>
+                <ArrowUp size={14} />
+              </button>
+            )) : <p className="overview-note">No urgent settlement issues detected from the current snapshot.</p>}
+          </div>
+        </article>
+      </section>
+
+      <section className="command-operations-rail">
+        <header>
+          <span>Settlement Details</span>
+          <button onClick={() => onNavigate("empire")}>View Region</button>
+        </header>
+        <div className="overview-detail-grid">
           {[
             ["Entity ID", claim.entityId],
             ["Region", `${claim.regionName ?? "Unknown"} (${claim.regionId ?? "?"})`],
             ["Empire", claim.empireName ?? "None"],
             ["Location", `${claim.locationX ?? "?"}, ${claim.locationZ ?? "?"}`],
-            ["Members", `${members.length} total`],
-            ["Market Listings", market.length],
-            ["Region Online", regionStatus ? formatNumber(regionStatus.signedInPlayers) : "-"],
-            ["Region Trade / Day", marketDay ? `${formatNumber(marketDay.totalValue)}g` : "-"],
+            ["Region Online", regionStatus ? formatNumber(regionStatus.signedInPlayers) : "Unavailable"],
+            ["Region Trade / Day", marketDay ? `${formatNumber(marketDay.totalValue)}g` : "Unavailable"],
             ["Recruitment Rules", recruitment.length ? `${recruitment.length} active` : "None"],
+            ["Research Complete", `${formatNumber(researched)} tech${researched === 1 ? "" : "s"}`],
           ].map(([label, value]) => <Info key={label} label={label} value={value} />)}
-        </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OverviewKpiCard({ icon, label, value, detail, tone, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; detail: React.ReactNode; tone?: "good" | "danger"; onClick?: () => void }) {
+  const content = (
+    <>
+      <span className="overview-kpi-icon">{icon}</span>
+      <span>{label}</span>
+      <strong><LiveValue value={value} /></strong>
+      <small>{detail}</small>
+    </>
+  );
+  return onClick ? (
+    <button className={`overview-kpi-card ${tone ?? ""}`} onClick={onClick}>{content}</button>
+  ) : (
+    <article className={`overview-kpi-card ${tone ?? ""}`}>{content}</article>
+  );
+}
+
+function OverviewCardHeader({ icon, title, action, onClick }: { icon: React.ReactNode; title: string; action?: string; onClick?: () => void }) {
+  return (
+    <header className="overview-card-header">
+      <span>{icon}</span>
+      <h3>{title}</h3>
+      {action && onClick ? <button onClick={onClick}>{action}</button> : null}
+    </header>
+  );
+}
+
+function OverviewTrendChart({ points, suffix = "" }: { points: Array<{ at: string; value: number }>; suffix?: string }) {
+  if (points.length < 2) {
+    return (
+      <div className="overview-trend-empty">
+        <TrendingUp size={18} />
+        <span>Trend appears after at least two local snapshots are recorded.</span>
       </div>
-      <WatchlistPanel data={data} watches={watches} onToggleWatch={onToggleWatch} onNavigate={onNavigate} />
+    );
+  }
+  const width = 520;
+  const height = 210;
+  const padding = 14;
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const path = points.map((point, index) => {
+    const x = padding + (index / Math.max(points.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const areaPath = `${path} L${width - padding},${height - padding} L${padding},${height - padding} Z`;
+  const latest = points[points.length - 1];
+  const first = points[0];
+  const change = latest.value - first.value;
+  return (
+    <div className="overview-trend">
+      <div className="overview-trend-meta">
+        <span>Recorded treasury trend</span>
+        <strong className={change > 0 ? "money-positive" : change < 0 ? "money-negative" : ""}>{signedDelta(latest.value, first.value, suffix)}</strong>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Treasury trend from ${formatNumber(first.value)}${suffix} to ${formatNumber(latest.value)}${suffix}`}>
+        <defs>
+          <linearGradient id="overviewTreasuryArea" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255, 211, 77, .42)" />
+            <stop offset="100%" stopColor="rgba(255, 211, 77, 0)" />
+          </linearGradient>
+        </defs>
+        <path className="overview-trend-area" d={areaPath} />
+        <path className="overview-trend-line" d={path} />
+        <circle className="overview-trend-dot" cx={padding + (width - padding * 2)} cy={height - padding - ((latest.value - min) / range) * (height - padding * 2)} r="4.5" />
+      </svg>
+      <div className="overview-trend-axis"><span>{shortDateLabel(first.at)}</span><span>{shortDateLabel(latest.at)}</span></div>
     </div>
   );
 }
@@ -2477,7 +2941,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
               <strong>{suggestedPrice == null ? "-" : `${formatNumber(suggestedPrice)}g`}</strong>
                 <small>{suggestedWindow ? `Based on ${suggestedWindow.toLowerCase()} average` : "No completed trades in this selection"}</small>
               </div>
-              {selectedWatch ? <button className={`pin-action ${pinned ? "active" : ""}`} onClick={() => onToggleWatch(selectedWatch)} title={pinned ? "Remove from Overview watchlist" : "Pin to Overview watchlist"}>{pinned ? <PinOff size={14} /> : <Pin size={14} />}{pinned ? "Pinned" : "Pin"}</button> : null}
+              {selectedWatch ? <button className={`pin-action ${pinned ? "active" : ""}`} onClick={() => onToggleWatch(selectedWatch)} title={pinned ? "Remove from watchlist" : "Pin to watchlist"}>{pinned ? <PinOff size={14} /> : <Pin size={14} />}{pinned ? "Pinned" : "Pin"}</button> : null}
             </div>
             <div className="metric-grid">
             <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
@@ -4557,9 +5021,9 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               <h3><Upload size={17} /> Branding</h3>
               {(["logo", "favicon"] as const).map((type) => {
                 const asset = draft.branding?.[type];
-                return <div className="brand-upload" key={type}><div>{asset ? <img src={`${asset.url}?v=${encodeURIComponent(asset.updatedAt)}`} alt="" /> : <Shield size={25} />}<strong>{type === "logo" ? "Overview Logo" : "Browser Favicon"}</strong></div><label className="toolbar-button"><Upload size={14} /> Upload<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => uploadBrand(type, event.target.files?.[0])} /></label>{asset ? <button className="toolbar-button" onClick={() => removeBrand(type)}><X size={14} /> Remove</button> : null}</div>;
+                return <div className="brand-upload" key={type}><div>{asset ? <img src={`${asset.url}?v=${encodeURIComponent(asset.updatedAt)}`} alt="" /> : <Shield size={25} />}<strong>{type === "logo" ? "App Logo" : "Browser Favicon"}</strong></div><label className="toolbar-button"><Upload size={14} /> Upload<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => uploadBrand(type, event.target.files?.[0])} /></label>{asset ? <button className="toolbar-button" onClick={() => removeBrand(type)}><X size={14} /> Remove</button> : null}</div>;
               })}
-              <p className="legend">PNG, JPG or WebP up to 1 MB. The logo is shown on Overview and the favicon is used by the browser tab.</p>
+              <p className="legend">PNG, JPG or WebP up to 1 MB. The logo is shown in the app chrome and the favicon is used by the browser tab.</p>
             </section>
           </div>
         </div>
@@ -4919,7 +5383,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 }
 
 function DashboardApp() {
-  const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "overview");
+  const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
   const mainRef = React.useRef<HTMLElement | null>(null);
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
@@ -4997,14 +5461,14 @@ function DashboardApp() {
     toastTimersRef.current.clear();
   }, []);
   React.useEffect(() => {
-    if (String(active) === "buildings") {
-      setActive("overview");
-      updateQueryState({ page: "overview" });
+    if (String(active) === "buildings" || String(active) === "overview") {
+      setActive("dashboard");
+      updateQueryState({ page: "dashboard" });
     }
   }, [active, setActive]);
   React.useEffect(() => {
     const rawPanel = new URLSearchParams(window.location.search).get("page");
-    if (rawPanel === "buildings") updateQueryState({ page: "overview" });
+    if (rawPanel === "buildings" || rawPanel === "overview") updateQueryState({ page: "dashboard" });
     const requested = urlPanel();
     const requestedMapFocus = urlMapFocus();
     if (requestedMapFocus) setMapFocus(requestedMapFocus);
@@ -5164,7 +5628,7 @@ function DashboardApp() {
   }, [appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    overview: <Overview data={data} activity={localHistory.activity} onNavigate={navigate} logo={appSettings.branding.logo} watches={watches} onToggleWatch={toggleWatch} />,
+    dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} lastUpdated={lastUpdated} onNavigate={navigate} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
@@ -5179,7 +5643,7 @@ function DashboardApp() {
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
-  const activePanel = panels[active] ?? panels.overview;
+  const activePanel = panels[active] ?? panels.dashboard;
 
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>

@@ -13,6 +13,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
+const discordStartupEnabled = process.env.ENABLE_DISCORD_STARTUP !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -291,7 +292,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("bitcraft_sync_url", defaultSyncUrl, now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("refresh_seconds", "30", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "overview", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "dashboard", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_region", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
@@ -976,13 +977,13 @@ function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
-  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "overview";
+  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "dashboard";
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
-    defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "overview",
+    defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
@@ -1016,7 +1017,7 @@ function validSyncUrl(value) {
 }
 
 function validPage(value) {
-  return ["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"].includes(value);
+  return ["dashboard", "overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"].includes(value);
 }
 
 const scryptAsync = promisify(scrypt);
@@ -1231,7 +1232,7 @@ const analyticsEvents = new Set([
   "activity_member_filter_used",
   "activity_category_filter_used",
 ]);
-const analyticsPages = new Set(["overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"]);
+const analyticsPages = new Set(["dashboard", "overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"]);
 const analyticsRetentionDays = 90;
 let lastAnalyticsPruneAt = 0;
 
@@ -3520,6 +3521,11 @@ function scheduleDiscordGatewayReconnect(delayMs = 15000) {
 }
 
 function startDiscordGateway() {
+  if (!discordStartupEnabled) {
+    stopDiscordGateway();
+    discordGatewayStatus.lastError = null;
+    return;
+  }
   const settings = getDiscordSettingsRaw();
   const presence = normalizeDiscordPresence(settings.presence ?? {});
   if (!settings.enabled || !settings.botToken || !presence.enabled || typeof WebSocket !== "function") {
@@ -4318,7 +4324,7 @@ const server = createServer(async (req, res) => {
         if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
         if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Refresh interval must be between 15 and 300 seconds" });
-        const defaultPage = String(body.defaultPage ?? "overview");
+        const defaultPage = String(body.defaultPage ?? "dashboard");
         if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
         if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
@@ -4490,6 +4496,18 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
+      const claimId = url.searchParams.get("claimId") ?? "";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 96), 2), 1000);
+      const snapshots = db.prepare(`
+        SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
+        FROM snapshots
+        WHERE claim_id = ?
+        ORDER BY captured_at DESC, id DESC
+        LIMIT ?
+      `).all(claimId, limit).reverse();
+      return send(res, 200, { snapshots });
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
       if (isProduction) {

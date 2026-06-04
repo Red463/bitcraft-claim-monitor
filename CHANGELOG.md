@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.59-beta.1] - 2026-06-04
+
+### Changed
+
+- Removed the old Overview page from main navigation so Dashboard is the single home page.
+- Redirected old Overview and Buildings page URLs to Dashboard to avoid stale or broken entry points.
+
+## [0.8.58-beta.1] - 2026-06-04
+
+### Added
+
+- Added a new Dashboard page as the default home page, styled separately from the existing Overview page to more closely match the supplied command-centre mockup.
+
+### Changed
+
+- Updated the main navigation and default page setting so new sessions open on Dashboard while the existing Overview page remains available.
+
+## [0.8.57-beta.1] - 2026-06-04
+
+### Changed
+
+- Redesigned the main app Overview page into a denser settlement command-centre dashboard with KPI cards, supply, treasury, activity, online member, production, attention and settlement detail sections.
+- Restyled Overview around a sharper blue-black dashboard palette inspired by the new mockup direction.
+- Renamed the unclear market presence KPI to Trade Listings and kept the metric limited to current settlement listing counts.
+- Added a real treasury trend chart powered by locally recorded settlement snapshots, with an honest empty state until enough snapshots exist.
+
 ## [0.8.56-beta.1] - 2026-06-04
 
 ### Changed

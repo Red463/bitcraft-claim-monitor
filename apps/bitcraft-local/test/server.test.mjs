@@ -178,6 +178,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
+  const baselineSnapshots = await fetch(`${origin}/api/local/snapshots?claimId=${claimId}&limit=10`).then((response) => response.json());
+  assert.equal(baselineSnapshots.snapshots.length, 1);
+  assert.equal(baselineSnapshots.snapshots[0].treasury, 300);
+  assert.equal(baselineSnapshots.snapshots[0].supplies, 500);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   trades = [

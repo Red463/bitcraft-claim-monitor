@@ -68,6 +68,7 @@ This starts `apps/bitcraft-local/server.mjs` detached on `http://127.0.0.1:18449
 - `APP_PORT=18449`
 - `SERVE_STATIC=true`
 - `ENABLE_SERVER_POLLING=false`
+- `ENABLE_DISCORD_STARTUP=false`
 - `BITCRAFT_LOCAL_DATA_DIR=.dev-data`
 
 The launcher writes:
@@ -285,6 +286,73 @@ Common failure modes to watch for:
 - If a Discord action is necessary, explain which server/channel/role will be affected before doing it.
 
 ## Styling and UI Guidelines
+
+- The new Dashboard page is the visual source of truth for future main-app styling. When redesigning or adding main-app pages, aim for the same "settlement command centre" feel: dark, polished, game-adjacent, data-dense, and premium without becoming decorative or marketing-like.
+- Do not let older page styles pull new work back toward a flat generic admin panel. If an older page conflicts with the Dashboard style, prefer moving that page toward the Dashboard language.
+
+### Main App Design System
+
+Use these rules for main-app UI unless the user explicitly asks for a different direction:
+
+- Fonts:
+  - Use the existing app font stack, currently `Outfit, system-ui, sans-serif`.
+  - Keep letter spacing at `0` for normal body text.
+  - Use modest uppercase letter spacing only for small labels, section labels, and card headings.
+  - Avoid viewport-based font sizing.
+- Font sizes:
+  - Page titles: `28px-34px`, weight `750-800`.
+  - Dashboard-style primary metrics: `26px-40px`, weight `750-800`.
+  - Card titles and KPI labels: `11px-13px`, uppercase, weight `700`.
+  - Body text: `14px-16px`.
+  - Supporting text and metadata: `12px-13px`.
+  - Tables may use `12px-14px`, but must remain readable on 1920x1080.
+- Font colours:
+  - Primary text: near-white, use `#f7f8fb` or `var(--text)`.
+  - Secondary text: cool muted grey, use `#aab3c2` or `var(--muted)`.
+  - Tertiary/helper text: `#7f8998`.
+  - Headings and important labels: gold `#f0c64f`.
+  - Positive values: green `#63eba5`.
+  - Negative values: red `#ff6b65`.
+  - Informational values: blue `#56d5ff`.
+- Background colours:
+  - Main app background should be very dark with subtle layered depth, not flat black.
+  - Preferred base: `#060a12` to `#090d14`.
+  - Use restrained radial gradients, for example dark blue/black and soft gold glows, to create atmosphere without obvious blobs.
+  - Sidebar background should stay darker than content, around `#06070a` to `#080b10`.
+- Card design:
+  - Cards should feel like elevated dark navy surfaces above a darker page.
+  - Use subtle vertical gradients, for example `linear-gradient(180deg, #111923, #080d14)`.
+  - Use visible but restrained borders: `1px solid rgba(240, 198, 79, 0.14-0.22)`.
+  - Use hover borders around `rgba(240, 198, 79, 0.28-0.34)` when cards are interactive.
+  - Use soft depth: `0 8px 24px rgba(0, 0, 0, 0.28-0.38)`.
+  - Border radius should usually be `8px-10px` for major dashboard cards, and `6px-8px` for compact controls.
+  - Do not put UI cards inside other cards unless the inner card is a repeated item, row, modal, or preview.
+- Card content:
+  - KPI cards should have one dominant metric, one clear label, and one short supporting line.
+  - Icons should sit in a dark/gold-tinted square or circle with a subtle border when used as KPI anchors.
+  - Avoid redundant labels, duplicate badges, or metrics that appear clickable but do nothing.
+  - If a button-like element is intentionally static, style it as a pill or label, not a button.
+- Layout:
+  - Use Dashboard-style grid rhythm: consistent gaps around `12px-18px` between cards and `20px-28px` inside larger cards.
+  - Keep dense operational pages readable on 1920x1080 without unnecessary vertical scroll.
+  - Prefer responsive CSS grid with explicit `minmax()` tracks over hard-coded widths.
+  - Match card heights in paired sections when users visually compare them, such as focus/coverage and leaders/nearby lists.
+  - Avoid large empty rectangles. Empty states should include an icon or short explanation and look intentional.
+  - Avoid horizontal overflow at all viewport widths.
+- Controls:
+  - Main-app buttons should use the Dashboard button language: dark surface, clear border, gold or blue accent only where action priority needs it.
+  - Floating utility buttons should share one consistent shape, size, border, and hover style.
+  - Selects, inputs, and search fields should use dark backgrounds, readable borders, and high-contrast text.
+  - Visible checkboxes should usually be replaced with theme-appropriate toggles.
+- Charts and progress:
+  - Use gold for treasury/economy lines and accents.
+  - Use green-to-cyan gradients for supply/health progress where appropriate.
+  - Chart empty states must be deliberate and explanatory, not blank panels.
+- Accessibility:
+  - Text and controls must meet readable contrast on the dark theme.
+  - Interactive controls need visible focus states.
+  - Touch/click targets should generally be at least `34px` high, preferably `38px+` for common controls.
+  - Icon-only controls need accessible labels or tooltips.
 
 - Keep dashboard pages compact and readable on 1920x1080.
 - Avoid nested cards unless the inner card is a real repeated item or modal-like surface.
