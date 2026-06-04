@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.56-beta.1] - 2026-06-04
+
+### Changed
+
+- Refactored main-app API parsing for supply runway and Construction project materials into tested shared helpers.
+
+### Fixed
+
+- Fixed Overview supply runway parsing so it accepts both documented and currently observed BitJita run-out field names.
+- Added regression coverage for BitJita construction requirements, project contributions, stored inventory quantities, timestamp parsing and wrapped/direct API arrays.
+
 ## [0.8.55-beta.1] - 2026-06-03
 
 ### Added

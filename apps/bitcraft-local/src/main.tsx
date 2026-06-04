@@ -75,6 +75,16 @@ import { DiscordRolePanelsSection } from "./components/bot/DiscordRolePanelsSect
 import { DiscordSafetySection } from "./components/bot/DiscordSafetySection";
 import { DiscordSetupSection } from "./components/bot/DiscordSetupSection";
 import { DiscordTestsPanel } from "./components/bot/DiscordTestsPanel";
+import {
+  buildConstructionProjects,
+  claimSupplyCap,
+  claimSupplyRunOutAt,
+  constructionNeededMaterials,
+  parseDateValue,
+  toNumber,
+  unwrap,
+  type AnyRecord,
+} from "./main-app-data";
 import "./styles.css";
 
 const DEFAULT_CLAIM_ID = "1369094286777412590";
@@ -85,7 +95,6 @@ const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 
-type AnyRecord = Record<string, any>;
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
 type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; error: string | null; refreshToken: number };
@@ -578,11 +587,6 @@ function skillNameFromRows(rows: AnyRecord[], id: number): string {
   return String(rows.find((skill) => toNumber(skill.id) === id)?.name ?? SKILL_NAMES[id] ?? `Skill ${id}`);
 }
 
-function unwrap<T>(payload: any, key: string, fallback: T): T {
-  if (Array.isArray(payload)) return payload as T;
-  return (payload?.[key] ?? fallback) as T;
-}
-
 function usePersistedState<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = React.useState<T>(() => {
     try {
@@ -944,11 +948,6 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
   return state;
 }
 
-function toNumber(value: unknown): number {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function safeDisplayJson(value: unknown): AnyRecord {
   try {
     const parsed = JSON.parse(String(value ?? "{}"));
@@ -960,19 +959,6 @@ function safeDisplayJson(value: unknown): AnyRecord {
 
 function formatNumber(value: unknown, maximumFractionDigits = 0): string {
   return toNumber(value).toLocaleString(undefined, { maximumFractionDigits });
-}
-
-function parseDateValue(value: unknown): Date | null {
-  if (!value) return null;
-  const text = String(value);
-  if (!/^\d+$/.test(text)) {
-    const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  const numeric = Number(text);
-  const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
-  const date = new Date(millis);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function timestampMs(value: unknown): number {
@@ -1039,17 +1025,6 @@ function formatDaysAndHours(days: number): string {
   const wholeDays = Math.floor(days);
   const hours = Math.floor((days - wholeDays) * 24);
   return wholeDays > 0 ? `${wholeDays}d ${hours}h` : `${hours}h`;
-}
-
-function claimSupplyCap(claim: AnyRecord): number {
-  const direct = toNumber(claim.maxSupplies ?? claim.suppliesMax ?? claim.supplyCap ?? claim.maxSupply);
-  if (direct > 0) return direct;
-  const maxSupplyTechs = (claim.researchedTechs ?? []).filter((tech: AnyRecord) => tech.techType === "max_supplies");
-  return maxSupplyTechs.reduce((max: number, tech: AnyRecord) => {
-    const match = String(tech.name ?? "").match(/(\d[\d,]*)\s*max supplies/i);
-    const value = match ? toNumber(match[1].replaceAll(",", "")) : 0;
-    return Math.max(max, value);
-  }, 0);
 }
 
 function summarizePassiveCrafts(payload: AnyRecord): AnyRecord[] {
@@ -1167,8 +1142,9 @@ function Overview({ data, activity, onNavigate, logo, watches, onToggleWatch }: 
   const tileCost = toNumber(claim.tileCost);
   const tileCount = toNumber(claim.numTiles);
   const suppliesPerDay = (upkeep || tileCost * tileCount) * 24;
-  const runOut = claim.suppliesRunOut ? dateLabel(claim.suppliesRunOut) : "Unknown";
-  const runOutDate = parseDateValue(claim.suppliesRunOut);
+  const supplyRunOutAt = claimSupplyRunOutAt(claim);
+  const runOut = supplyRunOutAt ? dateLabel(supplyRunOutAt) : "Unknown";
+  const runOutDate = parseDateValue(supplyRunOutAt);
   const onlineCount = data.players.filter((player) => player.signedIn).length;
   const regionStatus = data.regionStatus.find((region) => String(region.regionId) === String(claim.regionId));
   const marketDay = [...(data.tradeVolume.buckets ?? [])].sort((a: AnyRecord, b: AnyRecord) => String(b.bucket).localeCompare(String(a.bucket)))[0];
@@ -2051,61 +2027,8 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const itemLookup = new Map<string, AnyRecord>((data.construction.items ?? []).map((i: AnyRecord) => [String(i.id), i]));
-  const cargoLookup = new Map<string, AnyRecord>((data.construction.cargos ?? []).map((i: AnyRecord) => [String(i.id), i]));
-  const storedTotals = new Map<string, number>();
-  for (const building of data.inventories.buildings ?? []) {
-    for (const slot of building.inventory ?? []) {
-      const contents = slot.contents ?? {};
-      const rawType = contents.item_type ?? contents.itemType;
-      const type = rawType === "cargo" || rawType === 1 ? "cargo" : "item";
-      const itemId = contents.item_id ?? contents.itemId;
-      if (itemId == null) continue;
-      const key = `${type}:${itemId}`;
-      storedTotals.set(key, (storedTotals.get(key) ?? 0) + toNumber(contents.quantity));
-    }
-  }
-  const addContributions = (totals: Map<string, number>, materials: AnyRecord[] = [], type: "item" | "cargo") => {
-    for (const mat of materials) {
-      const itemId = mat.item_id ?? mat.itemId ?? mat.id;
-      if (itemId == null) continue;
-      const key = `${type}:${itemId}`;
-      totals.set(key, (totals.get(key) ?? 0) + toNumber(mat.quantity ?? mat.amount));
-    }
-  };
-  const materialRows = (materials: AnyRecord[], type: "item" | "cargo", contributions: Map<string, number>) => materials.map((mat: AnyRecord) => {
-    const itemId = mat.item_id ?? mat.itemId ?? mat.id;
-    const lookup = type === "cargo" ? cargoLookup.get(String(itemId)) : itemLookup.get(String(itemId));
-    const required = toNumber(mat.required ?? mat.quantityRequired ?? mat.quantity ?? mat.amount);
-    const key = `${type}:${itemId}`;
-    const contributed = contributions.get(key) ?? 0;
-    const stored = storedTotals.get(key) ?? 0;
-    return {
-      type,
-      itemId,
-      name: lookup?.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${itemId}`,
-      required,
-      contributed,
-      stored,
-    };
-  }).filter((mat: AnyRecord) => mat.itemId != null && mat.required > 0);
-  const projects: AnyRecord[] = (data.construction.projects ?? []).map((project: AnyRecord) => {
-    const contributions = new Map<string, number>();
-    addContributions(contributions, project.items ?? [], "item");
-    addContributions(contributions, project.cargos ?? [], "cargo");
-    return {
-      ...project,
-      name: project.recipeName ?? project.buildingName ?? project.entityId,
-      materials: [
-        ...materialRows(project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [], "item", contributions),
-        ...materialRows(project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [], "cargo", contributions),
-      ],
-    };
-  });
-  const needed = Object.entries((projects.flatMap((project: AnyRecord) => project.materials) as AnyRecord[]).reduce((acc: Record<string, number>, mat: AnyRecord) => {
-    acc[mat.name] = (acc[mat.name] ?? 0) + Math.max(0, mat.required - mat.contributed - mat.stored);
-    return acc;
-  }, {})).filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const projects = buildConstructionProjects(data.construction, data.inventories);
+  const needed = constructionNeededMaterials(projects);
   return (
     <div className="panel">
       <Header title="Construction Projects">{projects.length} active project{projects.length === 1 ? "" : "s"}</Header>
