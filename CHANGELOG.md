@@ -6,6 +6,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.0-beta.1] - 2026-06-06
+
+### Changed
+
+- Restyled the Inventory page with the new Dashboard visual language, including a Dashboard-style topbar, summary cards, compact filters, polished core material cards, and cleaner container panels.
+- Improved the Inventory filter panel so dropdowns have clear labels, search fields use a cleaner single-surface style, and the non-empty toggle no longer dominates the filter area.
+- Restyled the Public Craft Finder page with the new Dashboard/Production visual language, including summary cards, a compact filter panel, and a cleaner results table.
+- Restyled the Construction page with the new Dashboard visual language, including summary cards, a cleaner gather-next panel, and elevated project cards.
+- Restyled the Research page with the new Dashboard visual language, including summary cards, labelled filters, and cleaner completed/available research lanes.
+- Restyled the Market page with the new Dashboard visual language, including a trade-focused topbar, summary cards, cleaner filters, richer analytics panels, and a polished Price Finder.
+- Restyled the Region page with the new Dashboard visual language, including a compact topbar, elevated rank cards, equal-height regional context panels, and a cleaner rankings table.
+- Restyled the Map page topbar, player filters, resource finder, and map frame colours to match the new Dashboard visual language.
+- Restyled the Sync page shell with the new Dashboard-style topbar and background while preserving the embedded board.
+- Restyled the Activity page with the new Dashboard visual language, including summary cards, clearer filters, and a more polished timeline feed.
+- Restyled the Admin page and its tabs with the new Dashboard visual language, including the console shell, tab bar, cards, forms, metric cards, tables, and list rows.
+- Restyled the floating Settings, Updates, and Help controls and their popups to match the new Dashboard visual language.
+- Filtered treasury and supply-only entries out of the Dashboard recent activity card so it stays focused on other settlement activity.
+
+### Fixed
+
+- Fixed Market Price Finder layout stretching so switching tabs no longer enlarges the header, KPI cards, or tool panel.
+
+## [0.8.65-beta.1] - 2026-06-05
+
+### Changed
+
+- Refined the Production page command controls into a compact panel and updated active craft card headings to match the Dashboard heading style.
+
+## [0.8.64-beta.1] - 2026-06-05
+
+### Changed
+
+- Updated Dashboard, Professions, and Production card headings to use the same compact Dashboard heading style while retaining section icons.
+
+## [0.8.63-beta.1] - 2026-06-05
+
+### Fixed
+
+- Fixed top-right metadata spacing on the Production and Professions pages so tier badges no longer crowd their labels.
+- Cleaned up the Production passive craft table row background so it no longer shows an unintended gradient band.
+
+## [0.8.62-beta.1] - 2026-06-05
+
+### Changed
+
+- Restyled the Production page around the new Dashboard visual language with elevated KPI cards, cleaner production controls, richer craft cards, and a polished passive craft section.
+
+## [0.8.61-beta.1] - 2026-06-05
+
+### Changed
+
+- Restyled the Professions page to match the new Dashboard and Members visual language while preserving tier colours in the professions table.
+
+## [0.8.60-beta.1] - 2026-06-05
+
+### Fixed
+
+- Shortened Dashboard region wealth values to compact million notation.
+- Fixed the Dashboard treasury trend axis so it shows a seven-day timeline instead of repeating the same date label.
+
+### Changed
+
+- Restyled the Members page around the new Dashboard visual language with elevated summary cards, cleaner roster rows, and a darker command-centre surface.
+
 ## [0.8.59-beta.1] - 2026-06-04
 
 ### Changed

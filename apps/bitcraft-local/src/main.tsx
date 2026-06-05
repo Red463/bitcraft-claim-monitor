@@ -964,6 +964,15 @@ function formatNumber(value: unknown, maximumFractionDigits = 0): string {
   return toNumber(value).toLocaleString(undefined, { maximumFractionDigits });
 }
 
+function formatCompactNumber(value: unknown): string {
+  const num = toNumber(value);
+  const abs = Math.abs(num);
+  if (abs >= 1_000_000_000) return `${(num / 1_000_000_000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}B`;
+  if (abs >= 1_000_000) return `${(num / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  if (abs >= 1_000) return `${(num / 1_000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}K`;
+  return formatNumber(num);
+}
+
 function timestampMs(value: unknown): number {
   const date = parseDateValue(value);
   return date ? date.getTime() : 0;
@@ -1189,7 +1198,10 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
     .filter((point) => point.at && point.value > 0)
     .sort((a, b) => timestampMs(a.at) - timestampMs(b.at))
     .slice(-48);
-  const recentActivity = [...activity].sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at)).slice(0, 5);
+  const dashboardActivity = [...activity]
+    .filter((event) => !["treasury", "supplies"].includes(String(event.event_type ?? "")))
+    .sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at));
+  const recentActivity = dashboardActivity.slice(0, 5);
   const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
   const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
     const member = memberByPlayerId.get(String(player.entityId));
@@ -1247,12 +1259,12 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
         <DashboardMetric icon={<Hammer />} label="Construction" value={activeProjects} detail={`${activeProjects} current project${activeProjects === 1 ? "" : "s"}`} onClick={() => onNavigate("construction")} />
         <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatNumber(marketListingValue)}g total listing value`} tone="green" onClick={() => onNavigate("market")} />
-        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? `${formatNumber(regionWealth)}g` : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
+        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
       </section>
 
       <section className="dashboard-main-grid">
         <article className="dashboard-card dashboard-card-chart">
-          <DashboardCardHeader title="Treasury Over Time" action="7 Days" />
+          <DashboardCardHeader title="Treasury Over Time" icon={<CircleDollarSign size={15} />} action="7 Days" />
           <div className="dashboard-money-row">
             <strong>{formatNumber(treasury)}g</strong>
             <span className={treasuryNetToday < 0 ? "negative" : treasuryNetToday > 0 ? "positive" : ""}>{signedDelta(treasuryNetToday, 0, "g")} net today</span>
@@ -1261,7 +1273,7 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
         </article>
 
         <article className="dashboard-card dashboard-card-supply">
-          <DashboardCardHeader title="Supply Status" />
+          <DashboardCardHeader title="Supply Status" icon={<Package size={15} />} />
           <div className="dashboard-supply-lead"><strong>{formatDaysAndHours(supplyDays)}</strong><span>until full depletion</span></div>
           <div className="dashboard-supply-cap"><span>{formatNumber(supplies)}{supplyCap ? ` / ${formatNumber(supplyCap)}` : ""}</span><span>{supplyCap ? `${Math.round((supplies / supplyCap) * 100)}% capacity` : "Runway estimate"}</span></div>
           <div className="dashboard-progress"><div style={{ width: `${supplyPct}%` }} /></div>
@@ -1275,7 +1287,7 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
         </article>
 
         <article className="dashboard-card dashboard-card-activity">
-          <DashboardCardHeader title="Recent Activity" action="View all" onClick={() => onNavigate("activity")} />
+          <DashboardCardHeader title="Recent Activity" icon={<Activity size={15} />} action="View all" onClick={() => onNavigate("activity")} />
           <div className="dashboard-feed">
             {recentActivity.length ? recentActivity.map((event) => {
               const style = activityStyle(event);
@@ -1287,12 +1299,12 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
                   <time>{timeAgo(event.occurred_at)}</time>
                 </button>
               );
-            }) : <div className="dashboard-empty">No local activity history has been recorded yet.</div>}
+            }) : <div className="dashboard-empty">{activity.length ? "No non-treasury or non-supply activity has been recorded yet." : "No local activity history has been recorded yet."}</div>}
           </div>
         </article>
 
         <article className="dashboard-card dashboard-card-members">
-          <DashboardCardHeader title={`Online Members (${onlineCount})`} action="View all" onClick={() => onNavigate("members")} />
+          <DashboardCardHeader title={`Online Members (${onlineCount})`} icon={<Users size={15} />} action="View all" onClick={() => onNavigate("members")} />
           <div className="dashboard-member-list">
             {dashboardMembers.length ? dashboardMembers.map((player) => (
               <button key={player.entityId} onClick={() => onNavigate("members")}>
@@ -1311,7 +1323,7 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
         </article>
 
         <article className="dashboard-card dashboard-card-production">
-          <DashboardCardHeader title="Current Crafts" action="View production" onClick={() => onNavigate("production")} />
+          <DashboardCardHeader title="Current Crafts" icon={<Factory size={15} />} action="View production" onClick={() => onNavigate("production")} />
           <div className="dashboard-production-list">
             {currentCraftsDisplay.length ? currentCraftsDisplay.map((job) => (
               <button key={job.id} onClick={() => onNavigate("production")}>
@@ -1326,7 +1338,7 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
         </article>
 
         <article className="dashboard-card dashboard-card-attention">
-          <DashboardCardHeader title="Needs Attention" />
+          <DashboardCardHeader title="Needs Attention" icon={<AlertTriangle size={15} />} />
           <div className="dashboard-alert-list">
             {attention.length ? attention.map((item) => (
               <button key={item.title} className={item.tone} onClick={() => onNavigate(item.panel)}>
@@ -1356,33 +1368,52 @@ function DashboardMetric({ icon, label, value, detail, progress, trend, tone, on
   );
 }
 
-function DashboardCardHeader({ title, action, onClick }: { title: string; action?: string; onClick?: () => void }) {
+function DashboardCardHeader({ title, icon, action, onClick }: { title: string; icon?: React.ReactNode; action?: string; onClick?: () => void }) {
   return (
     <header className="dashboard-card-header">
-      <h3>{title}</h3>
+      <h3>{icon ? <span className="dashboard-card-title-icon">{icon}</span> : null}{title}</h3>
       {action ? onClick ? <button onClick={onClick}>{action}</button> : <span className="dashboard-card-range">{action}</span> : null}
     </header>
   );
 }
 
 function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; value: number }>; suffix?: string }) {
-  if (points.length < 2) {
+  const datedPoints = points
+    .map((point) => ({ ...point, ms: timestampMs(point.at) }))
+    .filter((point) => point.ms > 0)
+    .sort((a, b) => a.ms - b.ms);
+  if (datedPoints.length < 2) {
     return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Trend appears after local snapshots are recorded.</span></div>;
   }
   const width = 560;
   const height = 230;
   const pad = 18;
-  const values = points.map((point) => point.value);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const latestSnapshot = datedPoints[datedPoints.length - 1];
+  const end = new Date(latestSnapshot.ms);
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end.getTime() - 6 * dayMs);
+  start.setHours(0, 0, 0, 0);
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const chartPoints = datedPoints.filter((point) => point.ms >= startMs && point.ms <= endMs);
+  if (chartPoints.length < 2) {
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Trend appears after local snapshots are recorded.</span></div>;
+  }
+  const values = chartPoints.map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = Math.max(max - min, 1);
-  const path = points.map((point, index) => {
-    const x = pad + (index / Math.max(points.length - 1, 1)) * (width - pad * 2);
+  const path = chartPoints.map((point, index) => {
+    const x = pad + ((point.ms - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
     const y = height - pad - ((point.value - min) / range) * (height - pad * 2);
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const areaPath = `${path} L${width - pad},${height - pad} L${pad},${height - pad} Z`;
-  const latest = points[points.length - 1];
+  const latest = chartPoints[chartPoints.length - 1];
+  const latestX = pad + ((latest.ms - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
+  const latestY = height - pad - ((latest.value - min) / range) * (height - pad * 2);
+  const axisDays = Array.from({ length: 7 }, (_, index) => new Date(startMs + index * dayMs));
   return (
     <div className="dashboard-chart">
       <svg viewBox={`0 0 ${width} ${height}`} aria-label={`Treasury trend ending at ${formatNumber(latest.value)}${suffix}`}>
@@ -1395,9 +1426,9 @@ function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; v
         {[0.25, 0.5, 0.75].map((y) => <line key={y} x1="0" x2={width} y1={height * y} y2={height * y} className="dashboard-chart-grid" />)}
         <path d={areaPath} className="dashboard-chart-area" />
         <path d={path} className="dashboard-chart-line" />
-        <circle cx={width - pad} cy={height - pad - ((latest.value - min) / range) * (height - pad * 2)} r="5" className="dashboard-chart-dot" />
+        <circle cx={latestX} cy={latestY} r="5" className="dashboard-chart-dot" />
       </svg>
-      <div>{[points[0], points[Math.floor(points.length / 2)], latest].map((point, index) => <span key={`${point.at}-${index}`}>{shortDateLabel(point.at)}</span>)}</div>
+      <div className="dashboard-chart-axis">{axisDays.map((day) => <span key={day.toISOString()}>{shortDateLabel(day.toISOString())}</span>)}</div>
     </div>
   );
 }
@@ -1882,6 +1913,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
   });
   const filtered = merged.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
+  const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
   const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
   React.useEffect(() => {
     if (!selectedId) {
@@ -1915,28 +1947,49 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
   const activeGearSlots = gearPresets.find((preset) => preset.active)?.slots ?? currentEquipmentSlots;
 
   return (
-    <div className="panel">
-      <div className="split-header">
-        <Header title="Settlement Roster">Member permissions and online status</Header>
-        <p className="online-summary"><strong>{onlineCount} online</strong> / {merged.length} members</p>
+    <div className="panel members-page">
+      <header className="members-topbar">
+        <div>
+          <h2>Settlement Roster</h2>
+          <p>Member permissions and online status</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span className="dashboard-region-line"><Globe2 size={15} /> {data.claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{data.claim.regionId ?? "?"}</span></span>
+            <span className="dashboard-refresh-line"><span className="online-dot is-online" /> {onlineCount} online / {merged.length} members</span>
+          </div>
+          <span className="dashboard-claim-link"><TierBadge tier={data.claim.tier} /> {data.claim.name ?? "Monitored Settlement"}</span>
+        </div>
+      </header>
+      <div className="members-summary-grid">
+        <article><Users /><span>Members</span><strong>{merged.length}</strong><small>{onlineCount} online now</small></article>
+        <article><Activity /><span>Total Levels</span><strong>{formatNumber(totalMemberLevels)}</strong><small>Across visible citizens</small></article>
+        <article><Hammer /><span>Build Access</span><strong>{merged.filter((member) => member.buildPermission).length}</strong><small>Members with build rights</small></article>
+        <article><Shield /><span>Storage Access</span><strong>{merged.filter((member) => member.inventoryPermission).length}</strong><small>Members with inventory rights</small></article>
       </div>
-      <div className="toolbar-row">
+      <div className="toolbar-row members-toolbar">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
         <span>{filtered.length} members found</span>
       </div>
-      <DataTable
-        rows={filtered}
-        onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); trackAnalyticsEvent("member_details_opened"); }}
-        rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
-        columns={[
-          ["", (m) => <span className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} title={m.player?.signedIn ? `Online ${formatDuration(m.player.sessionSeconds)}` : "Offline"} />],
-          ["Username", (m) => <strong>{m.username}</strong>],
-          ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
-          ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
-          ["Session / Last Login", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : timeAgo(m.lastLoginTimestamp)],
-          ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
-        ]}
-      />
+      <div className="members-roster-table">
+        <DataTable
+          rows={filtered}
+          onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); trackAnalyticsEvent("member_details_opened"); }}
+          rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
+          columns={[
+            ["Username", (m) => (
+              <span className="member-name-cell">
+                <span className="member-row-avatar">{String(m.username ?? "?").slice(0, 1).toUpperCase()}<i className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} /></span>
+                <span className="member-row-copy"><strong>{m.username}</strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
+              </span>
+            )],
+            ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
+            ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
+            ["Session", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : <span className="muted-cell">Offline</span>],
+            ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
+          ]}
+        />
+      </div>
       {selectedMember ? (
         <section className="member-detail">
           <div className="split-header">
@@ -2121,8 +2174,23 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
-    <div className="panel">
-      <Header title="Member Professions">{citizens.length} citizens - {professionIds.length} professions tracked separately from adventure skills</Header>
+    <div className="panel skills-page">
+      <header className="members-topbar skills-topbar">
+        <div>
+          <h2>Member Professions</h2>
+          <p>{citizens.length} citizens - {professionIds.length} professions tracked separately from adventure skills</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><GraduationCap size={14} /> {professionIds.length} professions</span>
+            <span>{adventureSkillIds.length} skills</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            <TierBadge tier={Math.max(1, skillTier(settlementBest))} />
+            <span>Highest member tier</span>
+          </div>
+        </div>
+      </header>
       <div className="summary-grid skills-summary">
         <MiniStat icon={<TrendingUp />} label="Profession Levels" value={formatNumber(settlementTotalLevel)} />
         <MiniStat icon={<Star />} label="Highest Profession" value={settlementBest} />
@@ -2178,7 +2246,7 @@ function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           ))}
         </div>
       </section>
-      <div className="toolbar-row">
+      <div className="toolbar-row skills-toolbar">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
       </div>
@@ -2394,19 +2462,34 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
   const rarities = unique(allRows.map((row: AnyRecord) => String(row.rarity)).filter((value: string) => value && value !== "undefined" && value !== "Default"));
   const totalItems = rows.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
   const occupiedContainers = containers.filter((container) => container.items.length > 0).length;
+  const uniqueVisibleItems = unique(rows.map((row: AnyRecord) => String(row.name))).length;
   return (
-    <div className="panel">
-      <Header title="Inventory & Storage">{containers.length} containers - {rows.length} visible stacks</Header>
-      <div className="metric-grid">
+    <div className="panel inventory-page">
+      <header className="members-topbar inventory-topbar">
+        <div>
+          <h2>Inventory & Storage</h2>
+          <p>{containers.length} containers - {rows.length} visible stacks</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Package size={14} /> {formatNumber(totalItems)} visible items</span>
+            <span>{formatNumber(uniqueVisibleItems)} unique</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            <span className="status-pill">{formatNumber(occupiedContainers)}</span>
+            <span>Occupied containers</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid inventory-summary">
         <MiniStat icon={<Package />} label="Total Items" value={formatNumber(totalItems)} />
-        <MiniStat icon={<Box />} label="Unique Items" value={unique(rows.map((row: AnyRecord) => String(row.name))).length} />
+        <MiniStat icon={<Box />} label="Unique Items" value={uniqueVisibleItems} />
         <MiniStat icon={<Package />} label="Occupied Containers" value={occupiedContainers} />
         <MiniStat icon={<Building2 />} label="Containers" value={containers.length} />
       </div>
       <section className="material-watch">
         <div className="split-header">
           <h3><Package size={17} /> Core Materials</h3>
-          <p className="legend">Finished material stock only. Raw ingredients and intermediate inputs are excluded.</p>
         </div>
         <div className="material-watch-grid">
           {materialSummary.map((group) => (
@@ -2448,23 +2531,38 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
         </section>
       ) : null}
-      <div className="toolbar-row">
-        {selectedCoreMaterial ? <button className="mini-action active" onClick={() => setCoreMaterialFilter("All")}><X size={13} /> {selectedCoreMaterial.label} only</button> : null}
-        <SearchBox value={q} onChange={setQ} placeholder="Search for items" />
-        <SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search for containers" />
-        <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
-          <option>All</option><option>Item</option><option>Cargo</option>
-        </select>
-        <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}>
-          <option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}
-        </select>
-        <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}>
-          <option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}
-        </select>
-        <select className="select-control" value={buildingFilter} onChange={(event) => setBuildingFilter(event.target.value)}>
-          <option>All</option>{buildings.map((value) => <option key={value}>{value}</option>)}
-        </select>
-        <label className="check-control"><input type="checkbox" checked={nonEmptyOnly} onChange={(event) => setNonEmptyOnly(event.target.checked)} /> Non-empty only</label>
+      <div className="production-command-panel inventory-command-panel">
+        <div className="inventory-command-header">
+          <span className="production-command-title"><Search size={15} /> Inventory filters</span>
+          <div className="inventory-command-actions">
+            {selectedCoreMaterial ? <button className="mini-action active" onClick={() => setCoreMaterialFilter("All")}><X size={13} /> {selectedCoreMaterial.label} only</button> : null}
+            <label className="inventory-inline-toggle"><span>Non-empty only</span><input type="checkbox" checked={nonEmptyOnly} onChange={(event) => setNonEmptyOnly(event.target.checked)} /></label>
+          </div>
+        </div>
+        <div className="inventory-filter-grid">
+          <label className="inventory-filter-field"><span>Item</span><SearchBox value={q} onChange={setQ} placeholder="Search items" /></label>
+          <label className="inventory-filter-field"><span>Container</span><SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" /></label>
+          <label className="inventory-filter-field"><span>Type</span>
+            <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
+              <option>All</option><option>Item</option><option>Cargo</option>
+            </select>
+          </label>
+          <label className="inventory-filter-field"><span>Tier</span>
+            <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}>
+              <option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="inventory-filter-field"><span>Rarity</span>
+            <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}>
+              <option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="inventory-filter-field"><span>Storage</span>
+            <select className="select-control" value={buildingFilter} onChange={(event) => setBuildingFilter(event.target.value)}>
+              <option>All</option>{buildings.map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+        </div>
       </div>
       <div className="container-list">
         {selectedCoreMaterial && filteredContainers.length === 0 ? <div className="empty-state"><Package />No containers match the {selectedCoreMaterial.label.toLowerCase()} filter.</div> : null}
@@ -2493,12 +2591,41 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
 function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
   const projects = buildConstructionProjects(data.construction, data.inventories);
   const needed = constructionNeededMaterials(projects);
+  const totalMaterialsRequired = projects.reduce((sum: number, project: AnyRecord) => sum + (project.materials ?? []).reduce((inner: number, mat: AnyRecord) => inner + toNumber(mat.required), 0), 0);
+  const totalMaterialsContributed = projects.reduce((sum: number, project: AnyRecord) => sum + (project.materials ?? []).reduce((inner: number, mat: AnyRecord) => inner + toNumber(mat.contributed), 0), 0);
+  const totalMissingMaterials = needed.reduce((sum: number, [, amount]) => sum + toNumber(amount), 0);
+  const averageProgress = projects.length ? Math.round(projects.reduce((sum: number, project: AnyRecord) => {
+    const progress = toNumber(project.progress);
+    const total = toNumber(project.actionsRequired) || 1;
+    return sum + Math.min(100, (progress / total) * 100);
+  }, 0) / projects.length) : 0;
   return (
-    <div className="panel">
-      <Header title="Construction Projects">{projects.length} active project{projects.length === 1 ? "" : "s"}</Header>
+    <div className="panel construction-page">
+      <header className="members-topbar construction-topbar">
+        <div>
+          <h2>Construction Projects</h2>
+          <p>{projects.length} active project{projects.length === 1 ? "" : "s"}</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Hammer size={14} /> {formatNumber(projects.length)} active</span>
+            <span>{formatNumber(needed.length)} material types needed</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            <span className="status-pill">{averageProgress}%</span>
+            <span>Average progress</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid construction-summary">
+        <MiniStat icon={<Hammer />} label="Active Projects" value={formatNumber(projects.length)} />
+        <MiniStat icon={<Package />} label="Materials Added" value={formatNumber(totalMaterialsContributed)} />
+        <MiniStat icon={<Box />} label="Materials Required" value={formatNumber(totalMaterialsRequired)} />
+        <MiniStat icon={<AlertTriangle />} label="Still Needed" value={formatNumber(totalMissingMaterials)} />
+      </div>
       {needed.length ? (
         <section className="warning-section">
-          <h3><AlertTriangle size={17} /> What to Gather Next</h3>
+          <h3><AlertTriangle size={15} /> What to Gather Next</h3>
           <div className="gather-grid">{needed.map(([name, amount]) => <MiniStat key={name} icon={<Package />} label={name} value={formatNumber(amount)} />)}</div>
         </section>
       ) : null}
@@ -2507,9 +2634,13 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
           const progress = toNumber(project.progress);
           const total = toNumber(project.actionsRequired) || 1;
           const pct = Math.min(100, Math.round((progress / total) * 100));
+          const remainingMaterials = project.materials.reduce((sum: number, mat: AnyRecord) => sum + Math.max(0, toNumber(mat.required) - toNumber(mat.contributed)), 0);
           return (
             <article className="project-card" key={project.entityId}>
-              <header><Hammer /><strong>{project.name}</strong><span>{pct}%</span></header>
+              <header>
+                <div><Hammer size={15} /><strong>{project.name}</strong><small>{remainingMaterials ? `${formatNumber(remainingMaterials)} materials remaining` : "Materials complete"}</small></div>
+                <span>{pct}%</span>
+              </header>
               <div className="progress"><div style={{ width: `${pct}%` }} /></div>
               <div className="material-grid">
                 {project.materials.map((mat: AnyRecord, index: number) => {
@@ -2559,16 +2690,28 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
   return (
     <div className="panel research-panel">
-      <div className="research-hero">
-        <Header title="Research & Technology">Technology progression and the next available unlocks</Header>
-        <div className="research-completion"><strong>{completion}%</strong><span>complete</span></div>
-      </div>
-      <div className="research-summary">
-        <div><CheckCircle2 /><strong>{totalResearched}</strong><span>Researched</span></div>
-        <div><Lock /><strong>{totalAvailable}</strong><span>Available</span></div>
-        <div><Crown /><strong>T{settlementTier || "-"}</strong><span>Settlement Tier</span></div>
-        <div><Box /><strong>{maxSupplies ? formatNumber(maxSupplies) : "-"}</strong><span>Supply Cap</span></div>
-        <div><MapPin /><strong>{maxTiles ? formatNumber(maxTiles) : "-"}</strong><span>Tile Cap</span></div>
+      <header className="members-topbar research-topbar">
+        <div>
+          <h2>Research & Technology</h2>
+          <p>Technology progression and the next available unlocks</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><CheckCircle2 size={14} /> {formatNumber(totalResearched)} researched</span>
+            <span>{formatNumber(totalAvailable)} available</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            <span className="status-pill">{completion}%</span>
+            <span>Research complete</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid research-summary">
+        <MiniStat icon={<CheckCircle2 />} label="Researched" value={formatNumber(totalResearched)} />
+        <MiniStat icon={<Lock />} label="Available" value={formatNumber(totalAvailable)} />
+        <MiniStat icon={<Crown />} label="Settlement Tier" value={`T${settlementTier || "-"}`} />
+        <MiniStat icon={<Box />} label="Supply Cap" value={maxSupplies ? formatNumber(maxSupplies) : "-"} />
+        <MiniStat icon={<MapPin />} label="Tile Cap" value={maxTiles ? formatNumber(maxTiles) : "-"} />
       </div>
       {Object.keys(workstationTiers).length ? (
         <div className="research-unlocks">
@@ -2577,10 +2720,22 @@ function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
           ))}
         </div>
       ) : null}
-      <div className="toolbar-row">
-        <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
-        <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
-      </div>
+      <section className="production-command-panel research-command-panel">
+        <div className="research-command-header">
+          <span className="production-command-title"><Search size={15} /> Research filters</span>
+          <span>{formatNumber(matching.length)} matching technologies</span>
+        </div>
+        <div className="research-filter-grid">
+          <label className="research-filter-field">
+            <span>Technology</span>
+            <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
+          </label>
+          <label className="research-filter-field">
+            <span>Tier</span>
+            <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
+          </label>
+        </div>
+      </section>
       <div className="two-col research-lanes"><section><h3><CheckCircle2 size={17} /> Completed Technology <small>{researched.length}</small></h3>{researched.map((item) => card(item, true))}</section><section><h3><Lock size={17} /> Available Research <small>{available.length}</small></h3>{available.map((item) => card(item, false))}</section></div>
     </div>
   );
@@ -2684,32 +2839,59 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   const confirmedRevenue = toNumber(analytics?.totals?.trackedValue ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0));
   const unitsSold = toNumber(analytics?.totals?.confirmedUnits ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0));
   const averageSaleValue = confirmedSales ? confirmedRevenue / confirmedSales : 0;
+  const listingValue = all.reduce((total, listing) => total + toNumber(listing.price) * Math.max(1, toNumber(listing.quantity)), 0);
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
   return (
-    <div className="panel">
-      <Header title="Market">{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : `${all.length} live listings - ${formatNumber(confirmedSales)} confirmed sale${confirmedSales === 1 ? "" : "s"} for ${filterLabel}`}</Header>
-      {view !== "pricing" ? <div className="toolbar-row">
-        <label className="inline-field">
-          <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
-            <option>All</option>
-            {memberOptions.map((name) => <option key={name}>{name}</option>)}
-          </select>
-        </label>
-      </div> : null}
-      <div className="tabs primary-tabs">
+    <div className="panel market-page">
+      <header className="members-topbar market-topbar">
+        <div>
+          <h2>Market</h2>
+          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><ShoppingCart size={14} /> {formatNumber(all.length)} listings</span>
+            <span>{formatNumber(confirmedSales)} confirmed sales</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            <span className="status-pill">R{data.claim?.regionId ?? "?"}</span>
+            <span>{data.claim?.name ?? "Settlement market"}</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid market-summary">
+        <MiniStat icon={<ShoppingCart />} label="Live Listings" value={formatNumber(all.length)} />
+        <MiniStat icon={<CircleDollarSign />} label="Listing Value" value={formatCompactNumber(listingValue)} />
+        <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
+        <MiniStat icon={<TrendingUp />} label="Sales Revenue" value={formatCompactNumber(confirmedRevenue)} />
+      </div>
+      <section className="production-command-panel market-command-panel">
+        <div className="market-command-header">
+          <span className="production-command-title"><CircleDollarSign size={15} /> Market tools</span>
+          {view !== "pricing" ? (
+            <label className="market-member-field">
+              <span>Member</span>
+              <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
+                <option>All</option>
+                {memberOptions.map((name) => <option key={name}>{name}</option>)}
+              </select>
+            </label>
+          ) : <span className="market-command-note">Use completed trade history to estimate listing prices.</span>}
+        </div>
+      <div className="tabs primary-tabs market-tabs">
         <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
         <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
         <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
       </div>
+      </section>
       {view === "pricing" ? (
         <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} watches={watches} onToggleWatch={onToggleWatch} />
       ) : view === "analytics" ? (
         <>
-          <p className="legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
-          <div className="metric-grid">
+          <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
+          <div className="metric-grid market-analytics-metrics">
             <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
             <MiniStat icon={<CircleDollarSign />} label="Sales Revenue" value={`${formatNumber(confirmedRevenue)}g`} />
@@ -2743,7 +2925,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
               </div>
             </section>
           </div>
-          <section>
+          <section className="market-section">
             <h3><CheckCircle2 size={17} /> Recent Confirmed Sales</h3>
             <p className="legend">Imported completed sales retained in this monitor's history for the selected current settlement member(s).</p>
             <DataTable rows={apiTrades} columns={[
@@ -2760,20 +2942,38 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
         </>
       ) : (
         <>
-      <div className="metric-grid">
+      <div className="market-live-grid">
         <MiniStat icon={<ShoppingCart />} label="Visible Listings" value={all.length} />
         <MiniStat icon={<TrendingDown />} label="Sell Orders" value={sellOrders.length || all.length} />
         <MiniStat icon={<TrendingUp />} label="Buy Orders" value={buyOrders.length} />
         <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? `${formatNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1))}g` : "-"} />
       </div>
-      <div className="highlight-grid">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><ItemLabel item={{ ...listing, name: listing.itemName }} name={listing.itemName} /><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
-      <div className="tabs"><button className={tab === "sell" ? "active" : ""} onClick={() => setTab("sell")}><TrendingDown size={15} /> Sell Orders</button><button className={tab === "buy" ? "active" : ""} onClick={() => setTab("buy")}><TrendingUp size={15} /> Buy Orders</button></div>
-      <div className="toolbar-row">
-        <SearchBox value={q} onChange={setQ} placeholder="Search market" />
-        <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
-        <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}><option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}</select>
-      </div>
-      <p className="legend">Listed time uses the BitJita listing timestamp when available; monitor tracking time is used only as a fallback.</p>
+      <div className="highlight-grid market-highlights">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><ItemLabel item={{ ...listing, name: listing.itemName }} name={listing.itemName} /><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
+      <section className="production-command-panel market-filter-panel">
+        <div className="market-command-header">
+          <span className="production-command-title"><Search size={15} /> Listing filters</span>
+          <span>{formatNumber(rows.length)} visible rows</span>
+        </div>
+        <div className="market-filter-grid">
+          <label className="research-filter-field">
+            <span>Search</span>
+            <SearchBox value={q} onChange={setQ} placeholder="Search market" />
+          </label>
+          <label className="research-filter-field">
+            <span>Order Type</span>
+            <div className="segmented market-order-tabs"><button className={tab === "sell" ? "active" : ""} onClick={() => setTab("sell")}><TrendingDown size={15} /> Sell</button><button className={tab === "buy" ? "active" : ""} onClick={() => setTab("buy")}><TrendingUp size={15} /> Buy</button></div>
+          </label>
+          <label className="research-filter-field">
+            <span>Tier</span>
+            <select className="select-control" value={tier} onChange={(event) => setTier(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select>
+          </label>
+          <label className="research-filter-field">
+            <span>Rarity</span>
+            <select className="select-control" value={rarity} onChange={(event) => setRarity(event.target.value)}><option>All</option>{rarities.map((value) => <option key={value}>{value}</option>)}</select>
+          </label>
+        </div>
+      </section>
+      <p className="legend market-legend">Listed time uses the BitJita listing timestamp when available; monitor tracking time is used only as a fallback.</p>
       <DataTable rows={rows} columns={[
         ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
@@ -2904,8 +3104,12 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
 
   return (
     <section className="price-finder">
+      <div className="market-command-header price-finder-header">
+        <span className="production-command-title"><Search size={15} /> Price lookup</span>
+        <span>{regionLabel} completed trades</span>
+      </div>
       <div className="price-finder-controls">
-        <label className="field price-item-search">
+        <label className="research-filter-field price-item-search">
           <span>Item</span>
           <div className="suggestion-anchor">
             <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
@@ -2921,7 +3125,7 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
           {searchState === "loading" ? <small className="legend">Finding market items...</small> : null}
           {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
         </label>
-        <label className="field">
+        <label className="research-filter-field price-region-field">
           <span>Region</span>
           <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("price_finder_region_changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
             {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
@@ -3081,6 +3285,9 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
     });
   const visibleJobs = filteredJobs.slice(0, 100);
   const skillName = skillId === "All" ? "All Skills" : SKILL_NAMES[toNumber(skillId)] ?? "Selected skill";
+  const highestTier = Math.max(...filteredJobs.map((job) => toNumber(job.tier)), 0);
+  const totalAvailableXp = filteredJobs.reduce((sum, job) => sum + toNumber(job.availableXp), 0);
+  const activeSettlements = new Set(filteredJobs.map((job) => String(job.claimName ?? job.claimEntityId ?? "")).filter(Boolean)).size;
   function changeSort(nextKey: PublicCraftSortKey) {
     if (nextKey === sortKey) setSortDir((current) => current === "asc" ? "desc" : "asc");
     else {
@@ -3099,11 +3306,31 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
   ];
   return (
     <section className="public-craft-finder">
-      <div className="split-header">
-        <Header title="Public Craft Finder">
-          {state.loading && !state.data ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}
-        </Header>
-        <div className="toolbar-row">
+      <header className="members-topbar public-craft-topbar">
+        <div>
+          <h2>Public Craft Finder</h2>
+          <p>{state.loading && !state.data ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Search size={14} /> {skillName}</span>
+            <span>{regionId === "All" ? "All regions" : `R${regionId}`}</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            {highestTier ? <TierBadge tier={highestTier} /> : <span className="status-pill">No tier</span>}
+            <span>Highest public craft tier</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid public-craft-summary">
+        <MiniStat icon={<Factory />} label="Public Jobs" value={formatNumber(filteredJobs.length)} />
+        <MiniStat icon={<Globe2 />} label="Settlements" value={formatNumber(activeSettlements)} />
+        <MiniStat icon={<GraduationCap />} label="Skill Filter" value={skillName} />
+        <MiniStat icon={<TrendingUp />} label="XP Available" value={formatNumber(totalAvailableXp)} />
+      </div>
+      <div className="production-command-panel public-craft-command-panel">
+        <div className="production-command-main">
+          <span className="production-command-title"><Search size={15} /> Craft filters</span>
           <label className="inline-field"><span>Skill</span>
             <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("public_craft_skill_filter_used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
               <option value="All">All Skills</option>
@@ -3115,6 +3342,10 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
               <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
             </select>
           </label>
+        </div>
+        <div className="public-craft-hint">
+          <MapPin size={13} />
+          <span>Click a settlement location to open it on the map. Column headings sort the results.</span>
         </div>
       </div>
       {state.error ? <div className="error">Failed to load public crafts: {state.error}</div> : null}
@@ -3172,9 +3403,10 @@ function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; 
   return (
     <section className="settlement-passive-crafts">
       <div className="split-header">
-        <Header title="Member Passive Crafts">
-          Recent public passive output for current settlement members. BitJita does not report craft location, so entries may have been performed elsewhere.
-        </Header>
+        <div className="dashboard-section-heading">
+          <h3><Factory size={15} /> Member Passive Crafts</h3>
+          <p>Recent public passive output for current settlement members. BitJita does not report craft location, so entries may have been performed elsewhere.</p>
+        </div>
         {state.loading && rows.length ? <span className="refreshing-label">Updating...</span> : null}
       </div>
       {state.error ? <p className="legend">{state.error}</p> : null}
@@ -3289,35 +3521,63 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
     const total = toNumber(job.totalActionsRequired);
     return total > toNumber(job.progress) && hasRecentCraftContribution(data.contributions[String(job.entityId)] ?? []);
   }).length;
+  const totalProductionXp = jobs.reduce((sum, job) => sum + metrics(job).totalXp, 0);
+  const remainingProductionXp = jobs.reduce((sum, job) => sum + metrics(job).remainingXp, 0);
+  const highestTier = Math.max(...jobs.map((job) => metrics(job).tier), 0);
 
   return (
-    <div className="panel">
-      <div className="split-header">
-        <Header title="Active Production">
-          {data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active in the last 30s - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}
-        </Header>
-        <div className="crafter-pills">
-          {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={13} /> <strong>{name}</strong> {count} job{count === 1 ? "" : "s"}</span>)}
+    <div className="panel production-page">
+      <header className="members-topbar production-topbar">
+        <div>
+          <h2>Active Production</h2>
+          <p>{data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}</p>
         </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Factory size={14} /> {formatNumber(data.crafts.length)} total jobs</span>
+            <span>{formatNumber(Object.keys(crafterCounts).length)} crafters</span>
+          </div>
+          <div className="dashboard-settlement-pill">
+            {highestTier ? <TierBadge tier={highestTier} /> : <span className="status-pill">No tier</span>}
+            <span>Highest craft tier</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid production-summary">
+        <MiniStat icon={<Factory />} label="Total Jobs" value={formatNumber(data.crafts.length)} />
+        <MiniStat icon={<Activity />} label="Active Now" value={formatNumber(activeJobs)} />
+        <MiniStat icon={<TrendingUp />} label="Total XP" value={formatNumber(totalProductionXp)} />
+        <MiniStat icon={<Star />} label="XP Remaining" value={formatNumber(remainingProductionXp)} />
       </div>
-      <div className="toolbar-row production-controls">
-        <label className="inline-field"><span>Member</span>
-          <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("production_eligibility_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
-            <option value="All">All members</option>
-            {data.members.map((member: AnyRecord) => <option key={member.playerEntityId} value={String(member.playerEntityId)}>{member.userName ?? member.username}</option>)}
-          </select>
-        </label>
-        <label className="inline-field"><span>Sort by</span>
-          <select className="select-control" value={sortKey} onChange={(event) => setSortKey(event.target.value as ProductionSortKey)}>
-            <option value="tier">Tier</option>
-            <option value="totalXp">Total XP</option>
-            <option value="remainingXp">XP Remaining</option>
-            <option value="remainingEffort">Effort Remaining</option>
-            <option value="completion">Completion</option>
-            <option value="name">Item Name</option>
-          </select>
-        </label>
-        <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+      <div className="production-command-panel">
+        <div className="production-command-main">
+          <span className="production-command-title"><Wrench size={15} /> Production controls</span>
+          <label className="inline-field"><span>Member</span>
+            <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("production_eligibility_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
+              <option value="All">All members</option>
+              {data.members.map((member: AnyRecord) => <option key={member.playerEntityId} value={String(member.playerEntityId)}>{member.userName ?? member.username}</option>)}
+            </select>
+          </label>
+          <label className="inline-field"><span>Sort by</span>
+            <select className="select-control" value={sortKey} onChange={(event) => setSortKey(event.target.value as ProductionSortKey)}>
+              <option value="tier">Tier</option>
+              <option value="totalXp">Total XP</option>
+              <option value="remainingXp">XP Remaining</option>
+              <option value="remainingEffort">Effort Remaining</option>
+              <option value="completion">Completion</option>
+              <option value="name">Item Name</option>
+            </select>
+          </label>
+          <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+        </div>
+        {Object.keys(crafterCounts).length ? (
+          <div className="production-crafter-line">
+            <span>Current crafters</span>
+            <div className="crafter-pills">
+              {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={12} /> <strong>{name}</strong> {count}</span>)}
+            </div>
+          </div>
+        ) : null}
       </div>
       {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong>{selectedMember.userName ?? selectedMember.username}</strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
@@ -3337,7 +3597,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={16} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
                 <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
@@ -3390,7 +3650,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       : Number(aVal) - Number(bVal);
     return sortDir === "asc" ? result : -result;
   }).slice(0, 100);
-  const mine = rows.find((row) => String(row.entityId) === String(data.claim.entityId));
+  const mine = allRows.find((row) => String(row.entityId) === String(data.claim.entityId));
   const rank = (field: string) => {
     const sorted = [...allRows].sort((a, b) => toNumber(b[field]) - toNumber(a[field]));
     const idx = sorted.findIndex((row) => String(row.entityId) === String(data.claim.entityId));
@@ -3425,37 +3685,52 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     ["Treasury", "treasury", (r) => `${formatNumber(r.treasury)}g`],
     ["Tiles", "numTiles", (r) => formatNumber(r.numTiles)],
   ];
+  const regionStatusLabel = liveStatus ? liveStatus.syncing ? "Syncing" : liveStatus.active ? "Active" : "Offline" : "-";
   return (
     <div className="panel region-panel">
-      <div className="region-hero">
-        <Header title={`${data.claim.regionName ?? "Region"} Overview`}>{allRows.length} settlements compared across supplies, treasury, tiles, and tier</Header>
-        {myRankRow ? <div className="region-identity"><Crown size={18} /><div><strong>{myRankRow.name}</strong><span><TierBadge tier={myRankRow.tier} /> Monitored settlement</span></div></div> : null}
-      </div>
+      <header className="members-topbar region-topbar">
+        <div>
+          <h2>{data.claim.regionName ?? "Region"}</h2>
+          <p>{formatNumber(allRows.length)} settlements compared across supplies, treasury, tiles, and tier</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Server size={14} /> {regionStatusLabel}</span>
+            <span><Users size={14} /> {liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} online</span>
+          </div>
+          {myRankRow ? (
+            <div className="dashboard-settlement-pill">
+              <TierBadge tier={myRankRow.tier} />
+              <span>{myRankRow.name}</span>
+            </div>
+          ) : null}
+        </div>
+      </header>
       {mine ? (
-        <div className="rank-grid">
+        <div className="rank-grid region-rank-grid">
           <MiniStat icon={<Crown />} label="Tier Rank" value={rank("tier")} />
           <MiniStat icon={<Box />} label="Supply Rank" value={rank("supplies")} />
           <MiniStat icon={<CircleDollarSign />} label="Treasury Rank" value={rank("treasury")} />
           <MiniStat icon={<Hammer />} label="Tile Rank" value={rank("numTiles")} />
         </div>
       ) : null}
-      <div className="metric-grid">
+      <div className="metric-grid region-summary-grid">
         <MiniStat icon={<Globe2 />} label="Settlements" value={allRows.length} />
         <MiniStat icon={<Users />} label="Players Online" value={liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} />
-        <MiniStat icon={<Server />} label="Region Status" value={liveStatus ? liveStatus.syncing ? "Syncing" : liveStatus.active ? "Active" : "Offline" : "-"} />
+        <MiniStat icon={<Server />} label="Region Status" value={regionStatusLabel} />
         <MiniStat icon={<ShoppingCart />} label="Regional Trades" value={formatNumber(tradeSummary.totalTrades)} />
-        <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={`${formatNumber(totalTreasury)}g`} />
+        <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={`${formatCompactNumber(totalTreasury)}g`} />
       </div>
-      <div className="highlight-grid">
+      <div className="highlight-grid region-insights">
         <div><strong>Average Tier</strong><span>{avgTier.toFixed(1)} across known settlements</span></div>
         <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
         <div><strong>Regional Trade Value</strong><span>{formatNumber(tradeSummary.totalValue)}g in selected API window</span></div>
       </div>
       <div className="region-context">
-        <div className="bar-panel">
-          <h3>Supply Leaders</h3>
+        <section className="bar-panel region-leaders-panel">
+          <h3><Box size={16} /> Supply Leaders</h3>
           {chartRows.map((row) => <div className="bar-row" key={row.entityId}><span>{row.name}</span><div><i style={{ width: `${(toNumber(row.supplies) / maxSupplies) * 100}%` }} className={String(row.entityId) === String(data.claim.entityId) ? "mine" : ""} /></div><b>{formatNumber(row.supplies)}</b></div>)}
-        </div>
+        </section>
         {nearbyRows.length ? (
           <section className="nearby-panel">
             <h3><MapPin size={17} /> Close Settlements</h3>
@@ -3464,17 +3739,22 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
           </section>
         ) : null}
       </div>
-      <div className="table-heading"><h3>Regional Rankings</h3><span>Click a column heading to sort</span></div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>{columns.map(([label, key]) => <th key={label}><button className="sort-button" onClick={() => key !== "rank" && changeSort(key)} disabled={key === "rank"}>{label}{key !== "rank" ? (sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />) : null}</button></th>)}</tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => <tr className={String(row.entityId) === String(data.claim.entityId) ? "mine-row" : ""} key={row.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>)}
-          </tbody>
-        </table>
-      </div>
+      <section className="production-command-panel region-table-panel">
+        <div className="market-command-header">
+          <span className="production-command-title"><Globe2 size={15} /> Regional rankings</span>
+          <span>Click a column heading to sort</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>{columns.map(([label, key]) => <th key={label}><button className="sort-button" onClick={() => key !== "rank" && changeSort(key)} disabled={key === "rank"}>{label}{key !== "rank" ? (sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />) : null}</button></th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => <tr className={String(row.entityId) === String(data.claim.entityId) ? "mine-row" : ""} key={row.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -3639,11 +3919,19 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const currentFrameUrl = mapUrl;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
-      <div className="split-header">
-        <Header title="World Map">Live player tracking via bitcraftmap.com</Header>
-        <a className="toolbar-button" href={currentFrameUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
-      </div>
-      <p className="online-summary"><strong>{onlineCount} online</strong> - {roster.length} members total</p>
+      <header className="members-topbar map-topbar">
+        <div>
+          <h2>World Map</h2>
+          <p>Live player and resource tracking via bitcraftmap.com</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Users size={14} /> {formatNumber(onlineCount)} online</span>
+            <span>{formatNumber(roster.length)} members total</span>
+          </div>
+          <a className="toolbar-button" href={currentFrameUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
+        </div>
+      </header>
       {focus ? (
         <div className="map-focus">
           <MapPin size={17} />
@@ -3812,35 +4100,54 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
   const scopeLabel = memberFilter === "All" ? "settlement" : memberFilter;
   return (
     <div className="panel activity-panel">
-      <Header title="Activity">A live audit trail of settlement updates and movements through owned storage.</Header>
+      <header className="members-topbar activity-topbar">
+        <div>
+          <h2>Activity</h2>
+          <p>A live audit trail of settlement updates and owned-storage movements.</p>
+        </div>
+        <div className="dashboard-top-meta" aria-label="Activity status">
+          <div className="dashboard-meta-cluster">
+            <span><Activity size={15} /> {formatNumber(memberActivity.length)} recent events</span>
+            <span>{latestEvent ? `Last event ${timeAgo(latestEvent)}` : "Awaiting activity"}</span>
+          </div>
+          <div className="dashboard-meta-cluster">
+            <span>{memberFilter === "All" ? "All members" : memberFilter}</span>
+            <span>{filter === "all" ? "All categories" : ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1]}</span>
+          </div>
+        </div>
+      </header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
       <div className="activity-overview">
-        <article><Activity /><span>{memberFilter === "All" ? "Total history" : "Recent member events"}</span><strong>{formatNumber(memberFilter === "All" ? activityTotal : memberActivity.length)}</strong><small>{memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`}</small></article>
-        <article><Box /><span>Recent storage moves</span><strong>{formatNumber(storageMoves)}</strong><small>Settlement containers only</small></article>
-        <article><Building2 /><span>{memberFilter === "All" ? "Recent system changes" : "System changes"}</span><strong>{formatNumber(settlementChanges)}</strong><small>{memberFilter === "All" ? "Within loaded history" : "Not attributed to members"}</small></article>
-        <article><RefreshCw /><span>Latest event</span><strong>{latestEvent ? timeAgo(latestEvent) : "-"}</strong><small>{latestEvent ? dateLabel(latestEvent) : "Awaiting activity"}</small></article>
+        <MiniStat icon={<Activity />} label={memberFilter === "All" ? "Total History" : "Member Events"} value={formatNumber(memberFilter === "All" ? activityTotal : memberActivity.length)} title={memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`} />
+        <MiniStat icon={<Box />} label="Storage Moves" value={formatNumber(storageMoves)} title="Settlement containers only" />
+        <MiniStat icon={<Building2 />} label={memberFilter === "All" ? "System Changes" : "Other Changes"} value={formatNumber(settlementChanges)} title={memberFilter === "All" ? "Within loaded history" : "Not attributed to members"} />
+        <MiniStat icon={<RefreshCw />} label="Latest Event" value={latestEvent ? timeAgo(latestEvent) : "-"} title={latestEvent ? dateLabel(latestEvent) : "Awaiting activity"} />
       </div>
-      <section className="activity-controls" aria-label="Activity filters">
-        <label className="activity-member-filter">
-          <User size={16} />
-          <span>Member</span>
-          <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("activity_member_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
-            <option value="All">All members</option>
-            {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-          {memberFilter !== "All" ? <small>Shows attributed storage and market events only.</small> : null}
-        </label>
-        <div className="activity-filters">
-          {ACTIVITY_FILTERS.map(([id, label]) => (
-            <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
-              <span>{label}</span>
-              <strong>{filterCounts.get(id) ?? 0}</strong>
-            </button>
-          ))}
+      <section className="production-command-panel activity-command-panel" aria-label="Activity filters">
+        <div className="activity-command-head">
+          <strong><Activity size={16} /> Activity Filters</strong>
+          <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>
+        </div>
+        <div className="activity-filter-grid">
+          <label className="field">
+            <span>Member</span>
+            <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("activity_member_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
+              <option value="All">All members</option>
+              {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <div className="activity-filters" role="group" aria-label="Activity categories">
+            {ACTIVITY_FILTERS.map(([id, label]) => (
+              <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
+                <span>{label}</span>
+                <strong>{filterCounts.get(id) ?? 0}</strong>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="activity-options">
           <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Combine repeated treasury changes</label>
-          <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>
+          <span>{memberFilter !== "All" ? "Member filtering only includes attributed storage and market events." : "Activity is limited to monitored settlement history."}</span>
         </div>
       </section>
       <div className="activity-timeline">
@@ -4247,10 +4554,15 @@ function AppSkeleton() {
 function SyncPanel({ syncUrl }: { syncUrl: string }) {
   return (
     <div className="panel sync-panel">
-      <div className="split-header">
-        <Header title="Sync">Embedded BitCraft Sync materials and goals board</Header>
-        <a className="toolbar-button" href={syncUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open Full Page</a>
-      </div>
+      <header className="members-topbar sync-topbar">
+        <div>
+          <h2>Sync</h2>
+          <p>Embedded BitCraft Sync materials and goals board</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <a className="toolbar-button" href={syncUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full page</a>
+        </div>
+      </header>
       <iframe className="sync-frame" src={syncUrl} title="BitCraft Sync" />
     </div>
   );
@@ -4615,11 +4927,16 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     ["supplies", "Supplies"],
     ["appUpdate", "App Update"],
   ] as const;
-  if (authLoading) return <div className="panel"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
+  if (authLoading) return <div className="panel admin-login"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
   if (!auth?.authenticated) {
     return (
       <div className="panel admin-login">
-        <Header title={botOnly ? "Discord Bot Control" : "Admin"}>{auth?.setupRequired ? "Create the first administrator account" : botOnly ? "Sign in to manage bot settings and notifications" : "Sign in to manage this installation"}</Header>
+        <header className="members-topbar admin-topbar">
+          <div>
+            <h2>{botOnly ? "Discord Bot Control" : "Admin"}</h2>
+            <p>{auth?.setupRequired ? "Create the first administrator account" : botOnly ? "Sign in to manage bot settings and notifications" : "Sign in to manage this installation"}</p>
+          </div>
+        </header>
         <form className="form-card" onSubmit={submitAuth}>
           <label className="field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
           {auth?.setupKeyRequired ? <label className="field"><span>Server Setup Key</span><input type="password" value={setupKey} onChange={(event) => setSetupKey(event.target.value)} autoComplete="one-time-code" /></label> : null}
@@ -4927,14 +5244,33 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     return <pre className="discord-tool-result">{JSON.stringify(result, null, 2)}</pre>;
   }
   return (
-    <div className={`panel admin-console ${botOnly ? "bot-console" : ""}`}>
-      <div className="split-header">
-        <Header title={botOnly ? "Discord Bot Control" : "Admin Console"}>{botOnly ? "Manage bot setup, notifications, self-assign roles, tools and diagnostics" : "Configuration and operational controls for this installation"}</Header>
-        <div className="toolbar">
-          {!botOnly ? <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a> : <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>}
-          <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+    <div className={`panel admin-console ${botOnly ? "bot-console" : "admin-page"}`}>
+      {botOnly ? (
+        <div className="split-header">
+          <Header title="Discord Bot Control">Manage bot setup, notifications, self-assign roles, tools and diagnostics</Header>
+          <div className="toolbar">
+            <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>
+            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <header className="members-topbar admin-topbar">
+          <div>
+            <h2>Admin Console</h2>
+            <p>Configuration and operational controls for this installation</p>
+          </div>
+          <div className="dashboard-top-meta" aria-label="Admin status">
+            <div className="dashboard-meta-cluster">
+              <span><Server size={15} /> {status?.environment ?? "Local"}</span>
+              <span>{status?.polling?.enabled ? "Collection enabled" : "Collection disabled"}</span>
+            </div>
+            <div className="toolbar">
+              <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a>
+              <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+            </div>
+          </div>
+        </header>
+      )}
       {tabs.length ? <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div> : null}
       {message ? <div className="admin-message">{message}</div> : null}
 

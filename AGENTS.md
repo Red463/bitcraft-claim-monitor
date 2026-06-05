@@ -56,11 +56,13 @@ Use this exact process when the user is testing in the in-app browser at `http:/
 corepack pnpm --filter @workspace/bitcraft-local run build
 ```
 
-2. Start or reuse the stable production-style local smoke server:
+2. Restart the stable production-style local smoke server so it serves the freshly built static assets:
 
 ```powershell
-node scripts/start-bitcraft-local-smoke.mjs
+node scripts/start-bitcraft-local-smoke.mjs --restart
 ```
+
+Use `node scripts/start-bitcraft-local-smoke.mjs` without `--restart` only when no frontend build has changed and you intentionally want to reuse the current server.
 
 This starts `apps/bitcraft-local/server.mjs` detached on `http://127.0.0.1:18449/` with:
 
@@ -91,7 +93,9 @@ http://127.0.0.1:18449/?page=map
 http://127.0.0.1:18449/bot
 ```
 
-If the page is still stale after code changes, rerun the build, rerun `node scripts/start-bitcraft-local-smoke.mjs` if needed, then reload the browser tab.
+If the page is still stale after code changes, rerun the build, rerun `node scripts/start-bitcraft-local-smoke.mjs --restart`, then reload the browser tab.
+
+The smoke launcher must return quickly. If `--restart` does not return within 15 seconds, stop retrying it. Inspect `.codex-dev/bitcraft-local-smoke.err.log`, check the PID in `.codex-dev/bitcraft-local-smoke.pid`, and report the blocker rather than sitting on repeated server commands.
 
 ### Testing Discipline
 
@@ -104,17 +108,7 @@ If the page is still stale after code changes, rerun the build, rerun `node scri
 - Use the in-app browser for local UI checks after frontend changes when a local server is available.
 - If a page is blank or behaving strangely, inspect console errors before guessing.
 - For bot/admin UI work, check the relevant `/bot` or Admin tab at desktop size and verify there are no obvious spacing, overflow, or blank-page errors.
-- When the Vite dev process is unreliable, build first and run the production-style local server on a known port:
-
-```powershell
-corepack pnpm --filter @workspace/bitcraft-local run build
-$env:SERVE_STATIC = "true"
-$env:LOCAL_API_PORT = "18449"
-$env:ENABLE_SERVER_POLLING = "false"
-$env:BITCRAFT_LOCAL_DATA_DIR = "$PWD\.dev-data"
-node apps/bitcraft-local/server.mjs
-```
-
+- When the Vite dev process is unreliable, use the Local Browser Smoke Server process above. Do not hand-roll a separate `node apps/bitcraft-local/server.mjs` command for UI verification.
 - Then smoke test the target URL, for example `http://127.0.0.1:18449/bot`, in the in-app browser and check console errors.
 
 ## Git and Versioning
@@ -148,7 +142,9 @@ Maintain `CHANGELOG.md` using [Keep a Changelog 1.1.0](https://keepachangelog.co
 
 ### Commit and Push Rules
 
-- For user-visible fixes and features, update `CHANGELOG.md` and bump `apps/bitcraft-local/package.json`.
+- For user-visible fixes and features during an active local iteration, add concise notes under `CHANGELOG.md` `Unreleased` first and do not bump `apps/bitcraft-local/package.json` for every tiny adjustment.
+- When the user asks to push, deploy, or otherwise publish the current batch, move the accumulated `Unreleased` notes into one new version section, bump `apps/bitcraft-local/package.json` once, then commit/push.
+- For urgent production hotfixes or standalone releases, it is still fine to bump immediately when the fix is complete.
 - Use clear commit messages that describe the user-facing change or bug fixed.
 - Push only after the relevant build/tests pass, unless the user explicitly asks for a work-in-progress push.
 - In final updates, state what changed, what was tested, whether it was pushed, and any VPS commands the user needs.
@@ -287,8 +283,11 @@ Common failure modes to watch for:
 
 ## Styling and UI Guidelines
 
-- The new Dashboard page is the visual source of truth for future main-app styling. When redesigning or adding main-app pages, aim for the same "settlement command centre" feel: dark, polished, game-adjacent, data-dense, and premium without becoming decorative or marketing-like.
+- The new Dashboard page is the visual source of truth for future main-app styling. The restyled Members page is the first accepted example of applying that language to an operational table page. When redesigning or adding main-app pages, aim for the same "settlement command centre" feel: dark, polished, game-adjacent, data-dense, and premium without becoming decorative or marketing-like.
 - Do not let older page styles pull new work back toward a flat generic admin panel. If an older page conflicts with the Dashboard style, prefer moving that page toward the Dashboard language.
+- Do not invent new near-match colour palettes for Dashboard-aligned pages. Reuse the Dashboard's actual CSS values first, then make deliberate deviations only when the user asks.
+- Before styling another main-app page to match Dashboard, inspect the existing `.dashboard-*` CSS rules and copy the underlying surface, border, typography, and accent values. Avoid warmer brown/gold-tinted surfaces unless the Dashboard itself uses them in that context.
+- For pages with tables or operational lists, use the Members page as the reference: Dashboard-like topbar, KPI/summary cards, dark elevated table surface, avatar/status rows where useful, and cool muted borders with gold used as a restrained accent.
 
 ### Main App Design System
 
@@ -316,26 +315,28 @@ Use these rules for main-app UI unless the user explicitly asks for a different 
   - Informational values: blue `#56d5ff`.
 - Background colours:
   - Main app background should be very dark with subtle layered depth, not flat black.
-  - Preferred base: `#060a12` to `#090d14`.
+  - Preferred Dashboard base: `linear-gradient(180deg, #03060a 0%, #05070b 46%, #030509 100%)` with restrained `rgba(10,18,28,.24)` and `rgba(240,198,79,.075)` radial accents.
   - Use restrained radial gradients, for example dark blue/black and soft gold glows, to create atmosphere without obvious blobs.
   - Sidebar background should stay darker than content, around `#06070a` to `#080b10`.
 - Card design:
   - Cards should feel like elevated dark navy surfaces above a darker page.
-  - Use subtle vertical gradients, for example `linear-gradient(180deg, #111923, #080d14)`.
-  - Use visible but restrained borders: `1px solid rgba(240, 198, 79, 0.14-0.22)`.
+  - Preferred Dashboard surface: `radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%), linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99))`.
+  - Use visible but restrained cool borders: `1px solid rgba(108,123,145,.24)` for ordinary cards. Reserve gold borders for emphasis/active states.
   - Use hover borders around `rgba(240, 198, 79, 0.28-0.34)` when cards are interactive.
-  - Use soft depth: `0 8px 24px rgba(0, 0, 0, 0.28-0.38)`.
-  - Border radius should usually be `8px-10px` for major dashboard cards, and `6px-8px` for compact controls.
+  - Use soft depth matching Dashboard: `inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2)`.
+  - Border radius should usually be `7px` for Dashboard-matched cards and `6px-8px` for compact controls.
   - Do not put UI cards inside other cards unless the inner card is a repeated item, row, modal, or preview.
 - Card content:
   - KPI cards should have one dominant metric, one clear label, and one short supporting line.
   - Icons should sit in a dark/gold-tinted square or circle with a subtle border when used as KPI anchors.
+  - Section headings inside Dashboard-style cards should use the Dashboard treatment: small uppercase muted text with modest letter spacing and an optional retained gold icon. Avoid reverting to the older large gold `h3` style inside cards.
   - Avoid redundant labels, duplicate badges, or metrics that appear clickable but do nothing.
   - If a button-like element is intentionally static, style it as a pill or label, not a button.
 - Layout:
   - Use Dashboard-style grid rhythm: consistent gaps around `12px-18px` between cards and `20px-28px` inside larger cards.
   - Keep dense operational pages readable on 1920x1080 without unnecessary vertical scroll.
   - Prefer responsive CSS grid with explicit `minmax()` tracks over hard-coded widths.
+  - For page top-right metadata, reuse the Dashboard pattern exactly: `dashboard-top-meta` containing `dashboard-meta-cluster` plus `dashboard-claim-link` or `dashboard-settlement-pill`. Keep the divider on the metadata cluster, use `gap: 11px` between tier badges and labels, and avoid page-specific one-off spacing that jams badges into text.
   - Match card heights in paired sections when users visually compare them, such as focus/coverage and leaders/nearby lists.
   - Avoid large empty rectangles. Empty states should include an icon or short explanation and look intentional.
   - Avoid horizontal overflow at all viewport widths.
