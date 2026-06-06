@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.3-beta.1] - 2026-06-06
+
+### Added
+
+- Added browser-local theme import and export controls so users can copy, download, share, and restore theme JSON.
+- Added a saved Custom theme preset so users can switch between built-in presets and their own saved theme.
+
+### Changed
+
+- Improved the browser-local theme editor with clearer labels, a collapsible advanced editor, a closer app preview, and dedicated page-gradient controls.
+- Expanded the browser-local theme editor with card surface, card heading, metric value, icon background, active highlight, active border, and hover border controls.
+- Changed the theme editor entry point so the Custom preset opens the advanced theme controls instead of using a separate Edit Theme button.
+
+### Fixed
+
+- Fixed theme controls so the sidebar colour and advanced colour inputs update the actual rendered app surfaces.
+- Fixed Dashboard and shared KPI cards so theme changes affect card gradients, card titles, metric values, icons, active states, and hover borders.
+- Fixed browser-local themes so shared main-app cards, filters, tables, controls, and page panels outside Dashboard also consume the selected theme colours.
+
 ## [0.9.2-beta.1] - 2026-06-06
 
 ### Added
