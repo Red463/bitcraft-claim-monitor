@@ -1423,7 +1423,7 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
               <button key={player.entityId} onClick={() => onNavigate("members")}>
                 <span className="dashboard-avatar">{String(player.displayName ?? "?").slice(0, 1).toUpperCase()}<i className="online-dot is-online" /></span>
                 <span className="dashboard-member-copy">
-                  <strong>{player.displayName}</strong>
+                  <strong><TrackedOwnerName name={player.displayName} claim={claim} /></strong>
                   <small>{player.regionName ?? "Online"}</small>
                 </span>
                 <span className="dashboard-member-session">
@@ -1654,7 +1654,7 @@ function Overview({ data, activity, snapshots, onNavigate, logo, watches, onTogg
               <TierBadge tier={claim.tier} />
               <span>{claim.regionName ?? "Unknown region"}</span>
               <span className="metadata-divider" />
-              <span>Owner {claim.ownerPlayerUsername ?? "Unknown"}</span>
+              <span>Owner <TrackedOwnerName name={claim.ownerPlayerUsername} claim={claim} /></span>
               {claim.empireName ? <><span className="metadata-divider" /><span>{claim.empireName}</span></> : null}
             </p>
           </div>
@@ -1743,7 +1743,7 @@ function Overview({ data, activity, snapshots, onNavigate, logo, watches, onTogg
                   {String(player.displayName ?? "?").slice(0, 1).toUpperCase()}
                   <i className="online-dot is-online" />
                 </span>
-                <strong>{player.displayName}</strong>
+                  <strong><TrackedOwnerName name={player.displayName} claim={claim} /></strong>
                 <small>{player.sessionSeconds ? `Playing ${formatDuration(player.sessionSeconds)}` : "Online"}{player.regionName ? ` - ${player.regionName}` : ""}</small>
               </button>
             )) : <p className="overview-note">No members are currently online.</p>}
@@ -2105,7 +2105,7 @@ function Members({ data, selectedMemberId, onSelectMember }: { data: ReturnType<
             ["Username", (m) => (
               <span className="member-name-cell">
                 <span className="member-row-avatar">{String(m.username ?? "?").slice(0, 1).toUpperCase()}<i className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} /></span>
-                <span className="member-row-copy"><strong>{m.username}</strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
+                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} /></strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
               </span>
             )],
             ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
@@ -2477,6 +2477,28 @@ function getOwnerName(row: AnyRecord): string {
   return String(row.ownerPlayerUsername ?? row.ownerUsername ?? row.ownerName ?? row.owner ?? row.empireName ?? "-");
 }
 
+function getTrackedOwnerName(claim: AnyRecord): string {
+  return String(claim.ownerPlayerUsername ?? claim.ownerUsername ?? claim.ownerName ?? claim.owner ?? "").trim();
+}
+
+function isTrackedOwnerName(name: unknown, claim: AnyRecord): boolean {
+  const label = String(name ?? "").trim();
+  const owner = getTrackedOwnerName(claim);
+  return Boolean(label && owner && label.toLowerCase() === owner.toLowerCase());
+}
+
+function TrackedOwnerName({ name, claim }: { name: unknown; claim: AnyRecord }) {
+  const label = String(name ?? "").trim();
+  if (!label || label === "-") return <span className="muted-line">Unknown</span>;
+  const isOwner = isTrackedOwnerName(label, claim);
+  return (
+    <span className={isOwner ? "tracked-owner-name" : undefined}>
+      {label}
+      {isOwner ? <Crown size={13} aria-label="Tracked settlement owner" /> : null}
+    </span>
+  );
+}
+
 function Segmented({ options, value, onChange, label }: { options: string[]; value: string; onChange: (value: string) => void; label?: string }) {
   return (
     <div className="segmented" aria-label={label}>
@@ -2764,14 +2786,33 @@ function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
             <article className="project-card" key={project.entityId}>
               <header>
                 <div><Hammer size={15} /><strong>{project.name}</strong><small>{remainingMaterials ? `${formatNumber(remainingMaterials)} materials remaining` : "Materials complete"}</small></div>
-                <span>{pct}%</span>
+                <span className="project-progress-badge">{pct}%</span>
               </header>
-              <div className="progress"><div style={{ width: `${pct}%` }} /></div>
-              <div className="material-grid">
+              <div className="project-progress-row">
+                <div className="progress"><div style={{ width: `${pct}%` }} /></div>
+                <small>{formatNumber(progress)} / {formatNumber(total)} effort</small>
+              </div>
+              <div className="construction-material-grid">
                 {project.materials.map((mat: AnyRecord, index: number) => {
-                  const projectRemaining = Math.max(0, mat.required - mat.contributed);
-                  const uncovered = Math.max(0, projectRemaining - mat.stored);
-                  return <div key={`${mat.type}-${mat.itemId}-${index}`}><strong>{mat.name}</strong><span>{formatNumber(mat.contributed)} / {formatNumber(mat.required)} added{projectRemaining ? ` - ${formatNumber(mat.stored)} in storage` : ""}{uncovered ? ` - need ${formatNumber(uncovered)}` : ""}</span></div>;
+                  const required = toNumber(mat.required);
+                  const contributed = toNumber(mat.contributed);
+                  const stored = toNumber(mat.stored);
+                  const projectRemaining = Math.max(0, required - contributed);
+                  const uncovered = Math.max(0, projectRemaining - stored);
+                  const matPct = required ? Math.min(100, Math.round((contributed / required) * 100)) : 100;
+                  return (
+                    <div className={`construction-material-card ${uncovered ? "needs-material" : projectRemaining ? "available-material" : "complete"}`} key={`${mat.type}-${mat.itemId}-${index}`}>
+                      <div>
+                        <strong>{mat.name}</strong>
+                        <span>{formatNumber(contributed)} / {formatNumber(required)} added</span>
+                      </div>
+                      <div className="progress"><div style={{ width: `${matPct}%` }} /></div>
+                      <dl>
+                        <div><dt>Storage</dt><dd>{formatNumber(stored)}</dd></div>
+                        <div><dt>Need</dt><dd>{formatNumber(uncovered)}</dd></div>
+                      </dl>
+                    </div>
+                  );
                 })}
               </div>
             </article>
@@ -2995,21 +3036,24 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       <section className="production-command-panel market-command-panel">
         <div className="market-command-header">
           <span className="production-command-title"><CircleDollarSign size={15} /> Market tools</span>
-          {view !== "pricing" ? (
-            <label className="market-member-field">
-              <span>Member</span>
+          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : "Browse settlement market data by view and member."}</span>
+        </div>
+        <div className="market-tool-row">
+          <div className="tabs primary-tabs market-tabs">
+            <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
+            <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
+            <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
+          </div>
+          <label className={`market-member-field ${view === "pricing" ? "is-placeholder" : ""}`}>
+            <span>Member</span>
+            {view !== "pricing" ? (
               <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
                 <option>All</option>
                 {memberOptions.map((name) => <option key={name}>{name}</option>)}
               </select>
-            </label>
-          ) : <span className="market-command-note">Use completed trade history to estimate listing prices.</span>}
+            ) : <span className="market-member-placeholder">All settlement history</span>}
+          </label>
         </div>
-      <div className="tabs primary-tabs market-tabs">
-        <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
-        <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
-        <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
-      </div>
       </section>
       {view === "pricing" ? (
         <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} watches={watches} onToggleWatch={onToggleWatch} />
@@ -3106,7 +3150,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
         ["Price", r => `${formatNumber(r.price)}g`],
         ["Tier", r => (r.itemTier ?? r.tier) ? <TierBadge tier={r.itemTier ?? r.tier} /> : "-"],
         ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <RarityBadge rarity={r.itemRarityStr ?? r.rarity} /> : "-"],
-        ["Owner", r => r.ownerUsername ?? "-"],
+        ["Owner", r => <TrackedOwnerName name={r.ownerUsername ?? "-"} claim={data.claim} />],
         ["Listed", r => listingListedAt(r) ? dateLabel(listingListedAt(r)) : "-"],
         ["Live", r => liveDaysSince(listingListedAt(r))],
       ]} />
@@ -3335,7 +3379,7 @@ function formatMarketDay(value: string): string {
   return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName, defaultRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
   const [regionId, setRegionId] = usePersistedState("public-crafts.region", defaultRegionId || monitoredRegionId || "All");
@@ -3427,7 +3471,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, defaultRegionId, o
     ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
     ["Effort to Craft", "remaining", (job) => formatNumber(job.remaining)],
     ["XP Available", "availableXp", (job) => formatNumber(job.availableXp)],
-    ["Owner", "owner", (job) => job.ownerUsername ?? "-"],
+    ["Owner", "owner", (job) => <TrackedOwnerName name={job.ownerUsername ?? "-"} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
   ];
   return (
     <section className="public-craft-finder">
@@ -3699,12 +3743,12 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           <div className="production-crafter-line">
             <span>Current crafters</span>
             <div className="crafter-pills">
-              {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={12} /> <strong>{name}</strong> {count}</span>)}
+              {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={12} /> <strong><TrackedOwnerName name={name} claim={data.claim} /></strong> {count}</span>)}
             </div>
           </div>
         ) : null}
       </div>
-      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong>{selectedMember.userName ?? selectedMember.username}</strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
+      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong><TrackedOwnerName name={selectedMember.userName ?? selectedMember.username} claim={data.claim} /></strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
@@ -3722,7 +3766,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span>{job.ownerUsername ?? "Unknown"}</span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} /></span></div>
                 <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
@@ -3741,7 +3785,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
                   <div className="contributors">
                     <small>Contributors</small>
                     {contributors.slice(0, 3).map((person) => (
-                      <span key={person.contributorEntityId}><strong>{person.contributorUsername ?? "Unknown"}</strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
+                      <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
                     ))}
                   </div>
                 ) : <small>No contributions recorded by the API.</small>}
@@ -3804,7 +3848,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const columns: Array<[string, string, (row: AnyRecord, index: number) => React.ReactNode]> = [
     ["#", "rank", (_r, i) => i + 1],
     ["Claim", "name", (r) => <span className={String(r.entityId) === String(data.claim.entityId) ? "mine-text" : ""}>{String(r.entityId) === String(data.claim.entityId) ? <Crown size={13} /> : null}{r.name}</span>],
-    ["Owner", "owner", (r) => getOwnerName(r)],
+    ["Owner", "owner", (r) => <TrackedOwnerName name={getOwnerName(r)} claim={data.claim} />],
     ["Tier", "tier", (r) => <TierBadge tier={r.tier} />],
     ["Supplies", "supplies", (r) => formatNumber(r.supplies)],
     ["Treasury", "treasury", (r) => `${formatNumber(r.treasury)}g`],
@@ -3860,7 +3904,7 @@ function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
           <section className="nearby-panel">
             <h3><MapPin size={17} /> Close Settlements</h3>
             <p>These settlements are geographically closest to our monitored settlement.</p>
-            {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span>{getOwnerName(row)} <TierBadge tier={row.tier} /></span><small>{formatNumber(row.supplies)} supplies</small></div>)}
+            {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span><TrackedOwnerName name={getOwnerName(row)} claim={data.claim} /> <TierBadge tier={row.tier} /></span><small>{formatNumber(row.supplies)} supplies</small></div>)}
           </section>
         ) : null}
       </div>
@@ -6500,7 +6544,7 @@ function DashboardApp() {
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
-    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
+    publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.7-beta.1] - 2026-06-06
+
+### Changed
+
+- Improved Production controls spacing so member, sorting, and crafter filters align cleanly.
+- Redesigned Construction project cards to make required materials, storage, and missing quantities easier to scan.
+- Standardised Market tools layout so Live Listings, Analytics, and Price Finder keep a consistent height.
+- Improved Admin status card spacing to better match the updated dashboard styling.
+
+### Added
+
+- Added crown styling beside the monitored settlement owner's member name where that user appears in the app.
+
+### Fixed
+
+- Prevented crown styling from being applied to owners of other settlements in regional views.
+
 ## [0.9.6-beta.1] - 2026-06-06
 
 ### Fixed

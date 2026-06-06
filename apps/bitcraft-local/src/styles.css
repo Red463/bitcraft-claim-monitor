@@ -1165,6 +1165,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .lvl3 { color: #f5cd67; }
 .lvl4 { color: #ffe9a7; font-weight: 700; }
 .legend { color: var(--muted); font-size: var(--font-caption); line-height: 1.4; margin: 0; }
+.tracked-owner-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: inherit; font: inherit; vertical-align: middle; }
+.tracked-owner-name svg { flex: 0 0 auto; color: var(--active-color, #f0c64f); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--active-color, #f0c64f) 28%, transparent)); }
 .tier-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 31px; height: 21px; border-radius: 5px; padding: 0 7px; font: 700 11px "JetBrains Mono", monospace; line-height: 1; vertical-align: middle; color: var(--tier-text); background: var(--tier-bg); border: 1px solid var(--tier-border); box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
 .tier-badge.tier-1, .tier-framed.tier-1 { --tier-text: #c9d1dd; --tier-bg: rgba(131,142,158,.16); --tier-border: rgba(131,142,158,.5); }
 .tier-badge.tier-2, .tier-framed.tier-2 { --tier-text: #ed9561; --tier-bg: rgba(190,99,39,.16); --tier-border: rgba(190,99,39,.58); }
@@ -1290,12 +1292,14 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .production-command-panel {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  padding: 14px;
 }
 .production-command-main {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(210px, 260px) minmax(210px, 260px) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 .production-command-title,
@@ -1305,7 +1309,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
-  min-width: 160px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .055em;
@@ -1315,22 +1319,23 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   color: #f0c64f;
 }
 .production-command-main .inline-field {
-  flex: 1 1 210px;
+  flex: 0 0 auto;
   min-width: 170px;
 }
 .production-command-main .segmented {
   flex: 0 0 auto;
+  justify-content: flex-end;
 }
 .production-crafter-line {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr);
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding-top: 10px;
+  padding-top: 12px;
   border-top: 1px solid rgba(154,168,190,.12);
 }
 .production-crafter-line > span {
-  min-width: 160px;
   color: #aab5c4;
 }
 .production-page .crafter-pills {
@@ -1715,7 +1720,10 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   gap: 10px;
 }
 .construction-page .project-list {
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 .construction-page .project-card {
   border-color: rgba(108,123,145,.24);
@@ -1725,12 +1733,16 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
   padding: 16px;
+  min-height: 236px;
+  align-content: start;
 }
 .construction-page .project-card header {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(154,168,190,.12);
 }
 .construction-page .project-card header div {
   min-width: 0;
@@ -1745,18 +1757,18 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   height: 15px;
 }
 .construction-page .project-card header strong {
-  color: #b8c2cf;
-  font-size: 12px;
+  color: #fff;
+  font-size: 16px;
   font-weight: 800;
-  letter-spacing: .055em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .construction-page .project-card header small {
   grid-column: 2;
   color: #8f9aaa;
   font-size: 12px;
 }
-.construction-page .project-card header span {
+.construction-page .project-card header .project-progress-badge {
   margin-left: 0;
   min-width: 52px;
   color: #f0c64f;
@@ -1773,24 +1785,71 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   background: linear-gradient(90deg, #f0c64f, #63eba5);
   box-shadow: 0 0 12px rgba(240,198,79,.18);
 }
-.construction-page .material-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+.project-progress-row { display: grid; gap: 6px; }
+.project-progress-row small { color: #8f9aaa; font-size: 12px; }
+.construction-material-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
 }
-.construction-page .material-grid div {
-  border-color: rgba(154,168,190,.16);
-  border-radius: 7px;
+.construction-material-card {
+  border: 1px solid rgba(154,168,190,.16);
+  border-radius: 8px;
   background: rgba(5,8,12,.78);
   padding: 10px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
-.construction-page .material-grid strong {
+.construction-material-card.needs-material {
+  border-color: rgba(240,198,79,.32);
+  background: linear-gradient(180deg, rgba(240,198,79,.07), rgba(5,8,12,.78));
+}
+.construction-material-card.available-material {
+  border-color: rgba(86,213,255,.28);
+}
+.construction-material-card.complete {
+  border-color: rgba(99,235,165,.32);
+}
+.construction-material-card > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.construction-material-card strong {
   color: #fff;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.construction-page .material-grid span {
-  color: #a6afbd;
-  font-size: 11px;
+.construction-material-card span {
+  color: #aab5c4;
+  font-size: 12px;
   line-height: 1.35;
+}
+.construction-material-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.construction-material-card dl div {
+  display: grid;
+  gap: 2px;
+}
+.construction-material-card dt {
+  color: #7f8998;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.construction-material-card dd {
+  margin: 0;
+  color: #f7f8fb;
+  font-size: 13px;
+  font-weight: 800;
 }
 .construction-page .empty-state {
   border-color: rgba(108,123,145,.24);
@@ -2368,9 +2427,16 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   border-bottom: 1px solid rgba(154,168,190,.12);
 }
 .market-command-note { color: #a6afbd; }
+.market-tool-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: end;
+  gap: 14px;
+  padding-top: 10px;
+}
 .market-member-field {
   display: inline-grid;
-  grid-template-columns: auto minmax(170px, 240px);
+  grid-template-columns: auto minmax(170px, 1fr);
   align-items: center;
   gap: 9px;
   color: #aab5c4;
@@ -2378,6 +2444,24 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   font-weight: 800;
   letter-spacing: .075em;
   text-transform: uppercase;
+}
+.market-member-field.is-placeholder {
+  opacity: .82;
+}
+.market-member-placeholder {
+  min-height: var(--control-height);
+  border: 1px solid rgba(154,168,190,.18);
+  border-radius: var(--radius-control);
+  background: rgba(5,8,12,.5);
+  color: #8793a5;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .market-page .select-control,
 .market-page .field input,
@@ -2389,7 +2473,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .market-tabs {
   border-bottom: 0;
   gap: 7px;
-  padding-top: 10px;
+  padding-top: 0;
 }
 .market-tabs button,
 .market-order-tabs button {
@@ -3432,7 +3516,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
-  padding: 16px;
+  padding: 18px;
 }
 .admin-page .form-card h3,
 .admin-page .form-card summary {
@@ -3525,6 +3609,10 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .admin-page .theme-grid {
   gap: 10px;
 }
+.admin-page .status-detail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .admin-page .info-row,
 .admin-page .diagnostics div,
 .admin-page .toggle-line,
@@ -3549,6 +3637,25 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .admin-page .audit-list strong,
 .admin-page .backup-list strong {
   color: #fff;
+  overflow-wrap: anywhere;
+}
+.admin-page .status-detail .info-row {
+  min-height: 76px;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 12px;
+}
+.admin-page .status-detail .info-row span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.admin-page .status-detail .info-row strong {
+  color: #d7e0ec;
+  font-size: 14px;
+  line-height: 1.25;
 }
 .linked-accounts-card { align-content: start; }
 .linked-account-list { display: grid; gap: 9px; }
@@ -4427,10 +4534,14 @@ body .market-page tbody tr:hover td {
   .market-analytics-metrics,
   .market-page .price-finder .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .production-command-main,
-  .production-crafter-line { align-items: flex-start; flex-direction: column; }
+  .production-crafter-line,
+  .market-tool-row,
+  .admin-page .status-detail { grid-template-columns: 1fr; align-items: stretch; }
   .production-command-title,
   .production-crafter-line > span { min-width: 0; }
   .production-page .crafter-pills { justify-content: flex-start; }
+  .construction-page .project-list,
+  .construction-material-grid { grid-template-columns: 1fr; }
   .inventory-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-member-field { grid-template-columns: 1fr; }
