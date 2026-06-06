@@ -1116,6 +1116,23 @@ const upstreamCache = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
 
+const BODY_LIMITS = {
+  auth: 8 * 1024,
+  analytics: 8 * 1024,
+  json: 64 * 1024,
+  settings: 256 * 1024,
+  branding: 2 * 1024 * 1024,
+  snapshot: 1024 * 1024,
+  discordInteraction: 256 * 1024,
+};
+
+class RequestBodyTooLargeError extends Error {
+  constructor(limit) {
+    super(`Request body is too large; maximum size is ${limit} bytes`);
+    this.statusCode = 413;
+  }
+}
+
 function requestAddress(req) {
   return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
 }
@@ -3595,12 +3612,12 @@ function csvValue(value) {
 }
 
 function sendText(res, status, text, contentType, headers = {}) {
-  res.writeHead(status, { "content-type": contentType, "cache-control": "no-store", ...headers });
+  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-store", ...headers }));
   res.end(text);
 }
 
 function sendBinary(res, status, content, contentType, headers = {}) {
-  res.writeHead(status, { "content-type": contentType, "cache-control": "no-cache", ...headers });
+  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-cache", ...headers }));
   res.end(content);
 }
 
@@ -3665,19 +3682,19 @@ function createBackup() {
   return { name, size: info.size, createdAt: info.mtime.toISOString() };
 }
 
-async function readRawBody(req, limit = 1500000) {
+async function readRawBody(req, limit = BODY_LIMITS.json) {
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > limit) throw new Error("Request body is too large");
+    if (total > limit) throw new RequestBodyTooLargeError(limit);
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
 }
 
-async function readJson(req) {
-  return JSON.parse((await readRawBody(req)).toString("utf8") || "{}");
+async function readJson(req, limit = BODY_LIMITS.json) {
+  return JSON.parse((await readRawBody(req, limit)).toString("utf8") || "{}");
 }
 
 const discordCommands = [
@@ -3880,7 +3897,7 @@ function discordEmbedResponse(embed, options = {}) {
 }
 
 async function handleDiscordInteraction(req) {
-  const rawBody = await readRawBody(req, 1000000);
+  const rawBody = await readRawBody(req, BODY_LIMITS.discordInteraction);
   const settings = getDiscordSettingsRaw();
   if (!settings.publicKey || !verifyDiscordInteraction(req, rawBody, settings.publicKey)) {
     return { status: 401, body: { error: "Invalid Discord request signature" } };
@@ -4377,7 +4394,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "PUT" && url.pathname === "/api/local/auth/character") {
       const user = requireAppUser(req, res);
       if (!user) return;
-      const body = await readJson(req);
+      const body = await readJson(req, BODY_LIMITS.auth);
       const characterPlayerId = String(body.characterPlayerId ?? "").trim();
       const characterName = String(body.characterName ?? "").trim();
       if (!characterPlayerId && !characterName) {
@@ -4394,7 +4411,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "PUT" && url.pathname === "/api/local/auth/settings") {
       const user = requireAppUser(req, res);
       if (!user) return;
-      const body = await readJson(req);
+      const body = await readJson(req, BODY_LIMITS.settings);
       const raw = JSON.stringify(body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? body.settings : {});
       if (raw.length > 50000) return send(res, 413, { error: "Saved settings are too large" });
       statements.updateUserSettings.run(raw, user.id);
@@ -4407,10 +4424,10 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/local/analytics/event") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin analytics event rejected" });
       try {
-        return send(res, 201, recordAnalyticsEvent(await readJson(req), req));
+        return send(res, 201, recordAnalyticsEvent(await readJson(req, BODY_LIMITS.analytics), req));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return send(res, message === "Analytics consent is required" ? 403 : 400, { error: message });
+        return send(res, error?.statusCode ?? (message === "Analytics consent is required" ? 403 : 400), { error: message });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
@@ -4432,7 +4449,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
-      const body = await readJson(req);
+      const body = await readJson(req, BODY_LIMITS.auth);
       if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
       if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
       const username = String(body.username ?? "admin").trim();
@@ -4448,7 +4465,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
-      const body = await readJson(req);
+      const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
       const attemptKey = loginAttemptKey(req, username);
       if (loginBlocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
@@ -4662,7 +4679,7 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {
-        const body = await readJson(req);
+        const body = await readJson(req, BODY_LIMITS.settings);
         const nextClaimId = String(body.claimId ?? "").trim();
         const nextSyncUrl = String(body.syncUrl ?? defaultSyncUrl).trim();
         if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
@@ -4706,7 +4723,7 @@ const server = createServer(async (req, res) => {
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
-        const body = await readJson(req);
+        const body = await readJson(req, BODY_LIMITS.branding);
         try {
           const branding = await saveBrandingAsset(String(body.type ?? ""), String(body.dataUrl ?? ""));
           audit(user, "branding.upload", { type: body.type });
@@ -4851,7 +4868,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
       if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
-      return send(res, 200, await enqueueSnapshot(await readJson(req)));
+      return send(res, 200, await enqueueSnapshot(await readJson(req, BODY_LIMITS.snapshot)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
@@ -4899,7 +4916,7 @@ const server = createServer(async (req, res) => {
         const user = requireAdmin(req, res);
         if (!user || !requireAdminMutation(req, res, user)) return;
       }
-      return send(res, 200, resolveMarketEvent(await readJson(req)));
+      return send(res, 200, resolveMarketEvent(await readJson(req, BODY_LIMITS.json)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
       const claimId = url.searchParams.get("claimId") ?? "";
@@ -4911,7 +4928,8 @@ const server = createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
-    send(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    const status = Number(error?.statusCode) || 500;
+    send(res, status, { error: error instanceof Error ? error.message : String(error) });
   }
 });
 

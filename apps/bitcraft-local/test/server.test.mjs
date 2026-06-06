@@ -178,6 +178,12 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "page_duration", page: "production", durationSeconds: 90 }),
   });
   assert.equal(analyticsDuration.status, 201);
+  const oversizedAnalytics = await fetch(`${origin}/api/local/analytics/event`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin, cookie: analyticsCookie },
+    body: JSON.stringify({ sessionId: "session-identifier-0001", eventName: "page_view", page: "production", filler: "x".repeat(9000) }),
+  });
+  assert.equal(oversizedAnalytics.status, 413);
   const analyticsDashboard = await fetch(`${origin}/api/local/admin/analytics?days=30`, {
     method: "GET",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
