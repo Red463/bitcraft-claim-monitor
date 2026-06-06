@@ -4500,6 +4500,32 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
       const claimId = url.searchParams.get("claimId") ?? "";
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 96), 2), 1000);
+      const daily = url.searchParams.get("daily") === "1";
+      if (daily) {
+        const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? 7), 2), 30);
+        const since = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+        since.setHours(0, 0, 0, 0);
+        const rows = db.prepare(`
+          SELECT s.id, s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count, s.buildings_count, s.market_count
+          FROM snapshots s
+          JOIN (
+            SELECT substr(captured_at, 1, 10) AS day_key, MAX(captured_at) AS captured_at
+            FROM snapshots
+            WHERE claim_id = ? AND captured_at >= ?
+            GROUP BY substr(captured_at, 1, 10)
+          ) latest
+            ON substr(s.captured_at, 1, 10) = latest.day_key
+           AND s.captured_at = latest.captured_at
+          WHERE s.claim_id = ?
+          ORDER BY s.captured_at ASC, s.id ASC
+        `).all(claimId, since.toISOString(), claimId);
+        const snapshotsByDay = new Map();
+        for (const row of rows) {
+          const dayKey = String(row.captured_at ?? "").slice(0, 10);
+          if (dayKey) snapshotsByDay.set(dayKey, row);
+        }
+        return send(res, 200, { snapshots: Array.from(snapshotsByDay.values()).slice(-days) });
+      }
       const snapshots = db.prepare(`
         SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
         FROM snapshots

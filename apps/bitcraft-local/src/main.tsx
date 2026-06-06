@@ -926,7 +926,7 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
         const [marketRes, activityRes, snapshotsRes] = await Promise.all([
           fetch(`${LOCAL_API}/market/history?claimId=${claimId}&limit=120`, { signal: controller.signal }),
           fetch(`${LOCAL_API}/activity?claimId=${claimId}&limit=2000`, { signal: controller.signal }),
-          fetch(`${LOCAL_API}/snapshots?claimId=${claimId}&limit=96`, { signal: controller.signal }),
+          fetch(`${LOCAL_API}/snapshots?claimId=${claimId}&daily=1&days=7&limit=96`, { signal: controller.signal }),
         ]);
         if (!marketRes.ok) throw new Error(`market history HTTP ${marketRes.status}`);
         if (!activityRes.ok) throw new Error(`activity history HTTP ${activityRes.status}`);
@@ -1383,7 +1383,7 @@ function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; v
     .filter((point) => point.ms > 0)
     .sort((a, b) => a.ms - b.ms);
   if (datedPoints.length < 2) {
-    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Trend appears after local snapshots are recorded.</span></div>;
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Daily trend appears after snapshots exist for at least two days.</span></div>;
   }
   const width = 560;
   const height = 230;
@@ -1396,23 +1396,35 @@ function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; v
   start.setHours(0, 0, 0, 0);
   const startMs = start.getTime();
   const endMs = end.getTime();
-  const chartPoints = datedPoints.filter((point) => point.ms >= startMs && point.ms <= endMs);
+  const dailyPoints = new Map<number, { at: string; value: number; ms: number; dayMs: number }>();
+  for (const point of datedPoints) {
+    if (point.ms < startMs || point.ms > endMs) continue;
+    const day = new Date(point.ms);
+    day.setHours(12, 0, 0, 0);
+    const dayMs = day.getTime();
+    const existing = dailyPoints.get(dayMs);
+    if (!existing || point.ms >= existing.ms) dailyPoints.set(dayMs, { ...point, dayMs });
+  }
+  const chartPoints = [...dailyPoints.values()].sort((a, b) => a.dayMs - b.dayMs);
   if (chartPoints.length < 2) {
-    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Trend appears after local snapshots are recorded.</span></div>;
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Daily trend appears after snapshots exist for at least two days.</span></div>;
   }
   const values = chartPoints.map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
+  const isFlat = max === min;
   const range = Math.max(max - min, 1);
+  const xForDay = (dayMsValue: number) => pad + ((dayMsValue - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
+  const yForValue = (value: number) => isFlat ? height / 2 : height - pad - ((value - min) / range) * (height - pad * 2);
   const path = chartPoints.map((point, index) => {
-    const x = pad + ((point.ms - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
-    const y = height - pad - ((point.value - min) / range) * (height - pad * 2);
+    const x = xForDay(point.dayMs);
+    const y = yForValue(point.value);
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const areaPath = `${path} L${width - pad},${height - pad} L${pad},${height - pad} Z`;
   const latest = chartPoints[chartPoints.length - 1];
-  const latestX = pad + ((latest.ms - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
-  const latestY = height - pad - ((latest.value - min) / range) * (height - pad * 2);
+  const latestX = xForDay(latest.dayMs);
+  const latestY = yForValue(latest.value);
   const axisDays = Array.from({ length: 7 }, (_, index) => new Date(startMs + index * dayMs));
   return (
     <div className="dashboard-chart">
@@ -1424,7 +1436,7 @@ function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; v
           </linearGradient>
         </defs>
         {[0.25, 0.5, 0.75].map((y) => <line key={y} x1="0" x2={width} y1={height * y} y2={height * y} className="dashboard-chart-grid" />)}
-        <path d={areaPath} className="dashboard-chart-area" />
+        {chartPoints.length >= 3 ? <path d={areaPath} className="dashboard-chart-area" /> : null}
         <path d={path} className="dashboard-chart-line" />
         <circle cx={latestX} cy={latestY} r="5" className="dashboard-chart-dot" />
       </svg>

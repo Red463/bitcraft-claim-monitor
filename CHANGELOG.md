@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.1-beta.1] - 2026-06-06
+
+### Changed
+
+- Restyled the main app sidebar to match the new Dashboard visual language.
+- Standardised main app page backgrounds on the new black-to-charcoal gradient.
+- Adjusted sidebar brand sizing so the current settlement name fits without removing truncation for longer names.
+- Made the main app background gradient consistent across short and long pages by fixing the lighter section to the top of the viewport.
+
+### Fixed
+
+- Fixed the Dashboard treasury chart so it uses daily snapshots and no longer draws vertical spike charts from clustered refresh samples.
+
 ## [0.9.0-beta.1] - 2026-06-06
 
 ### Changed
