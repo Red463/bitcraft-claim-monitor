@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.6-beta.1] - 2026-06-06
+
+### Fixed
+
+- Fixed Discord character-link selection so member names are shown and submitted instead of raw player IDs.
+
 ## [0.9.5-beta.1] - 2026-06-06
 
 ### Added

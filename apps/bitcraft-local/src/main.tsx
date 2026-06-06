@@ -4728,6 +4728,7 @@ function UserSettingsDialog({
     }
   };
   const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
+  const memberDisplayName = (member: AnyRecord | null | undefined) => String(member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? member?.playerEntityId ?? "Unknown member");
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
   const statusLabel = auth.user?.characterStatus === "approved"
     ? "Approved"
@@ -4788,7 +4789,7 @@ function UserSettingsDialog({
                     <select value={selectedCharacterId} onChange={(event) => setSelectedCharacterId(event.target.value)}>
                       <option value="">Select your character</option>
                       {auth.user.characterPlayerId && !members.some((member) => String(member.playerEntityId) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
-                      {members.map((member) => <option key={member.playerEntityId ?? member.username} value={String(member.playerEntityId ?? "")}>{member.username ?? member.name ?? member.playerEntityId}</option>)}
+                      {members.map((member) => <option key={member.playerEntityId ?? memberDisplayName(member)} value={String(member.playerEntityId ?? "")}>{memberDisplayName(member)}</option>)}
                     </select>
                   </label>
                   <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>
@@ -6269,7 +6270,7 @@ function DashboardApp() {
     setUserAuth(body);
   }, []);
   const linkDiscordCharacter = React.useCallback(async (member: AnyRecord | null) => {
-    const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.username ?? member.name ?? "") } : {};
+    const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.userName ?? member.username ?? member.playerUsername ?? member.name ?? "") } : {};
     const response = await fetch(`${LOCAL_API}/auth/character`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save character link request");
