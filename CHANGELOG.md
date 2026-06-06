@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.2-beta.1] - 2026-06-06
+
+### Added
+
+- Added a browser-local theme editor to User Settings with presets, grouped colour controls, live preview, and reset-to-default.
+
+### Removed
+
+- Removed the Admin Theme tab so theme changes are user-specific rather than server-wide.
+
 ## [0.9.1-beta.1] - 2026-06-06
 
 ### Changed

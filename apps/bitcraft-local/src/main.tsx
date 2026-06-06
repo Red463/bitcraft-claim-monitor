@@ -37,7 +37,6 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
-  Palette,
   Pin,
   PinOff,
   Plus,
@@ -182,6 +181,7 @@ const DEFAULT_THEME = {
   good: "#4ee28a",
   danger: "#ef6461",
 };
+type ThemeSettings = typeof DEFAULT_THEME;
 
 const DEFAULT_CRAFT_CHANNELS: Record<string, string> = {
   forestry: "1509932116077711411",
@@ -504,6 +504,22 @@ const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
   ["gold", "Accent", "--gold"],
   ["good", "Positive", "--good"],
   ["danger", "Danger", "--danger"],
+];
+
+const THEME_PRESETS: Array<{ id: string; label: string; description: string; theme: ThemeSettings }> = [
+  { id: "default", label: "Default", description: "Original Timbersteel gold on dark steel.", theme: DEFAULT_THEME },
+  { id: "command", label: "Command", description: "Darker dashboard-style black and charcoal.", theme: { ...DEFAULT_THEME, bg: "#030303", sidebar: "#05070b", panel: "#111923", panel2: "#070c12", border: "#273140", muted: "#aab3c2", text: "#f7f8fb" } },
+  { id: "steel", label: "Steel", description: "Cooler blue-grey surfaces with blue accent.", theme: { ...DEFAULT_THEME, bg: "#071018", sidebar: "#050a10", panel: "#121f2b", panel2: "#0b141d", border: "#2e4356", gold: "#65b7fa", good: "#63eba5" } },
+  { id: "ember", label: "Ember", description: "Warm copper-gold for a forge feel.", theme: { ...DEFAULT_THEME, bg: "#110b08", sidebar: "#080604", panel: "#211714", panel2: "#160f0c", border: "#493329", gold: "#f5aa45", good: "#63eba5", danger: "#ff6b65" } },
+  { id: "forest", label: "Forest", description: "Green accent for resource and gathering focus.", theme: { ...DEFAULT_THEME, bg: "#07100c", sidebar: "#040806", panel: "#101c16", panel2: "#0a120e", border: "#284238", gold: "#63eba5", good: "#78f0a2", danger: "#ff6b65" } },
+  { id: "violet", label: "Violet", description: "Purple arcane accent for research-heavy setups.", theme: { ...DEFAULT_THEME, bg: "#090812", sidebar: "#05050b", panel: "#151322", panel2: "#0d0b18", border: "#39304f", gold: "#b783ff", good: "#63eba5", danger: "#ff6b88" } },
+  { id: "contrast", label: "High Contrast", description: "Brighter text and stronger borders.", theme: { ...DEFAULT_THEME, bg: "#020304", sidebar: "#020304", panel: "#111820", panel2: "#070b10", border: "#536072", muted: "#c1cad8", text: "#ffffff", gold: "#ffd84d", good: "#68ff9a", danger: "#ff5b5b" } },
+];
+
+const THEME_FIELD_GROUPS: Array<{ title: string; keys: Array<keyof ThemeSettings> }> = [
+  { title: "Surfaces", keys: ["bg", "sidebar", "panel", "panel2", "border"] },
+  { title: "Text", keys: ["text", "muted"] },
+  { title: "Accents", keys: ["gold", "good", "danger"] },
 ];
 
 function endpointMap(claimId: string) {
@@ -4239,7 +4255,12 @@ function applyTheme(theme: Partial<typeof DEFAULT_THEME>) {
     const value = theme[key] ?? DEFAULT_THEME[key];
     document.documentElement.style.setProperty(cssVar, value);
   }
-  document.documentElement.style.setProperty("--gold-dim", `${theme.gold ?? DEFAULT_THEME.gold}2e`);
+  const bg = theme.bg ?? DEFAULT_THEME.bg;
+  const sidebar = theme.sidebar ?? DEFAULT_THEME.sidebar;
+  const panel = theme.panel ?? DEFAULT_THEME.panel;
+  const gold = theme.gold ?? DEFAULT_THEME.gold;
+  document.documentElement.style.setProperty("--gold-dim", `${gold}2e`);
+  document.documentElement.style.setProperty("--command-page-gradient", `linear-gradient(180deg, ${panel} 0%, ${sidebar} 58%, ${bg}00 100%) top / 100% 32vh no-repeat, ${bg}`);
 }
 
 function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss: (id: string) => void }) {
@@ -4474,7 +4495,29 @@ function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsCons
   );
 }
 
-function UserSettingsDialog({ density, onDensityChange, toastSettings, onToastSettingsChange, watchCount, onClearWatches, onResetSettings, onClose }: { density: "comfortable" | "compact"; onDensityChange: (density: "comfortable" | "compact") => void; toastSettings: UserToastSettings; onToastSettingsChange: (settings: UserToastSettings) => void; watchCount: number; onClearWatches: () => void; onResetSettings: () => void; onClose: () => void }) {
+function UserSettingsDialog({
+  density,
+  onDensityChange,
+  toastSettings,
+  onToastSettingsChange,
+  theme,
+  onThemeChange,
+  watchCount,
+  onClearWatches,
+  onResetSettings,
+  onClose,
+}: {
+  density: "comfortable" | "compact";
+  onDensityChange: (density: "comfortable" | "compact") => void;
+  toastSettings: UserToastSettings;
+  onToastSettingsChange: (settings: UserToastSettings) => void;
+  theme: ThemeSettings;
+  onThemeChange: (theme: ThemeSettings) => void;
+  watchCount: number;
+  onClearWatches: () => void;
+  onResetSettings: () => void;
+  onClose: () => void;
+}) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -4482,6 +4525,9 @@ function UserSettingsDialog({ density, onDensityChange, toastSettings, onToastSe
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+  const activePreset = THEME_PRESETS.find((preset) => JSON.stringify(preset.theme) === JSON.stringify(theme))?.id ?? "custom";
+  const fieldLabel = (key: keyof ThemeSettings) => THEME_FIELDS.find(([fieldKey]) => fieldKey === key)?.[1] ?? key;
+  const setThemeValue = (key: keyof ThemeSettings, value: string) => onThemeChange({ ...theme, [key]: value });
   return (
     <div className="help-overlay" onClick={onClose}>
       <section className="help-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
@@ -4496,6 +4542,56 @@ function UserSettingsDialog({ density, onDensityChange, toastSettings, onToastSe
           <section>
             <h3>This Browser</h3>
             <p className="legend">Your page, filters, density, notifications and pinned overview items are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+          </section>
+          <section className="settings-theme-section">
+            <div className="settings-section-heading">
+              <div>
+                <h3>Theme</h3>
+                <p className="legend">Saved locally for this browser. Presets apply instantly and can be fine-tuned below.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => onThemeChange(DEFAULT_THEME)}><RefreshCw size={14} /> Reset Default</button>
+            </div>
+            <div className="theme-preset-grid">
+              {THEME_PRESETS.map((preset) => (
+                <button className={activePreset === preset.id ? "active" : ""} key={preset.id} onClick={() => onThemeChange(preset.theme)}>
+                  <span className="theme-preset-swatches" aria-hidden="true">
+                    <i style={{ background: preset.theme.bg }} />
+                    <i style={{ background: preset.theme.panel }} />
+                    <i style={{ background: preset.theme.gold }} />
+                  </span>
+                  <strong>{preset.label}</strong>
+                  <small>{preset.description}</small>
+                </button>
+              ))}
+            </div>
+            <div className="theme-editor-layout">
+              <div className="theme-field-groups">
+                {THEME_FIELD_GROUPS.map((group) => (
+                  <div className="theme-field-group" key={group.title}>
+                    <strong>{group.title}</strong>
+                    <div className="theme-grid">
+                      {group.keys.map((key) => (
+                        <label className="color-field" key={key}>
+                          <span>{fieldLabel(key)}</span>
+                          <code>{theme[key]}</code>
+                          <input type="color" value={theme[key]} onChange={(event) => setThemeValue(key, event.target.value)} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="theme-preview-card" style={{ background: `linear-gradient(180deg, ${theme.panel}, ${theme.panel2})`, borderColor: theme.border, color: theme.text }}>
+                <span style={{ color: theme.gold }}>Preview</span>
+                <strong>Settlement Command Center</strong>
+                <p style={{ color: theme.muted }}>Theme changes apply immediately to this browser.</p>
+                <div>
+                  <b style={{ color: theme.gold }}>47d 6h</b>
+                  <small style={{ color: theme.good }}>Healthy runway</small>
+                  <em style={{ color: theme.danger }}>Needs review</em>
+                </div>
+              </div>
+            </div>
           </section>
           <section>
             <h3>Display Density</h3>
@@ -4580,7 +4676,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-type AdminTab = "status" | "analytics" | "configuration" | "discord" | "theme" | "database" | "users" | "audit" | "backups";
+type AdminTab = "status" | "analytics" | "configuration" | "discord" | "database" | "users" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -4698,10 +4794,6 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   React.useEffect(() => setDraft(settings), [settings]);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
   React.useEffect(() => {
-    if (tab === "theme" && auth?.authenticated) applyTheme(draft.theme);
-    return () => { if (tab === "theme") applyTheme(settings.theme); };
-  }, [auth?.authenticated, draft.theme, settings.theme, tab]);
-  React.useEffect(() => {
     if (!auth?.authenticated) return;
     run(async () => {
       if (tab === "status" || tab === "discord") await refreshStatus();
@@ -4744,7 +4836,6 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   function revertSettings() {
     setDraft(settings);
-    applyTheme(settings.theme);
     setMessage("Unsaved changes reverted.");
   }
 
@@ -4924,12 +5015,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["theme", "Theme"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
-  const themePresets: Array<[string, typeof DEFAULT_THEME]> = [
-    ["Default", DEFAULT_THEME],
-    ["Steel", { ...DEFAULT_THEME, bg: "#0b1117", sidebar: "#070b11", panel: "#18222d", panel2: "#101821", border: "#344657", gold: "#65b7fa" }],
-    ["Ember", { ...DEFAULT_THEME, bg: "#120c0a", sidebar: "#090705", panel: "#211815", panel2: "#17110f", border: "#50382d", gold: "#f5aa45", good: "#55db96" }],
-  ];
+  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
   const discordTestButtons = [
     ["basic", "Basic"],
     ["listing", "Listing"],
@@ -5662,14 +5748,6 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
         </div>
       ) : null}
 
-      {tab === "theme" ? (
-        <section className="form-card admin-theme">
-          <div className="split-header"><h3><Palette size={17} /> Theme Editor</h3><div className="toolbar">{themePresets.map(([label, preset]) => <button className="toolbar-button" key={label} onClick={() => updateDraft("theme", preset)}>{label}</button>)}</div></div>
-          <div className="theme-grid">{THEME_FIELDS.map(([key, label]) => <label className="color-field" key={key}><span>{label}</span><input type="color" value={draft.theme[key]} onChange={(event) => updateDraft("theme", { ...draft.theme, [key]: event.target.value })} /></label>)}</div>
-          <div className="toolbar"><button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Theme</button><button className="toolbar-button" onClick={() => updateDraft("theme", settings.theme)}><RefreshCw size={15} /> Revert Preview</button></div>
-        </section>
-      ) : null}
-
       {tab === "database" ? (
         <section className="form-card database-browser">
           <div className="split-header"><h3><Database size={17} /> Database Browser</h3><select className="select-control" value={selectedTable} onChange={(event) => { setSelectedTable(event.target.value); setTableOffset(0); }}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select></div>
@@ -5738,7 +5816,7 @@ function DashboardApp() {
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
-  const [theme, setTheme] = React.useState<typeof DEFAULT_THEME>(DEFAULT_THEME);
+  const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
@@ -5854,7 +5932,6 @@ function DashboardApp() {
         setAppSettings(next);
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);
-        setTheme(next.theme);
         if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
@@ -5863,8 +5940,8 @@ function DashboardApp() {
       .catch(() => undefined);
   }, []);
   React.useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyTheme(browserTheme);
+  }, [browserTheme]);
   React.useEffect(() => {
     if (consent !== "accepted") return;
     trackAnalyticsEvent("page_view", undefined, undefined, active);
@@ -5989,7 +6066,7 @@ function DashboardApp() {
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
-    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setTheme({ ...DEFAULT_THEME, ...settings.theme }); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
   const activePanel = panels[active] ?? panels.dashboard;
 
@@ -6052,7 +6129,7 @@ function DashboardApp() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
