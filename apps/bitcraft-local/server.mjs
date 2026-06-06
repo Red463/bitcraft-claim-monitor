@@ -4267,12 +4267,35 @@ async function registerDiscordCommands() {
   return response.json();
 }
 
+function securityHeaders(headers = {}) {
+  return {
+    "content-security-policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "connect-src 'self' https://bitjita.com https://discord.com",
+      "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+    ].join("; "),
+    "cross-origin-opener-policy": "same-origin",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    ...headers,
+  };
+}
+
 function send(res, status, body, headers = {}) {
   const json = JSON.stringify(body);
-  res.writeHead(status, {
+  res.writeHead(status, securityHeaders({
     "content-type": "application/json",
     ...headers,
-  });
+  }));
   res.end(json);
 }
 
@@ -4305,10 +4328,10 @@ async function serveBuiltFrontend(url, method, res) {
     return true;
   }
   const content = await readFile(candidate);
-  res.writeHead(200, {
+  res.writeHead(200, securityHeaders({
     "content-type": mimeType(candidate),
     "cache-control": candidate.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
-  });
+  }));
   if (method === "HEAD") return res.end();
   res.end(content);
   return true;
@@ -4321,7 +4344,7 @@ async function proxyBitjita(url, res) {
   const key = upstream.toString();
   const cached = upstreamCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
-    res.writeHead(cached.status, cached.headers);
+    res.writeHead(cached.status, securityHeaders(cached.headers));
     return res.end(cached.body);
   }
   const response = await fetch(upstream, {
@@ -4333,7 +4356,7 @@ async function proxyBitjita(url, res) {
     "cache-control": response.headers.get("cache-control") ?? "no-cache",
   };
   if (response.ok) upstreamCache.set(key, { status: response.status, headers, body, expiresAt: Date.now() + 10000 });
-  res.writeHead(response.status, headers);
+  res.writeHead(response.status, securityHeaders(headers));
   res.end(body);
 }
 

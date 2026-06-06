@@ -119,6 +119,11 @@ test("server collection paginates listings and protects production mutations", a
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
+  const health = await fetch(`${origin}/api/local/health`);
+  assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(health.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  assert.equal(health.headers.get("x-frame-options"), "SAMEORIGIN");
+  assert.match(health.headers.get("content-security-policy") ?? "", /default-src 'self'/);
 
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",
