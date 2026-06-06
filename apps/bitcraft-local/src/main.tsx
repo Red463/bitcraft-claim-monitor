@@ -104,6 +104,20 @@ type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: st
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
+type AppUser = {
+  id: number;
+  discordId: string;
+  username: string;
+  globalName: string;
+  avatarUrl: string | null;
+  characterPlayerId: string;
+  characterName: string;
+  characterStatus: "unlinked" | "pending" | "approved" | "rejected" | string;
+  settings: AnyRecord;
+  createdAt?: string;
+  lastLoginAt?: string;
+};
+type UserAuthState = { user: AppUser | null; discordLoginEnabled: boolean };
 type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };
 type DiscordRoleOption = { key: string; label: string; roleId: string; emoji: string };
 type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; showHelperText: boolean; options: DiscordRoleOption[] };
@@ -192,19 +206,48 @@ const DEFAULT_THEME = {
   gradientTop: "#1f1f1f",
   gradientMid: "#080808",
   gradientBase: "#030303",
+  gradientTopStop: "0",
+  gradientMidStop: "58",
+  gradientFadeStop: "100",
+  gradientHeight: "32",
 };
 type ThemeSettings = typeof DEFAULT_THEME;
+type ThemeKey = keyof ThemeSettings;
+type ThemeRangeKey = "gradientTopStop" | "gradientMidStop" | "gradientFadeStop" | "gradientHeight";
+type ThemeColorKey = Exclude<ThemeKey, ThemeRangeKey>;
 const CUSTOM_THEME_STORAGE_KEY = "theme.custom.local";
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+const THEME_RANGE_FIELD_CONFIG: Record<ThemeRangeKey, { label: string; cssVar: string; min: number; max: number; unit: string }> = {
+  gradientTopStop: { label: "Top colour stop", cssVar: "--theme-gradient-top-stop", min: 0, max: 100, unit: "%" },
+  gradientMidStop: { label: "Middle colour stop", cssVar: "--theme-gradient-mid-stop", min: 0, max: 100, unit: "%" },
+  gradientFadeStop: { label: "Fade stop", cssVar: "--theme-gradient-fade-stop", min: 0, max: 100, unit: "%" },
+  gradientHeight: { label: "Gradient height", cssVar: "--theme-gradient-height", min: 12, max: 72, unit: "vh" },
+};
+const THEME_RANGE_KEYS = Object.keys(THEME_RANGE_FIELD_CONFIG) as ThemeRangeKey[];
+
+function clampThemeNumber(value: unknown, min: number, max: number, fallback: string) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
+  const parsed = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(parsed)) return fallback;
+  return String(Math.min(max, Math.max(min, Math.round(parsed))));
+}
 
 function normalizeThemeCandidate(input: unknown): { theme: ThemeSettings; count: number } | null {
   const source = (input as AnyRecord)?.theme && typeof (input as AnyRecord).theme === "object" ? (input as AnyRecord).theme : input;
   if (!source || typeof source !== "object") return null;
   const nextTheme = { ...DEFAULT_THEME };
   let applied = 0;
-  for (const key of Object.keys(DEFAULT_THEME) as Array<keyof ThemeSettings>) {
+  for (const key of Object.keys(DEFAULT_THEME) as ThemeKey[]) {
     const value = (source as AnyRecord)[key];
-    if (typeof value === "string" && HEX_COLOR_RE.test(value)) {
+    if (THEME_RANGE_KEYS.includes(key as ThemeRangeKey)) {
+      const config = THEME_RANGE_FIELD_CONFIG[key as ThemeRangeKey];
+      const nextValue = clampThemeNumber(value, config.min, config.max, DEFAULT_THEME[key]);
+      if (nextValue !== DEFAULT_THEME[key] || value !== undefined) {
+        nextTheme[key] = nextValue;
+        applied += 1;
+      }
+    } else if (typeof value === "string" && HEX_COLOR_RE.test(value)) {
       nextTheme[key] = value;
       applied += 1;
     }
@@ -532,7 +575,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
   } as AppSettings;
 }
 
-const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
+const THEME_FIELDS: Array<[ThemeColorKey, string, string]> = [
   ["gradientTop", "Top page gradient", "--theme-gradient-top"],
   ["gradientMid", "Middle page gradient", "--theme-gradient-mid"],
   ["gradientBase", "Lower page base", "--theme-gradient-base"],
@@ -556,6 +599,7 @@ const THEME_FIELDS: Array<[keyof typeof DEFAULT_THEME, string, string]> = [
   ["good", "Positive", "--good"],
   ["danger", "Danger", "--danger"],
 ];
+const THEME_GRADIENT_RANGE_FIELDS: ThemeRangeKey[] = ["gradientTopStop", "gradientMidStop", "gradientFadeStop", "gradientHeight"];
 
 const THEME_PRESETS: Array<{ id: string; label: string; description: string; theme: ThemeSettings }> = [
   { id: "default", label: "Default", description: "Original Timbersteel gold on dark steel.", theme: DEFAULT_THEME },
@@ -567,7 +611,7 @@ const THEME_PRESETS: Array<{ id: string; label: string; description: string; the
   { id: "contrast", label: "High Contrast", description: "Brighter text and stronger borders.", theme: { ...DEFAULT_THEME, bg: "#020304", sidebar: "#020304", panel: "#111820", panel2: "#070b10", border: "#536072", cardTop: "#16202a", cardBottom: "#05080c", cardTitle: "#e5ebf5", cardValue: "#ffffff", iconBg: "#101720", muted: "#c1cad8", text: "#ffffff", gold: "#ffd84d", activeColor: "#ffd84d", activeBg: "#403414", activeBorder: "#b9972f", hoverBorder: "#c7a83a", good: "#68ff9a", danger: "#ff5b5b", gradientTop: "#202834", gradientMid: "#090d12", gradientBase: "#020304" } },
 ];
 
-const THEME_FIELD_GROUPS: Array<{ title: string; keys: Array<keyof ThemeSettings> }> = [
+const THEME_FIELD_GROUPS: Array<{ title: string; keys: ThemeColorKey[] }> = [
   { title: "Page Background", keys: ["gradientTop", "gradientMid", "gradientBase", "bg"] },
   { title: "Surfaces", keys: ["sidebar", "panel", "panel2", "border", "cardTop", "cardBottom", "iconBg"] },
   { title: "Text", keys: ["text", "muted", "cardTitle", "cardValue"] },
@@ -4315,10 +4359,18 @@ function applyTheme(theme: Partial<typeof DEFAULT_THEME>) {
   const gradientTop = theme.gradientTop ?? DEFAULT_THEME.gradientTop;
   const gradientMid = theme.gradientMid ?? DEFAULT_THEME.gradientMid;
   const gradientBase = theme.gradientBase ?? DEFAULT_THEME.gradientBase;
+  const gradientTopStop = clampThemeNumber(theme.gradientTopStop, 0, 100, DEFAULT_THEME.gradientTopStop);
+  const gradientMidStop = clampThemeNumber(theme.gradientMidStop, 0, 100, DEFAULT_THEME.gradientMidStop);
+  const gradientFadeStop = clampThemeNumber(theme.gradientFadeStop, 0, 100, DEFAULT_THEME.gradientFadeStop);
+  const gradientHeight = clampThemeNumber(theme.gradientHeight, 12, 72, DEFAULT_THEME.gradientHeight);
+  document.documentElement.style.setProperty("--theme-gradient-top-stop", `${gradientTopStop}%`);
+  document.documentElement.style.setProperty("--theme-gradient-mid-stop", `${gradientMidStop}%`);
+  document.documentElement.style.setProperty("--theme-gradient-fade-stop", `${gradientFadeStop}%`);
+  document.documentElement.style.setProperty("--theme-gradient-height", `${gradientHeight}vh`);
   document.documentElement.style.setProperty("--gold-dim", `color-mix(in srgb, ${activeBg || gold} 48%, transparent)`);
   document.documentElement.style.setProperty("--focus-border", activeColor);
   document.documentElement.style.setProperty("--focus-ring", `color-mix(in srgb, ${activeBg || activeColor} 42%, transparent)`);
-  document.documentElement.style.setProperty("--command-page-gradient", `linear-gradient(180deg, ${gradientTop} 0%, ${gradientMid} 58%, ${gradientBase}00 100%) top / 100% 32vh no-repeat, ${gradientBase || bg}`);
+  document.documentElement.style.setProperty("--command-page-gradient", `linear-gradient(180deg, ${gradientTop} ${gradientTopStop}%, ${gradientMid} ${gradientMidStop}%, ${gradientBase}00 ${gradientFadeStop}%) top / 100% ${gradientHeight}vh no-repeat, ${gradientBase || bg}`);
 }
 
 function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss: (id: string) => void }) {
@@ -4560,6 +4612,13 @@ function UserSettingsDialog({
   onToastSettingsChange,
   theme,
   onThemeChange,
+  auth,
+  members,
+  onDiscordLogin,
+  onDiscordLogout,
+  onLinkCharacter,
+  onSaveAccountSettings,
+  onLoadAccountSettings,
   watchCount,
   onClearWatches,
   onResetSettings,
@@ -4571,6 +4630,13 @@ function UserSettingsDialog({
   onToastSettingsChange: (settings: UserToastSettings) => void;
   theme: ThemeSettings;
   onThemeChange: (theme: ThemeSettings) => void;
+  auth: UserAuthState;
+  members: AnyRecord[];
+  onDiscordLogin: () => void;
+  onDiscordLogout: () => Promise<void>;
+  onLinkCharacter: (member: AnyRecord | null) => Promise<void>;
+  onSaveAccountSettings: () => Promise<void>;
+  onLoadAccountSettings: () => void;
   watchCount: number;
   onClearWatches: () => void;
   onResetSettings: () => void;
@@ -4590,6 +4656,9 @@ function UserSettingsDialog({
   const [customTheme, setCustomTheme] = React.useState<ThemeSettings>(() => loadSavedCustomTheme());
   const [customThemeStatus, setCustomThemeStatus] = React.useState("");
   const [lastThemeChoice, setLastThemeChoice] = React.useState("");
+  const [selectedCharacterId, setSelectedCharacterId] = React.useState(auth.user?.characterPlayerId ?? "");
+  const [accountStatus, setAccountStatus] = React.useState("");
+  React.useEffect(() => setSelectedCharacterId(auth.user?.characterPlayerId ?? ""), [auth.user?.characterPlayerId]);
   const themeFingerprint = JSON.stringify(theme);
   const customThemeFingerprint = JSON.stringify(customTheme);
   const matchedBuiltInPreset = THEME_PRESETS.find((preset) => JSON.stringify(preset.theme) === themeFingerprint)?.id;
@@ -4597,12 +4666,17 @@ function UserSettingsDialog({
   const activePreset = lastThemeChoice === "custom" && customThemeMatches
     ? "custom"
     : matchedBuiltInPreset ?? (customThemeMatches ? "custom" : "custom-editing");
-  const fieldLabel = (key: keyof ThemeSettings) => THEME_FIELDS.find(([fieldKey]) => fieldKey === key)?.[1] ?? key;
-  const setThemeValue = (key: keyof ThemeSettings, value: string) => onThemeChange({ ...theme, [key]: value });
-  const previewGradient = `linear-gradient(180deg, ${theme.gradientTop} 0%, ${theme.gradientMid} 58%, ${theme.gradientBase} 100%)`;
-  const themePayload = React.useMemo(() => JSON.stringify({ schema: "timbersteel-local-theme", version: 1, theme }, null, 2), [theme]);
+  const fieldLabel = (key: ThemeColorKey) => THEME_FIELDS.find(([fieldKey]) => fieldKey === key)?.[1] ?? key;
+  const setThemeValue = (key: ThemeColorKey, value: string) => onThemeChange({ ...theme, [key]: value });
+  const rangeFieldLabel = (key: ThemeRangeKey) => THEME_RANGE_FIELD_CONFIG[key].label;
+  const setThemeRangeValue = (key: ThemeRangeKey, value: string) => {
+    const config = THEME_RANGE_FIELD_CONFIG[key];
+    onThemeChange({ ...theme, [key]: clampThemeNumber(value, config.min, config.max, DEFAULT_THEME[key]) });
+  };
+  const previewGradient = `linear-gradient(180deg, ${theme.gradientTop} ${theme.gradientTopStop}%, ${theme.gradientMid} ${theme.gradientMidStop}%, ${theme.gradientBase} ${theme.gradientFadeStop}%)`;
+  const themePayload = React.useMemo(() => JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }, null, 2), [theme]);
   const saveCustomTheme = () => {
-    localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify({ schema: "timbersteel-local-theme", version: 1, theme }));
+    localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }));
     setCustomTheme(theme);
     setLastThemeChoice("custom");
     setThemeExpanded(false);
@@ -4648,11 +4722,29 @@ function UserSettingsDialog({
       onThemeChange(result.theme);
       setLastThemeChoice("custom-editing");
       setThemeExpanded(true);
-      setThemeShareStatus(`Imported ${result.count} theme colour${result.count === 1 ? "" : "s"}. Save as Custom if you want to keep it in the preset list.`);
+      setThemeShareStatus(`Imported ${result.count} theme setting${result.count === 1 ? "" : "s"}. Save as Custom if you want to keep it in the preset list.`);
     } catch (error) {
       setThemeShareStatus(error instanceof Error ? error.message : "Could not import that theme JSON.");
     }
   };
+  const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
+  const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
+  const statusLabel = auth.user?.characterStatus === "approved"
+    ? "Approved"
+    : auth.user?.characterStatus === "pending"
+      ? "Awaiting admin approval"
+      : auth.user?.characterStatus === "rejected"
+        ? "Rejected"
+        : "Not linked";
+  async function runAccountAction(action: () => Promise<void>, success: string) {
+    setAccountStatus("");
+    try {
+      await action();
+      setAccountStatus(success);
+    } catch (error) {
+      setAccountStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
   return (
     <div className="help-overlay" onClick={onClose}>
       <section className="help-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
@@ -4664,6 +4756,51 @@ function UserSettingsDialog({
           <button onClick={onClose} aria-label="Close user settings"><X size={16} /></button>
         </header>
         <div className="settings-grid">
+          <section className="settings-account-section">
+            <div className="settings-section-heading">
+              <div>
+                <h3>Discord Account</h3>
+                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and save settings beyond this browser.</p>
+              </div>
+              {auth.user ? <button className="toolbar-button" onClick={() => runAccountAction(onDiscordLogout, "Signed out of Discord.")}><LogOut size={14} /> Sign out</button> : null}
+            </div>
+            {!auth.user ? (
+              <div className="account-connect-card">
+                <div>
+                  <strong>Not signed in</strong>
+                  <span>{auth.discordLoginEnabled ? "Sign in with Discord to request a character link and save your preferences on this server." : "Discord login is not configured on this server yet."}</span>
+                </div>
+                <button className="toolbar-button primary" disabled={!auth.discordLoginEnabled} onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</button>
+              </div>
+            ) : (
+              <div className="account-profile-card">
+                <div className="account-profile-main">
+                  {auth.user.avatarUrl ? <img src={auth.user.avatarUrl} alt="" /> : <span>{accountName.slice(0, 1).toUpperCase()}</span>}
+                  <div>
+                    <strong>{accountName}</strong>
+                    <small>Discord ID {auth.user.discordId}</small>
+                  </div>
+                  <em className={`link-status ${auth.user.characterStatus}`}>{statusLabel}</em>
+                </div>
+                <div className="account-link-grid">
+                  <label className="field">
+                    <span>BitCraft character</span>
+                    <select value={selectedCharacterId} onChange={(event) => setSelectedCharacterId(event.target.value)}>
+                      <option value="">Select your character</option>
+                      {auth.user.characterPlayerId && !members.some((member) => String(member.playerEntityId) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
+                      {members.map((member) => <option key={member.playerEntityId ?? member.username} value={String(member.playerEntityId ?? "")}>{member.username ?? member.name ?? member.playerEntityId}</option>)}
+                    </select>
+                  </label>
+                  <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>
+                </div>
+                <div className="settings-account-actions">
+                  <button className="toolbar-button" onClick={() => runAccountAction(onSaveAccountSettings, "Settings saved to your Discord account.")}><Save size={14} /> Save settings to account</button>
+                  <button className="toolbar-button" disabled={!auth.user.settings || !Object.keys(auth.user.settings).length} onClick={onLoadAccountSettings}><Download size={14} /> Load saved settings</button>
+                </div>
+                {accountStatus ? <p className="theme-share-status">{accountStatus}</p> : null}
+              </div>
+            )}
+          </section>
           <section>
             <h3>This Browser</h3>
             <p className="legend">Your page, filters, density, notifications and pinned overview items are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
@@ -4723,6 +4860,38 @@ function UserSettingsDialog({
             ) : null}
             <div className="theme-editor-layout" hidden={!themeExpanded}>
               <div className="theme-field-groups">
+                <div className="theme-field-group">
+                  <strong>Gradient Shape</strong>
+                  <div className="theme-range-grid">
+                    {THEME_GRADIENT_RANGE_FIELDS.map((key) => {
+                      const config = THEME_RANGE_FIELD_CONFIG[key];
+                      return (
+                        <label className="theme-range-field" key={key}>
+                          <span>{rangeFieldLabel(key)}</span>
+                          <input
+                            aria-label={rangeFieldLabel(key)}
+                            type="range"
+                            min={config.min}
+                            max={config.max}
+                            value={theme[key]}
+                            onChange={(event) => setThemeRangeValue(key, event.target.value)}
+                          />
+                          <span className="theme-range-value">
+                            <input
+                              aria-label={`${rangeFieldLabel(key)} value`}
+                              type="number"
+                              min={config.min}
+                              max={config.max}
+                              value={theme[key]}
+                              onChange={(event) => setThemeRangeValue(key, event.target.value)}
+                            />
+                            <em>{config.unit}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
                 {THEME_FIELD_GROUPS.map((group) => (
                   <div className="theme-field-group" key={group.title}>
                     <strong>{group.title}</strong>
@@ -4856,7 +5025,7 @@ function SyncPanel({ syncUrl }: { syncUrl: string }) {
   );
 }
 
-type AdminTab = "status" | "analytics" | "configuration" | "discord" | "database" | "users" | "audit" | "backups";
+type AdminTab = "status" | "analytics" | "configuration" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -4883,6 +5052,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [tableSearch, setTableSearch] = React.useState("");
   const [tableOffset, setTableOffset] = React.useState(0);
   const [users, setUsers] = React.useState<AnyRecord[]>([]);
+  const [linkedAccounts, setLinkedAccounts] = React.useState<AppUser[]>([]);
   const [newUser, setNewUser] = React.useState({ username: "", password: "" });
   const [resetUser, setResetUser] = React.useState("");
   const [resetPassword, setResetPassword] = React.useState("");
@@ -4948,6 +5118,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     setUsers((await api("/admin/users")).users ?? []);
   }
 
+  async function refreshLinkedAccounts() {
+    setLinkedAccounts((await api("/admin/user-accounts")).accounts ?? []);
+  }
+
   async function refreshAudit() {
     setAuditData(await api("/admin/audit?limit=100"));
   }
@@ -4982,6 +5156,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
+      if (tab === "accounts") await refreshLinkedAccounts();
       if (tab === "audit") await refreshAudit();
       if (tab === "backups") await refreshBackups();
     });
@@ -5195,7 +5370,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Users"], ["audit", "Audit"], ["backups", "Backups"]];
+  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]];
   const discordTestButtons = [
     ["basic", "Basic"],
     ["listing", "Listing"],
@@ -5956,6 +6131,50 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
         </div>
       ) : null}
 
+      {tab === "accounts" ? (
+        <section className="form-card linked-accounts-card">
+          <div className="split-header">
+            <h3><MessageCircle size={17} /> Discord Linked Accounts</h3>
+            <button className="toolbar-button" onClick={() => run(refreshLinkedAccounts)}><RefreshCw size={14} /> Refresh</button>
+          </div>
+          <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
+          <div className="linked-account-list">
+            {linkedAccounts.length ? linkedAccounts.map((account) => (
+              <div className="linked-account-row" key={account.id}>
+                <div className="linked-account-user">
+                  {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : <span>{(account.globalName || account.username || "?").slice(0, 1).toUpperCase()}</span>}
+                  <div>
+                    <strong>{account.globalName || account.username || "Discord user"}</strong>
+                    <small>{account.username ? `@${account.username}` : account.discordId} | Last login {dateLabel(account.lastLoginAt)}</small>
+                  </div>
+                </div>
+                <div>
+                  <strong>{account.characterName || "No character selected"}</strong>
+                  <small>{account.characterPlayerId || "No BitCraft player ID"}</small>
+                </div>
+                <em className={`link-status ${account.characterStatus}`}>{account.characterStatus || "unlinked"}</em>
+                <div className="toolbar">
+                  {(["approved", "pending", "rejected"] as const).map((status) => (
+                    <button
+                      className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
+                      disabled={!account.characterPlayerId}
+                      key={status}
+                      onClick={() => run(async () => {
+                        const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) });
+                        setLinkedAccounts(result.accounts ?? []);
+                      }, `Account marked ${status}.`)}
+                    >
+                      {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
+                      {status[0].toUpperCase() + status.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )) : <p className="legend">No Discord users have signed in yet.</p>}
+          </div>
+        </section>
+      ) : null}
+
       {tab === "audit" ? (
         <div className="admin-grid audit-grid">
           <section className="form-card"><h3><Activity size={17} /> Admin Actions</h3><div className="audit-list">{auditData.auditLog.map((entry: AnyRecord) => <div key={entry.id}><strong>{entry.action}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)}</span></div>)}</div></section>
@@ -5994,6 +6213,7 @@ function DashboardApp() {
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
+  const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
@@ -6033,6 +6253,45 @@ function DashboardApp() {
     toastTimersRef.current.delete(id);
     setToasts((current) => current.filter((notice) => notice.id !== id));
   }, []);
+  const refreshUserAuth = React.useCallback(async () => {
+    const response = await fetch(`${LOCAL_API}/auth/me`);
+    if (!response.ok) return;
+    setUserAuth(await response.json());
+  }, []);
+  const discordLogin = React.useCallback(() => {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(returnTo)}`;
+  }, []);
+  const discordLogout = React.useCallback(async () => {
+    const response = await fetch(`${LOCAL_API}/auth/logout`, { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to sign out");
+    setUserAuth(body);
+  }, []);
+  const linkDiscordCharacter = React.useCallback(async (member: AnyRecord | null) => {
+    const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.username ?? member.name ?? "") } : {};
+    const response = await fetch(`${LOCAL_API}/auth/character`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to save character link request");
+    setUserAuth((current) => ({ ...current, user: body.user }));
+  }, []);
+  const saveAccountSettings = React.useCallback(async () => {
+    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, selectedMemberId, watches };
+    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to save account settings");
+    setUserAuth((current) => ({ ...current, user: body.user }));
+  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, userToastSettings, watches]);
+  const loadAccountSettings = React.useCallback(() => {
+    const saved = userAuth.user?.settings ?? {};
+    if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
+    if (saved.toastSettings && typeof saved.toastSettings === "object") setUserToastSettings({ ...DEFAULT_USER_TOAST_SETTINGS, ...saved.toastSettings });
+    const savedTheme = normalizeThemeCandidate(saved.theme)?.theme;
+    if (savedTheme) setBrowserTheme(savedTheme);
+    if (typeof saved.sidebarCollapsed === "boolean") setSidebarCollapsed(saved.sidebarCollapsed);
+    if (typeof saved.selectedMemberId === "string") setSelectedMemberId(saved.selectedMemberId);
+    if (Array.isArray(saved.watches)) setWatches(saved.watches.slice(0, 12));
+  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setUserToastSettings, setWatches, userAuth.user?.settings]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -6119,6 +6378,9 @@ function DashboardApp() {
       })
       .catch(() => undefined);
   }, []);
+  React.useEffect(() => {
+    refreshUserAuth().catch(() => undefined);
+  }, [refreshUserAuth]);
   React.useEffect(() => {
     applyTheme(browserTheme);
   }, [browserTheme]);
@@ -6309,7 +6571,7 @@ function DashboardApp() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}

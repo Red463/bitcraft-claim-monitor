@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.5-beta.1] - 2026-06-06
+
+### Added
+
+- Added optional Discord sign-in for app users.
+- Added Discord-to-character link requests with admin approval from the Admin page.
+- Added Discord mod-log notifications when users request a character link review.
+- Added signed-in account settings save/load so users can keep browser preferences on the server.
+
+### Security
+
+- Kept Discord OAuth client secrets server-side through environment or app secret storage instead of exposing them to the browser.
+
+## [0.9.4-beta.1] - 2026-06-06
+
+### Added
+
+- Added Custom theme controls for page-gradient stop positions and gradient height.
+
+### Changed
+
+- Expanded Custom theme import, export, and saving so all preset-controlled theme settings are preserved, including gradient shape values.
+
 ## [0.9.3-beta.1] - 2026-06-06
 
 ### Added

@@ -117,6 +117,26 @@ db.exec(`
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES admin_users(id)
   );
+  CREATE TABLE IF NOT EXISTS user_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id TEXT NOT NULL UNIQUE,
+    discord_username TEXT,
+    discord_global_name TEXT,
+    discord_avatar TEXT,
+    character_player_id TEXT,
+    character_name TEXT,
+    character_status TEXT NOT NULL DEFAULT 'unlinked',
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    last_login_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES user_accounts(id)
+  );
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -253,6 +273,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_notes_user ON discord_mod_notes (guild_id, user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -405,6 +426,30 @@ const statements = {
   deleteUserSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ?"),
   deleteOtherSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ? AND token_hash <> ?"),
   deleteExpiredSessions: db.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?"),
+  userBySession: db.prepare(`
+    SELECT user_accounts.*
+    FROM user_sessions
+    JOIN user_accounts ON user_accounts.id = user_sessions.user_id
+    WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?
+  `),
+  userByDiscordId: db.prepare("SELECT * FROM user_accounts WHERE discord_id = ?"),
+  upsertUserAccount: db.prepare(`
+    INSERT INTO user_accounts (discord_id, discord_username, discord_global_name, discord_avatar, character_status, settings_json, created_at, last_login_at)
+    VALUES (?, ?, ?, ?, 'unlinked', '{}', ?, ?)
+    ON CONFLICT(discord_id) DO UPDATE SET
+      discord_username = excluded.discord_username,
+      discord_global_name = excluded.discord_global_name,
+      discord_avatar = excluded.discord_avatar,
+      last_login_at = excluded.last_login_at
+  `),
+  updateUserLastLogin: db.prepare("UPDATE user_accounts SET last_login_at = ? WHERE id = ?"),
+  insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
+  deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
+  deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),
+  updateUserCharacter: db.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = ? WHERE id = ?"),
+  updateUserSettings: db.prepare("UPDATE user_accounts SET settings_json = ? WHERE id = ?"),
+  listUserAccounts: db.prepare("SELECT * FROM user_accounts ORDER BY last_login_at DESC, created_at DESC"),
+  updateUserCharacterStatus: db.prepare("UPDATE user_accounts SET character_status = ? WHERE id = ?"),
   insertAudit: db.prepare("INSERT INTO admin_audit_log (user_id, username, action, details_json, occurred_at) VALUES (?, ?, ?, ?, ?)"),
   insertLoginEvent: db.prepare("INSERT INTO admin_login_events (username, successful, occurred_at, remote_address) VALUES (?, ?, ?, ?)"),
   insertAnalyticsEvent: db.prepare(`
@@ -1151,6 +1196,177 @@ function clearSession(req) {
   return `bitcraft_admin_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
 }
 
+function originFromRequest(req) {
+  const proto = String(req.headers["x-forwarded-proto"] ?? (isProduction ? "https" : "http")).split(",")[0].trim();
+  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim();
+  return `${proto || "http"}://${host}`;
+}
+
+function discordOAuthConfig(req) {
+  const discordSettings = getDiscordSettingsRaw();
+  const clientId = String(process.env.DISCORD_OAUTH_CLIENT_ID ?? discordSettings.applicationId ?? "").trim();
+  const envSecret = String(process.env.DISCORD_OAUTH_CLIENT_SECRET ?? "").trim();
+  const storedSecret = String(statements.getSecret.get("discord_oauth_client_secret")?.value ?? "").trim();
+  const clientSecret = envSecret || storedSecret;
+  const redirectUri = String(process.env.DISCORD_OAUTH_REDIRECT_URI ?? "").trim() || `${originFromRequest(req)}/api/local/auth/discord/callback`;
+  return { clientId, clientSecret, redirectUri, enabled: Boolean(clientId && clientSecret) };
+}
+
+function safeReturnPath(value) {
+  const text = String(value ?? "/?page=dashboard").trim() || "/?page=dashboard";
+  if (!text.startsWith("/") || text.startsWith("//") || text.includes("\\")) return "/?page=dashboard";
+  return text.slice(0, 500);
+}
+
+function userAvatarUrl(row) {
+  const avatar = String(row?.discord_avatar ?? "").trim();
+  const discordId = String(row?.discord_id ?? "").trim();
+  return avatar && discordId ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=128` : null;
+}
+
+function publicAppUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    discordId: String(row.discord_id ?? ""),
+    username: String(row.discord_username ?? ""),
+    globalName: String(row.discord_global_name ?? ""),
+    avatarUrl: userAvatarUrl(row),
+    characterPlayerId: String(row.character_player_id ?? ""),
+    characterName: String(row.character_name ?? ""),
+    characterStatus: String(row.character_status ?? "unlinked"),
+    settings: safeJson(row.settings_json, {}),
+    createdAt: row.created_at,
+    lastLoginAt: row.last_login_at,
+  };
+}
+
+function getAppUser(req) {
+  const token = parseCookies(req).bitcraft_user_session;
+  if (!token) return null;
+  statements.deleteExpiredUserSessions.run(new Date().toISOString());
+  return statements.userBySession.get(tokenHash(token), new Date().toISOString()) ?? null;
+}
+
+function createAppUserSession(userId) {
+  const token = randomBytes(32).toString("base64url");
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  statements.insertUserSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
+  return {
+    token,
+    cookie: `bitcraft_user_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
+  };
+}
+
+function clearAppUserSession(req) {
+  const token = parseCookies(req).bitcraft_user_session;
+  if (token) statements.deleteAppUserSession.run(tokenHash(token));
+  return `bitcraft_user_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+}
+
+function authStatus(req) {
+  const user = getAppUser(req);
+  const config = discordOAuthConfig(req);
+  return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
+}
+
+function authStateCookie(state, returnTo) {
+  const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
+  return `bitcraft_discord_oauth_state=${encodeURIComponent(Buffer.from(payload, "utf8").toString("base64url"))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${isProduction ? "; Secure" : ""}`;
+}
+
+function clearAuthStateCookie() {
+  return `bitcraft_discord_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+}
+
+function readAuthStateCookie(req) {
+  try {
+    const encoded = parseCookies(req).bitcraft_discord_oauth_state;
+    if (!encoded) return null;
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function handleDiscordOAuthStart(req, res, url) {
+  const config = discordOAuthConfig(req);
+  if (!config.enabled) return send(res, 503, { error: "Discord login is not configured on this server" });
+  const state = randomBytes(24).toString("base64url");
+  const returnTo = safeReturnPath(url.searchParams.get("returnTo"));
+  const authorize = new URL("https://discord.com/oauth2/authorize");
+  authorize.searchParams.set("client_id", config.clientId);
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("redirect_uri", config.redirectUri);
+  authorize.searchParams.set("scope", "identify");
+  authorize.searchParams.set("state", state);
+  res.writeHead(302, { location: authorize.toString(), "set-cookie": authStateCookie(state, returnTo) });
+  res.end();
+  return true;
+}
+
+async function handleDiscordOAuthCallback(req, res, url) {
+  const config = discordOAuthConfig(req);
+  const stateCookie = readAuthStateCookie(req);
+  const state = String(url.searchParams.get("state") ?? "");
+  const code = String(url.searchParams.get("code") ?? "");
+  const error = String(url.searchParams.get("error") ?? "");
+  const returnTo = safeReturnPath(stateCookie?.returnTo);
+  if (error) {
+    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-denied`, "set-cookie": clearAuthStateCookie() });
+    res.end();
+    return true;
+  }
+  if (!config.enabled || !code || !stateCookie?.state || stateCookie.state !== state) {
+    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-error`, "set-cookie": clearAuthStateCookie() });
+    res.end();
+    return true;
+  }
+  const tokenBody = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.redirectUri,
+  });
+  const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: tokenBody,
+  });
+  if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed: ${tokenResponse.status}`);
+  const tokenJson = await tokenResponse.json();
+  const profileResponse = await fetch("https://discord.com/api/v10/users/@me", {
+    headers: { authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  if (!profileResponse.ok) throw new Error(`Discord profile lookup failed: ${profileResponse.status}`);
+  const profile = await profileResponse.json();
+  const discordId = String(profile.id ?? "").trim();
+  if (!/^\d+$/.test(discordId)) throw new Error("Discord profile did not include a usable id");
+  const loginAt = new Date().toISOString();
+  statements.upsertUserAccount.run(discordId, String(profile.username ?? ""), String(profile.global_name ?? ""), String(profile.avatar ?? ""), loginAt, loginAt);
+  const user = statements.userByDiscordId.get(discordId);
+  statements.updateUserLastLogin.run(loginAt, user.id);
+  const session = createAppUserSession(user.id);
+  res.writeHead(302, { location: returnTo, "set-cookie": [clearAuthStateCookie(), session.cookie] });
+  res.end();
+  return true;
+}
+
+function requireAppUser(req, res) {
+  const user = getAppUser(req);
+  if (!user) {
+    send(res, 401, { error: "Discord sign-in required" });
+    return null;
+  }
+  if (!sameOriginRequest(req)) {
+    send(res, 403, { error: "Cross-origin account request rejected" });
+    return null;
+  }
+  return user;
+}
+
 function adminStatus(req) {
   const setupRequired = toNumber(statements.adminCount.get()?.count) === 0;
   const user = getSessionUser(req);
@@ -1416,6 +1632,14 @@ function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDisco
   return "notifications";
 }
 
+function discordModLogTarget(settings = getDiscordSettingsRaw()) {
+  const modLog = String(settings.channels?.modLog ?? "").trim();
+  const modNotes = String(settings.channels?.modNotes ?? "").trim();
+  if (modLog) return { channelId: modLog, channelKey: "modLog" };
+  if (modNotes) return { channelId: modNotes, channelKey: "modNotes" };
+  return { channelId: settings.channelId, channelKey: "notifications" };
+}
+
 function discordDiagnosticContext(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
   return {
     eventType,
@@ -1432,6 +1656,71 @@ function discordDiagnosticContext(eventType, metadata = {}, settings = getDiscor
     craftRoleId: craftWatchRole(metadata, settings)?.roleId ?? "",
     metadata,
   };
+}
+
+async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings = getDiscordSettingsRaw()) {
+  const eventType = "character_link_request";
+  const { channelId, channelKey } = discordModLogTarget(settings);
+  const accountName = String(userRow.discord_global_name || userRow.discord_username || "Discord user");
+  const characterName = String(metadata.characterName || userRow.character_name || "Unknown character");
+  const characterPlayerId = String(metadata.characterPlayerId || userRow.character_player_id || "");
+  const diagnostics = {
+    eventType,
+    enabled: Boolean(settings.enabled),
+    hasBotToken: Boolean(settings.botToken),
+    channelId,
+    channelKey,
+    discordId: String(userRow.discord_id ?? ""),
+    discordUsername: String(userRow.discord_username ?? ""),
+    characterName,
+    characterPlayerId,
+    accountId: userRow.id,
+  };
+  if (!settings.enabled || !settings.botToken || !channelId) {
+    recordDiscordDeliverySafe({
+      status: "skipped",
+      eventType,
+      channelId,
+      channelKey,
+      summary: `Character link requested: ${characterName}`,
+      reason: "Discord disabled, bot token missing, or mod-log channel not configured",
+      metadata: diagnostics,
+    });
+    return { ok: true, skipped: true };
+  }
+  try {
+    const response = await sendDiscordMessage({
+      embeds: [discordCommandEmbed("Character Link Review", `**${accountName}** requested a BitCraft character link.`, [
+        { name: "Discord", value: `<@${userRow.discord_id}>`, inline: true },
+        { name: "Character", value: characterName, inline: true },
+        { name: "Player ID", value: characterPlayerId || "Not provided", inline: false },
+        { name: "Admin action", value: "Open Admin -> Linked Accounts to approve or reject this request.", inline: false },
+      ], 0x56d5ff)],
+      allowed_mentions: { parse: [] },
+    }, settings, channelId);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType,
+      channelId,
+      channelKey,
+      summary: `Character link requested: ${characterName}`,
+      metadata: diagnostics,
+      response: { id: response?.id, channel_id: response?.channel_id },
+    });
+    return { ok: true, skipped: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType,
+      channelId,
+      channelKey,
+      summary: `Character link requested: ${characterName}`,
+      error: message,
+      metadata: diagnostics,
+    });
+    return { ok: false, error: message };
+  }
 }
 
 function recordDiscordDelivery(status) {
@@ -4055,6 +4344,39 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
+    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") return handleDiscordOAuthStart(req, res, url);
+    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/callback") return handleDiscordOAuthCallback(req, res, url);
+    if (req.method === "POST" && url.pathname === "/api/local/auth/logout") {
+      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin sign-out rejected" });
+      return send(res, 200, { ok: true, user: null, discordLoginEnabled: discordOAuthConfig(req).enabled }, { "set-cookie": clearAppUserSession(req) });
+    }
+    if (req.method === "PUT" && url.pathname === "/api/local/auth/character") {
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      const body = await readJson(req);
+      const characterPlayerId = String(body.characterPlayerId ?? "").trim();
+      const characterName = String(body.characterName ?? "").trim();
+      if (!characterPlayerId && !characterName) {
+        statements.updateUserCharacter.run("", "", "unlinked", user.id);
+        return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+      }
+      if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
+      if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
+      statements.updateUserCharacter.run(characterPlayerId, characterName, "pending", user.id);
+      const updatedUser = statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString());
+      void sendDiscordCharacterLinkRequest(updatedUser, { characterPlayerId, characterName });
+      return send(res, 200, { user: publicAppUser(updatedUser) });
+    }
+    if (req.method === "PUT" && url.pathname === "/api/local/auth/settings") {
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      const body = await readJson(req);
+      const raw = JSON.stringify(body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? body.settings : {});
+      if (raw.length > 50000) return send(res, 413, { error: "Saved settings are too large" });
+      statements.updateUserSettings.run(raw, user.id);
+      return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+    }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
       const result = await handleDiscordInteraction(req);
       return send(res, result.status, result.body);
@@ -4389,6 +4711,20 @@ const server = createServer(async (req, res) => {
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
         return send(res, 200, { users });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
+        return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/user-accounts/approval") {
+        const body = await readJson(req);
+        const userId = Number(body.userId);
+        const status = String(body.status ?? "");
+        if (!userId || !["pending", "approved", "rejected", "unlinked"].includes(status)) return send(res, 400, { error: "Choose an account and a valid link status" });
+        const target = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Linked account not found" });
+        statements.updateUserCharacterStatus.run(status, userId);
+        audit(user, "linked_account.approval", { userId, discordId: target.discord_id, characterName: target.character_name, status });
+        return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/users") {
         const body = await readJson(req);

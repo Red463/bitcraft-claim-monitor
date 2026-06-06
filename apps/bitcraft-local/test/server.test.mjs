@@ -107,6 +107,8 @@ test("server collection paginates listings and protects production mutations", a
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
+      DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
     },
     stdio: "ignore",
   });
@@ -129,6 +131,23 @@ test("server collection paginates listings and protects production mutations", a
   assert.ok(auth.csrfToken);
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
+  const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
+  assert.equal(authStatus.discordLoginEnabled, true);
+  assert.equal(authStatus.user, null);
+  const oauthStart = await fetch(`${origin}/api/local/auth/discord/start?returnTo=%2F%3Fpage%3Dmembers`, { redirect: "manual" });
+  assert.equal(oauthStart.status, 302);
+  assert.match(oauthStart.headers.get("location"), /^https:\/\/discord\.com\/oauth2\/authorize/);
+  assert.match(oauthStart.headers.get("set-cookie"), /bitcraft_discord_oauth_state=/);
+  const anonymousCharacterLink = await fetch(`${origin}/api/local/auth/character`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ characterPlayerId: "player-1", characterName: "Tester" }),
+  });
+  assert.equal(anonymousCharacterLink.status, 401);
+  const linkedAccounts = await fetch(`${origin}/api/local/admin/user-accounts`, {
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.deepEqual(linkedAccounts.accounts, []);
   const refusedAnalytics = await fetch(`${origin}/api/local/analytics/event`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },
