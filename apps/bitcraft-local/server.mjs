@@ -1115,6 +1115,7 @@ const loginAttempts = new Map();
 const upstreamCache = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
+const rateLimitBuckets = new Map();
 
 const BODY_LIMITS = {
   auth: 8 * 1024,
@@ -1133,8 +1134,29 @@ class RequestBodyTooLargeError extends Error {
   }
 }
 
+const RATE_LIMITS = {
+  auth: { windowMs: 15 * 60 * 1000, max: 30 },
+  analytics: { windowMs: 60 * 1000, max: 120 },
+  discordInteraction: { windowMs: 60 * 1000, max: 120 },
+  proxy: { windowMs: 60 * 1000, max: 240 },
+  expensiveLocal: { windowMs: 60 * 1000, max: 60 },
+};
+
 function requestAddress(req) {
   return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+}
+
+function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
+  const now = Date.now();
+  const key = `${name}:${requestAddress(req) || "unknown"}`;
+  const current = rateLimitBuckets.get(key);
+  const bucket = current && current.resetAt > now ? current : { count: 0, resetAt: now + policy.windowMs };
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+  if (bucket.count <= policy.max) return true;
+  const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+  send(res, 429, { error: "Too many requests. Please slow down and try again shortly." }, { "retry-after": String(retryAfter) });
+  return false;
 }
 
 function loginAttemptKey(req, username) {
@@ -4382,16 +4404,26 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
-    if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) return proxyBitjita(url, res);
+    if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
+      if (!rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
+      return proxyBitjita(url, res);
+    }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
-    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") return handleDiscordOAuthStart(req, res, url);
-    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/callback") return handleDiscordOAuthCallback(req, res, url);
+    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      return handleDiscordOAuthStart(req, res, url);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/auth/discord/callback") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      return handleDiscordOAuthCallback(req, res, url);
+    }
     if (req.method === "POST" && url.pathname === "/api/local/auth/logout") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin sign-out rejected" });
       return send(res, 200, { ok: true, user: null, discordLoginEnabled: discordOAuthConfig(req).enabled }, { "set-cookie": clearAppUserSession(req) });
     }
     if (req.method === "PUT" && url.pathname === "/api/local/auth/character") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       const user = requireAppUser(req, res);
       if (!user) return;
       const body = await readJson(req, BODY_LIMITS.auth);
@@ -4409,6 +4441,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { user: publicAppUser(updatedUser) });
     }
     if (req.method === "PUT" && url.pathname === "/api/local/auth/settings") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       const user = requireAppUser(req, res);
       if (!user) return;
       const body = await readJson(req, BODY_LIMITS.settings);
@@ -4418,10 +4451,12 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
+      if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
       const result = await handleDiscordInteraction(req);
       return send(res, result.status, result.body);
     }
     if (req.method === "POST" && url.pathname === "/api/local/analytics/event") {
+      if (!rateLimit(req, res, "analytics", RATE_LIMITS.analytics)) return;
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin analytics event rejected" });
       try {
         return send(res, 201, recordAnalyticsEvent(await readJson(req, BODY_LIMITS.analytics), req));
@@ -4431,6 +4466,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
+      if (!rateLimit(req, res, "region-claims", RATE_LIMITS.expensiveLocal)) return;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const cached = regionCache.get(regionId);
@@ -4447,6 +4483,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
       const body = await readJson(req, BODY_LIMITS.auth);
@@ -4464,6 +4501,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
@@ -4867,6 +4905,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
+      if (!rateLimit(req, res, "local-snapshot", RATE_LIMITS.expensiveLocal)) return;
       if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
       return send(res, 200, await enqueueSnapshot(await readJson(req, BODY_LIMITS.snapshot)));
     }

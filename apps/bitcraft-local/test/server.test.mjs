@@ -264,4 +264,15 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({}),
   });
   assert.equal(forgedSettings.status, 403);
+
+  let rateLimited = null;
+  for (let index = 0; index < 35; index += 1) {
+    const response = await fetch(`${origin}/api/local/auth/discord/start?returnTo=%2F`, { redirect: "manual" });
+    if (response.status === 429) {
+      rateLimited = response;
+      break;
+    }
+  }
+  assert.equal(rateLimited?.status, 429);
+  assert.ok(Number(rateLimited.headers.get("retry-after")) > 0);
 });
