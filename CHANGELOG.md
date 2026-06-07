@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.8-beta.1] - 2026-06-07
+
+### Security
+
+- Added baseline browser security headers for API, static frontend, file download, branding, and BitJita proxy responses.
+- Added route-specific request body limits so oversized public and admin requests are rejected predictably.
+- Added route-class rate limiting for auth, Discord OAuth, analytics, Discord interactions, BitJita proxying, region lookups, and local snapshot collection.
+- Hardened Discord OAuth state cookies with a server-side HMAC signature to reject tampered callback state.
+
+### Fixed
+
+- Improved oversized request handling so rejected bodies return `413` instead of a generic server error.
+
 ## [0.9.7-beta.1] - 2026-06-06
 
 ### Changed
