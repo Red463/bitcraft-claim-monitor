@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.12-beta.1] - 2026-06-07
+
+### Changed
+
+- Reduced BitJita player-detail fan-out by only loading per-member online/session details on Dashboard, Members, and Map pages where that data is displayed.
+
 ## [0.9.11-beta.1] - 2026-06-07
 
 ### Changed

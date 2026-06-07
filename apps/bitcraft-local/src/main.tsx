@@ -987,7 +987,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsPlayerDetail = activePanel !== "activity";
+        const readsPlayerDetail = activePanel === "dashboard" || activePanel === "members" || activePanel === "map";
         const readsProductionDetail = activePanel === "production" || activePanel === "dashboard";
         const readsRegionDetail = activePanel === "dashboard" || activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
