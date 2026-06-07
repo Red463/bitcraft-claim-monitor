@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added private settlement crafts to the Production page when BitJita returns them through member craft data, with private craft badges and a browser setting to hide them.
 
+### Fixed
+
+- Fixed Production current-crafter chips so member names and counts render as one clean pill.
+
 ## [0.9.15-beta.1] - 2026-06-07
 
 ### Changed
