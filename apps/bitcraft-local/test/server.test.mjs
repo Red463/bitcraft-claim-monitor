@@ -61,11 +61,22 @@ test("server collection paginates listings and protects production mutations", a
   const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
   let trades = [historicalTrade];
   let proxyCacheRequests = 0;
+  let resourceCatalogRequests = 0;
+  let creatureCatalogRequests = 0;
+  let passiveCraftRequests = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
       proxyCacheRequests += 1;
       return setTimeout(() => json(res, { ok: true, request: proxyCacheRequests }), 75);
+    }
+    if (url.pathname === "/api/resources") {
+      resourceCatalogRequests += 1;
+      return json(res, { resources: [{ id: 21, name: "Oak Tree", tier: 2 }] });
+    }
+    if (url.pathname === "/api/creatures") {
+      creatureCatalogRequests += 1;
+      return json(res, { creatures: [{ enemyType: 42, name: "Sagi Bird", huntable: true }] });
     }
     if (url.pathname === `/api/claims/${claimId}`) return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
@@ -92,6 +103,16 @@ test("server collection paginates listings and protects production mutations", a
       if (orderId === "historic-order") return json(res, { trades: [historicalTrade] });
       if (orderId === "foreign-order") return json(res, { trades: [foreignTrade] });
       return json(res, { trades });
+    }
+    if (url.pathname === "/api/players/player-1/passive-crafts") {
+      passiveCraftRequests += 1;
+      return json(res, {
+        items: [{ id: "passive-item-1", name: "Fine Timber", tier: 4 }],
+        craftResults: [
+          { recipeName: "Collect {0}", buildingName: "Forestry Camp", status: "complete", timestamp: "2026-05-20T12:10:00.000Z", craftedItem: [{ item_id: "passive-item-1", quantity: 3 }] },
+          { recipeName: "Collect {0}", buildingName: "Forestry Camp", status: "complete", timestamp: "2026-05-20T12:20:00.000Z", craftedItem: [{ item_id: "passive-item-1", quantity: 2 }] },
+        ],
+      });
     }
     return json(res, { error: "not found" }, 404);
   });
@@ -141,6 +162,28 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(proxyTwo.headers.get("x-bitjita-cache"), "deduped");
   assert.deepEqual(await proxyOne.json(), { ok: true, request: 1 });
   assert.deepEqual(await proxyTwo.json(), { ok: true, request: 1 });
+  const mapCatalogOne = await fetch(`${origin}/api/local/map/catalog`).then((response) => response.json());
+  const mapCatalogTwo = await fetch(`${origin}/api/local/map/catalog`).then((response) => response.json());
+  assert.deepEqual(mapCatalogOne.resources, [{ id: 21, name: "Oak Tree", tier: 2 }]);
+  assert.deepEqual(mapCatalogTwo.creatures, [{ enemyType: 42, name: "Sagi Bird", huntable: true }]);
+  assert.equal(resourceCatalogRequests, 1);
+  assert.equal(creatureCatalogRequests, 1);
+  const passivePayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
+  const passiveOne = await fetch(`${origin}/api/local/passive-crafts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify(passivePayload),
+  }).then((response) => response.json());
+  const passiveTwo = await fetch(`${origin}/api/local/passive-crafts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify(passivePayload),
+  }).then((response) => response.json());
+  assert.equal(passiveOne.rows[0].recipe, "Collect Fine Timber");
+  assert.equal(passiveOne.rows[0].quantity, 5);
+  assert.equal(passiveOne.rows[0].memberName, "Tester");
+  assert.equal(passiveTwo.rows[0].recipe, "Collect Fine Timber");
+  assert.equal(passiveCraftRequests, 1);
 
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",
@@ -273,6 +316,14 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(aggregateHistory.activity.total >= aggregateHistory.activity.events.length, true);
   assert.equal(aggregateHistory.snapshots.snapshots.length, 1);
   assert.equal(aggregateHistory.snapshots.snapshots[0].treasury, 300);
+  const dashboardHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=activity,dashboard&activityLimit=1`).then((response) => response.json());
+  assert.equal(dashboardHistory.activity.events.length, 1);
+  assert.equal(typeof dashboardHistory.dashboard.treasuryNetToday, "number");
+  assert.equal(Array.isArray(dashboardHistory.dashboard.recentActivity), true);
+  assert.equal("market" in dashboardHistory, false);
+  assert.equal("snapshots" in dashboardHistory, false);
+  const clampedHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=activity&activityLimit=-50`).then((response) => response.json());
+  assert.equal(clampedHistory.activity.events.length, 1);
   const activityOnlyHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=activity`).then((response) => response.json());
   assert.equal("activity" in activityOnlyHistory, true);
   assert.equal("market" in activityOnlyHistory, false);

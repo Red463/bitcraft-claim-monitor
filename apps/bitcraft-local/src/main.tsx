@@ -61,19 +61,7 @@ import {
   X,
 } from "lucide-react";
 import packageJson from "../package.json";
-import { BotSectionNav, type BotSection } from "./components/bot/BotSectionNav";
-import { DiscordChannelsSection } from "./components/bot/DiscordChannelsSection";
-import { DiscordColourRolesSection } from "./components/bot/DiscordColourRolesSection";
-import { DiscordCraftWatchRolesSection } from "./components/bot/DiscordCraftWatchRolesSection";
-import { DiscordDiagnosticsPanel } from "./components/bot/DiscordDiagnosticsPanel";
-import { DiscordMemberRecordsSection } from "./components/bot/DiscordMemberRecordsSection";
-import { DiscordModerationSection } from "./components/bot/DiscordModerationSection";
-import { DiscordNotificationsSection } from "./components/bot/DiscordNotificationsSection";
-import { DiscordRoleManagerSection } from "./components/bot/DiscordRoleManagerSection";
-import { DiscordRolePanelsSection } from "./components/bot/DiscordRolePanelsSection";
-import { DiscordSafetySection } from "./components/bot/DiscordSafetySection";
-import { DiscordSetupSection } from "./components/bot/DiscordSetupSection";
-import { DiscordTestsPanel } from "./components/bot/DiscordTestsPanel";
+import type { BotSection } from "./components/bot/BotSectionNav";
 import {
   buildConstructionProjects,
   claimSupplyCap,
@@ -86,6 +74,20 @@ import {
 } from "./main-app-data";
 import "./styles.css";
 
+const BotSectionNav = React.lazy(() => import("./components/bot/BotSectionNav").then((module) => ({ default: module.BotSectionNav })));
+const DiscordChannelsSection = React.lazy(() => import("./components/bot/DiscordChannelsSection").then((module) => ({ default: module.DiscordChannelsSection })));
+const DiscordColourRolesSection = React.lazy(() => import("./components/bot/DiscordColourRolesSection").then((module) => ({ default: module.DiscordColourRolesSection })));
+const DiscordCraftWatchRolesSection = React.lazy(() => import("./components/bot/DiscordCraftWatchRolesSection").then((module) => ({ default: module.DiscordCraftWatchRolesSection })));
+const DiscordMemberRecordsSection = React.lazy(() => import("./components/bot/DiscordMemberRecordsSection").then((module) => ({ default: module.DiscordMemberRecordsSection })));
+const DiscordModerationSection = React.lazy(() => import("./components/bot/DiscordModerationSection").then((module) => ({ default: module.DiscordModerationSection })));
+const DiscordNotificationsSection = React.lazy(() => import("./components/bot/DiscordNotificationsSection").then((module) => ({ default: module.DiscordNotificationsSection })));
+const DiscordRoleManagerSection = React.lazy(() => import("./components/bot/DiscordRoleManagerSection").then((module) => ({ default: module.DiscordRoleManagerSection })));
+const DiscordRolePanelsSection = React.lazy(() => import("./components/bot/DiscordRolePanelsSection").then((module) => ({ default: module.DiscordRolePanelsSection })));
+const DiscordSafetySection = React.lazy(() => import("./components/bot/DiscordSafetySection").then((module) => ({ default: module.DiscordSafetySection })));
+const DiscordSetupSection = React.lazy(() => import("./components/bot/DiscordSetupSection").then((module) => ({ default: module.DiscordSetupSection })));
+const DiscordDiagnosticsPanel = React.lazy(() => import("./components/bot/DiscordDiagnosticsPanel").then((module) => ({ default: module.DiscordDiagnosticsPanel })));
+const DiscordTestsPanel = React.lazy(() => import("./components/bot/DiscordTestsPanel").then((module) => ({ default: module.DiscordTestsPanel })));
+
 const DEFAULT_CLAIM_ID = "1369094286777412590";
 const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 const API = "/api/bitjita";
@@ -96,7 +98,7 @@ const APP_VERSION = packageJson.version;
 
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 type ActivePanel = (typeof NAV)[number][0];
-type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; snapshots: AnyRecord[]; error: string | null; refreshToken: number };
+type LocalHistoryState = { market: AnyRecord | null; activity: AnyRecord[]; activityTotal: number; snapshots: AnyRecord[]; dashboard: AnyRecord | null; error: string | null; refreshToken: number };
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
@@ -987,6 +989,20 @@ function craftDisplayName(job: AnyRecord, craftsPayload?: AnyRecord): string {
   return String(item?.name ?? job.recipeName ?? `${job.buildingName ?? "Settlement"} craft`);
 }
 
+async function mapWithBrowserConcurrency<T, R>(values: T[], concurrency: number, mapper: (value: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  async function worker() {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return results;
+}
+
 function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
@@ -1008,7 +1024,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
           const first = await request(`/claims/${claimId}/market/listings?page=1&limit=200`);
           const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
           const remaining = totalPages > 1
-            ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => request(`/claims/${claimId}/market/listings?page=${index + 2}&limit=200`)))
+            ? await mapWithBrowserConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => request(`/claims/${claimId}/market/listings?page=${page}&limit=200`))
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
@@ -1027,14 +1043,27 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const readsProductionDetail = activePanel === "production" || activePanel === "dashboard";
         const readsRegionDetail = activePanel === "dashboard" || activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
-          readsPlayerDetail ? Promise.allSettled(memberIds.map(async (id) => {
-            const payload = await request(`/players/${id}`);
-            return payload.player ?? payload;
-          })) : Promise.resolve([]),
-          readsProductionDetail ? Promise.allSettled(crafts.filter((craft) => craft.entityId).map(async (craft) => ({
-            craftId: String(craft.entityId),
-            payload: await request(`/crafts/${craft.entityId}/contributions`),
-          }))) : Promise.resolve([]),
+          readsPlayerDetail ? mapWithBrowserConcurrency(memberIds, 4, async (id) => {
+            try {
+              const payload = await request(`/players/${id}`);
+              return { status: "fulfilled", value: payload.player ?? payload } as PromiseFulfilledResult<AnyRecord>;
+            } catch (reason) {
+              return { status: "rejected", reason } as PromiseRejectedResult;
+            }
+          }) : Promise.resolve([]),
+          readsProductionDetail ? mapWithBrowserConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
+            try {
+              return {
+                status: "fulfilled",
+                value: {
+                  craftId: String(craft.entityId),
+                  payload: await request(`/crafts/${craft.entityId}/contributions`),
+                },
+              } as PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }>;
+            } catch (reason) {
+              return { status: "rejected", reason } as PromiseRejectedResult;
+            }
+          }) : Promise.resolve([]),
           readsRegionDetail ? request("/regions/status").catch(() => ({ regions: [] })) : Promise.resolve({ regions: [] }),
           readsRegionDetail ? request(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
         ]);
@@ -1067,13 +1096,15 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
 }
 
 function useLocalHistory(refreshToken: number, claimId: string, activePanel: ActivePanel): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], error: null, refreshToken: 0 });
+  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], dashboard: null, error: null, refreshToken: 0 });
   React.useEffect(() => {
     const controller = new AbortController();
+    const intervalMs = activePanel === "activity" ? 10000 : activePanel === "market" ? 15000 : 30000;
     async function load() {
       try {
-        const include = ["activity", activePanel === "market" ? "market" : "", activePanel === "dashboard" ? "snapshots" : ""].filter(Boolean).join(",");
-        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}`, { signal: controller.signal });
+        const include = ["activity", activePanel === "market" ? "market" : "", activePanel === "dashboard" ? "snapshots,dashboard" : ""].filter(Boolean).join(",");
+        const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
+        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { signal: controller.signal });
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
         const history = await response.json();
         const activity = history.activity ?? {};
@@ -1083,6 +1114,7 @@ function useLocalHistory(refreshToken: number, claimId: string, activePanel: Act
           activity: activity.events ?? [],
           activityTotal: toNumber(activity.total ?? activity.events?.length),
           snapshots: snapshots.snapshots ?? (activePanel === "dashboard" ? [] : prev.snapshots),
+          dashboard: history.dashboard ?? (activePanel === "dashboard" ? null : prev.dashboard),
           error: null,
           refreshToken: prev.refreshToken + 1,
         }));
@@ -1093,7 +1125,7 @@ function useLocalHistory(refreshToken: number, claimId: string, activePanel: Act
       }
     }
     load();
-    const timer = window.setInterval(load, 10000);
+    const timer = window.setInterval(load, intervalMs);
     return () => {
       window.clearInterval(timer);
       controller.abort();
@@ -1302,7 +1334,7 @@ function DiscordIcon({ size = 17 }: { size?: number }) {
   );
 }
 
-function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   const { claim, members, market, construction, crafts, research } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
@@ -1343,13 +1375,15 @@ function Dashboard({ data, activity, snapshots, lastUpdated, onNavigate }: { dat
     return !!occurredAt && occurredAt >= todayStart;
   }).map((event) => ({ event, metadata: activityMetadata(event) })).filter(({ metadata }) => metadata.before != null && metadata.after != null);
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
-  const treasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
+  const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
+  const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
   const treasuryTrend = [...snapshots]
     .map((snapshot) => ({ at: String(snapshot.captured_at ?? snapshot.capturedAt ?? ""), value: toNumber(snapshot.treasury) }))
     .filter((point) => point.at && point.value > 0)
     .sort((a, b) => timestampMs(a.at) - timestampMs(b.at))
     .slice(-48);
-  const dashboardActivity = [...activity]
+  const dashboardSummaryActivity = Array.isArray(dashboardSummary?.recentActivity) ? dashboardSummary.recentActivity : null;
+  const dashboardActivity = [...(dashboardSummaryActivity ?? activity)]
     .filter((event) => !["treasury", "supplies"].includes(String(event.event_type ?? "")))
     .sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at));
   const recentActivity = dashboardActivity.slice(0, 5);
@@ -2012,11 +2046,11 @@ function WatchlistPanel({ data, watches, onToggleWatch, onNavigate }: { data: Re
     const selected = watches.filter((watch) => watch.type === "market" && watch.itemId);
     if (!selected.length) return;
     const controller = new AbortController();
-    Promise.all(selected.map(async (watch) => {
+    mapWithBrowserConcurrency(selected, 4, async (watch) => {
       const type = watch.itemType === 1 ? "cargo" : "items";
       const response = await fetch(`${API}/market/${type}/${watch.itemId}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(data.claim.regionId ?? "19"))}`, { signal: controller.signal });
       return [watch.id, response.ok ? await response.json() : null] as const;
-    })).then((values) => setMarketValues(Object.fromEntries(values))).catch(() => undefined);
+    }).then((values) => setMarketValues(Object.fromEntries(values))).catch(() => undefined);
     return () => controller.abort();
   }, [data.claim.regionId, watches]);
   const isWatched = (id: string) => watches.some((watch) => watch.id === id);
@@ -3583,26 +3617,32 @@ function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; 
     }
     const controller = new AbortController();
     setState((previous) => previous.data ? { ...previous, loading: true, error: null } : { data: null, error: null, loading: true });
-    Promise.allSettled(members.filter((member) => member.playerEntityId).map(async (member) => {
-      const response = await fetch(`${API}/players/${member.playerEntityId}/passive-crafts?status=all`, { signal: controller.signal });
-      if (!response.ok) throw new Error(`passive crafts HTTP ${response.status}`);
-      const payload = await response.json();
-      return summarizePassiveCrafts(payload).map((craft): AnyRecord => ({
-        ...craft,
-        memberName: member.userName ?? member.username ?? "Unknown member",
-      }));
-    })).then((results) => {
+    const memberEntries = members.filter((member) => member.playerEntityId);
+    fetch(`${LOCAL_API}/passive-crafts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ members: memberEntries.map((member) => ({
+        playerEntityId: member.playerEntityId,
+        userName: member.userName ?? member.username,
+      })) }),
+      signal: controller.signal,
+    }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`passive crafts HTTP ${response.status}`)))
+      .then((payload) => {
       if (controller.signal.aborted) return;
-      const rows = results
-        .flatMap((result) => result.status === "fulfilled" ? result.value : [])
-        .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
-        .slice(0, 18);
-      const failures = results.filter((result) => result.status === "rejected").length;
+      const rows = (payload.rows ?? []) as AnyRecord[];
+      const failures = toNumber(payload.failed);
       setState({
         data: rows,
         error: failures ? `${failures} member${failures === 1 ? "" : "s"} could not be loaded.` : null,
         loading: false,
       });
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setState((previous) => ({
+        data: previous.data ?? [],
+        error: error instanceof Error ? error.message : String(error),
+        loading: false,
+      }));
     });
     return () => controller.abort();
   }, [memberKey, refreshToken]);
@@ -4025,17 +4065,13 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const roster = data.players;
   React.useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      fetch(`${API}/resources`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`resources HTTP ${response.status}`))),
-      fetch(`${API}/creatures`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`creatures HTTP ${response.status}`))),
-    ])
-      .then(([resourcePayload, creaturePayload]) => {
-        const resourceRows: AnyRecord[] = unwrap<AnyRecord[]>(resourcePayload, "resources", [])
+    fetch(`${LOCAL_API}/map/catalog`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`map catalog HTTP ${response.status}`)))
+      .then((catalogPayload) => {
+        const resourceRows: AnyRecord[] = unwrap<AnyRecord[]>(catalogPayload, "resources", [])
           .filter((resource) => resource?.id != null && resource?.name)
           .map((resource) => ({ ...resource, mapKind: "resource", mapId: String(resource.id), mapSortOrder: toNumber(resource.id) }));
-        const creatureRows: AnyRecord[] = unwrap<AnyRecord[]>(creaturePayload, "creatures", [])
+        const creatureRows: AnyRecord[] = unwrap<AnyRecord[]>(catalogPayload, "creatures", [])
           .filter((creature) => creature?.enemyType != null && creature?.name && (creature.huntable === true || String(creature.tag ?? "").toLowerCase().includes("animal")))
           .map((creature) => ({ ...creature, id: `enemy:${creature.enemyType}`, mapKind: "enemy", mapId: String(creature.enemyType), mapSortOrder: 100000 + toNumber(creature.enemyType), tag: "Huntable Animal" }));
         setResources([...resourceRows, ...creatureRows].sort((a, b) => toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name))));
@@ -5914,6 +5950,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             </div>
           ) : null}
           <div className={botOnly ? "bot-layout" : ""}>
+          <React.Suspense fallback={<div className="loading">Loading Discord controls...</div>}>
           {botOnly ? (
             <BotSectionNav active={botSection} onSelect={setBotSection} />
           ) : null}
@@ -6184,6 +6221,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           ) : null}
           {(!botOnly || botSection === "diagnostics") ? <DiscordDiagnosticsPanel filter={discordDiagnosticsFilter} log={discordLog} onFilterChange={setDiscordDiagnosticsFilter} onRefresh={() => run(refreshStatus)} /> : null}
         </div>
+        </React.Suspense>
         </div>
         </div>
       ) : null}
@@ -6582,7 +6620,7 @@ function DashboardApp() {
   }, [active, appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} lastUpdated={lastUpdated} onNavigate={navigate} />,
+    dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,

@@ -6,36 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.9.14-beta.1] - 2026-06-07
-
-### Changed
-
-- Reduced main BitJita refresh fan-out by loading heavier settlement endpoints only on the pages that display them, while keeping shared claim, member, and craft data available for app-wide shell features and production notifications.
-- Limited browser snapshot writes to the Dashboard page so snapshots are recorded only when the full snapshot inputs are loaded.
-
-## [0.9.13-beta.1] - 2026-06-07
-
-### Changed
-
-- Reduced local history polling payloads by loading market history only on the Market page and trend snapshots only on the Dashboard while keeping activity notifications available everywhere.
-
-## [0.9.12-beta.1] - 2026-06-07
-
-### Changed
-
-- Reduced BitJita player-detail fan-out by only loading per-member online/session details on Dashboard, Members, and Map pages where that data is displayed.
-
-## [0.9.11-beta.1] - 2026-06-07
-
-### Changed
-
-- Reduced local history polling from three separate browser requests to one combined endpoint for market, activity, and snapshot history.
-
-## [0.9.10-beta.1] - 2026-06-07
+## [0.9.15-beta.1] - 2026-06-07
 
 ### Changed
 
 - Improved BitJita proxy performance by sharing duplicate in-flight API requests and using a bounded short-lived cache for repeated frontend refreshes.
+- Reduced local history polling from three separate browser requests to one combined endpoint for market, activity, and snapshot history.
+- Reduced BitJita player-detail fan-out by only loading per-member online/session details on Dashboard, Members, and Map pages where that data is displayed.
+- Reduced local history polling payloads by loading market history only on the Market page and trend snapshots only on the Dashboard while keeping activity notifications available everywhere.
+- Reduced main BitJita refresh fan-out by loading heavier settlement endpoints only on the pages that display them, while keeping shared claim, member, and craft data available for app-wide shell features and production notifications.
+- Limited browser snapshot writes to the Dashboard page so snapshots are recorded only when the full snapshot inputs are loaded.
+- Capped paginated BitJita listing and region fetches to avoid large bursts of simultaneous requests while preserving complete results.
+- Capped Production passive-craft member lookups to avoid refreshing every member request at once while preserving the same passive craft results.
+- Moved Dashboard activity summaries and treasury net calculations server-side so non-Activity pages can refresh with smaller local history payloads.
+- Split Discord bot dashboard sections into lazy-loaded chunks so ordinary app pages download less admin-only UI code up front.
+- Reduced background local-history polling on non-Activity pages while keeping Activity and Market refreshes more responsive.
+- Capped player-detail and craft-contribution refreshes to avoid large simultaneous BitJita request bursts while preserving per-item fallback behavior.
+- Capped market sale/cancellation reconciliation checks during polling so closed or changed listings no longer trigger unbounded BitJita trade-history lookups.
+- Reduced non-Activity local-history payload sizes while keeping the full retained history available on the Activity page.
+- Split production frontend bundles into dedicated vendor chunks for React, icons, and other dependencies so repeat visits can reuse cached framework code.
+- Capped combined local-history activity limits server-side so oversized history requests cannot create unnecessarily large database reads.
+- Added a cached local Map catalog endpoint so resources and creatures load through one reusable server-side aggregation instead of separate browser BitJita requests.
+- Capped pinned market watch price-history refreshes so watchlist items no longer request every tracked market price at once.
+- Moved settlement member passive-craft summaries behind one cached local endpoint so the Production page no longer makes a separate browser BitJita request for every member.
 
 ## [0.9.9-beta.1] - 2026-06-07
 

@@ -1119,6 +1119,8 @@ const upstreamCache = new Map();
 const upstreamInflight = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
+const passiveCraftsCache = new Map();
+let mapCatalogCache = null;
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
@@ -3291,8 +3293,8 @@ async function recordSnapshot(payload) {
     };
   });
   const [partialChecks, closedChecks, pendingConfirmations] = await Promise.all([
-    Promise.all(partialCandidates.map(async ({ listing, soldQuantity }) => ({ listing, soldQuantity, trade: await findConfirmedTrade(listing, soldQuantity) }))),
-    Promise.all(closedCandidates.map(async ({ active, listing }) => ({ active, listing, trade: await findConfirmedTrade(listing, listing.quantity) }))),
+    mapWithConcurrency(partialCandidates, 4, async ({ listing, soldQuantity }) => ({ listing, soldQuantity, trade: await findConfirmedTrade(listing, soldQuantity) })),
+    mapWithConcurrency(closedCandidates, 4, async ({ active, listing }) => ({ active, listing, trade: await findConfirmedTrade(listing, listing.quantity) })),
     findPendingMarketConfirmations(claimId),
   ]);
   const partialResults = new Map(partialChecks.map((result) => [result.listing.key, result]));
@@ -3388,7 +3390,7 @@ async function fetchAllClaimListings(claimId) {
   const first = await fetchBitjita(`${base}&page=1`);
   const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
   const pages = totalPages > 1
-    ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => fetchBitjita(`${base}&page=${index + 2}`)))
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
     : [];
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
 }
@@ -3540,7 +3542,7 @@ async function fetchAllRegionClaims(regionId) {
   const first = await fetchBitjita(`${base}&page=1`);
   const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
   const pages = totalPages > 1
-    ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) => fetchBitjita(`${base}&page=${index + 2}`)))
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
     : [];
   const claims = [first, ...pages].flatMap((page) => unwrap(page, "claims", []));
   const details = await mapWithConcurrency(claims, 8, async (claim) => {
@@ -3556,6 +3558,104 @@ async function fetchAllRegionClaims(regionId) {
       const detail = details[index];
       return detail ? { ...claim, ...(detail.claim ?? detail) } : claim;
     }),
+  };
+}
+
+async function fetchMapCatalog() {
+  if (mapCatalogCache && mapCatalogCache.expiresAt > Date.now()) return mapCatalogCache.value;
+  const [resources, creatures] = await Promise.all([
+    fetchBitjita("/resources"),
+    fetchBitjita("/creatures"),
+  ]);
+  const value = { resources: unwrap(resources, "resources", []), creatures: unwrap(creatures, "creatures", []) };
+  mapCatalogCache = { expiresAt: Date.now() + 10 * 60 * 1000, value };
+  return value;
+}
+
+function passiveCraftTimestamp(value) {
+  const parsed = new Date(String(value ?? ""));
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function summarizePassiveCrafts(payload) {
+  const catalog = new Map(
+    [...(payload?.items ?? []), ...(payload?.cargos ?? [])].map((item) => [String(item.id), item]),
+  );
+  const summaries = new Map();
+  for (const craft of payload?.craftResults ?? []) {
+    const output = craft.craftedItem?.[0] ?? {};
+    const item = catalog.get(String(output.item_id)) ?? {};
+    const outputName = item.name ?? "crafted item";
+    const recipe = String(craft.recipeName ?? "Craft {0}")
+      .replace(/\s*\{\d+\}/g, ` ${outputName}`)
+      .replace(/\s+/g, " ")
+      .trim();
+    const key = [recipe, craft.buildingName, craft.status, item.id ?? output.item_id].join("|");
+    const current = summaries.get(key);
+    const timestamp = passiveCraftTimestamp(craft.timestamp);
+    if (current) {
+      current.quantity += toNumber(output.quantity) || 1;
+      if (timestamp > current.sortTimestamp) {
+        current.timestamp = craft.timestamp;
+        current.sortTimestamp = timestamp;
+      }
+      continue;
+    }
+    summaries.set(key, {
+      recipe,
+      status: craft.status ?? "unknown",
+      structure: craft.buildingName ?? "Unknown structure",
+      timestamp: craft.timestamp,
+      sortTimestamp: timestamp,
+      quantity: toNumber(output.quantity) || 1,
+      tier: item.tier,
+    });
+  }
+  return Array.from(summaries.values()).sort((a, b) => b.sortTimestamp - a.sortTimestamp).slice(0, 8);
+}
+
+async function fetchCachedPassiveCrafts(member) {
+  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
+  if (!playerId) return { ok: false, error: "Missing player id" };
+  const cached = passiveCraftsCache.get(playerId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`);
+  const value = {
+    ok: true,
+    playerId,
+    memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
+    rows: summarizePassiveCrafts(payload),
+  };
+  passiveCraftsCache.set(playerId, { value, expiresAt: Date.now() + 60 * 1000 });
+  return value;
+}
+
+async function passiveCraftSummaries(body) {
+  const members = Array.isArray(body?.members) ? body.members : [];
+  const uniqueMembers = [...new Map(members
+    .filter((member) => member && (member.playerEntityId ?? member.entityId))
+    .slice(0, 50)
+    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+  const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
+    try {
+      return await fetchCachedPassiveCrafts(member);
+    } catch (error) {
+      return {
+        ok: false,
+        playerId: String(member.playerEntityId ?? member.entityId ?? ""),
+        memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+  const rows = results
+    .flatMap((result) => result.ok ? result.rows.map((row) => ({ ...row, playerId: result.playerId, memberName: result.memberName })) : [])
+    .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+    .slice(0, 18);
+  return {
+    rows,
+    requested: uniqueMembers.length,
+    failed: results.filter((result) => !result.ok).length,
   };
 }
 
@@ -3714,12 +3814,36 @@ function activityHistory(claimId, limit = 500) {
   return { events, total };
 }
 
-function localHistory(claimId, include = null) {
+function dashboardHistory(claimId) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const treasuryRows = db.prepare(`
+    SELECT metadata_json
+    FROM activity_events
+    WHERE claim_id = ? AND event_type = 'treasury' AND occurred_at >= ?
+  `).all(claimId, todayStart.toISOString());
+  const treasuryNetToday = treasuryRows.reduce((total, row) => {
+    const metadata = safeJson(row.metadata_json, {});
+    if (metadata.before == null || metadata.after == null) return total;
+    return total + (toNumber(metadata.after) - toNumber(metadata.before));
+  }, 0);
+  const recentActivity = db.prepare(`
+    SELECT *
+    FROM activity_events
+    WHERE claim_id = ? AND event_type NOT IN ('treasury', 'supplies')
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 5
+  `).all(claimId);
+  return { treasuryNetToday, recentActivity };
+}
+
+function localHistory(claimId, include = null, options = {}) {
   const sections = include instanceof Set && include.size ? include : new Set(["market", "activity", "snapshots"]);
   const history = {};
   if (sections.has("market")) history.market = marketHistory(claimId, 120);
-  if (sections.has("activity")) history.activity = activityHistory(claimId, 2000);
+  if (sections.has("activity")) history.activity = activityHistory(claimId, Math.min(Math.max(Number(options.activityLimit) || 2000, 1), 2000));
   if (sections.has("snapshots")) history.snapshots = snapshotHistory(claimId, { daily: true, days: 7, limit: 96 });
+  if (sections.has("dashboard")) history.dashboard = dashboardHistory(claimId);
   return history;
 }
 
@@ -4676,6 +4800,10 @@ const server = createServer(async (req, res) => {
       regionCache.set(regionId, { expiresAt: Date.now() + 10 * 60 * 1000, value });
       return send(res, 200, value);
     }
+    if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
+      if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
+      return send(res, 200, await fetchMapCatalog());
+    }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
       const type = url.pathname.slice("/api/local/branding/".length);
       const asset = brandingAsset(type);
@@ -5130,11 +5258,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
+    if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
+      if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
+      return send(res, 200, await passiveCraftSummaries(await readJson(req, BODY_LIMITS.json)));
+    }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
-      const allowed = new Set(["market", "activity", "snapshots"]);
+      const allowed = new Set(["market", "activity", "snapshots", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
-      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections));
+      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections, {
+        activityLimit: Number(url.searchParams.get("activityLimit") ?? 2000),
+      }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
       const claimId = url.searchParams.get("claimId") ?? "";
