@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.18-beta.1] - 2026-06-07
+
+### Added
+
+- Added Void, Ocean, and Crimson browser theme presets.
+
+### Changed
+
+- Updated the Violet browser theme description to avoid research-specific wording.
+
 ## [0.9.17-beta.1] - 2026-06-07
 
 ### Changed
