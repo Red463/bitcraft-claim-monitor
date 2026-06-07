@@ -1030,22 +1030,23 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
   return state;
 }
 
-function useLocalHistory(refreshToken: number, claimId: string): LocalHistoryState {
+function useLocalHistory(refreshToken: number, claimId: string, activePanel: ActivePanel): LocalHistoryState {
   const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], error: null, refreshToken: 0 });
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
       try {
-        const response = await fetch(`${LOCAL_API}/history?claimId=${claimId}`, { signal: controller.signal });
+        const include = ["activity", activePanel === "market" ? "market" : "", activePanel === "dashboard" ? "snapshots" : ""].filter(Boolean).join(",");
+        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}`, { signal: controller.signal });
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
         const history = await response.json();
         const activity = history.activity ?? {};
         const snapshots = history.snapshots ?? {};
         setState((prev) => ({
-          market: history.market ?? null,
+          market: history.market ?? (activePanel === "market" ? null : prev.market),
           activity: activity.events ?? [],
           activityTotal: toNumber(activity.total ?? activity.events?.length),
-          snapshots: snapshots.snapshots ?? [],
+          snapshots: snapshots.snapshots ?? (activePanel === "dashboard" ? [] : prev.snapshots),
           error: null,
           refreshToken: prev.refreshToken + 1,
         }));
@@ -1061,7 +1062,7 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
       window.clearInterval(timer);
       controller.abort();
     };
-  }, [claimId, refreshToken]);
+  }, [activePanel, claimId, refreshToken]);
   return state;
 }
 
@@ -6294,7 +6295,7 @@ function DashboardApp() {
     const normalized = normalizeData(state.data);
     return { ...normalized, raw: state.data };
   }, [state.data]);
-  const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId);
+  const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   analyticsConsent = consent;
   const dismissToast = React.useCallback((id: string) => {

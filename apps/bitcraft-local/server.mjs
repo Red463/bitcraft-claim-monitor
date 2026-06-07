@@ -3714,12 +3714,13 @@ function activityHistory(claimId, limit = 500) {
   return { events, total };
 }
 
-function localHistory(claimId) {
-  return {
-    market: marketHistory(claimId, 120),
-    activity: activityHistory(claimId, 2000),
-    snapshots: snapshotHistory(claimId, { daily: true, days: 7, limit: 96 }),
-  };
+function localHistory(claimId, include = null) {
+  const sections = include instanceof Set && include.size ? include : new Set(["market", "activity", "snapshots"]);
+  const history = {};
+  if (sections.has("market")) history.market = marketHistory(claimId, 120);
+  if (sections.has("activity")) history.activity = activityHistory(claimId, 2000);
+  if (sections.has("snapshots")) history.snapshots = snapshotHistory(claimId, { daily: true, days: 7, limit: 96 });
+  return history;
 }
 
 function resolveMarketEvent(body) {
@@ -5130,7 +5131,10 @@ const server = createServer(async (req, res) => {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
-      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? ""));
+      const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
+      const allowed = new Set(["market", "activity", "snapshots"]);
+      const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
+      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections));
     }
     if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
       const claimId = url.searchParams.get("claimId") ?? "";

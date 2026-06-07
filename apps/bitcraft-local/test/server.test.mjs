@@ -273,6 +273,15 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(aggregateHistory.activity.total >= aggregateHistory.activity.events.length, true);
   assert.equal(aggregateHistory.snapshots.snapshots.length, 1);
   assert.equal(aggregateHistory.snapshots.snapshots[0].treasury, 300);
+  const activityOnlyHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=activity`).then((response) => response.json());
+  assert.equal("activity" in activityOnlyHistory, true);
+  assert.equal("market" in activityOnlyHistory, false);
+  assert.equal("snapshots" in activityOnlyHistory, false);
+  assert.equal(activityOnlyHistory.activity.total >= activityOnlyHistory.activity.events.length, true);
+  const marketSnapshotHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=market,snapshots`).then((response) => response.json());
+  assert.equal(marketSnapshotHistory.market.totals.confirmedSales, 1);
+  assert.equal(marketSnapshotHistory.snapshots.snapshots.length, 1);
+  assert.equal("activity" in marketSnapshotHistory, false);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   trades = [

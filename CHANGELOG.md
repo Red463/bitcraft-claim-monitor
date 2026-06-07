@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.13-beta.1] - 2026-06-07
+
+### Changed
+
+- Reduced local history polling payloads by loading market history only on the Market page and trend snapshots only on the Dashboard while keeping activity notifications available everywhere.
+
 ## [0.9.12-beta.1] - 2026-06-07
 
 ### Changed
