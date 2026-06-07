@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.9-beta.1] - 2026-06-07
+
+### Security
+
+- Added administrator roles and route-level permission checks for settings, data export, backups, analytics, linked accounts, Discord management, Discord moderation, and administrator account management.
+- Preserved existing administrator access by migrating current admin users to the Owner role.
+
+### Changed
+
+- Added role selection and role editing to the Admin Console administrator management screen.
+
 ## [0.9.8-beta.1] - 2026-06-07
 
 ### Security

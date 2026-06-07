@@ -108,6 +108,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'owner',
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -291,6 +292,7 @@ ensureColumn("market_events", "trade_id", "TEXT");
 ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
+ensureColumn("admin_users", "role", "TEXT NOT NULL DEFAULT 'owner'");
 ensureColumn("production_jobs", "start_notified", "INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
 
@@ -412,14 +414,15 @@ const statements = {
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminBySession: db.prepare(`
-    SELECT admin_users.id, admin_users.username
+    SELECT admin_users.id, admin_users.username, admin_users.role
     FROM admin_sessions
     JOIN admin_users ON admin_users.id = admin_sessions.user_id
     WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ? AND admin_users.active = 1
   `),
-  insertAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, created_at) VALUES (?, ?, ?)"),
+  insertAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)"),
   updatePassword: db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?"),
   updateAdminActive: db.prepare("UPDATE admin_users SET active = ? WHERE id = ?"),
+  updateAdminRole: db.prepare("UPDATE admin_users SET role = ? WHERE id = ?"),
   updateLastLogin: db.prepare("UPDATE admin_users SET last_login_at = ? WHERE id = ?"),
   insertSession: db.prepare("INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
   deleteSession: db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?"),
@@ -1185,6 +1188,89 @@ function validAdminUsername(username) {
   return /^[A-Za-z0-9_-]{3,32}$/.test(username);
 }
 
+const ADMIN_ROLE_LABELS = {
+  owner: "Owner",
+  admin: "Administrator",
+  "discord-manager": "Discord Manager",
+  moderator: "Moderator",
+  viewer: "Viewer",
+};
+
+const ADMIN_ROLE_PERMISSIONS = {
+  owner: ["*"],
+  admin: [
+    "status.view",
+    "settings.view",
+    "settings.manage",
+    "data.view",
+    "data.export",
+    "data.manage",
+    "accounts.manage",
+    "analytics.view",
+    "analytics.manage",
+    "audit.view",
+    "discord.view",
+    "discord.manage",
+    "discord.moderate",
+  ],
+  "discord-manager": ["status.view", "settings.view", "discord.view", "discord.manage"],
+  moderator: ["status.view", "settings.view", "discord.view", "discord.moderate", "audit.view"],
+  viewer: ["status.view", "settings.view", "data.view", "analytics.view", "audit.view", "discord.view"],
+};
+
+function normalizeAdminRole(value) {
+  const role = String(value ?? "viewer").trim().toLowerCase();
+  return Object.hasOwn(ADMIN_ROLE_LABELS, role) ? role : "viewer";
+}
+
+function publicAdminUser(row) {
+  if (!row) return null;
+  const role = normalizeAdminRole(row.role);
+  return {
+    id: row.id,
+    username: row.username,
+    role,
+    roleLabel: ADMIN_ROLE_LABELS[role],
+    permissions: adminPermissions(role),
+  };
+}
+
+function adminPermissions(role) {
+  return ADMIN_ROLE_PERMISSIONS[normalizeAdminRole(role)] ?? ADMIN_ROLE_PERMISSIONS.viewer;
+}
+
+function adminHasPermission(user, permission) {
+  const permissions = adminPermissions(user?.role);
+  return permissions.includes("*") || permissions.includes(permission);
+}
+
+function adminPermissionFor(method, pathname) {
+  if (pathname === "/api/local/admin/me") return "status.view";
+  if (pathname === "/api/local/admin/status") return "status.view";
+  if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
+  if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/diagnostics") return "data.manage";
+  if (pathname === "/api/local/admin/branding") return "settings.manage";
+  if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
+  if (pathname === "/api/local/admin/sessions/clear") return "users.manage";
+  if (pathname === "/api/local/admin/user-accounts") return "accounts.manage";
+  if (pathname === "/api/local/admin/user-accounts/approval") return "accounts.manage";
+  if (pathname === "/api/local/admin/audit") return "audit.view";
+  if (pathname === "/api/local/admin/analytics") return method === "DELETE" ? "analytics.manage" : "analytics.view";
+  if (pathname === "/api/local/admin/tables" || pathname === "/api/local/admin/table") return "data.view";
+  if (pathname === "/api/local/admin/export") return "data.export";
+  if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup" || pathname === "/api/local/admin/maintenance/prune") return "data.manage";
+  if (pathname.startsWith("/api/local/admin/discord/moderation/")) return "discord.moderate";
+  if (pathname.startsWith("/api/local/admin/discord/") && method === "GET") return "discord.view";
+  if (pathname.startsWith("/api/local/admin/discord/")) return "discord.manage";
+  return "status.view";
+}
+
+function requireAdminPermission(req, res, user, permission) {
+  if (adminHasPermission(user, permission)) return true;
+  send(res, 403, { error: `Administrator role does not allow ${permission.replace(".", " ")}` });
+  return false;
+}
+
 function sameOriginRequest(req) {
   const origin = String(req.headers.origin ?? "").trim();
   if (!origin) return true;
@@ -1435,8 +1521,9 @@ function adminStatus(req) {
     setupRequired,
     setupKeyRequired: isProduction && setupRequired,
     authenticated: Boolean(user),
-    user: user ? { id: user.id, username: user.username } : null,
+    user: publicAdminUser(user),
     csrfToken: user ? csrfToken(req) : null,
+    roles: ADMIN_ROLE_LABELS,
   };
 }
 
@@ -4516,7 +4603,7 @@ const server = createServer(async (req, res) => {
       const password = String(body.password ?? "");
       if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run(username, await hashPassword(password), createdAt);
+      const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
       statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
       audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
       const session = createSession(result.lastInsertRowid);
@@ -4552,6 +4639,8 @@ const server = createServer(async (req, res) => {
       const user = requireAdmin(req, res);
       if (!user) return;
       if (!requireAdminMutation(req, res, user)) return;
+      const requiredPermission = adminPermissionFor(req.method, url.pathname);
+      if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
       if (req.method === "POST" && url.pathname === "/api/local/admin/poll") {
         await collectServerSnapshot(true);
@@ -4805,12 +4894,12 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/users") {
         const users = db.prepare(`
-          SELECT admin_users.id, admin_users.username, admin_users.active, admin_users.created_at, admin_users.last_login_at,
+          SELECT admin_users.id, admin_users.username, admin_users.role, admin_users.active, admin_users.created_at, admin_users.last_login_at,
                  COUNT(admin_sessions.token_hash) AS sessions
           FROM admin_users LEFT JOIN admin_sessions ON admin_sessions.user_id = admin_users.id AND admin_sessions.expires_at > ?
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
-        return send(res, 200, { users });
+        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)] })), roles: ADMIN_ROLE_LABELS });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
@@ -4830,11 +4919,13 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const username = String(body.username ?? "").trim();
         const password = String(body.password ?? "");
+        const role = normalizeAdminRole(body.role ?? "admin");
+        if (role === "owner" && normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only owners can create owner administrators" });
         if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
         if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
         try {
-          const result = statements.insertAdmin.run(username, await hashPassword(password), new Date().toISOString());
-          audit(user, "user.create", { id: result.lastInsertRowid, username });
+          const result = statements.insertAdmin.run(username, await hashPassword(password), role, new Date().toISOString());
+          audit(user, "user.create", { id: result.lastInsertRowid, username, role });
           return send(res, 201, { ok: true });
         } catch (error) {
           if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That username is already in use" });
@@ -4864,6 +4955,19 @@ const server = createServer(async (req, res) => {
         if (!active) statements.deleteUserSessions.run(userId);
         audit(user, "user.status", { id: target.id, username: target.username, active });
         return send(res, 200, { ok: true });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/user/role") {
+        const body = await readJson(req);
+        const userId = Number(body.userId);
+        const role = normalizeAdminRole(body.role);
+        if (!userId) return send(res, 400, { error: "Select an administrator and role" });
+        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
+        const target = db.prepare("SELECT id, username, role FROM admin_users WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Admin user not found" });
+        statements.updateAdminRole.run(role, userId);
+        statements.deleteUserSessions.run(userId);
+        audit(user, "user.role", { id: target.id, username: target.username, previousRole: normalizeAdminRole(target.role), role });
+        return send(res, 200, { ok: true, signedOut: userId === user.id });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/sessions/clear") {
         const body = await readJson(req);

@@ -134,6 +134,7 @@ test("server collection paginates listings and protects production mutations", a
   const auth = await setup.json();
   const cookie = setup.headers.get("set-cookie").split(";")[0];
   assert.ok(auth.csrfToken);
+  assert.equal(auth.user.role, "owner");
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
@@ -205,6 +206,31 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(analyticsDashboard.totals.pageViews, 1);
   assert.equal(analyticsDashboard.totals.interactions, 1);
   assert.equal(analyticsDashboard.totals.durationSeconds, 90);
+  const createViewer = await fetch(`${origin}/api/local/admin/users`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ username: "viewer", password: "viewer password ok", role: "viewer" }),
+  });
+  assert.equal(createViewer.status, 201);
+  const viewerLogin = await fetch(`${origin}/api/local/admin/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ username: "viewer", password: "viewer password ok" }),
+  });
+  assert.equal(viewerLogin.status, 200);
+  const viewerAuth = await viewerLogin.json();
+  const viewerCookie = viewerLogin.headers.get("set-cookie").split(";")[0];
+  assert.equal(viewerAuth.user.role, "viewer");
+  const viewerStatus = await fetch(`${origin}/api/local/admin/status`, { headers: { cookie: viewerCookie, origin } });
+  assert.equal(viewerStatus.status, 200);
+  const viewerSettingsMutation = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie: viewerCookie, origin, "content-type": "application/json", "x-csrf-token": viewerAuth.csrfToken },
+    body: JSON.stringify({}),
+  });
+  assert.equal(viewerSettingsMutation.status, 403);
+  const viewerUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: viewerCookie, origin } });
+  assert.equal(viewerUserList.status, 403);
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",

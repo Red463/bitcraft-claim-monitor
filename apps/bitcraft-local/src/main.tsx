@@ -5098,7 +5098,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [tableOffset, setTableOffset] = React.useState(0);
   const [users, setUsers] = React.useState<AnyRecord[]>([]);
   const [linkedAccounts, setLinkedAccounts] = React.useState<AppUser[]>([]);
-  const [newUser, setNewUser] = React.useState({ username: "", password: "" });
+  const [newUser, setNewUser] = React.useState({ username: "", password: "", role: "admin" });
   const [resetUser, setResetUser] = React.useState("");
   const [resetPassword, setResetPassword] = React.useState("");
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
@@ -5122,6 +5122,8 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [customCommands, setCustomCommands] = React.useState<AnyRecord[]>([]);
   const [discordDiagnosticsFilter, setDiscordDiagnosticsFilter] = React.useState("all");
   const discordToolResult = discordToolResults[botSection] ?? null;
+  const adminRoles: Record<string, string> = auth?.roles ?? { owner: "Owner", admin: "Administrator", "discord-manager": "Discord Manager", moderator: "Moderator", viewer: "Viewer" };
+  const canManageAdmins = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("users.manage"));
   const setDiscordToolResult = React.useCallback((result: AnyRecord | null) => {
     setDiscordToolResults((current) => ({ ...current, [botSection]: result }));
   }, [botSection]);
@@ -6161,17 +6163,19 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
         <div className="admin-grid">
           <section className="form-card">
             <h3><UserPlus size={17} /> Add Administrator</h3>
+            {!canManageAdmins ? <p className="legend">Your administrator role can view this page but cannot create or change administrator accounts.</p> : null}
             <label className="field"><span>Username</span><input value={newUser.username} onChange={(event) => setNewUser({ ...newUser, username: event.target.value })} /></label>
             <label className="field"><span>Initial password</span><input type="password" minLength={12} value={newUser.password} onChange={(event) => setNewUser({ ...newUser, password: event.target.value })} /></label>
-            <button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ username: "", password: "" }); await refreshUsers(); }, "Administrator created.")}><UserPlus size={15} /> Create Account</button>
+            <label className="field"><span>Role</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
+            <button className="toolbar-button primary" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ username: "", password: "", role: "admin" }); await refreshUsers(); }, "Administrator created.")}><UserPlus size={15} /> Create Account</button>
             <h3><KeyRound size={17} /> Reset Password</h3>
             <label className="field"><span>Administrator</span><select value={resetUser} onChange={(event) => setResetUser(event.target.value)}><option value="">Select user</option>{users.map((entry) => <option value={entry.id} key={entry.id}>{entry.username}</option>)}</select></label>
             <label className="field"><span>New password</span><input type="password" minLength={12} value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
-            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
+            <button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { const result = await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
           </section>
           <section className="form-card">
             <h3><Users size={17} /> Administrators</h3>
-            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><div className="toolbar"><button className="toolbar-button" onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
+            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
           </section>
         </div>
       ) : null}
