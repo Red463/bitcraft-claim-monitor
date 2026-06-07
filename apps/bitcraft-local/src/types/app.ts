@@ -1,0 +1,29 @@
+import type { AnyRecord } from "../main-app-data";
+
+export type ActivePanel =
+  | "dashboard"
+  | "members"
+  | "skills"
+  | "production"
+  | "publiccrafts"
+  | "inventory"
+  | "construction"
+  | "research"
+  | "market"
+  | "empire"
+  | "map"
+  | "sync"
+  | "activity"
+  | "admin";
+
+export type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
+
+export type LocalHistoryState = {
+  market: AnyRecord | null;
+  activity: AnyRecord[];
+  activityTotal: number;
+  snapshots: AnyRecord[];
+  dashboard: AnyRecord | null;
+  error: string | null;
+  refreshToken: number;
+};

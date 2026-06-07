@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.17-beta.1] - 2026-06-07
+
+### Changed
+
+- Continued Phase 4 frontend modularization by moving shared formatting, item/equipment normalization, owner labels, browser persistence hooks, badges, item displays, metric components, API polling hooks, and app data normalization into focused modules.
+- Moved the Members, Professions, Construction, Research, Region, and Sync views into dedicated page modules and removed the dead legacy Overview implementation from the main app shell.
+
+## [0.9.16-beta.1] - 2026-06-07
+
 ### Added
 
 - Added private settlement crafts to the Production page when BitJita returns them through member craft data, with private craft badges and a browser setting to hide them.
