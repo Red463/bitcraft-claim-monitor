@@ -1120,6 +1120,7 @@ const upstreamInflight = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
 const passiveCraftsCache = new Map();
+const productionCraftsCache = new Map();
 let mapCatalogCache = null;
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
@@ -3659,6 +3660,105 @@ async function passiveCraftSummaries(body) {
   };
 }
 
+function itemCatalogKey(item) {
+  const id = item?.id ?? item?.entityId ?? item?.itemId;
+  return id == null ? "" : String(id);
+}
+
+function mergeCraftCatalogs(payloads) {
+  const items = new Map();
+  const cargos = new Map();
+  const claims = new Map();
+  for (const payload of payloads) {
+    for (const item of unwrap(payload, "items", [])) {
+      const key = itemCatalogKey(item);
+      if (key) items.set(key, item);
+    }
+    for (const cargo of unwrap(payload, "cargos", [])) {
+      const key = itemCatalogKey(cargo);
+      if (key) cargos.set(key, cargo);
+    }
+    for (const claim of unwrap(payload, "claims", [])) {
+      const key = itemCatalogKey(claim);
+      if (key) claims.set(key, claim);
+    }
+  }
+  return {
+    items: [...items.values()],
+    cargos: [...cargos.values()],
+    claims: [...claims.values()],
+  };
+}
+
+function craftClaimId(craft) {
+  return String(craft?.claimEntityId ?? craft?.claim_entity_id ?? craft?.claim?.entityId ?? craft?.claimId ?? "");
+}
+
+function productionCraftCacheKey(claimId, members) {
+  const ids = members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort();
+  return `${claimId}:${ids.join(",")}`;
+}
+
+async function settlementProductionCrafts(body) {
+  const claimId = String(body?.claimId ?? "").trim();
+  if (!claimId) return { craftResults: [], items: [], cargos: [], claims: [], count: 0, publicCount: 0, privateCount: 0, failedMemberRequests: 0 };
+  const members = Array.isArray(body?.members) ? body.members : [];
+  const uniqueMembers = [...new Map(members
+    .filter((member) => member && (member.playerEntityId ?? member.entityId))
+    .slice(0, 50)
+    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+  const cacheKey = productionCraftCacheKey(claimId, uniqueMembers);
+  const cached = productionCraftsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] }));
+  const publicCrafts = unwrap(publicPayload, "craftResults", []);
+  const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
+  const memberResults = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
+    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+    try {
+      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  const memberPayloads = memberResults.filter((result) => result.ok).map((result) => result.payload);
+  const merged = new Map();
+
+  for (const craft of publicCrafts) {
+    if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
+    merged.set(String(craft.entityId), { ...craft, isPublic: craft.isPublic !== false, visibilitySource: "claim-public" });
+  }
+
+  for (const payload of memberPayloads) {
+    for (const craft of unwrap(payload, "craftResults", [])) {
+      if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
+      const id = String(craft.entityId);
+      const existing = merged.get(id) ?? {};
+      const isPublic = craft.isPublic === false ? false : publicIds.has(id) || craft.isPublic === true;
+      merged.set(id, {
+        ...existing,
+        ...craft,
+        isPublic,
+        visibilitySource: isPublic ? existing.visibilitySource ?? "player-public" : "player-private",
+      });
+    }
+  }
+
+  const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
+  const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
+  const value = {
+    craftResults,
+    ...catalog,
+    count: craftResults.length,
+    publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
+    privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
+    failedMemberRequests: memberResults.filter((result) => !result.ok).length,
+  };
+  productionCraftsCache.set(cacheKey, { value, expiresAt: Date.now() + 30 * 1000 });
+  return value;
+}
+
 let snapshotQueue = Promise.resolve();
 
 function enqueueSnapshot(payload) {
@@ -5261,6 +5361,10 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
       if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
       return send(res, 200, await passiveCraftSummaries(await readJson(req, BODY_LIMITS.json)));
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/production/crafts") {
+      if (!rateLimit(req, res, "production-crafts", RATE_LIMITS.expensiveLocal)) return;
+      return send(res, 200, await settlementProductionCrafts(await readJson(req, BODY_LIMITS.json)));
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);

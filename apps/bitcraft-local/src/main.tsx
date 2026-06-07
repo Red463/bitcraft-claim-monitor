@@ -1038,6 +1038,14 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
+        if (activePanel === "production") {
+          raw.crafts = await fetch(`${LOCAL_API}/production/crafts`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({ claimId, members }),
+          }).then((response) => response.ok ? response.json() : raw.crafts).catch(() => raw.crafts);
+        }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel === "dashboard" || activePanel === "members" || activePanel === "map";
         const readsProductionDetail = activePanel === "production" || activePanel === "dashboard";
@@ -3676,6 +3684,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
+  const [showPrivateCrafts, setShowPrivateCrafts] = usePersistedState("production.showPrivateCrafts", true);
   const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
   const [toolbeltError, setToolbeltError] = React.useState(false);
   const toolsForMemberRef = React.useRef<string | null>(null);
@@ -3746,7 +3755,9 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
     if (toolRequirement && !ownedTool) return { ok: false, text: `Needs T${Math.max(1, craftTier - 1)}+ ${expectedTool ?? "required tool"} in Toolbelt` };
     return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}${ownedTool ? ` - ${ownedTool.name} (${formatNumber(ownedTool.toolPower)} power)` : ""}` };
   }
-  const jobs = [...data.crafts].sort((a, b) => {
+  const privateCrafts = data.crafts.filter((job) => job.isPublic === false);
+  const visibleCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);
+  const jobs = [...visibleCrafts].sort((a, b) => {
     const aMetrics = metrics(a);
     const bMetrics = metrics(b);
     const aValue = sortKey === "remainingEffort" ? aMetrics.remaining : aMetrics[sortKey];
@@ -3759,7 +3770,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
     const bActive = hasRecentCraftContribution(data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
     return bActive - aActive || bMetrics.completion - aMetrics.completion;
   });
-  const crafterCounts = data.crafts.reduce<Record<string, number>>((acc, job) => {
+  const crafterCounts = visibleCrafts.reduce<Record<string, number>>((acc, job) => {
     const name = String(job.ownerUsername ?? "Unknown");
     acc[name] = (acc[name] ?? 0) + 1;
     return acc;
@@ -3777,11 +3788,12 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
       <header className="members-topbar production-topbar">
         <div>
           <h2>Active Production</h2>
-          <p>{data.crafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${data.crafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}</p>
+          <p>{visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
-            <span><Factory size={14} /> {formatNumber(data.crafts.length)} total jobs</span>
+            <span><Factory size={14} /> {formatNumber(visibleCrafts.length)} shown</span>
+            {privateCrafts.length ? <span><Lock size={14} /> {formatNumber(privateCrafts.length)} private</span> : null}
             <span>{formatNumber(Object.keys(crafterCounts).length)} crafters</span>
           </div>
           <div className="dashboard-settlement-pill">
@@ -3791,7 +3803,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
         </div>
       </header>
       <div className="summary-grid production-summary">
-        <MiniStat icon={<Factory />} label="Total Jobs" value={formatNumber(data.crafts.length)} />
+        <MiniStat icon={<Factory />} label="Total Jobs" value={formatNumber(visibleCrafts.length)} />
         <MiniStat icon={<Activity />} label="Active Now" value={formatNumber(activeJobs)} />
         <MiniStat icon={<TrendingUp />} label="Total XP" value={formatNumber(totalProductionXp)} />
         <MiniStat icon={<Star />} label="XP Remaining" value={formatNumber(remainingProductionXp)} />
@@ -3816,18 +3828,26 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
             </select>
           </label>
           <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+          <label className="production-private-toggle"><span><Lock size={13} /> Show private crafts</span><input type="checkbox" checked={showPrivateCrafts} onChange={(event) => setShowPrivateCrafts(event.target.checked)} /></label>
         </div>
         {Object.keys(crafterCounts).length ? (
           <div className="production-crafter-line">
             <span>Current crafters</span>
             <div className="crafter-pills">
-              {Object.entries(crafterCounts).map(([name, count]) => <span key={name}><User size={12} /> <strong><TrackedOwnerName name={name} claim={data.claim} /></strong> {count}</span>)}
+              {Object.entries(crafterCounts).map(([name, count]) => (
+                <span key={name}>
+                  <User size={12} />
+                  <strong><TrackedOwnerName name={name} claim={data.claim} /></strong>
+                  <small>{count}</small>
+                </span>
+              ))}
             </div>
           </div>
         ) : null}
       </div>
       {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong><TrackedOwnerName name={selectedMember.userName ?? selectedMember.username} claim={data.claim} /></strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
+      {data.crafts.length > 0 && visibleCrafts.length === 0 ? <div className="empty-state"><Lock />Private crafts are hidden by your Production controls.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
           const first = job.craftedItem?.[0] ?? {};
@@ -3844,7 +3864,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} /></span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft. BitJita returned this through member craft data with isPublic false."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} /></span></div>
                 <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>

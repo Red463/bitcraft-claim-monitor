@@ -1297,7 +1297,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .production-command-main {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(210px, 260px) minmax(210px, 260px) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(190px, 240px) minmax(190px, 240px) auto auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -1326,31 +1326,106 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   flex: 0 0 auto;
   justify-content: flex-end;
 }
-.production-crafter-line {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr);
+.production-private-toggle {
+  min-height: 38px;
+  border: 1px solid rgba(154,168,190,.22);
+  border-radius: 8px;
+  background: rgba(5,8,12,.78);
+  padding: 0 10px;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.production-private-toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.production-private-toggle svg { color: #f0c64f; }
+.production-private-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 38px;
+  height: 21px;
+  border: 1px solid rgba(154,168,190,.32);
+  border-radius: 999px;
+  background: rgba(154,168,190,.16);
+  position: relative;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.production-private-toggle input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #9aa6b6;
+  transition: transform .16s ease, background .16s ease;
+}
+.production-private-toggle input[type="checkbox"]:checked {
+  border-color: rgba(240,198,79,.58);
+  background: rgba(240,198,79,.22);
+  box-shadow: 0 0 0 3px rgba(240,198,79,.08);
+}
+.production-private-toggle input[type="checkbox"]:checked::before {
+  transform: translateX(17px);
+  background: #f0c64f;
+}
+.production-private-toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 2px;
+}
+.production-crafter-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   min-width: 0;
   padding-top: 12px;
   border-top: 1px solid rgba(154,168,190,.12);
 }
 .production-crafter-line > span {
   color: #aab5c4;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
 }
 .production-page .crafter-pills {
   max-width: none;
   justify-content: flex-start;
-  gap: 7px;
+  gap: 8px;
 }
 .production-page .crafter-pills span {
   border-color: rgba(154,168,190,.18);
   background: rgba(5,8,12,.78);
   color: #aab5c4;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 30px;
+  padding: 0 6px 0 10px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
 }
 .production-page .crafter-pills strong { color: #fff; }
+.production-page .crafter-pills small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 1px;
+  border-radius: 999px;
+  border: 1px solid rgba(240,198,79,.2);
+  background: rgba(240,198,79,.08);
+  color: #dce5f2;
+  font-size: 11px;
+  font-weight: 800;
+}
 .production-page .select-control,
 .production-page .segmented button {
   border-color: rgba(154,168,190,.28);
@@ -1403,7 +1478,26 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   font-weight: 800;
   letter-spacing: .055em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
+.private-craft-pill {
+  flex: 0 0 auto;
+  min-height: 20px;
+  border: 1px solid rgba(240,198,79,.42);
+  border-radius: 999px;
+  background: rgba(240,198,79,.11);
+  color: #f0c64f;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.private-craft-pill svg { width: 11px; height: 11px; }
 .production-page .production-card header svg { color: #f0c64f; }
 .production-page .production-card header span,
 .production-page .production-card header small,

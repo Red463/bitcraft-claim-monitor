@@ -64,6 +64,7 @@ test("server collection paginates listings and protects production mutations", a
   let resourceCatalogRequests = 0;
   let creatureCatalogRequests = 0;
   let passiveCraftRequests = 0;
+  let playerCraftRequests = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
@@ -112,6 +113,25 @@ test("server collection paginates listings and protects production mutations", a
           { recipeName: "Collect {0}", buildingName: "Forestry Camp", status: "complete", timestamp: "2026-05-20T12:10:00.000Z", craftedItem: [{ item_id: "passive-item-1", quantity: 3 }] },
           { recipeName: "Collect {0}", buildingName: "Forestry Camp", status: "complete", timestamp: "2026-05-20T12:20:00.000Z", craftedItem: [{ item_id: "passive-item-1", quantity: 2 }] },
         ],
+      });
+    }
+    if (url.pathname === `/api/crafts`) return json(res, {
+      craftResults: [
+        { entityId: "public-craft", claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 },
+      ],
+      items: [{ id: "craft-item-1", name: "Public Output", tier: 2 }],
+      cargos: [],
+    });
+    if (url.pathname === "/api/players/player-1/crafts") {
+      playerCraftRequests += 1;
+      return json(res, {
+        craftResults: [
+          { entityId: "public-craft", claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 },
+          { entityId: "private-craft", claimEntityId: claimId, buildingName: "Private Scholar Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-2" }], totalActionsRequired: 200, progress: 10 },
+          { entityId: "foreign-private-craft", claimEntityId: "other-claim", buildingName: "Other Claim Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-3" }], totalActionsRequired: 300, progress: 10 },
+        ],
+        items: [{ id: "craft-item-2", name: "Private Output", tier: 3 }],
+        cargos: [],
       });
     }
     return json(res, { error: "not found" }, 404);
@@ -184,6 +204,23 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(passiveOne.rows[0].memberName, "Tester");
   assert.equal(passiveTwo.rows[0].recipe, "Collect Fine Timber");
   assert.equal(passiveCraftRequests, 1);
+  const productionCraftPayload = { claimId, members: [{ playerEntityId: "player-1", userName: "Tester" }] };
+  const productionOne = await fetch(`${origin}/api/local/production/crafts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify(productionCraftPayload),
+  }).then((response) => response.json());
+  const productionTwo = await fetch(`${origin}/api/local/production/crafts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify(productionCraftPayload),
+  }).then((response) => response.json());
+  assert.equal(productionOne.publicCount, 1);
+  assert.equal(productionOne.privateCount, 1);
+  assert.deepEqual(productionOne.craftResults.map((craft) => craft.entityId).sort(), ["private-craft", "public-craft"]);
+  assert.equal(productionOne.craftResults.find((craft) => craft.entityId === "private-craft").isPublic, false);
+  assert.equal(productionTwo.privateCount, 1);
+  assert.equal(playerCraftRequests, 1);
 
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",
