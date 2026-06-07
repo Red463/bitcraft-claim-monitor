@@ -1116,9 +1116,12 @@ function audit(user, action, details = {}) {
 
 const loginAttempts = new Map();
 const upstreamCache = new Map();
+const upstreamInflight = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
 const rateLimitBuckets = new Map();
+const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
+const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
 
 const BODY_LIMITS = {
   auth: 8 * 1024,
@@ -4485,27 +4488,63 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
+function pruneUpstreamCache(now = Date.now()) {
+  for (const [key, value] of upstreamCache) {
+    if (value.expiresAt <= now) upstreamCache.delete(key);
+  }
+  while (upstreamCache.size > UPSTREAM_CACHE_MAX_ENTRIES) {
+    const oldestKey = upstreamCache.keys().next().value;
+    if (!oldestKey) break;
+    upstreamCache.delete(oldestKey);
+  }
+}
+
+async function fetchUpstreamCached(upstream) {
+  const key = upstream.toString();
+  const now = Date.now();
+  const cached = upstreamCache.get(key);
+  if (cached && cached.expiresAt > now) return { ...cached, cacheState: "hit" };
+  if (cached) upstreamCache.delete(key);
+
+  const inflight = upstreamInflight.get(key);
+  if (inflight) {
+    const value = await inflight;
+    return { ...value, cacheState: "deduped" };
+  }
+
+  const request = (async () => {
+    const response = await fetch(upstream, {
+      headers: { accept: "application/json", "x-app-identifier": appIdentifier },
+    });
+    const body = Buffer.from(await response.arrayBuffer());
+    const headers = {
+      "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
+      "cache-control": response.headers.get("cache-control") ?? `public, max-age=${Math.max(1, Math.floor(UPSTREAM_CACHE_TTL_MS / 1000))}`,
+    };
+    const value = { status: response.status, headers, body, expiresAt: Date.now() + UPSTREAM_CACHE_TTL_MS };
+    if (response.ok) {
+      upstreamCache.set(key, value);
+      pruneUpstreamCache();
+    }
+    return value;
+  })();
+
+  upstreamInflight.set(key, request);
+  try {
+    const value = await request;
+    return { ...value, cacheState: "miss" };
+  } finally {
+    upstreamInflight.delete(key);
+  }
+}
+
 async function proxyBitjita(url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
-  const key = upstream.toString();
-  const cached = upstreamCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    res.writeHead(cached.status, securityHeaders(cached.headers));
-    return res.end(cached.body);
-  }
-  const response = await fetch(upstream, {
-    headers: { accept: "application/json", "x-app-identifier": appIdentifier },
-  });
-  const body = Buffer.from(await response.arrayBuffer());
-  const headers = {
-    "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
-    "cache-control": response.headers.get("cache-control") ?? "no-cache",
-  };
-  if (response.ok) upstreamCache.set(key, { status: response.status, headers, body, expiresAt: Date.now() + 10000 });
-  res.writeHead(response.status, securityHeaders(headers));
-  res.end(body);
+  const response = await fetchUpstreamCached(upstream);
+  res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState }));
+  res.end(response.body);
 }
 
 const server = createServer(async (req, res) => {

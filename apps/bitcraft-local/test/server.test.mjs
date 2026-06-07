@@ -60,8 +60,13 @@ test("server collection paginates listings and protects production mutations", a
   const historicalTrade = { id: "historic-1", orderEntityId: "historic-order", itemId: 30, itemType: "0", itemName: "Leather", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 5, unitPrice: 10, totalPrice: 50, createdAt: "2026-05-20T12:00:00.000Z" };
   const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
   let trades = [historicalTrade];
+  let proxyCacheRequests = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/api/cache-test") {
+      proxyCacheRequests += 1;
+      return setTimeout(() => json(res, { ok: true, request: proxyCacheRequests }), 75);
+    }
     if (url.pathname === `/api/claims/${claimId}`) return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
@@ -124,6 +129,18 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(health.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
   assert.equal(health.headers.get("x-frame-options"), "SAMEORIGIN");
   assert.match(health.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+
+  const [proxyOne, proxyTwo] = await Promise.all([
+    fetch(`${origin}/api/bitjita/cache-test?same=1`),
+    fetch(`${origin}/api/bitjita/cache-test?same=1`),
+  ]);
+  assert.equal(proxyOne.status, 200);
+  assert.equal(proxyTwo.status, 200);
+  assert.equal(proxyCacheRequests, 1);
+  assert.equal(proxyOne.headers.get("x-bitjita-cache"), "miss");
+  assert.equal(proxyTwo.headers.get("x-bitjita-cache"), "deduped");
+  assert.deepEqual(await proxyOne.json(), { ok: true, request: 1 });
+  assert.deepEqual(await proxyTwo.json(), { ok: true, request: 1 });
 
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",

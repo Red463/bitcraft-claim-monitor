@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.10-beta.1] - 2026-06-07
+
+### Changed
+
+- Improved BitJita proxy performance by sharing duplicate in-flight API requests and using a bounded short-lived cache for repeated frontend refreshes.
+
 ## [0.9.9-beta.1] - 2026-06-07
 
 ### Security
