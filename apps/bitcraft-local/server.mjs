@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1310,9 +1310,31 @@ function authStatus(req) {
   return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
 }
 
+function oauthStateSecret() {
+  const stored = String(statements.getSecret.get("discord_oauth_state_secret")?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  statements.upsertSecret.run("discord_oauth_state_secret", generated, new Date().toISOString());
+  return generated;
+}
+
+function signedOAuthStateValue(payload) {
+  const encoded = Buffer.from(payload, "utf8").toString("base64url");
+  const signature = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function verifySignedOAuthStateValue(value) {
+  const [encoded, signature, ...extra] = String(value ?? "").split(".");
+  if (!encoded || !signature || extra.length) return null;
+  const expected = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
+  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  return encoded;
+}
+
 function authStateCookie(state, returnTo) {
   const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
-  return `bitcraft_discord_oauth_state=${encodeURIComponent(Buffer.from(payload, "utf8").toString("base64url"))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${isProduction ? "; Secure" : ""}`;
+  return `bitcraft_discord_oauth_state=${encodeURIComponent(signedOAuthStateValue(payload))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${isProduction ? "; Secure" : ""}`;
 }
 
 function clearAuthStateCookie() {
@@ -1321,7 +1343,7 @@ function clearAuthStateCookie() {
 
 function readAuthStateCookie(req) {
   try {
-    const encoded = parseCookies(req).bitcraft_discord_oauth_state;
+    const encoded = verifySignedOAuthStateValue(parseCookies(req).bitcraft_discord_oauth_state);
     if (!encoded) return null;
     return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch {

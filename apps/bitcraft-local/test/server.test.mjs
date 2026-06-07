@@ -141,8 +141,21 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(authStatus.user, null);
   const oauthStart = await fetch(`${origin}/api/local/auth/discord/start?returnTo=%2F%3Fpage%3Dmembers`, { redirect: "manual" });
   assert.equal(oauthStart.status, 302);
-  assert.match(oauthStart.headers.get("location"), /^https:\/\/discord\.com\/oauth2\/authorize/);
-  assert.match(oauthStart.headers.get("set-cookie"), /bitcraft_discord_oauth_state=/);
+  const oauthLocation = oauthStart.headers.get("location");
+  const oauthCookie = oauthStart.headers.get("set-cookie");
+  assert.match(oauthLocation, /^https:\/\/discord\.com\/oauth2\/authorize/);
+  assert.match(oauthCookie, /bitcraft_discord_oauth_state=/);
+  const signedStateCookie = oauthCookie.match(/bitcraft_discord_oauth_state=([^;]+)/)?.[1] ?? "";
+  assert.match(decodeURIComponent(signedStateCookie), /^[^.]+\.[^.]+$/);
+  const oauthState = new URL(oauthLocation).searchParams.get("state");
+  const signedStateValue = decodeURIComponent(signedStateCookie);
+  const tamperedValue = `${signedStateValue.slice(0, -1)}${signedStateValue.endsWith("x") ? "y" : "x"}`;
+  const tamperedCallback = await fetch(`${origin}/api/local/auth/discord/callback?code=fake-code&state=${oauthState}`, {
+    headers: { cookie: `bitcraft_discord_oauth_state=${encodeURIComponent(tamperedValue)}` },
+    redirect: "manual",
+  });
+  assert.equal(tamperedCallback.status, 302);
+  assert.match(tamperedCallback.headers.get("location"), /auth=discord-error/);
   const anonymousCharacterLink = await fetch(`${origin}/api/local/auth/character`, {
     method: "PUT",
     headers: { "content-type": "application/json", origin },
