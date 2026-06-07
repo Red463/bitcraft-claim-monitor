@@ -1036,18 +1036,19 @@ function useLocalHistory(refreshToken: number, claimId: string): LocalHistorySta
     const controller = new AbortController();
     async function load() {
       try {
-        const [marketRes, activityRes, snapshotsRes] = await Promise.all([
-          fetch(`${LOCAL_API}/market/history?claimId=${claimId}&limit=120`, { signal: controller.signal }),
-          fetch(`${LOCAL_API}/activity?claimId=${claimId}&limit=2000`, { signal: controller.signal }),
-          fetch(`${LOCAL_API}/snapshots?claimId=${claimId}&daily=1&days=7&limit=96`, { signal: controller.signal }),
-        ]);
-        if (!marketRes.ok) throw new Error(`market history HTTP ${marketRes.status}`);
-        if (!activityRes.ok) throw new Error(`activity history HTTP ${activityRes.status}`);
-        if (!snapshotsRes.ok) throw new Error(`snapshot history HTTP ${snapshotsRes.status}`);
-        const market = await marketRes.json();
-        const activity = await activityRes.json();
-        const snapshots = await snapshotsRes.json();
-        setState((prev) => ({ market, activity: activity.events ?? [], activityTotal: toNumber(activity.total ?? activity.events?.length), snapshots: snapshots.snapshots ?? [], error: null, refreshToken: prev.refreshToken + 1 }));
+        const response = await fetch(`${LOCAL_API}/history?claimId=${claimId}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
+        const history = await response.json();
+        const activity = history.activity ?? {};
+        const snapshots = history.snapshots ?? {};
+        setState((prev) => ({
+          market: history.market ?? null,
+          activity: activity.events ?? [],
+          activityTotal: toNumber(activity.total ?? activity.events?.length),
+          snapshots: snapshots.snapshots ?? [],
+          error: null,
+          refreshToken: prev.refreshToken + 1,
+        }));
       } catch (err) {
         if (!controller.signal.aborted) {
           setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));

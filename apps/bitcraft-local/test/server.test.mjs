@@ -268,6 +268,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(baselineSnapshots.snapshots.length, 1);
   assert.equal(baselineSnapshots.snapshots[0].treasury, 300);
   assert.equal(baselineSnapshots.snapshots[0].supplies, 500);
+  const aggregateHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(aggregateHistory.market.totals.confirmedSales, 1);
+  assert.equal(aggregateHistory.activity.total >= aggregateHistory.activity.events.length, true);
+  assert.equal(aggregateHistory.snapshots.snapshots.length, 1);
+  assert.equal(aggregateHistory.snapshots.snapshots[0].treasury, 300);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   trades = [

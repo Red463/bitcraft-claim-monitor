@@ -3670,6 +3670,58 @@ function marketHistory(claimId, limit, owner = "") {
   return { liveListings, events, sales, topItems, daily, totals, pending };
 }
 
+function snapshotHistory(claimId, { limit = 96, daily = false, days = 7 } = {}) {
+  const snapshotLimit = Math.min(Math.max(Number(limit) || 96, 2), 1000);
+  if (daily) {
+    const dayLimit = Math.min(Math.max(Number(days) || 7, 2), 30);
+    const since = new Date(Date.now() - (dayLimit - 1) * 24 * 60 * 60 * 1000);
+    since.setHours(0, 0, 0, 0);
+    const rows = db.prepare(`
+      SELECT s.id, s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count, s.buildings_count, s.market_count
+      FROM snapshots s
+      JOIN (
+        SELECT substr(captured_at, 1, 10) AS day_key, MAX(captured_at) AS captured_at
+        FROM snapshots
+        WHERE claim_id = ? AND captured_at >= ?
+        GROUP BY substr(captured_at, 1, 10)
+      ) latest
+        ON substr(s.captured_at, 1, 10) = latest.day_key
+       AND s.captured_at = latest.captured_at
+      WHERE s.claim_id = ?
+      ORDER BY s.captured_at ASC, s.id ASC
+    `).all(claimId, since.toISOString(), claimId);
+    const snapshotsByDay = new Map();
+    for (const row of rows) {
+      const dayKey = String(row.captured_at ?? "").slice(0, 10);
+      if (dayKey) snapshotsByDay.set(dayKey, row);
+    }
+    return { snapshots: Array.from(snapshotsByDay.values()).slice(-dayLimit) };
+  }
+  const snapshots = db.prepare(`
+    SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
+    FROM snapshots
+    WHERE claim_id = ?
+    ORDER BY captured_at DESC, id DESC
+    LIMIT ?
+  `).all(claimId, snapshotLimit).reverse();
+  return { snapshots };
+}
+
+function activityHistory(claimId, limit = 500) {
+  const eventLimit = Math.min(Math.max(Number(limit) || 500, 1), 2000);
+  const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, eventLimit);
+  const total = toNumber(db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE claim_id = ?").get(claimId)?.count);
+  return { events, total };
+}
+
+function localHistory(claimId) {
+  return {
+    market: marketHistory(claimId, 120),
+    activity: activityHistory(claimId, 2000),
+    snapshots: snapshotHistory(claimId, { daily: true, days: 7, limit: 96 }),
+  };
+}
+
 function resolveMarketEvent(body) {
   const id = Number(body.id);
   const claimId = String(body.claimId ?? "");
@@ -5077,43 +5129,16 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
+    if (req.method === "GET" && url.pathname === "/api/local/history") {
+      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? ""));
+    }
     if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
       const claimId = url.searchParams.get("claimId") ?? "";
-      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 96), 2), 1000);
-      const daily = url.searchParams.get("daily") === "1";
-      if (daily) {
-        const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? 7), 2), 30);
-        const since = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
-        since.setHours(0, 0, 0, 0);
-        const rows = db.prepare(`
-          SELECT s.id, s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count, s.buildings_count, s.market_count
-          FROM snapshots s
-          JOIN (
-            SELECT substr(captured_at, 1, 10) AS day_key, MAX(captured_at) AS captured_at
-            FROM snapshots
-            WHERE claim_id = ? AND captured_at >= ?
-            GROUP BY substr(captured_at, 1, 10)
-          ) latest
-            ON substr(s.captured_at, 1, 10) = latest.day_key
-           AND s.captured_at = latest.captured_at
-          WHERE s.claim_id = ?
-          ORDER BY s.captured_at ASC, s.id ASC
-        `).all(claimId, since.toISOString(), claimId);
-        const snapshotsByDay = new Map();
-        for (const row of rows) {
-          const dayKey = String(row.captured_at ?? "").slice(0, 10);
-          if (dayKey) snapshotsByDay.set(dayKey, row);
-        }
-        return send(res, 200, { snapshots: Array.from(snapshotsByDay.values()).slice(-days) });
-      }
-      const snapshots = db.prepare(`
-        SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
-        FROM snapshots
-        WHERE claim_id = ?
-        ORDER BY captured_at DESC, id DESC
-        LIMIT ?
-      `).all(claimId, limit).reverse();
-      return send(res, 200, { snapshots });
+      return send(res, 200, snapshotHistory(claimId, {
+        limit: Number(url.searchParams.get("limit") ?? 96),
+        daily: url.searchParams.get("daily") === "1",
+        days: Number(url.searchParams.get("days") ?? 7),
+      }));
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
       if (isProduction) {
@@ -5124,10 +5149,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
       const claimId = url.searchParams.get("claimId") ?? "";
-      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 500), 1), 2000);
-      const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, limit);
-      const total = toNumber(db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE claim_id = ?").get(claimId)?.count);
-      return send(res, 200, { events, total });
+      return send(res, 200, activityHistory(claimId, Number(url.searchParams.get("limit") ?? 500)));
     }
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
