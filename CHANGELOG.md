@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.14-beta.1] - 2026-06-07
+
+### Changed
+
+- Reduced main BitJita refresh fan-out by loading heavier settlement endpoints only on the pages that display them, while keeping shared claim, member, and craft data available for app-wide shell features and production notifications.
+- Limited browser snapshot writes to the Dashboard page so snapshots are recorded only when the full snapshot inputs are loaded.
+
 ## [0.9.13-beta.1] - 2026-06-07
 
 ### Changed

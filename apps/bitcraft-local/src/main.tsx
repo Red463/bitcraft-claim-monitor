@@ -619,8 +619,8 @@ const THEME_FIELD_GROUPS: Array<{ title: string; keys: ThemeColorKey[] }> = [
   { title: "Status", keys: ["good", "danger"] },
 ];
 
-function endpointMap(claimId: string) {
-  return {
+function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
+  const endpoints = {
     claim: `/claims/${claimId}`,
     members: `/claims/${claimId}/members`,
     citizens: `/claims/${claimId}/citizens`,
@@ -634,6 +634,42 @@ function endpointMap(claimId: string) {
     layout: `/claims/${claimId}/layout`,
     skills: `/skills`,
   } as const;
+  if (!activePanel) return endpoints;
+  if (activePanel === "activity") return {};
+
+  const keys = new Set<keyof typeof endpoints>(["claim", "members", "crafts"]);
+  const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
+
+  switch (activePanel) {
+    case "dashboard":
+      add("citizens", "buildings", "construction", "research", "market");
+      break;
+    case "members":
+      add("citizens");
+      break;
+    case "skills":
+      add("citizens", "skills");
+      break;
+    case "production":
+      add("citizens");
+      break;
+    case "inventory":
+      add("inventories");
+      break;
+    case "construction":
+      add("construction", "inventories");
+      break;
+    case "research":
+      add("research");
+      break;
+    case "market":
+      add("market");
+      break;
+    default:
+      break;
+  }
+
+  return Object.fromEntries([...keys].map((key) => [key, endpoints[key]]));
 }
 
 const SKILL_NAMES: Record<number, string> = {
@@ -976,7 +1012,7 @@ function useBitjitaData(refreshToken: number, claimId: string, activePanel: Acti
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
-        const requestedEndpoints: Record<string, string> = activePanel === "activity" ? {} : endpointMap(claimId);
+        const requestedEndpoints = endpointMap(claimId, activePanel);
         const entries = await Promise.all(
           Object.entries(requestedEndpoints).map(async ([key, path]) => {
             return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
@@ -6520,7 +6556,7 @@ function DashboardApp() {
     craftQueueRef.current = { claimId, jobs: current };
   }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);
   React.useEffect(() => {
-    if (!appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
+    if (active !== "dashboard" || !appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
     async function record() {
       try {
@@ -6543,7 +6579,7 @@ function DashboardApp() {
     }
     record();
     return () => controller.abort();
-  }, [appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
+  }, [active, appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} lastUpdated={lastUpdated} onNavigate={navigate} />,
