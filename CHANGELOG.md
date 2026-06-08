@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.19-beta.1] - 2026-06-08
+
+### Changed
+
+- Updated Market live listings to label the per-item amount as Unit Price and show a separate Total Price column for the full listing value.
+
 ## [0.9.18-beta.1] - 2026-06-07
 
 ### Added
