@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.21-beta.1] - 2026-06-08
+
+### Fixed
+
+- Fixed the footer support button so it renders reliably without depending on the third-party Buy Me a Coffee embed script.
+
 ## [0.9.20-beta.1] - 2026-06-08
 
 ### Changed

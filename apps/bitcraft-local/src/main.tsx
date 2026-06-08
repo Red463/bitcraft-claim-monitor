@@ -15,6 +15,7 @@ import {
   CircleDollarSign,
   CircleHelp,
   Clock,
+  Coffee,
   Command,
   Crown,
   Database,
@@ -121,31 +122,19 @@ const DiscordDiagnosticsPanel = React.lazy(() => import("./components/bot/Discor
 const DiscordTestsPanel = React.lazy(() => import("./components/bot/DiscordTestsPanel").then((module) => ({ default: module.DiscordTestsPanel })));
 
 function BuyMeCoffeeButton() {
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-
-  React.useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    container.innerHTML = "";
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js";
-    script.async = true;
-    script.setAttribute("data-name", "bmc-button");
-    script.setAttribute("data-slug", "tom.bush");
-    script.setAttribute("data-color", "#f0c64f");
-    script.setAttribute("data-emoji", "\u2615");
-    script.setAttribute("data-font", "Inter");
-    script.setAttribute("data-text", "Support the app");
-    script.setAttribute("data-outline-color", "#000000");
-    script.setAttribute("data-font-color", "#000000");
-    script.setAttribute("data-coffee-color", "#FFDD00");
-    container.appendChild(script);
-    return () => {
-      container.innerHTML = "";
-    };
-  }, []);
-
-  return <div className="footer-bmc" ref={containerRef} />;
+  return (
+    <a
+      className="footer-bmc"
+      href="https://buymeacoffee.com/tom.bush"
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Support the app on Buy Me a Coffee"
+    >
+      <span className="footer-bmc-emoji" aria-hidden="true">☕</span>
+      <span>Support the app</span>
+      <Coffee size={14} aria-hidden="true" />
+    </a>
+  );
 }
 
 const DEFAULT_CLAIM_ID = "1369094286777412590";

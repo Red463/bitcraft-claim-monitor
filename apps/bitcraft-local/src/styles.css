@@ -116,7 +116,30 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .app-footer a, .footer-link { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
 .footer-link { border: 0; background: transparent; padding: 0; cursor: pointer; font-size: 12px; }
 .app-footer a:hover, .footer-link:hover { color: var(--gold); }
-.footer-bmc { display: inline-flex; align-items: center; min-height: 40px; }
+.footer-bmc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #000;
+  border-radius: 999px;
+  background: #f0c64f;
+  color: #000 !important;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .16);
+}
+.footer-bmc:hover {
+  color: #000 !important;
+  background: #f3cd5f;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .22);
+}
+.footer-bmc-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
 .toast-stack { position: fixed; right: 20px; bottom: 78px; z-index: var(--z-toast); width: min(390px, calc(100vw - 36px)); display: grid; gap: 9px; pointer-events: none; }
 .toast { pointer-events: auto; border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 8px; background: rgba(24,27,33,.98); box-shadow: 0 12px 28px rgba(0,0,0,.38); padding: 11px 10px 11px 12px; display: grid; grid-template-columns: 29px minmax(0, 1fr) 25px; gap: 9px; align-items: start; animation: toast-enter .18s ease-out; }
 .toast.production { border-left-color: var(--good); }
