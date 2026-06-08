@@ -120,6 +120,34 @@ const DiscordSetupSection = React.lazy(() => import("./components/bot/DiscordSet
 const DiscordDiagnosticsPanel = React.lazy(() => import("./components/bot/DiscordDiagnosticsPanel").then((module) => ({ default: module.DiscordDiagnosticsPanel })));
 const DiscordTestsPanel = React.lazy(() => import("./components/bot/DiscordTestsPanel").then((module) => ({ default: module.DiscordTestsPanel })));
 
+function BuyMeCoffeeButton() {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.innerHTML = "";
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js";
+    script.async = true;
+    script.setAttribute("data-name", "bmc-button");
+    script.setAttribute("data-slug", "tom.bush");
+    script.setAttribute("data-color", "#f0c64f");
+    script.setAttribute("data-emoji", "\u2615");
+    script.setAttribute("data-font", "Inter");
+    script.setAttribute("data-text", "Support the app");
+    script.setAttribute("data-outline-color", "#000000");
+    script.setAttribute("data-font-color", "#000000");
+    script.setAttribute("data-coffee-color", "#FFDD00");
+    container.appendChild(script);
+    return () => {
+      container.innerHTML = "";
+    };
+  }, []);
+
+  return <div className="footer-bmc" ref={containerRef} />;
+}
+
 const DEFAULT_CLAIM_ID = "1369094286777412590";
 const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 const API = "/api/bitjita";
@@ -4890,6 +4918,7 @@ function DashboardApp() {
           <div>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
             <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
+            <BuyMeCoffeeButton />
             <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
             <button className="footer-link" onClick={() => setTermsOpen(true)}><FileText size={13} /> Terms & Bot Use</button>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>

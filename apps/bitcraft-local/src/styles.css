@@ -116,6 +116,7 @@ main { min-width: 0; max-height: 100vh; overflow: auto; display: flex; flex-dire
 .app-footer a, .footer-link { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
 .footer-link { border: 0; background: transparent; padding: 0; cursor: pointer; font-size: 12px; }
 .app-footer a:hover, .footer-link:hover { color: var(--gold); }
+.footer-bmc { display: inline-flex; align-items: center; min-height: 40px; }
 .toast-stack { position: fixed; right: 20px; bottom: 78px; z-index: var(--z-toast); width: min(390px, calc(100vw - 36px)); display: grid; gap: 9px; pointer-events: none; }
 .toast { pointer-events: auto; border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 8px; background: rgba(24,27,33,.98); box-shadow: 0 12px 28px rgba(0,0,0,.38); padding: 11px 10px 11px 12px; display: grid; grid-template-columns: 29px minmax(0, 1fr) 25px; gap: 9px; align-items: start; animation: toast-enter .18s ease-out; }
 .toast.production { border-left-color: var(--good); }

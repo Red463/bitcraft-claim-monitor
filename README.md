@@ -436,22 +436,18 @@ artifacts/                           Original exported/Replit application artifa
 
 ## License
 
-This project is licensed under the PolyForm Noncommercial 1.0.0 license.
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
 
-You are free to:
+That means you can:
 
-- Self-host
-- Modify
-- Fork
-- Deploy personal/community instances
+- Clone, fork, self-host, and modify the project
+- Publish your own version
+- Run a modified hosted version, provided you also make the corresponding source code available under AGPL-3.0
 
-You may NOT:
+Additional repository guidance:
 
-- Sell this software
-- Offer it as a paid service
-- Monetise it commercially without permission
-
-Attribution to the original project and author must be retained.
+- Attribution and repository notices are described in [`NOTICE`](./NOTICE)
+- Project/app branding expectations are described in [`TRADEMARKS.md`](./TRADEMARKS.md)
 
 Original project by Tom Bush:
 [github.com/Red463](https://github.com/Red463)

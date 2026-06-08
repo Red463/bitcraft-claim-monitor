@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.20-beta.1] - 2026-06-08
+
+### Changed
+
+- Switched the repository license from PolyForm Noncommercial to AGPL-3.0-only and added explicit notice/trademark guidance for attribution and branding.
+- Added a Buy Me a Coffee support link to the main app footer.
+- Replaced the plain footer support link with the embedded Buy Me a Coffee button configuration.
+
 ## [0.9.19-beta.1] - 2026-06-08
 
 ### Changed

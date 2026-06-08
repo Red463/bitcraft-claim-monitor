@@ -34,3 +34,5 @@ NODE_ENV=production ADMIN_SETUP_KEY=choose-a-one-time-key BITCRAFT_LOCAL_DATA_DI
 ```
 
 Use the one-time setup key when creating the first production admin, then restart the process without that variable. The full systemd and Caddy procedure is in the deployment guide.
+
+License: repository-wide `AGPL-3.0-only`. See the root [`LICENSE`](../../LICENSE), [`NOTICE`](../../NOTICE), and [`TRADEMARKS.md`](../../TRADEMARKS.md).
