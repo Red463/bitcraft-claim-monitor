@@ -5100,18 +5100,17 @@ function DashboardApp() {
       </aside>
       <main ref={mainRef}>
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{activePanel}</div>}
-        <footer className="app-footer">
-          <div className="footer-legal">
-            <span>&copy; {new Date().getFullYear()} Timbersteel Claim Monitor</span>
-            <span>Unofficial fan-made tool. Not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data provided by the <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer">BitJita API</a>.</span>
-          </div>
-          <div>
+      <footer className="app-footer">
+          <div className="footer-links">
+            <span className="footer-copy">
+              &copy; {new Date().getFullYear()} Timbersteel Claim Monitor — unofficial fan-made tool.
+            </span>
+            <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer">Data: BitJita API</a>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
             <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
             <BuyMeCoffeeButton />
             <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
             <button className="footer-link" onClick={() => setTermsOpen(true)}><FileText size={13} /> Terms & Bot Use</button>
-            <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitJita API</a>
             <a href="https://bitcraftmap.com/" target="_blank" rel="noreferrer"><ExternalLink size={13} /> BitCraft Map</a>
           </div>
         </footer>
