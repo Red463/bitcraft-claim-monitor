@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.22-beta.1] - 2026-06-09
+
+### Added
+
+- Added a Market Buy Order Finder tab for finding active regional buy orders by item, with best price, total demand, total value, and order details.
+- Added a Craft Calculator page that uses BitJita recipe data to calculate source materials and step-by-step crafting chains.
+- Added recipe route selectors to the Craft Calculator when BitJita exposes multiple valid recipes for an output or intermediate material.
+
+### Fixed
+
+- Fixed the Buy Order Finder region filter so returned buy orders are locally filtered to the selected region even if the API returns a broader result set.
+- Fixed Craft Calculator source-material chains for items whose production recipe is exposed through BitJita output-helper items, such as wood logs from trunks.
+
 ## [0.9.21-beta.1] - 2026-06-08
 
 ### Fixed

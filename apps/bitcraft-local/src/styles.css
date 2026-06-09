@@ -2841,6 +2841,12 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .market-page .pin-action.active {
   background: rgba(240,198,79,.14);
 }
+.buy-order-finder .table-subline {
+  display: block;
+  margin-top: 3px;
+  color: #8793a5;
+  font-size: 11px;
+}
 .price-recommendation { min-width: 245px; border-left: 1px solid var(--border); padding-left: 20px; display: grid; gap: 3px; }
 .price-recommendation span { color: var(--gold); text-transform: uppercase; font-size: var(--font-micro); }
 .price-recommendation strong { color: var(--text); font: 700 34px Rajdhani, sans-serif; line-height: 1; }
@@ -2848,6 +2854,178 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .pin-action { min-height: 34px; border: 1px solid rgba(240,198,79,.35); border-radius: 6px; background: transparent; color: var(--gold); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .pin-action:hover, .pin-action.active { background: var(--gold-dim); border-color: rgba(240,198,79,.62); }
 .watchlist-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
+
+.craftcalc-page {
+  background: #030303;
+  background: var(--command-page-gradient);
+  min-height: 100%;
+  align-content: start;
+  color: #f4f7fb;
+}
+.craftcalc-topbar { align-items: center; }
+.craftcalc-page .dashboard-top-meta {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+.craftcalc-controls,
+.craftcalc-section,
+.craftcalc-warning,
+.craftcalc-recipe-picker {
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+}
+.craftcalc-controls,
+.craftcalc-section,
+.craftcalc-warning,
+.craftcalc-recipe-picker {
+  padding: 14px;
+}
+.craftcalc-control-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(150px, 220px);
+  gap: 12px;
+  padding-top: 12px;
+}
+.craftcalc-recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+}
+.craftcalc-page input,
+.craftcalc-page select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(154,168,190,.28);
+  border-radius: 7px;
+  background: #080d14;
+  color: #f7f8fb;
+  padding: 0 11px;
+}
+.craftcalc-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.craftcalc-summary .mini-stat,
+.craftcalc-material-row,
+.craftcalc-step-card {
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.16);
+}
+.craftcalc-section {
+  display: grid;
+  gap: 12px;
+}
+.craftcalc-section > h3,
+.craftcalc-warning h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #b8c2cf;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.craftcalc-section > h3 svg,
+.craftcalc-warning h3 svg {
+  color: #f0c64f;
+}
+.craftcalc-material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+.craftcalc-material-row {
+  min-height: 60px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.craftcalc-material-row strong {
+  display: block;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.craftcalc-material-row span {
+  color: #8f9aaa;
+  font-size: 12px;
+}
+.craftcalc-material-row b {
+  color: #fff;
+  font-size: 18px;
+}
+.craftcalc-step-list {
+  display: grid;
+  gap: 12px;
+}
+.craftcalc-step-card {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+}
+.craftcalc-step-index {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(240,198,79,.32);
+  border-radius: 999px;
+  background: rgba(240,198,79,.1);
+  color: #f0c64f;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+}
+.craftcalc-step-main {
+  display: grid;
+  gap: 10px;
+}
+.craftcalc-step-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.craftcalc-step-heading strong {
+  display: block;
+  color: #fff;
+  font-size: 16px;
+}
+.craftcalc-step-heading span,
+.craftcalc-step-main p {
+  color: #aab5c4;
+  margin: 0;
+}
+.craftcalc-step-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+.craftcalc-warning {
+  border-color: rgba(255,179,71,.35);
+  background: linear-gradient(180deg, rgba(48,35,13,.58), rgba(8,11,15,.96));
+  display: grid;
+  gap: 6px;
+}
+.craftcalc-warning p {
+  margin: 0;
+  color: #d6be8c;
+}
+.craftcalc-empty {
+  min-height: 220px;
+}
 .watchlist-panel h3 { color: var(--gold); font-size: 18px; display: flex; align-items: center; gap: 8px; }
 .watch-add { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
 .watch-add button { min-height: 28px; border: 1px solid var(--border); border-radius: 999px; padding: 0 9px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }

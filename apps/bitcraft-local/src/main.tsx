@@ -10,6 +10,7 @@ import {
   Bell,
   Box,
   Building2,
+  Calculator,
   CheckCircle2,
   Circle,
   CircleDollarSign,
@@ -95,11 +96,13 @@ import { mapWithBrowserConcurrency } from "./utils/concurrency";
 import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from "./hooks/usePersistedState";
 import { getTrackedOwnerName } from "./utils/ownership";
 import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "./utils/items";
+import { buyOrderAgeDays, normalizeBuyOrder, sortBuyOrdersByBestPrice } from "./utils/marketOrders";
 import { normalizeData } from "./utils/normalize";
 import { unique } from "./utils/array";
 import { SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "./utils/professions";
 import type { ActivePanel, LocalHistoryState, LoadState } from "./types/app";
 import { Construction } from "./pages/ConstructionPage";
+import { CraftCalculatorPage } from "./pages/CraftCalculatorPage";
 import { Members } from "./pages/MembersPage";
 import { Research } from "./pages/ResearchPage";
 import { Region } from "./pages/RegionPage";
@@ -220,6 +223,7 @@ const NAV = [
   ["skills", "Professions", GraduationCap],
   ["production", "Production", Factory],
   ["publiccrafts", "Public Craft Finder", Search],
+  ["craftcalc", "Craft Calculator", Calculator],
   ["inventory", "Inventory", Package],
   ["construction", "Construction", Hammer],
   ["research", "Research", FlaskConical],
@@ -1366,7 +1370,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
 }
 function Market({ data, history, claimId, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
   const [q, setQ] = React.useState("");
-  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing">("market.view", "live");
+  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders">("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = usePersistedState("market.tier", "All");
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
@@ -1375,10 +1379,11 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   React.useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
+    if (requested === "buy-orders" || requested === "buyOrders") setView("buyOrders");
   }, [setView]);
-  const selectView = (next: "live" | "analytics" | "pricing") => {
+  const selectView = (next: "live" | "analytics" | "pricing" | "buyOrders") => {
     setView(next);
-    updateQueryState({ page: "market", tab: next });
+    updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next });
     trackAnalyticsEvent("market_tab_viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {
@@ -1471,7 +1476,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       <header className="members-topbar market-topbar">
         <div>
           <h2>Market</h2>
-          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
+          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : view === "buyOrders" ? "Find active buy orders across regional markets" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -1493,27 +1498,30 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
       <section className="production-command-panel market-command-panel">
         <div className="market-command-header">
           <span className="production-command-title"><CircleDollarSign size={15} /> Market tools</span>
-          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : "Browse settlement market data by view and member."}</span>
+          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : "Browse settlement market data by view and member."}</span>
         </div>
         <div className="market-tool-row">
           <div className="tabs primary-tabs market-tabs">
             <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
             <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
             <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
+            <button className={view === "buyOrders" ? "active" : ""} onClick={() => selectView("buyOrders")}><ShoppingBag size={15} /> Buy Order Finder</button>
           </div>
-          <label className={`market-member-field ${view === "pricing" ? "is-placeholder" : ""}`}>
+          <label className={`market-member-field ${view === "pricing" || view === "buyOrders" ? "is-placeholder" : ""}`}>
             <span>Member</span>
-            {view !== "pricing" ? (
+            {view !== "pricing" && view !== "buyOrders" ? (
               <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
                 <option>All</option>
                 {memberOptions.map((name) => <option key={name}>{name}</option>)}
               </select>
-            ) : <span className="market-member-placeholder">All settlement history</span>}
+            ) : <span className="market-member-placeholder">{view === "buyOrders" ? "All market buyers" : "All settlement history"}</span>}
           </label>
         </div>
       </section>
       {view === "pricing" ? (
         <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} watches={watches} onToggleWatch={onToggleWatch} />
+      ) : view === "buyOrders" ? (
+        <BuyOrderFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : view === "analytics" ? (
         <>
           <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
@@ -1792,6 +1800,192 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
               ["Seller", row => row.sellerUsername ?? "-"],
               ["Buyer", row => row.purchaserUsername ?? row.buyerUsername ?? "-"],
             ]} />
+          </section>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
+  const defaultRegion = monitoredRegionId || "19";
+  const [query, setQuery] = React.useState("");
+  const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
+  const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
+  const [regionChoice, setRegionChoice] = usePersistedState("market.buyOrders.region", defaultRegion);
+  const [availableRegions, setAvailableRegions] = React.useState<AnyRecord[]>([]);
+  const [orderState, setOrderState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
+  const activeRegion = regionChoice === "All" ? "" : regionChoice;
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const itemId = params.get("buyItem");
+    const itemName = params.get("buyItemName");
+    const itemType = params.get("buyItemType");
+    const region = params.get("buyRegion");
+    if (itemId && itemName) {
+      setSelectedItem({ id: itemId, name: itemName, itemType: toNumber(itemType) });
+      setQuery(itemName);
+    }
+    if (region) setRegionChoice(region === "all" ? "All" : region);
+  }, [setRegionChoice]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/regions/status`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`regions HTTP ${response.status}`)))
+      .then((payload) => setAvailableRegions(payload.regions ?? []))
+      .catch(() => {
+        if (!controller.signal.aborted) setAvailableRegions([]);
+      });
+    return () => controller.abort();
+  }, []);
+
+  React.useEffect(() => {
+    if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
+      setSuggestions([]);
+      setSearchState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearchState("loading");
+      fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
+        .then((payload) => {
+          const items: AnyRecord[] = payload.data?.items ?? [];
+          setSuggestions(items.filter((item) => String(item.name ?? "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8));
+          setSearchState("idle");
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setSuggestions([]);
+            setSearchState("error");
+          }
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, selectedItem?.name]);
+
+  React.useEffect(() => {
+    if (!selectedItem) {
+      setOrderState({ data: null, error: null, loading: false });
+      return;
+    }
+    const controller = new AbortController();
+    const type = toNumber(selectedItem.itemType) === 1 ? "cargo" : "items";
+    const regionParam = activeRegion ? `?regionId=${encodeURIComponent(activeRegion)}` : "";
+    setOrderState((current) => ({ ...current, error: null, loading: true }));
+    fetch(`${API}/market/${type}/${selectedItem.id}${regionParam}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`buy orders HTTP ${response.status}`)))
+      .then((payload) => setOrderState({ data: payload, error: null, loading: false }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setOrderState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+      });
+    return () => controller.abort();
+  }, [selectedItem, activeRegion]);
+
+  function chooseItem(item: AnyRecord) {
+    setSelectedItem(item);
+    setQuery(String(item.name));
+    setSuggestions([]);
+    updateQueryState({
+      tab: "buy-orders",
+      buyItem: String(item.id),
+      buyItemName: String(item.name),
+      buyItemType: String(item.itemType ?? 0),
+      buyRegion: activeRegion || "all",
+    });
+    trackAnalyticsEvent("buy_order_finder_search", { region: activeRegion ? "selected_region" : "all_regions" });
+  }
+
+  const regionIds = unique([
+    defaultRegion,
+    regionChoice !== "All" ? regionChoice : "",
+    ...availableRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
+  const orders = sortBuyOrdersByBestPrice((orderState.data?.buyOrders ?? [])
+    .map((order: AnyRecord) => normalizeBuyOrder(order, toNumber(selectedItem?.itemType)))
+    .filter((order: ReturnType<typeof normalizeBuyOrder>) => !activeRegion || String(order.regionId) === String(activeRegion)));
+  const bestOrder = orders[0];
+  const largestVolume = [...orders].sort((a, b) => b.quantity - a.quantity || b.unitPrice - a.unitPrice)[0];
+  const totalDemand = orders.reduce((total, order) => total + order.quantity, 0);
+  const totalValue = orders.reduce((total, order) => total + order.totalValue, 0);
+  const marketCount = new Set(orders.map((order) => order.claimEntityId || order.claimName)).size;
+  const regionLabel = activeRegion ? `R${activeRegion}` : "All Regions";
+
+  return (
+    <section className="price-finder buy-order-finder">
+      <div className="market-command-header price-finder-header">
+        <span className="production-command-title"><ShoppingBag size={15} /> Buy order lookup</span>
+        <span>{regionLabel} active buy orders</span>
+      </div>
+      <div className="price-finder-controls">
+        <label className="research-filter-field price-item-search">
+          <span>Item</span>
+          <div className="suggestion-anchor">
+            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
+            {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
+              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+                <ItemIcon item={item} />
+                <strong>{item.name}</strong>
+                {item.tier ? <TierBadge tier={item.tier} /> : null}
+                <small className="item-meta-line">{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
+              </button>
+            ))}</div> : null}
+          </div>
+          {searchState === "loading" ? <small className="legend">Finding market items...</small> : null}
+          {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
+        </label>
+        <label className="research-filter-field price-region-field">
+          <span>Region</span>
+          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ buyRegion: event.target.value === "All" ? "all" : event.target.value }); }}>
+            {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
+            <option value="All">All Regions</option>
+          </select>
+        </label>
+      </div>
+      {!selectedItem ? <div className="empty-state price-empty"><ShoppingBag />Choose an item to find active buy orders.</div> : null}
+      {selectedItem && orderState.loading && !orderState.data ? <div className="loading">Loading buy orders for {selectedItem.name}...</div> : null}
+      {orderState.error ? <div className="error">Unable to load buy orders: {orderState.error}</div> : null}
+      {selectedItem && orderState.data ? (
+        <>
+          <div className="price-finder-heading">
+            <div><h3>{selectedItem.name}</h3><span>{regionLabel} current demand</span></div>
+            <div className="price-recommendation">
+              <span>Best Unit Price</span>
+              <strong>{bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"}</strong>
+              <small>{bestOrder ? `${bestOrder.claimName} - ${bestOrder.ownerUsername}` : "No active buy orders"}</small>
+            </div>
+          </div>
+          <div className="metric-grid">
+            <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"} />
+            <MiniStat icon={<Package />} label="Total Demand" value={formatNumber(totalDemand)} />
+            <MiniStat icon={<TrendingUp />} label="Total Buy Value" value={`${formatCompactNumber(totalValue)}g`} />
+            <MiniStat icon={<ShoppingCart />} label="Markets With Orders" value={formatNumber(marketCount)} />
+            <MiniStat icon={<ShoppingBag />} label="Most Volume" value={largestVolume ? `${formatNumber(largestVolume.quantity)} units` : "-"} />
+          </div>
+          <section>
+            <h3><ShoppingBag size={17} /> Active Buy Orders <small>{formatNumber(orders.length)} order{orders.length === 1 ? "" : "s"}</small></h3>
+            {orders.length ? (
+              <DataTable rows={orders} columns={[
+                ["Settlement", row => <div><strong>{row.claimName}</strong><small className="table-subline">{row.regionName || (row.regionId ? `R${row.regionId}` : "")}</small></div>],
+                ["Buyer", row => row.ownerUsername],
+                ["Qty", row => formatNumber(row.quantity)],
+                ["Unit Price", row => `${formatNumber(row.unitPrice)}g`],
+                ["Total Value", row => `${formatNumber(row.totalValue)}g`],
+                ["Stored Coins", row => `${formatNumber(row.storedCoins)}g`],
+                ["Listed", row => row.listedAt ? dateLabel(row.listedAt) : "-"],
+                ["Live", row => {
+                  const age = buyOrderAgeDays(row as ReturnType<typeof normalizeBuyOrder>);
+                  return age == null ? "-" : age === 0 ? "Today" : `${age}d`;
+                }],
+              ]} />
+            ) : <div className="empty-state price-empty"><ShoppingBag />No active buy orders found for this item in {regionLabel}.</div>}
           </section>
         </>
       ) : null}
@@ -2788,6 +2982,8 @@ function CommandPalette({ data, onClose, onNavigate, onSelectMember }: { data: R
   const commands = [
     ...NAV.map(([id, label, Icon]) => ({ key: `page-${id}`, label, description: "Open page", icon: <Icon size={15} />, run: () => onNavigate(id) })),
     { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, run: () => onNavigate("market", "pricing") },
+    { key: "buy-order-finder", label: "Buy Order Finder", description: "Find active buy orders", icon: <ShoppingBag size={15} />, run: () => onNavigate("market", "buy-orders") },
+    { key: "craft-calculator", label: "Craft Calculator", description: "Calculate recipe chains", icon: <Calculator size={15} />, run: () => onNavigate("craftcalc") },
     ...data.members.map((member: AnyRecord) => ({
       key: `member-${member.playerEntityId}`,
       label: String(member.userName ?? member.username ?? "Member"),
@@ -4653,6 +4849,10 @@ function DashboardApp() {
       itemName: panel === "market" ? new URLSearchParams(window.location.search).get("itemName") : null,
       itemType: panel === "market" ? new URLSearchParams(window.location.search).get("itemType") : null,
       region: panel === "market" ? new URLSearchParams(window.location.search).get("region") : null,
+      buyItem: panel === "market" ? new URLSearchParams(window.location.search).get("buyItem") : null,
+      buyItemName: panel === "market" ? new URLSearchParams(window.location.search).get("buyItemName") : null,
+      buyItemType: panel === "market" ? new URLSearchParams(window.location.search).get("buyItemType") : null,
+      buyRegion: panel === "market" ? new URLSearchParams(window.location.search).get("buyRegion") : null,
       mapName: activeMapFocus?.name ?? null,
       mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
@@ -4851,6 +5051,7 @@ function DashboardApp() {
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
+    craftcalc: <CraftCalculatorPage />,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
