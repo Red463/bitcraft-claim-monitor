@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.24-beta.1] - 2026-06-10
+
+### Fixed
+
+- Fixed duplicate Discord craft-start notifications when BitJita changes a craft entity ID, Discord delivery is skipped or fails, or a craft briefly disappears from polling.
+
 ## [0.9.23-beta.1] - 2026-06-09
 
 ### Changed

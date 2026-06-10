@@ -15,6 +15,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = process.env.ENABLE_DISCORD_STARTUP !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
+const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
@@ -387,6 +388,7 @@ const statements = {
   activeProductionJobs: db.prepare("SELECT * FROM production_jobs WHERE claim_id = ? AND status = 'active'"),
   productionJobCount: db.prepare("SELECT COUNT(*) AS count FROM production_jobs WHERE claim_id = ?"),
   markProductionStartNotified: db.prepare("UPDATE production_jobs SET start_notified = 1 WHERE job_key = ?"),
+  rekeyProductionJob: db.prepare("UPDATE OR IGNORE production_jobs SET job_key = ? WHERE job_key = ?"),
   upsertProductionJob: db.prepare(`
     INSERT INTO production_jobs (job_key, claim_id, label, building_name, crafter_name, first_seen, last_seen, status, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
@@ -577,8 +579,23 @@ function normalizeListing(row) {
   };
 }
 
+function stableCraftPart(value, fallback = "") {
+  return String(value ?? fallback).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function craftJobKey(job) {
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.claimEntityId ?? "claim"}:${job.buildingEntityId ?? job.buildingName ?? "building"}:${job.recipeId ?? job.recipe_entity_id ?? job.craftedItem?.[0]?.item_id ?? "recipe"}`);
+  const output = job.craftedItem?.[0] ?? {};
+  const claim = stableCraftPart(job.claimEntityId ?? job.claimId, "claim");
+  const structure = stableCraftPart(
+    job.buildingEntityId ?? job.structureEntityId ?? job.stationEntityId ?? job.craftingStationEntityId ?? job.buildingId ?? job.buildingName ?? job.structureName,
+  );
+  const recipe = stableCraftPart(job.recipeId ?? job.recipeEntityId ?? job.recipe_entity_id ?? job.craftingRecipeId ?? job.recipeName ?? job.name);
+  const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId);
+  const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType);
+  const crafter = stableCraftPart(job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName);
+  const visibility = job.isPublic === false ? "private" : "public";
+  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", crafter || "unknown", visibility].join("|");
+  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", crafter || "unknown", visibility].join("|"));
 }
 
 function craftOutputItem(job, craftsPayload = {}) {
@@ -647,7 +664,9 @@ function normalizeProfessionKey(value) {
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
   const jobs = unwrap(craftsPayload, "craftResults", []).map((job) => normalizeProductionJob(job, craftsPayload));
   const seen = new Set(jobs.map((job) => job.key));
-  const existing = new Map(statements.activeProductionJobs.all(claimId).map((row) => [row.job_key, row]));
+  const activeRows = statements.activeProductionJobs.all(claimId);
+  const existing = new Map(activeRows.map((row) => [row.job_key, row]));
+  const existingByStableKey = new Map(activeRows.map((row) => [normalizeProductionJob(safeJson(row.raw_json)).key, row]));
   const hasProductionBaseline = toNumber(statements.productionJobCount.get(claimId)?.count) > 0;
   const pendingNotifications = [];
   const diagnostics = [{
@@ -676,7 +695,12 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
   }];
 
   for (const job of jobs) {
-    const current = existing.get(job.key);
+    let current = existing.get(job.key) ?? existingByStableKey.get(job.key);
+    if (current && current.job_key !== job.key) {
+      statements.rekeyProductionJob.run(job.key, current.job_key);
+      current = { ...current, job_key: job.key };
+      existing.set(job.key, current);
+    }
     const firstSeen = current?.first_seen ?? occurredAt;
     const jobWithTiming = { ...job, firstSeen, lastSeen: occurredAt };
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(job.raw));
@@ -699,11 +723,23 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       }
       statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
       pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
+      statements.markProductionStartNotified.run(job.key);
     }
   }
 
   for (const [key, current] of existing) {
     if (seen.has(key)) continue;
+    const lastSeenMs = new Date(String(current.last_seen ?? "")).getTime();
+    if (Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs < productionMissingGraceMs) {
+      diagnostics.push({
+        status: "debug",
+        eventType: "production_completed",
+        summary: `Craft missing briefly: ${current.label}`,
+        reason: `Craft has been absent for less than ${Math.round(productionMissingGraceMs / 1000)} seconds; completion is delayed to avoid duplicate start notifications from transient API gaps`,
+        metadata: discordDiagnosticContext("production_completed", { key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name, lastSeen: current.last_seen }),
+      });
+      continue;
+    }
     statements.completeProductionJob.run(occurredAt, key);
     const job = { ...normalizeProductionJob(safeJson(current.raw_json)), key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name };
     const metadata = {
@@ -728,8 +764,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
 async function deliverProductionNotifications(pendingNotifications = []) {
   for (const notification of pendingNotifications) {
     try {
-      const result = await sendDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata);
-      if (notification.eventType === "production_started" && result.ok && !result.skipped) statements.markProductionStartNotified.run(notification.jobKey);
+      await sendDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata);
     } catch (error) {
       console.warn(`Discord production notification failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -954,8 +989,8 @@ function normalizeDiscordSettings(value = {}) {
     channelId: String(value.channelId ?? "").trim(),
     minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
     supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
-    productionMinXp: Math.max(toNumber(value.productionMinXp) || 40000, 0),
-    productionMinAgeMinutes: Math.max(toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins) || 5, 0),
+    productionMinXp: Math.max(value.productionMinXp == null ? 40000 : toNumber(value.productionMinXp), 0),
+    productionMinAgeMinutes: Math.max((value.productionMinAgeMinutes ?? value.productionMinAgeMins) == null ? 5 : toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins), 0),
     productionUsers: String(value.productionUsers ?? "").trim(),
     supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
     channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },

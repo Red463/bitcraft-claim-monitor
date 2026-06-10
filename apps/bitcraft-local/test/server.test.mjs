@@ -65,6 +65,7 @@ test("server collection paginates listings and protects production mutations", a
   let creatureCatalogRequests = 0;
   let passiveCraftRequests = 0;
   let playerCraftRequests = 0;
+  let craftEntityRevision = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
@@ -117,7 +118,7 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === `/api/crafts`) return json(res, {
       craftResults: [
-        { entityId: "public-craft", claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 },
+        { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
       ],
       items: [{ id: "craft-item-1", name: "Public Output", tier: 2 }],
       cargos: [],
@@ -126,7 +127,7 @@ test("server collection paginates listings and protects production mutations", a
       playerCraftRequests += 1;
       return json(res, {
         craftResults: [
-          { entityId: "public-craft", claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 },
+          { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
           { entityId: "private-craft", claimEntityId: claimId, buildingName: "Private Scholar Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-2" }], totalActionsRequired: 200, progress: 10 },
           { entityId: "foreign-private-craft", claimEntityId: "other-claim", buildingName: "Other Claim Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-3" }], totalActionsRequired: 300, progress: 10 },
         ],
@@ -217,7 +218,7 @@ test("server collection paginates listings and protects production mutations", a
   }).then((response) => response.json());
   assert.equal(productionOne.publicCount, 1);
   assert.equal(productionOne.privateCount, 1);
-  assert.deepEqual(productionOne.craftResults.map((craft) => craft.entityId).sort(), ["private-craft", "public-craft"]);
+  assert.deepEqual(productionOne.craftResults.map((craft) => craft.entityId).sort(), ["private-craft", "public-craft-0"]);
   assert.equal(productionOne.craftResults.find((craft) => craft.entityId === "private-craft").isPublic, false);
   assert.equal(productionTwo.privateCount, 1);
   assert.equal(playerCraftRequests, 1);
@@ -234,6 +235,19 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(auth.user.role, "owner");
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
+  const productionNotificationSettings = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...initialConfig,
+      discord: {
+        ...initialConfig.discord,
+        productionMinXp: 0,
+        productionMinAgeMinutes: 0,
+      },
+    }),
+  });
+  assert.equal(productionNotificationSettings.status, 200);
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
   assert.equal(authStatus.discordLoginEnabled, true);
   assert.equal(authStatus.user, null);
@@ -372,6 +386,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal("activity" in marketSnapshotHistory, false);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
+  craftEntityRevision = 1;
   trades = [
     historicalTrade,
     { id: "fill-1", orderEntityId: "listing-1", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
@@ -396,8 +411,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(history.events.some((event) => event.event_type === "partial_sale"), true);
   const secondActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(secondActivity.events.filter((event) => event.event_type === "storage").length, 1);
+  assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 1);
 
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
+  craftEntityRevision = 2;
   const thirdPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -408,6 +425,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(afterOldFills.totals.confirmedSales, 3);
   assert.equal(afterOldFills.totals.confirmedUnits, 8);
   assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), true);
+  const thirdActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 1);
 
   const browserSnapshot = await fetch(`${origin}/api/local/snapshot`, {
     method: "POST",
