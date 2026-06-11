@@ -64,6 +64,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
 import { useLocalHistory } from "./api/localHistory";
@@ -152,7 +153,7 @@ const APP_VERSION = packageJson.version;
 
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
-type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel };
+type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel; item?: AnyRecord | null };
 type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
@@ -219,28 +220,43 @@ type AppSettings = {
   discord: DiscordSettings;
 };
 
-const NAV = [
-  ["dashboard", "Dashboard", Home],
-  ["leaderboard", "Leaderboard", Trophy],
-  ["members", "Members", Users],
-  ["skills", "Professions", GraduationCap],
-  ["production", "Production", Factory],
-  ["publiccrafts", "Public Craft Finder", Search],
-  ["craftcalc", "Craft Calculator", Calculator],
-  ["inventory", "Inventory", Package],
-  ["construction", "Construction", Hammer],
-  ["research", "Research", FlaskConical],
-  ["market", "Market", CircleDollarSign],
-  ["empire", "Region", Globe2],
-  ["map", "Map", MapIcon],
-  ["sync", "Sync", Share2],
-  ["activity", "Activity", Activity],
-  ["admin", "Admin", KeyRound],
-] as const;
+type NavItem = readonly [ActivePanel, string, LucideIcon];
+type NavGroup = { id: string; label: string; items: readonly NavItem[] };
 
-const TOOL_PANEL_IDS = new Set<ActivePanel>(["publiccrafts", "craftcalc"]);
-const MAIN_NAV = NAV.filter(([id]) => !TOOL_PANEL_IDS.has(id));
-const TOOL_NAV = NAV.filter(([id]) => TOOL_PANEL_IDS.has(id));
+const NAV_GROUPS = [
+  { id: "command", label: "Command", items: [
+    ["dashboard", "Dashboard", Home],
+    ["leaderboard", "Leaderboard", Trophy],
+  ] },
+  { id: "settlement", label: "Settlement", items: [
+    ["members", "Members", Users],
+    ["skills", "Professions", GraduationCap],
+    ["production", "Production", Factory],
+    ["inventory", "Inventory", Package],
+    ["construction", "Construction", Hammer],
+    ["research", "Research", FlaskConical],
+  ] },
+  { id: "economy", label: "Economy & Region", items: [
+    ["market", "Market", CircleDollarSign],
+    ["empire", "Region", Globe2],
+    ["map", "Map", MapIcon],
+    ["activity", "Activity", Activity],
+  ] },
+  { id: "tools", label: "Tools", items: [
+    ["publiccrafts", "Public Craft Finder", Search],
+    ["craftcalc", "Craft Calculator", Calculator],
+    ["sync", "Sync", Share2],
+  ] },
+  { id: "admin", label: "Admin", items: [
+    ["admin", "Admin", KeyRound],
+  ] },
+] as const satisfies readonly NavGroup[];
+
+const NAV: readonly NavItem[] = NAV_GROUPS.reduce<NavItem[]>((items, group) => {
+  items.push(...group.items);
+  return items;
+}, []);
+const DEFAULT_SIDEBAR_GROUPS = Object.fromEntries(NAV_GROUPS.map((group) => [group.id, true])) as Record<string, boolean>;
 
 const DEFAULT_THEME = {
   bg: "#0c0d10",
@@ -784,9 +800,24 @@ function trackAnalyticsEvent(eventName: string, properties?: Record<string, stri
 }
 
 function craftDisplayName(job: AnyRecord, craftsPayload?: AnyRecord): string {
-  const itemId = String(job.craftedItem?.[0]?.item_id ?? "");
-  const item = [...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].find((candidate: AnyRecord) => String(candidate.id) === itemId);
+  const item = craftOutputItem(job, craftsPayload);
   return String(item?.name ?? job.recipeName ?? `${job.buildingName ?? "Settlement"} craft`);
+}
+
+function craftOutputItem(job: AnyRecord, craftsPayload?: AnyRecord): AnyRecord | null {
+  const output = job.craftedItem?.[0] ?? {};
+  const itemId = String(output.item_id ?? output.itemId ?? job.outputItemId ?? job.itemId ?? "");
+  const item = [...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].find((candidate: AnyRecord) => String(candidate.id) === itemId);
+  if (item) return { ...item, itemType: output.item_type ?? output.itemType ?? item.itemType };
+  if (!itemId && !job.recipeName && !job.name) return null;
+  return {
+    id: itemId,
+    itemId,
+    itemType: output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType,
+    name: job.recipeName ?? job.name ?? "Craft",
+    tier: job.tier ?? job.itemTier,
+    iconAssetName: job.iconAssetName,
+  };
 }
 
 function safeDisplayJson(value: unknown): AnyRecord {
@@ -3065,12 +3096,48 @@ function applyTheme(theme: Partial<typeof DEFAULT_THEME>) {
   document.documentElement.style.setProperty("--command-page-gradient", `linear-gradient(180deg, ${gradientTop} ${gradientTopStop}%, ${gradientMid} ${gradientMidStop}%, ${gradientBase}00 ${gradientFadeStop}%) top / 100% ${gradientHeight}vh no-repeat, ${gradientBase || bg}`);
 }
 
+function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
+  const metadata = activityMetadata(event);
+  const raw = metadata.raw && typeof metadata.raw === "object" ? metadata.raw as AnyRecord : {};
+  const itemName = metadata.itemName ?? metadata.item_name ?? raw.itemName ?? raw.name ?? event.item_name;
+  const itemId = metadata.itemId ?? metadata.item_id ?? raw.itemId ?? raw.item_id;
+  const iconAssetName = metadata.iconAssetName ?? metadata.icon_asset_name ?? raw.iconAssetName ?? raw.icon_asset_name ?? raw.iconAddress ?? raw.icon_address;
+  if (!itemName && !itemId && !iconAssetName) return null;
+  const tier = metadata.tier ?? metadata.itemTier ?? raw.tier ?? raw.itemTier;
+  const rarity = metadata.rarity ?? metadata.itemRarityStr ?? raw.rarity ?? raw.itemRarityStr;
+  return {
+    id: itemId,
+    itemId,
+    itemType: metadata.itemType ?? metadata.item_type ?? raw.itemType ?? raw.item_type,
+    name: itemName ?? "Market item",
+    itemName: itemName ?? "Market item",
+    tier,
+    itemTier: tier,
+    rarity,
+    itemRarityStr: rarity,
+    iconAssetName,
+  };
+}
+
+function ToastVisual({ notice }: { notice: ToastNotice }) {
+  const item = notice.item ?? null;
+  const tier = toNumber(item?.tier ?? item?.itemTier);
+  if (item && (bitjitaIconUrl(item) || item.name || item.itemName)) {
+    return (
+      <span className={`toast-item-icon ${tier >= 1 && tier <= 10 ? `tier-framed tier-${tier}` : ""}`} aria-hidden="true">
+        <ItemIcon item={item} />
+      </span>
+    );
+  }
+  return <span className="toast-icon" aria-hidden="true">{notice.kind === "market" ? <ShoppingCart size={17} /> : <Factory size={17} />}</span>;
+}
+
 function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss: (id: string) => void }) {
   return (
     <section className="toast-stack" aria-live="polite" aria-label="Notifications">
       {notices.map((notice) => (
         <article className={`toast ${notice.kind}`} key={notice.id}>
-          <div className="toast-icon">{notice.kind === "market" ? <ShoppingCart size={17} /> : <Factory size={17} />}</div>
+          <ToastVisual notice={notice} />
           <div>
             <strong>{notice.title}</strong>
             <p>{notice.body}</p>
@@ -3089,7 +3156,7 @@ function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices: Toast
         <header><h2><Bell size={18} /> Notifications</h2><button onClick={onClose} aria-label="Close notifications"><X size={16} /></button></header>
         {notices.length ? <div className="notice-list">{notices.map((notice) => (
           <button key={notice.id} className={notice.read ? "" : "unread"} onClick={() => onOpenNotice(notice)}>
-            <span>{notice.kind === "market" ? <ShoppingCart size={15} /> : <Factory size={15} />}</span>
+            <ToastVisual notice={notice} />
             <strong>{notice.title}</strong>
             <small>{notice.body}</small>
             <time>{notice.occurredAt ? timeAgo(notice.occurredAt) : ""}</time>
@@ -3697,7 +3764,7 @@ function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exclude<An
   );
 }
 
-function DiscordSignInPrompt({ onDiscordLogin, onClose, onSettings }: { onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
+function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSettings }: { authHref: string; onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
   return (
     <div className="help-overlay discord-signin-overlay" onClick={onClose}>
       <section className="help-dialog discord-signin-dialog" role="dialog" aria-modal="true" aria-labelledby="discord-signin-title" onClick={(event) => event.stopPropagation()}>
@@ -3718,7 +3785,7 @@ function DiscordSignInPrompt({ onDiscordLogin, onClose, onSettings }: { onDiscor
           </ul>
         </div>
         <div className="help-actions">
-          <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</button>
+          <a className="toolbar-button primary" href={authHref} onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</a>
           <button className="toolbar-button" onClick={onSettings}><Settings size={14} /> Open settings</button>
           <button className="toolbar-button" onClick={onClose}>Maybe later</button>
         </div>
@@ -3733,6 +3800,43 @@ function TablePanel({ title, subtitle, rows, columns }: { title: string; subtitl
 
 function AppSkeleton() {
   return <div className="panel app-skeleton"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
+}
+
+function ApiStatusBanner({ warnings, lastUpdated }: { warnings: string[]; lastUpdated: Date | null }) {
+  const uniqueWarnings = unique(warnings).slice(0, 6);
+  if (!uniqueWarnings.length) return null;
+  return (
+    <section className="api-status-banner" role="status" aria-live="polite">
+      <span className="api-status-icon"><AlertTriangle size={18} /></span>
+      <div className="api-status-copy">
+        <strong>BitJita data refresh issue</strong>
+        <span>Showing the latest successful data. Some production details may be stale until the API recovers.</span>
+        <small>{lastUpdated ? `Last successful refresh ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
+      </div>
+      <details className="api-status-details">
+        <summary>Details</summary>
+        <ul>
+          {uniqueWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      </details>
+    </section>
+  );
+}
+
+function ApiErrorState({ message }: { message: string }) {
+  return (
+    <section className="api-error-state" role="alert">
+      <span className="api-error-icon"><AlertTriangle size={22} /></span>
+      <div>
+        <h2>Unable to refresh BitJita data</h2>
+        <p>BitJita may be having a temporary issue. The app will recover automatically when the next refresh succeeds.</p>
+        <details>
+          <summary>Technical detail</summary>
+          <code>{message}</code>
+        </details>
+      </div>
+    </section>
+  );
 }
 
 type AdminTab = "status" | "analytics" | "configuration" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
@@ -5007,6 +5111,7 @@ function DashboardApp() {
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
+  const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
   const [discordPromptDismissed, setDiscordPromptDismissed] = usePersistedState("auth.discordPromptDismissed", false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
@@ -5015,7 +5120,6 @@ function DashboardApp() {
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
-  const [toolsOpen, setToolsOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
   const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
   const activityNoticeClaimRef = React.useRef(claimId);
@@ -5026,6 +5130,7 @@ function DashboardApp() {
     return { ...normalized, raw: state.data };
   }, [state.data]);
   const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
+  const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   analyticsConsent = consent;
   const dismissToast = React.useCallback((id: string) => {
@@ -5041,9 +5146,8 @@ function DashboardApp() {
   }, []);
   const discordLogin = React.useCallback(() => {
     setDiscordPromptDismissed(true);
-    const returnTo = `${window.location.pathname}${window.location.search}`;
-    window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(returnTo)}`;
-  }, [setDiscordPromptDismissed]);
+    window.location.href = discordAuthHref;
+  }, [discordAuthHref, setDiscordPromptDismissed]);
   const discordLogout = React.useCallback(async () => {
     const response = await fetch(`${LOCAL_API}/auth/logout`, { method: "POST" });
     const body = await response.json();
@@ -5058,12 +5162,12 @@ function DashboardApp() {
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, []);
   const saveAccountSettings = React.useCallback(async () => {
-    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, selectedMemberId, watches };
+    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId, watches };
     const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save account settings");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, userToastSettings, watches]);
+  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, sidebarGroups, userToastSettings, watches]);
   const loadAccountSettings = React.useCallback(() => {
     const saved = userAuth.user?.settings ?? {};
     if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
@@ -5071,9 +5175,10 @@ function DashboardApp() {
     const savedTheme = normalizeThemeCandidate(saved.theme)?.theme;
     if (savedTheme) setBrowserTheme(savedTheme);
     if (typeof saved.sidebarCollapsed === "boolean") setSidebarCollapsed(saved.sidebarCollapsed);
+    if (saved.sidebarGroups && typeof saved.sidebarGroups === "object" && !Array.isArray(saved.sidebarGroups)) setSidebarGroups({ ...DEFAULT_SIDEBAR_GROUPS, ...saved.sidebarGroups });
     if (typeof saved.selectedMemberId === "string") setSelectedMemberId(saved.selectedMemberId);
     if (Array.isArray(saved.watches)) setWatches(saved.watches.slice(0, 12));
-  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setUserToastSettings, setWatches, userAuth.user?.settings]);
+  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings, setWatches, userAuth.user?.settings]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -5096,9 +5201,9 @@ function DashboardApp() {
   const toggleWatch = React.useCallback((watch: WatchEntry) => {
     setWatches((current) => current.some((entry) => entry.id === watch.id) ? current.filter((entry) => entry.id !== watch.id) : [...current, watch].slice(-12));
   }, [setWatches]);
-  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind) => {
+  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind, item?: AnyRecord | null) => {
     const id = `${Date.now()}-${Math.random()}`;
-    const notice: ToastNotice = { id, title, body, kind, occurredAt: new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production" };
+    const notice: ToastNotice = { id, title, body, kind, occurredAt: new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null };
     setToasts((current) => [...current, notice].slice(-4));
     setNotificationLog((current) => [notice, ...current].slice(0, 80));
     const timer = window.setTimeout(() => {
@@ -5229,7 +5334,7 @@ function DashboardApp() {
       const isListing = event.event_type === "market_new_listing";
       if (isListing && (!appSettings.toastSettings.marketListings || !userToastSettings.marketListings)) continue;
       if (!isListing && (!appSettings.toastSettings.marketSales || !userToastSettings.marketSales)) continue;
-      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market");
+      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market", toastItemFromActivity(event));
     }
   }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
@@ -5247,10 +5352,10 @@ function DashboardApp() {
     const started = [...current.entries()].filter(([id]) => !previous.jobs.has(id)).slice(0, 2);
     const completed = [...previous.jobs.entries()].filter(([id]) => !current.has(id)).slice(0, 2);
     for (const [, job] of started) {
-      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
+      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, data.raw?.crafts));
     }
     for (const [, job] of completed) {
-      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production");
+      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, state.data?.crafts));
     }
     craftQueueRef.current = { claimId, jobs: current };
   }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);
@@ -5299,6 +5404,13 @@ function DashboardApp() {
     admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
   const activePanel = panels[active] ?? panels.dashboard;
+  const apiWarnings = React.useMemo(() => {
+    const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
+    return [
+      ...(state.error ? [`Main BitJita refresh failed: ${state.error}`] : []),
+      ...partialErrors,
+    ];
+  }, [data.raw?.partialErrors, state.error]);
 
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -5310,50 +5422,48 @@ function DashboardApp() {
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
-        <button className="command-launch" onClick={() => setCommandOpen(true)}><Search size={15} /><span>Quick find</span><kbd>Ctrl K</kbd></button>
         <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Our Discord</span><ExternalLink size={13} /></a>
-        <nav>{MAIN_NAV.map(([id, label, Icon]) => (
-          <a
-            key={id}
-            className={active === id ? "active" : ""}
-            href={panelHref(id)}
-            onClick={(event) => {
-              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-              event.preventDefault();
-              navigate(id);
-            }}
-          >
-            <Icon size={16} /><span className="nav-label">{label}</span>
+        {userAuth.discordLoginEnabled && !userAuth.user ? (
+          <a className="sidebar-auth-cta" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}>
+            <MessageCircle size={16} /><span>Sign in with Discord</span>
           </a>
-        ))}
-          <div
-            className={`nav-tools ${TOOL_NAV.some(([id]) => active === id) ? "active" : ""} ${toolsOpen ? "open" : ""}`}
-            onMouseEnter={() => setToolsOpen(true)}
-            onMouseLeave={() => setToolsOpen(false)}
-            onFocus={() => setToolsOpen(true)}
-          >
-            <button type="button" className={TOOL_NAV.some(([id]) => active === id) ? "active" : ""} onClick={() => setToolsOpen((current) => !current)} aria-expanded={toolsOpen}>
-              <Wrench size={16} /><span className="nav-label">Tools</span>
-            </button>
-            <div className="nav-tools-menu" role="menu" aria-label="Tools">
-              {TOOL_NAV.map(([id, label, Icon]) => (
-                <a
-                  key={id}
-                  href={panelHref(id)}
-                  role="menuitem"
-                  className={active === id ? "active" : ""}
-                  onClick={(event) => {
-                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                    event.preventDefault();
-                    setToolsOpen(false);
-                    navigate(id);
-                  }}
+        ) : null}
+        <nav aria-label="Main navigation">
+          {NAV_GROUPS.map((group) => {
+            const hasActivePage = group.items.some(([id]) => active === id);
+            const isOpen = sidebarGroups[group.id] ?? true;
+            const showItems = isOpen || hasActivePage;
+            return (
+              <section className={`sidebar-section ${showItems ? "" : "is-collapsed"} ${hasActivePage ? "has-active" : ""}`} key={group.id}>
+                <button
+                  className="sidebar-section-title"
+                  type="button"
+                  aria-expanded={showItems}
+                  onClick={() => setSidebarGroups((current) => ({ ...current, [group.id]: !(current[group.id] ?? true) }))}
                 >
-                  <Icon size={15} /><span>{label}</span>
-                </a>
-              ))}
-            </div>
-          </div>
+                  <span>{group.label}</span>
+                  <ArrowDown size={12} aria-hidden="true" />
+                </button>
+                <div className="sidebar-section-items">
+                  {group.items.map(([id, label, Icon]) => (
+                    <a
+                      key={id}
+                      className={active === id ? "active" : ""}
+                      href={panelHref(id)}
+                      title={label}
+                      onClick={(event) => {
+                        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault();
+                        navigate(id);
+                      }}
+                    >
+                      <Icon size={16} /><span className="nav-label">{label}</span>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </nav>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
           <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
@@ -5364,7 +5474,12 @@ function DashboardApp() {
         </div>
       </aside>
       <main ref={mainRef}>
-        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <div className="error">Failed to load BitJita data: {state.error}</div> : <div className="page-view" key={active}>{activePanel}</div>}
+        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
+          <>
+            <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} />
+            <div className="page-view" key={active}>{activePanel}</div>
+          </>
+        )}
       <footer className="app-footer">
           <div className="footer-links">
             <span className="footer-copy">
@@ -5388,7 +5503,7 @@ function DashboardApp() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
+      {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}

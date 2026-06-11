@@ -9,17 +9,24 @@ import {
 import { formatNumber } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 
+function materialCompletion(materials: AnyRecord[] = []) {
+  const required = materials.reduce((sum: number, mat: AnyRecord) => sum + toNumber(mat.required), 0);
+  const contributed = materials.reduce((sum: number, mat: AnyRecord) => {
+    const requiredAmount = toNumber(mat.required);
+    return sum + Math.min(requiredAmount, toNumber(mat.contributed));
+  }, 0);
+  const remaining = materials.reduce((sum: number, mat: AnyRecord) => sum + Math.max(0, toNumber(mat.required) - toNumber(mat.contributed)), 0);
+  const pct = required ? Math.min(100, Math.round((contributed / required) * 100)) : 100;
+  return { contributed, pct, remaining, required };
+}
+
 export function Construction({ data }: { data: ReturnType<typeof normalizeData> }) {
   const projects = buildConstructionProjects(data.construction, data.inventories);
   const needed = constructionNeededMaterials(projects);
   const totalMaterialsRequired = projects.reduce((sum: number, project: AnyRecord) => sum + (project.materials ?? []).reduce((inner: number, mat: AnyRecord) => inner + toNumber(mat.required), 0), 0);
-  const totalMaterialsContributed = projects.reduce((sum: number, project: AnyRecord) => sum + (project.materials ?? []).reduce((inner: number, mat: AnyRecord) => inner + toNumber(mat.contributed), 0), 0);
+  const totalMaterialsContributed = projects.reduce((sum: number, project: AnyRecord) => sum + materialCompletion(project.materials).contributed, 0);
   const totalMissingMaterials = needed.reduce((sum: number, [, amount]) => sum + toNumber(amount), 0);
-  const averageProgress = projects.length ? Math.round(projects.reduce((sum: number, project: AnyRecord) => {
-    const progress = toNumber(project.progress);
-    const total = toNumber(project.actionsRequired) || 1;
-    return sum + Math.min(100, (progress / total) * 100);
-  }, 0) / projects.length) : 0;
+  const materialsAddedPct = totalMaterialsRequired ? Math.min(100, Math.round((totalMaterialsContributed / totalMaterialsRequired) * 100)) : projects.length ? 100 : 0;
   return (
     <div className="panel construction-page">
       <header className="members-topbar construction-topbar">
@@ -33,8 +40,8 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
             <span>{formatNumber(needed.length)} material types needed</span>
           </div>
           <div className="dashboard-settlement-pill">
-            <span className="status-pill">{averageProgress}%</span>
-            <span>Average progress</span>
+            <span className="status-pill">{materialsAddedPct}%</span>
+            <span>Materials added</span>
           </div>
         </div>
       </header>
@@ -52,19 +59,16 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
       ) : null}
       <div className="project-list">
         {projects.length ? projects.map((project: AnyRecord) => {
-          const progress = toNumber(project.progress);
-          const total = toNumber(project.actionsRequired) || 1;
-          const pct = Math.min(100, Math.round((progress / total) * 100));
-          const remainingMaterials = project.materials.reduce((sum: number, mat: AnyRecord) => sum + Math.max(0, toNumber(mat.required) - toNumber(mat.contributed)), 0);
+          const { contributed, pct, remaining, required } = materialCompletion(project.materials);
           return (
             <article className="project-card" key={project.entityId}>
               <header>
-                <div><Hammer size={15} /><strong>{project.name}</strong><small>{remainingMaterials ? `${formatNumber(remainingMaterials)} materials remaining` : "Materials complete"}</small></div>
+                <div><Hammer size={15} /><strong>{project.name}</strong><small>{remaining ? `${formatNumber(remaining)} materials remaining` : "Materials complete"}</small></div>
                 <span className="project-progress-badge">{pct}%</span>
               </header>
               <div className="project-progress-row">
                 <div className="progress"><div style={{ width: `${pct}%` }} /></div>
-                <small>{formatNumber(progress)} / {formatNumber(total)} effort</small>
+                <small>{formatNumber(contributed)} / {formatNumber(required)} materials added</small>
               </div>
               <div className="construction-material-grid">
                 {project.materials.map((mat: AnyRecord, index: number) => {

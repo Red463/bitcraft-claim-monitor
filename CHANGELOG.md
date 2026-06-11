@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.27-beta.1] - 2026-06-11
+
+### Changed
+
+- Updated toast notifications to use the current dashboard-style colours and show item thumbnails with tier-coloured borders when item data is available.
+- Changed Construction progress bars to show material contribution completion instead of build effort progress.
+- Reworked the main sidebar into grouped collapsible sections to reduce navigation clutter.
+- Added a sidebar Discord sign-in link and changed the first-visit sign-in prompt to use the same direct OAuth link as User Settings.
+- Removed the visible Quick Find button from the sidebar while keeping keyboard command search available through Ctrl+K.
+- Added an in-app BitJita data warning banner when refreshes fail or production craft details only partially update.
+- Improved BitJita HTTP error messages so temporary API failures are shown as readable app alerts instead of raw endpoint errors.
+
 ## [0.9.26-beta.1] - 2026-06-11
 
 ### Fixed

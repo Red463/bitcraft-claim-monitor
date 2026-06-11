@@ -8,6 +8,33 @@ import { normalizePlayer } from "../utils/normalize";
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
+function appendPartialError(raw: AnyRecord, message: string) {
+  const current = Array.isArray(raw.partialErrors) ? raw.partialErrors : [];
+  raw.partialErrors = [...current, message];
+}
+
+function dataAreaLabel(path: string) {
+  if (path.includes("/market/")) return "market data";
+  if (path.includes("/crafts")) return "production data";
+  if (path.includes("/members")) return "member data";
+  if (path.includes("/citizens")) return "member profession data";
+  if (path.includes("/inventories")) return "inventory data";
+  if (path.includes("/construction")) return "construction data";
+  if (path.includes("/research")) return "research data";
+  if (path.includes("/regions")) return "region data";
+  if (path.includes("/skills")) return "profession reference data";
+  if (path.includes("/claims/")) return "settlement data";
+  return "BitJita data";
+}
+
+function httpErrorMessage(path: string, status: number) {
+  const label = dataAreaLabel(path);
+  const statusText = status >= 500
+    ? "BitJita may be having a temporary issue."
+    : "The request could not be completed.";
+  return `Unable to refresh ${label} (HTTP ${status}). ${statusText}`;
+}
+
 function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
   const endpoints = {
     claim: `/claims/${claimId}`,
@@ -75,7 +102,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
       try {
         async function request(path: string) {
           const response = await fetch(`${API}${path}`, { signal: controller.signal });
-          if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+          if (!response.ok) throw new Error(httpErrorMessage(path, response.status));
           return response.json();
         }
         async function requestAllMarketListings() {
@@ -89,7 +116,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         const requestedEndpoints = endpointMap(claimId, activePanel);
         if (activePanel === "dashboard") {
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
-          if (!response.ok) throw new Error(`dashboard data HTTP ${response.status}`);
+          if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
           const raw = await response.json();
           React.startTransition(() => setState({ loading: false, error: null, data: raw }));
           return;
@@ -99,16 +126,27 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
             return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
           }),
         );
-        const raw = Object.fromEntries(entries);
+        const raw = Object.fromEntries(entries) as AnyRecord;
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         if (activePanel === "production") {
-          raw.crafts = await fetch(`${LOCAL_API}/production/crafts`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            signal: controller.signal,
-            body: JSON.stringify({ claimId, members }),
-          }).then((response) => response.ok ? response.json() : raw.crafts).catch(() => raw.crafts);
+          try {
+            const response = await fetch(`${LOCAL_API}/production/crafts`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({ claimId, members }),
+            });
+            if (response.ok) {
+              raw.crafts = await response.json();
+            } else {
+              appendPartialError(raw, `Unable to refresh full production details (HTTP ${response.status}). Showing direct BitJita craft data only.`);
+            }
+          } catch (error) {
+            if (!controller.signal.aborted) {
+              appendPartialError(raw, `Production craft aggregation failed: ${error instanceof Error ? error.message : String(error)}. Showing direct BitJita craft data only.`);
+            }
+          }
         }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel === "members" || activePanel === "map";
@@ -149,6 +187,10 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => normalizePlayer(result.value));
         raw.marketApi = { histories: [], trades: [] };
+        const failedContributionCount = contributionResults.filter((result) => result.status === "rejected").length;
+        if (failedContributionCount) {
+          appendPartialError(raw, `${failedContributionCount} production contribution request${failedContributionCount === 1 ? "" : "s"} failed. Some contributor totals may be incomplete.`);
+        }
         raw.contributions = Object.fromEntries(contributionResults
           .filter((result): result is PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }> => result.status === "fulfilled")
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
