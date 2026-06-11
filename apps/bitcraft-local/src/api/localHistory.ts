@@ -10,7 +10,6 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
 
   React.useEffect(() => {
     const controller = new AbortController();
-    const intervalMs = activePanel === "activity" ? 10000 : activePanel === "market" ? 15000 : 30000;
     async function load() {
       try {
         const include = ["activity", activePanel === "market" ? "market" : "", activePanel === "dashboard" ? "snapshots,dashboard" : ""].filter(Boolean).join(",");
@@ -36,9 +35,7 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
       }
     }
     load();
-    const timer = window.setInterval(load, intervalMs);
     return () => {
-      window.clearInterval(timer);
       controller.abort();
     };
   }, [activePanel, claimId, refreshToken]);

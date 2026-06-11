@@ -1,6 +1,6 @@
 {
   "name": "@workspace/bitcraft-local",
-  "version": "0.9.24-beta.1",
+  "version": "0.9.25-beta.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,6 +10,7 @@
     "dev": "node dev.mjs",
     "dev:web": "vite --host 0.0.0.0",
     "dev:db": "node server.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
     "start": "node server.mjs",

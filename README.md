@@ -4,7 +4,7 @@ BitCraft Claim Monitor is a settlement operations dashboard built around the pub
 
 The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve.
 
-The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local). The `artifacts/` folders remain from the original Replit export and are not the application used for current development or deployment.
+The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local). Historical Replit export artifacts have been removed from the active workspace so new development stays focused on the maintained app.
 
 ## What It Does
 
@@ -23,7 +23,7 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 
 ## Application Pages
 
-### Overview
+### Dashboard
 
 The command-center view for the monitored settlement:
 
@@ -418,12 +418,14 @@ The database directory is outside the Git checkout, so ordinary code updates do 
 ```text
 apps/bitcraft-local/                 Maintained application
   src/main.tsx                       React UI and dashboard pages
+  src/components/                    Extracted React components
+  src/api/                           Frontend API hooks and fetch helpers
+  src/styles/                        Incremental stylesheet modules
   server.mjs                         SQLite API, BitJita proxy, auth, production server
   dev.mjs                            Local frontend/API launcher
 deploy/                              systemd and Caddy production configuration
 DEPLOYMENT.md                        VPS installation and maintenance guide
 BITJITA_API_AUDIT.md                 Public API audit and integration notes
-artifacts/                           Original exported/Replit application artifacts
 ```
 
 ## Security Notes

@@ -87,6 +87,13 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
         const requestedEndpoints = endpointMap(claimId, activePanel);
+        if (activePanel === "dashboard") {
+          const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
+          if (!response.ok) throw new Error(`dashboard data HTTP ${response.status}`);
+          const raw = await response.json();
+          React.startTransition(() => setState({ loading: false, error: null, data: raw }));
+          return;
+        }
         const entries = await Promise.all(
           Object.entries(requestedEndpoints).map(async ([key, path]) => {
             return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
@@ -95,7 +102,6 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         const raw = Object.fromEntries(entries);
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
-        const memberIds = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean);
         if (activePanel === "production") {
           raw.crafts = await fetch(`${LOCAL_API}/production/crafts`, {
             method: "POST",
@@ -105,18 +111,19 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           }).then((response) => response.ok ? response.json() : raw.crafts).catch(() => raw.crafts);
         }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsPlayerDetail = activePanel === "dashboard" || activePanel === "members" || activePanel === "map";
-        const readsProductionDetail = activePanel === "production" || activePanel === "dashboard";
-        const readsRegionDetail = activePanel === "dashboard" || activePanel === "empire";
+        const readsPlayerDetail = activePanel === "members" || activePanel === "map";
+        const readsProductionDetail = activePanel === "production";
+        const readsRegionDetail = activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
-          readsPlayerDetail ? mapWithBrowserConcurrency(memberIds, 4, async (id) => {
-            try {
-              const payload = await request(`/players/${id}`);
-              return { status: "fulfilled", value: payload.player ?? payload } as PromiseFulfilledResult<AnyRecord>;
-            } catch (reason) {
-              return { status: "rejected", reason } as PromiseRejectedResult;
-            }
-          }) : Promise.resolve([]),
+          readsPlayerDetail ? fetch(`${LOCAL_API}/player-details`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({ members }),
+          })
+            .then((response) => response.ok ? response.json() : Promise.reject(new Error(`player details HTTP ${response.status}`)))
+            .then((payload) => unwrap<AnyRecord[]>(payload, "players", []).map((player) => ({ status: "fulfilled", value: player }) as PromiseFulfilledResult<AnyRecord>))
+            .catch((): Array<PromiseFulfilledResult<AnyRecord>> => []) : Promise.resolve([] as Array<PromiseFulfilledResult<AnyRecord>>),
           readsProductionDetail ? mapWithBrowserConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
             try {
               return {

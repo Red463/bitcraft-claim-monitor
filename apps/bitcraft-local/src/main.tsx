@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/phase6.css";
 import {
   Activity,
   AlertTriangle,
@@ -54,6 +55,7 @@ import {
   Star,
   TrendingDown,
   TrendingUp,
+  Trophy,
   Trash2,
   Upload,
   Users,
@@ -219,6 +221,7 @@ type AppSettings = {
 
 const NAV = [
   ["dashboard", "Dashboard", Home],
+  ["leaderboard", "Leaderboard", Trophy],
   ["members", "Members", Users],
   ["skills", "Professions", GraduationCap],
   ["production", "Production", Factory],
@@ -234,6 +237,10 @@ const NAV = [
   ["activity", "Activity", Activity],
   ["admin", "Admin", KeyRound],
 ] as const;
+
+const TOOL_PANEL_IDS = new Set<ActivePanel>(["publiccrafts", "craftcalc"]);
+const MAIN_NAV = NAV.filter(([id]) => !TOOL_PANEL_IDS.has(id));
+const TOOL_NAV = NAV.filter(([id]) => TOOL_PANEL_IDS.has(id));
 
 const DEFAULT_THEME = {
   bg: "#0c0d10",
@@ -2469,6 +2476,123 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
   );
 }
 
+function Leaderboard({ claimId, refreshToken }: { claimId: string; refreshToken: number }) {
+  const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
+  const [professionFilter, setProfessionFilter] = React.useState("All");
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setState((current) => ({ ...current, loading: true, error: null }));
+    fetch(`${LOCAL_API}/leaderboard?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`leaderboard HTTP ${response.status}`)))
+      .then((payload) => setState({ data: payload, error: null, loading: false }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+      });
+    return () => controller.abort();
+  }, [claimId, refreshToken]);
+  const leaderboard = state.data ?? {};
+  const summary = leaderboard.summary ?? {};
+  const professions: AnyRecord[] = leaderboard.professions ?? [];
+  const contributors: AnyRecord[] = leaderboard.contributors ?? [];
+  const recent: AnyRecord[] = leaderboard.recent ?? [];
+  const filteredContributors = professionFilter === "All"
+    ? contributors
+    : contributors.filter((entry) => entry.professions?.some?.((profession: AnyRecord) => profession.profession === professionFilter));
+  const topContributor = contributors[0];
+  const topProfession = professions[0];
+  return (
+    <div className="panel leaderboard-page">
+      <header className="members-topbar leaderboard-topbar">
+        <div>
+          <h2>Contribution Leaderboard</h2>
+          <p>Recorded craft contribution totals for the monitored settlement, grouped by member and profession.</p>
+        </div>
+        <div className="dashboard-top-meta">
+          <div className="dashboard-meta-cluster">
+            <span><Trophy size={14} /> {formatNumber(summary.contributorCount)} contributors</span>
+            <span><Factory size={14} /> {formatNumber(summary.recordedCrafts)} crafts</span>
+            <span>{summary.lastContributedAt ? `Updated ${timeAgo(summary.lastContributedAt)}` : "No history yet"}</span>
+          </div>
+        </div>
+      </header>
+      <div className="summary-grid leaderboard-summary">
+        <MiniStat icon={<Trophy />} label="Recorded Progress" value={formatNumber(summary.totalProgress)} />
+        <MiniStat icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />
+        <MiniStat icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />
+        <MiniStat icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />
+      </div>
+      <section className="dashboard-card leaderboard-card">
+        <header className="dashboard-card-title">
+          <span><Trophy size={14} /> Member standings</span>
+          <label className="inline-field leaderboard-filter"><span>Profession</span>
+            <select value={professionFilter} onChange={(event) => setProfessionFilter(event.target.value)}>
+              <option value="All">All professions</option>
+              {professions.map((profession) => <option key={profession.profession} value={profession.profession}>{profession.profession}</option>)}
+            </select>
+          </label>
+        </header>
+        {state.loading ? <div className="empty-state"><RefreshCw /> Loading contribution history...</div> : null}
+        {state.error ? <div className="error">Failed to load leaderboard: {state.error}</div> : null}
+        {!state.loading && !state.error && !contributors.length ? (
+          <div className="empty-state"><Trophy />No craft contributions have been recorded yet. The leaderboard starts filling as settlement craft contribution data is observed during refreshes.</div>
+        ) : null}
+        {filteredContributors.length ? (
+          <DataTable
+            rows={filteredContributors}
+            columns={[
+              ["Member", (entry) => <strong>{entry.name}</strong>],
+              ["Progress", (entry) => formatNumber(entry.totalProgress)],
+              ["Estimated XP", (entry) => formatNumber(entry.totalXp)],
+              ["Crafts", (entry) => formatNumber(entry.craftCount)],
+              ["Top professions", (entry) => (
+                <div className="leaderboard-profession-tags">
+                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatNumber(profession.progress)}</b></span>)}
+                </div>
+              )],
+              ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"],
+            ]}
+          />
+        ) : null}
+      </section>
+      <div className="leaderboard-grid">
+        <section className="dashboard-card leaderboard-card">
+          <header className="dashboard-card-title"><span><GraduationCap size={14} /> Profession totals</span></header>
+          <div className="leaderboard-profession-list">
+            {professions.map((profession) => (
+              <article key={profession.profession}>
+                <div>
+                  <strong>{profession.profession}</strong>
+                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatNumber(profession.craftCount)} craft records</small>
+                </div>
+                <span>{formatNumber(profession.totalProgress)}</span>
+                <em>Top: {profession.topContributor || "Unknown"}</em>
+              </article>
+            ))}
+            {!professions.length ? <div className="empty-state compact"><GraduationCap />No profession totals yet.</div> : null}
+          </div>
+        </section>
+        <section className="dashboard-card leaderboard-card">
+          <header className="dashboard-card-title"><span><Activity size={14} /> Recent recorded contributions</span></header>
+          <div className="leaderboard-recent-list">
+            {recent.slice(0, 12).map((entry, index) => (
+              <article key={`${entry.contributorId}-${entry.craftLabel}-${index}`}>
+                <span className="activity-dot" />
+                <div>
+                  <strong>{entry.contributorName}</strong>
+                  <small>{entry.profession || "Unknown profession"} - {entry.craftLabel} at {entry.structureName}</small>
+                </div>
+                <span>{formatNumber(entry.totalProgress)}</span>
+                <time>{entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"}</time>
+              </article>
+            ))}
+            {!recent.length ? <div className="empty-state compact"><Activity />No recent contribution rows yet.</div> : null}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false, resourceIds: string[] = [], regionIds: string[] = [], enemyIds: string[] = []) {
   const params = new URLSearchParams();
   const sortedPlayers = playerIds.filter(Boolean).sort();
@@ -3212,6 +3336,7 @@ function UserSettingsDialog({
   onResetSettings: () => void;
   onClose: () => void;
 }) {
+  const [settingsSection, setSettingsSection] = React.useState<"account" | "theme" | "preferences" | "data">("account");
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -3326,8 +3451,21 @@ function UserSettingsDialog({
           </div>
           <button onClick={onClose} aria-label="Close user settings"><X size={16} /></button>
         </header>
-        <div className="settings-grid">
-          <section className="settings-account-section">
+        <div className="settings-shell">
+          <nav className="settings-section-tabs" aria-label="Settings sections">
+            {([
+              ["account", "Account", MessageCircle],
+              ["theme", "Theme", Star],
+              ["preferences", "Preferences", Bell],
+              ["data", "Local data", HardDrive],
+            ] as const).map(([id, label, Icon]) => (
+              <button key={id} className={settingsSection === id ? "active" : ""} onClick={() => setSettingsSection(id)}>
+                <Icon size={15} /><span>{label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="settings-grid">
+          {settingsSection === "account" ? <section className="settings-account-section">
             <div className="settings-section-heading">
               <div>
                 <h3>Discord Account</h3>
@@ -3371,12 +3509,12 @@ function UserSettingsDialog({
                 {accountStatus ? <p className="theme-share-status">{accountStatus}</p> : null}
               </div>
             )}
-          </section>
-          <section>
+          </section> : null}
+          {settingsSection === "account" ? <section>
             <h3>This Browser</h3>
             <p className="legend">Your page, filters, density, notifications and pinned overview items are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
-          </section>
-          <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
+          </section> : null}
+          {settingsSection === "theme" ? <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
             <div className="settings-section-heading">
               <div>
                 <h3>Theme</h3>
@@ -3512,30 +3650,31 @@ function UserSettingsDialog({
                 </div>
               </div>
             </div>
-          </section>
-          <section>
+          </section> : null}
+          {settingsSection === "preferences" ? <section>
             <h3>Display Density</h3>
             <div className="segmented-control">
               <button className={density === "comfortable" ? "active" : ""} onClick={() => onDensityChange("comfortable")}>Comfortable</button>
               <button className={density === "compact" ? "active" : ""} onClick={() => onDensityChange("compact")}>Compact</button>
             </div>
-          </section>
-          <section>
+          </section> : null}
+          {settingsSection === "preferences" ? <section>
             <h3>Notifications</h3>
             {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
               <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
             ))}
-          </section>
-          <section>
+          </section> : null}
+          {settingsSection === "preferences" ? <section>
             <h3>Pinned Items</h3>
             <p className="legend">{watchCount ? `${watchCount} pinned item${watchCount === 1 ? "" : "s"} saved in this browser.` : "No pinned items saved in this browser."}</p>
             <button className="toolbar-button" disabled={!watchCount} onClick={onClearWatches}><PinOff size={14} /> Clear pinned items</button>
-          </section>
-          <section>
+          </section> : null}
+          {settingsSection === "data" ? <section>
             <h3>Reset</h3>
             <p className="legend">Reset this browser's local app preferences. Admin settings and settlement data are not affected.</p>
             <button className="toolbar-button" onClick={onResetSettings}><RefreshCw size={14} /> Reset my settings</button>
-          </section>
+          </section> : null}
+          </div>
         </div>
       </section>
     </div>
@@ -3555,6 +3694,36 @@ function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exclude<An
         <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
       </div>
     </section>
+  );
+}
+
+function DiscordSignInPrompt({ onDiscordLogin, onClose, onSettings }: { onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
+  return (
+    <div className="help-overlay discord-signin-overlay" onClick={onClose}>
+      <section className="help-dialog discord-signin-dialog" role="dialog" aria-modal="true" aria-labelledby="discord-signin-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <MessageCircle size={19} />
+            <h2 id="discord-signin-title">Sign in with Discord</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close Discord sign-in prompt"><X size={16} /></button>
+        </header>
+        <div className="discord-signin-body">
+          <strong>Keep your preferences with you.</strong>
+          <p>Discord sign-in lets you link your BitCraft character for approval and save your app settings on this server instead of only in this browser.</p>
+          <ul>
+            <li><CheckCircle2 size={14} /> Request a verified character link.</li>
+            <li><CheckCircle2 size={14} /> Restore saved settings after changing browser or device.</li>
+            <li><CheckCircle2 size={14} /> Local browsing still works if you skip this.</li>
+          </ul>
+        </div>
+        <div className="help-actions">
+          <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</button>
+          <button className="toolbar-button" onClick={onSettings}><Settings size={14} /> Open settings</button>
+          <button className="toolbar-button" onClick={onClose}>Maybe later</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -3584,6 +3753,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const [tab, setTab] = React.useState<AdminTab>(botOnly ? "discord" : "status");
   const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
+  const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [diagnostics, setDiagnostics] = React.useState<AnyRecord[]>([]);
@@ -3639,10 +3809,15 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   async function run(task: () => Promise<void>, success?: string) {
     setMessage(null);
+    setMessageKind("info");
     try {
       await task();
-      if (success) setMessage(success);
+      if (success) {
+        setMessageKind("success");
+        setMessage(success);
+      }
     } catch (error) {
+      setMessageKind("error");
       setMessage(error instanceof Error ? error.message : String(error));
     }
   }
@@ -3686,7 +3861,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   }
 
   React.useEffect(() => {
-    api("/admin/me").then(setAuth).catch((error) => setMessage(error.message)).finally(() => setAuthLoading(false));
+    api("/admin/me").then(setAuth).catch((error) => {
+      setMessageKind("error");
+      setMessage(error.message);
+    }).finally(() => setAuthLoading(false));
   }, []);
   React.useEffect(() => setDraft(settings), [settings]);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
@@ -3734,6 +3912,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   function revertSettings() {
     setDraft(settings);
+    setMessageKind("info");
     setMessage("Unsaved changes reverted.");
   }
 
@@ -3873,8 +4052,13 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     setDiscordToolResult({ ...result, __type: "moderationAction" });
   }
 
+  function confirmDanger(message: string, phrase = "CONFIRM") {
+    const response = window.prompt(`${message}\n\nType ${phrase} to continue.`);
+    return response === phrase;
+  }
+
   function confirmModeration(message: string) {
-    return window.confirm(message);
+    return confirmDanger(message);
   }
 
   async function runBotEndpoint(path: string, payload: AnyRecord, type: string) {
@@ -3889,7 +4073,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
 
   async function uploadBrand(type: "logo" | "favicon", file?: File) {
     if (!file) return;
-    if (file.size > 1024 * 1024) return setMessage("Image must be smaller than 1 MB.");
+    if (file.size > 1024 * 1024) {
+      setMessageKind("error");
+      return setMessage("Image must be smaller than 1 MB.");
+    }
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
@@ -3998,6 +4185,21 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
       : discordDelivery.status === "skipped"
         ? `Skipped ${dateLabel(discordDelivery.at)}: ${discordDelivery.reason ?? "Not enabled"}`
         : "No Discord deliveries recorded";
+  const adminSetupItems = [
+    { label: "Administrator account", done: Boolean(auth?.user), detail: auth?.user?.username ? `Signed in as ${auth.user.username}` : "Create or sign in to an admin account." },
+    { label: "Settlement defaults", done: Boolean(draft.claimId), detail: draft.claimId ? `Settlement ${draft.claimId}` : "Add the monitored settlement ID." },
+    { label: "Local data collection", done: Boolean(status?.polling?.enabled || status?.counts?.snapshots), detail: status?.polling?.enabled ? `Collects every ${Math.round(toNumber(status.polling.intervalMs) / 1000)} seconds` : "Enable server polling in production or run manual collection." },
+    { label: "Database history", done: toNumber(status?.counts?.snapshots) > 0 || toNumber(status?.counts?.activity_events) > 0 || toNumber(status?.counts?.market_trades) > 0, detail: `${formatNumber(status?.counts?.snapshots)} snapshots, ${formatNumber(status?.counts?.market_trades)} trades` },
+    { label: "Branding", done: Boolean(draft.branding?.logo || draft.branding?.favicon), detail: draft.branding?.logo || draft.branding?.favicon ? "Custom brand assets configured." : "Optional logo and favicon can be added." },
+    { label: "Discord bot", done: Boolean(draft.discord?.botTokenConfigured && draft.discord?.enabled), detail: draft.discord?.botTokenConfigured ? (draft.discord.enabled ? "Enabled and token configured." : "Token configured, bot disabled.") : "Optional bot token not configured." },
+  ];
+  const completedSetupItems = adminSetupItems.filter((item) => item.done).length;
+  const botWorkflowItems = [
+    { label: "Connect bot", done: Boolean(draft.discord?.botTokenConfigured), detail: draft.discord?.botTokenConfigured ? `Token configured via ${draft.discord.botTokenSource ?? "server"}.` : "Add the bot token in Setup." },
+    { label: "Sync Discord server", done: Boolean(discoveredChannels.length || discoveredRoles.length || discoveredMembers.length), detail: `${formatNumber(discoveredChannels.length)} channels, ${formatNumber(discoveredRoles.length)} roles, ${formatNumber(discoveredMembers.length)} members cached.` },
+    { label: "Choose notification channels", done: Boolean(Object.values(draft.discord?.notificationChannels ?? {}).some(Boolean)), detail: "Route app, supply, craft and moderation messages." },
+    { label: "Register slash commands", done: Boolean(status?.discord?.registeredCommandsAt), detail: status?.discord?.registeredCommandsAt ? `Last registered ${dateLabel(status.discord.registeredCommandsAt)}.` : "Use Tests & Commands after settings are saved." },
+  ];
 
   function discordSnowflakeDate(id: unknown) {
     try {
@@ -4268,10 +4470,28 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
         </header>
       )}
       {tabs.length ? <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div> : null}
-      {message ? <div className="admin-message">{message}</div> : null}
+      {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
 
       {tab === "status" ? (
         <div className="admin-section">
+          <section className="form-card setup-checklist-card">
+            <div className="split-header">
+              <div>
+                <h3><CheckCircle2 size={17} /> Setup Checklist</h3>
+                <p className="legend">A quick operational checklist for this installation. Optional items are marked when configured, but do not block local use.</p>
+              </div>
+              <span className="setup-progress-pill">{completedSetupItems}/{adminSetupItems.length} complete</span>
+            </div>
+            <div className="setup-checklist">
+              {adminSetupItems.map((item) => (
+                <div className={item.done ? "done" : ""} key={item.label}>
+                  <span>{item.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
+                  <strong>{item.label}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
+          </section>
           <div className="metric-grid admin-metrics">
             <Stat icon={<Server />} label="Environment" value={status?.environment ?? "-"} />
             <Stat icon={<Database />} label="Database" value={bytesLabel(status?.databaseSize)} />
@@ -4303,7 +4523,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           <section className="form-card">
             <div className="split-header">
               <h3><TrendingUp size={17} /> Usage Analytics</h3>
-              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => setAnalyticsDays(event.target.value)}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button" onClick={() => { if (window.confirm("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
+              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => setAnalyticsDays(event.target.value)}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
             </div>
             <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
             <div className="metric-grid analytics-metrics">
@@ -4364,12 +4584,23 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
       {tab === "discord" ? (
         <div className="admin-section bot-dashboard">
           {botOnly ? (
-            <div className="bot-overview">
-              <div><MessageCircle size={19} /><strong>{draft.discord.enabled ? "Bot Enabled" : "Bot Disabled"}</strong><span>Slash commands and notification delivery</span></div>
-              <div><Bell size={19} /><strong>{Object.values(draft.discord.notify).filter(Boolean).length} Rules On</strong><span>Notification categories currently enabled</span></div>
-              <div><Command size={19} /><strong>{draft.discord.botTokenConfigured ? "Token Set" : "Token Missing"}</strong><span>{draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Add a bot token to send messages"}</span></div>
-              <div><Activity size={19} /><strong>{discordDelivery.status ?? "No delivery"}</strong><span>{discordDeliveryLabel}</span></div>
-            </div>
+            <>
+              <div className="bot-overview">
+                <div><MessageCircle size={19} /><strong>{draft.discord.enabled ? "Bot Enabled" : "Bot Disabled"}</strong><span>Slash commands and notification delivery</span></div>
+                <div><Bell size={19} /><strong>{Object.values(draft.discord.notify).filter(Boolean).length} Rules On</strong><span>Notification categories currently enabled</span></div>
+                <div><Command size={19} /><strong>{draft.discord.botTokenConfigured ? "Token Set" : "Token Missing"}</strong><span>{draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Add a bot token to send messages"}</span></div>
+                <div><Activity size={19} /><strong>{discordDelivery.status ?? "No delivery"}</strong><span>{discordDeliveryLabel}</span></div>
+              </div>
+              <section className="bot-workflow-card" aria-label="Bot setup workflow">
+                {botWorkflowItems.map((item) => (
+                  <button key={item.label} type="button" onClick={() => item.label === "Connect bot" ? setBotSection("setup") : item.label === "Sync Discord server" ? setBotSection("setup") : item.label === "Choose notification channels" ? setBotSection("notifications") : setBotSection("tests")}>
+                    <span className={item.done ? "done" : ""}>{item.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
+                    <strong>{item.label}</strong>
+                    <small>{item.detail}</small>
+                  </button>
+                ))}
+              </section>
+            </>
           ) : null}
           <div className={botOnly ? "bot-layout" : ""}>
           <React.Suspense fallback={<div className="loading">Loading Discord controls...</div>}>
@@ -4631,6 +4862,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
               onRegisterCommands={() =>
                 run(async () => {
                   const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" });
+                  setMessageKind("success");
                   setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`);
                 })
               }
@@ -4739,7 +4971,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           <section className="form-card maintenance-card">
             <h3><Database size={17} /> Retention Maintenance</h3>
             <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
-            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
+            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
           </section>
         </div>
       ) : null}
@@ -4775,6 +5007,7 @@ function DashboardApp() {
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
+  const [discordPromptDismissed, setDiscordPromptDismissed] = usePersistedState("auth.discordPromptDismissed", false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
@@ -4782,6 +5015,7 @@ function DashboardApp() {
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
+  const [toolsOpen, setToolsOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
   const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
   const activityNoticeClaimRef = React.useRef(claimId);
@@ -4806,9 +5040,10 @@ function DashboardApp() {
     setUserAuth(await response.json());
   }, []);
   const discordLogin = React.useCallback(() => {
+    setDiscordPromptDismissed(true);
     const returnTo = `${window.location.pathname}${window.location.search}`;
     window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(returnTo)}`;
-  }, []);
+  }, [setDiscordPromptDismissed]);
   const discordLogout = React.useCallback(async () => {
     const response = await fetch(`${LOCAL_API}/auth/logout`, { method: "POST" });
     const body = await response.json();
@@ -5047,6 +5282,7 @@ function DashboardApp() {
 
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
+    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
@@ -5076,7 +5312,7 @@ function DashboardApp() {
         </div>
         <button className="command-launch" onClick={() => setCommandOpen(true)}><Search size={15} /><span>Quick find</span><kbd>Ctrl K</kbd></button>
         <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Our Discord</span><ExternalLink size={13} /></a>
-        <nav>{NAV.map(([id, label, Icon]) => (
+        <nav>{MAIN_NAV.map(([id, label, Icon]) => (
           <a
             key={id}
             className={active === id ? "active" : ""}
@@ -5089,7 +5325,36 @@ function DashboardApp() {
           >
             <Icon size={16} /><span className="nav-label">{label}</span>
           </a>
-        ))}</nav>
+        ))}
+          <div
+            className={`nav-tools ${TOOL_NAV.some(([id]) => active === id) ? "active" : ""} ${toolsOpen ? "open" : ""}`}
+            onMouseEnter={() => setToolsOpen(true)}
+            onMouseLeave={() => setToolsOpen(false)}
+            onFocus={() => setToolsOpen(true)}
+          >
+            <button type="button" className={TOOL_NAV.some(([id]) => active === id) ? "active" : ""} onClick={() => setToolsOpen((current) => !current)} aria-expanded={toolsOpen}>
+              <Wrench size={16} /><span className="nav-label">Tools</span>
+            </button>
+            <div className="nav-tools-menu" role="menu" aria-label="Tools">
+              {TOOL_NAV.map(([id, label, Icon]) => (
+                <a
+                  key={id}
+                  href={panelHref(id)}
+                  role="menuitem"
+                  className={active === id ? "active" : ""}
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    setToolsOpen(false);
+                    navigate(id);
+                  }}
+                >
+                  <Icon size={15} /><span>{label}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </nav>
         <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
           <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
           <span>
@@ -5123,6 +5388,7 @@ function DashboardApp() {
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
+      {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}

@@ -1,0 +1,187 @@
+.setup-checklist-card {
+  gap: 16px;
+}
+
+.setup-progress-pill {
+  align-self: center;
+  border: 1px solid rgba(240, 198, 79, .34);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: var(--active-color);
+  background: color-mix(in srgb, var(--active-bg) 34%, transparent);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.setup-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.setup-checklist > div {
+  min-width: 0;
+  border: 1px solid rgba(108, 123, 145, .22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .022);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 4px 9px;
+  align-items: start;
+}
+
+.setup-checklist > div > span {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .035);
+}
+
+.setup-checklist > div.done > span {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--good) 14%, transparent);
+}
+
+.setup-checklist strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.setup-checklist small {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.admin-message.success {
+  border-color: color-mix(in srgb, var(--good) 42%, transparent);
+  color: color-mix(in srgb, var(--good) 86%, #fff);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+}
+
+.admin-message.error {
+  border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+  color: #ffd2d1;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.bot-workflow-card {
+  border: 1px solid rgba(108, 123, 145, .22);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22, 32, 43, .13), transparent 40%),
+    linear-gradient(180deg, rgba(11, 16, 22, .94), rgba(6, 9, 14, .98));
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.bot-workflow-card button {
+  min-width: 0;
+  min-height: 74px;
+  border: 1px solid rgba(108, 123, 145, .2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .022);
+  color: var(--text);
+  padding: 11px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 3px 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-workflow-card button:hover,
+.bot-workflow-card button:focus-visible {
+  border-color: var(--hover-border);
+  background: color-mix(in srgb, var(--active-bg) 22%, transparent);
+}
+
+.bot-workflow-card button > span {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .04);
+  display: inline-grid;
+  place-items: center;
+}
+
+.bot-workflow-card button > span.done {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+}
+
+.bot-workflow-card strong {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.bot-workflow-card small {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.32;
+}
+
+.admin-page .toolbar-button.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: #ffd2d1;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.admin-page .toolbar-button.danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 74%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+@media (max-width: 900px) {
+  .setup-checklist,
+  .bot-workflow-card {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-progress-pill {
+    justify-self: start;
+  }
+
+  aside {
+    max-height: none;
+    overflow: visible;
+  }
+
+  nav,
+  .sidebar-collapsed nav,
+  .bot-section-nav {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--active-color) 50%, transparent) transparent;
+  }
+
+  nav::-webkit-scrollbar,
+  .bot-section-nav::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  nav::-webkit-scrollbar-thumb,
+  .bot-section-nav::-webkit-scrollbar-thumb {
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--active-color) 45%, transparent);
+  }
+
+  .admin-page .dashboard-top-meta {
+    width: 100%;
+    align-items: stretch;
+  }
+}

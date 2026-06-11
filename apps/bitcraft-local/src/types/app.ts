@@ -2,6 +2,7 @@ import type { AnyRecord } from "../main-app-data";
 
 export type ActivePanel =
   | "dashboard"
+  | "leaderboard"
   | "members"
   | "skills"
   | "production"

@@ -160,6 +160,25 @@ db.exec(`
     status TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS production_contributions (
+    contribution_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    craft_entity_id TEXT NOT NULL,
+    contributor_entity_id TEXT NOT NULL,
+    contributor_name TEXT NOT NULL,
+    profession TEXT,
+    craft_label TEXT,
+    structure_name TEXT,
+    item_tier TEXT,
+    contributed_progress REAL NOT NULL DEFAULT 0,
+    contributed_xp REAL NOT NULL DEFAULT 0,
+    contribution_count REAL NOT NULL DEFAULT 0,
+    first_contributed_at TEXT,
+    last_contributed_at TEXT,
+    first_seen TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS admin_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -270,6 +289,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_watches_profession ON discord_craft_watches (guild_id, profession_key, mode);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);
@@ -402,6 +423,35 @@ const statements = {
       raw_json = excluded.raw_json
   `),
   completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
+  upsertProductionContribution: db.prepare(`
+    INSERT INTO production_contributions (
+      contribution_key, claim_id, craft_entity_id, contributor_entity_id, contributor_name, profession, craft_label, structure_name,
+      item_tier, contributed_progress, contributed_xp, contribution_count, first_contributed_at, last_contributed_at, first_seen, updated_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(contribution_key) DO UPDATE SET
+      contributor_name = excluded.contributor_name,
+      profession = excluded.profession,
+      craft_label = excluded.craft_label,
+      structure_name = excluded.structure_name,
+      item_tier = excluded.item_tier,
+      contributed_progress = max(production_contributions.contributed_progress, excluded.contributed_progress),
+      contributed_xp = max(production_contributions.contributed_xp, excluded.contributed_xp),
+      contribution_count = max(production_contributions.contribution_count, excluded.contribution_count),
+      first_contributed_at = CASE
+        WHEN production_contributions.first_contributed_at IS NULL THEN excluded.first_contributed_at
+        WHEN excluded.first_contributed_at IS NULL THEN production_contributions.first_contributed_at
+        WHEN excluded.first_contributed_at < production_contributions.first_contributed_at THEN excluded.first_contributed_at
+        ELSE production_contributions.first_contributed_at
+      END,
+      last_contributed_at = CASE
+        WHEN production_contributions.last_contributed_at IS NULL THEN excluded.last_contributed_at
+        WHEN excluded.last_contributed_at IS NULL THEN production_contributions.last_contributed_at
+        WHEN excluded.last_contributed_at > production_contributions.last_contributed_at THEN excluded.last_contributed_at
+        ELSE production_contributions.last_contributed_at
+      END,
+      updated_at = excluded.updated_at,
+      raw_json = excluded.raw_json
+  `),
   getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
   upsertSetting: db.prepare(`
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
@@ -592,10 +642,11 @@ function craftJobKey(job) {
   const recipe = stableCraftPart(job.recipeId ?? job.recipeEntityId ?? job.recipe_entity_id ?? job.craftingRecipeId ?? job.recipeName ?? job.name);
   const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId);
   const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType);
-  const crafter = stableCraftPart(job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName);
   const visibility = job.isPublic === false ? "private" : "public";
-  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", crafter || "unknown", visibility].join("|");
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", crafter || "unknown", visibility].join("|"));
+  // BitJita can report the same public craft with a different current/last crafter as work continues.
+  // Crafter is notification metadata, not stable craft identity, otherwise starts can fire again.
+  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
+  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|"));
 }
 
 function craftOutputItem(job, craftsPayload = {}) {
@@ -1100,7 +1151,7 @@ function validSyncUrl(value) {
 }
 
 function validPage(value) {
-  return ["dashboard", "overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"].includes(value);
+  return ["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"].includes(value);
 }
 
 const scryptAsync = promisify(scrypt);
@@ -1154,12 +1205,23 @@ const upstreamCache = new Map();
 const upstreamInflight = new Map();
 const regionCache = new Map();
 const claimDetailCache = new Map();
+const playerDetailCache = new Map();
+const craftContributionCache = new Map();
 const passiveCraftsCache = new Map();
 const productionCraftsCache = new Map();
 let mapCatalogCache = null;
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
+const BITJITA_PROXY_CACHE_POLICIES = [
+  { pattern: /^\/api\/(?:resources|creatures|skills|items|cargos|recipes|crafting-recipes)(?:\/|$)/, ttlMs: 60 * 60 * 1000 },
+  { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
+  { pattern: /^\/api\/players\/[^/]+$/, ttlMs: 60 * 1000 },
+  { pattern: /^\/api\/claims\/[^/]+\/(?:members|citizens)$/, ttlMs: 30 * 1000 },
+  { pattern: /^\/api\/claims\/[^/]+\/(?:market\/listings|buildings|inventories|construction|research|layout)$/, ttlMs: 15 * 1000 },
+  { pattern: /^\/api\/crafts(?:\/|$)/, ttlMs: 15 * 1000 },
+  { pattern: /^\/api\/logs\/storage$/, ttlMs: 10 * 1000 },
+];
 
 const BODY_LIMITS = {
   auth: 8 * 1024,
@@ -1637,7 +1699,7 @@ const analyticsEvents = new Set([
   "activity_member_filter_used",
   "activity_category_filter_used",
 ]);
-const analyticsPages = new Set(["dashboard", "overview", "members", "skills", "production", "publiccrafts", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"]);
+const analyticsPages = new Set(["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "map", "sync", "activity"]);
 const analyticsRetentionDays = 90;
 let lastAnalyticsPruneAt = 0;
 
@@ -3284,12 +3346,102 @@ function addMarketEvent(claimId, eventType, listing, occurredAt) {
   );
 }
 
+function craftOutputCatalog(craftsPayload) {
+  return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].map((item) => [String(item.id), item]));
+}
+
+function craftPrimarySkill(craft) {
+  const skillId = toNumber(craft.levelRequirements?.[0]?.skill_id ?? craft.experiencePerProgress?.[0]?.skill_id);
+  return skillId ? skillNames[skillId] ?? `Profession ${skillId}` : "";
+}
+
+function craftExperiencePerProgress(craft) {
+  const skillId = toNumber(craft.levelRequirements?.[0]?.skill_id ?? craft.experiencePerProgress?.[0]?.skill_id);
+  const match = craft.experiencePerProgress?.find?.((entry) => toNumber(entry.skill_id) === skillId);
+  return toNumber(match?.quantity ?? craft.experiencePerProgress?.[0]?.quantity);
+}
+
+function craftContributionOutputItem(craft, catalog) {
+  const outputId = craft.craftedItem?.[0]?.item_id;
+  return catalog.get(String(outputId)) ?? {};
+}
+
+function craftContributionRecord(claimId, craft, contribution, catalog, observedAt) {
+  const craftId = String(craft.entityId ?? "").trim();
+  const contributorId = String(contribution.contributorEntityId ?? contribution.playerEntityId ?? contribution.entityId ?? "").trim();
+  if (!craftId || !contributorId) return null;
+  const item = craftContributionOutputItem(craft, catalog);
+  const progress = toNumber(contribution.totalProgressContributed ?? contribution.contributedProgress ?? contribution.progress);
+  const xpPerProgress = craftExperiencePerProgress(craft);
+  return {
+    key: `${claimId}:${craftId}:${contributorId}`,
+    claimId,
+    craftId,
+    contributorId,
+    contributorName: String(contribution.contributorUsername ?? contribution.username ?? contribution.userName ?? contributorId),
+    profession: craftPrimarySkill(craft),
+    craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
+    structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
+    itemTier: item.tier == null ? (craft.tier == null ? null : String(craft.tier)) : String(item.tier),
+    progress,
+    xp: progress * xpPerProgress,
+    count: toNumber(contribution.contributionCount),
+    firstAt: contribution.firstContributedAt ?? null,
+    lastAt: contribution.lastContributedAt ?? null,
+    observedAt,
+    raw: contribution,
+  };
+}
+
+async function collectProductionContributionRecords(claimId, craftsPayload, observedAt) {
+  const crafts = unwrap(craftsPayload, "craftResults", []).filter((craft) => craft?.entityId);
+  const catalog = craftOutputCatalog(craftsPayload);
+  const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
+    try {
+      const contributions = await fetchCachedCraftContributions(craft.entityId);
+      return contributions
+        .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  });
+  return entries.flat();
+}
+
+function persistProductionContributions(records) {
+  for (const record of records) {
+    statements.upsertProductionContribution.run(
+      record.key,
+      record.claimId,
+      record.craftId,
+      record.contributorId,
+      record.contributorName,
+      record.profession || null,
+      record.craftLabel,
+      record.structureName,
+      record.itemTier,
+      record.progress,
+      record.xp,
+      record.count,
+      record.firstAt,
+      record.lastAt,
+      record.observedAt,
+      record.observedAt,
+      JSON.stringify(record.raw),
+    );
+  }
+}
+
 async function recordSnapshot(payload) {
   const now = new Date().toISOString();
   let pendingProductionNotifications = [];
   let productionDiagnostics = [];
   const claimId = String(payload.claimId ?? payload.claim?.entityId ?? "");
   if (!claimId) throw new Error("Missing claim id");
+  const productionContributionRecords = payload.crafts
+    ? await collectProductionContributionRecords(claimId, payload.crafts, now)
+    : [];
 
   const claim = payload.claim ?? {};
   const market = unwrap(payload.market, "listings", []);
@@ -3402,6 +3554,7 @@ async function recordSnapshot(payload) {
       const productionResult = recordProductionJobs(claimId, payload.crafts, now);
       pendingProductionNotifications = productionResult.pendingNotifications;
       productionDiagnostics = productionResult.diagnostics;
+      persistProductionContributions(productionContributionRecords);
     }
 
     db.exec("COMMIT");
@@ -3573,6 +3726,26 @@ async function fetchCachedClaimDetail(claimId) {
   return value;
 }
 
+async function fetchCachedPlayerDetail(playerId) {
+  const key = String(playerId);
+  const cached = playerDetailCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/players/${encodeURIComponent(key)}`);
+  const value = payload.player ?? payload;
+  playerDetailCache.set(key, { value, expiresAt: Date.now() + 60 * 1000 });
+  return value;
+}
+
+async function fetchCachedCraftContributions(craftId) {
+  const key = String(craftId);
+  const cached = craftContributionCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`);
+  const value = payload.contributions ?? [];
+  craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
+  return value;
+}
+
 async function fetchAllRegionClaims(regionId) {
   const base = `/claims?regionId=${encodeURIComponent(regionId)}&limit=100&sort=supplies&order=desc`;
   const first = await fetchBitjita(`${base}&page=1`);
@@ -3595,6 +3768,15 @@ async function fetchAllRegionClaims(regionId) {
       return detail ? { ...claim, ...(detail.claim ?? detail) } : claim;
     }),
   };
+}
+
+async function fetchCachedRegionClaims(regionId) {
+  const key = String(regionId);
+  const cached = regionCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await fetchAllRegionClaims(key);
+  regionCache.set(key, { expiresAt: Date.now() + 10 * 60 * 1000, value });
+  return value;
 }
 
 async function fetchMapCatalog() {
@@ -3690,6 +3872,27 @@ async function passiveCraftSummaries(body) {
     .slice(0, 18);
   return {
     rows,
+    requested: uniqueMembers.length,
+    failed: results.filter((result) => !result.ok).length,
+  };
+}
+
+async function playerDetailSummaries(body) {
+  const members = Array.isArray(body?.members) ? body.members : [];
+  const uniqueMembers = [...new Map(members
+    .filter((member) => member && (member.playerEntityId ?? member.entityId))
+    .slice(0, 100)
+    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+  const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
+    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+    try {
+      return { ok: true, player: await fetchCachedPlayerDetail(playerId) };
+    } catch (error) {
+      return { ok: false, playerId, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  return {
+    players: results.filter((result) => result.ok).map((result) => result.player),
     requested: uniqueMembers.length,
     failed: results.filter((result) => !result.ok).length,
   };
@@ -3792,6 +3995,56 @@ async function settlementProductionCrafts(body) {
   };
   productionCraftsCache.set(cacheKey, { value, expiresAt: Date.now() + 30 * 1000 });
   return value;
+}
+
+async function dashboardData(claimId) {
+  const id = String(claimId ?? "").trim();
+  if (!/^\d{8,}$/.test(id)) {
+    const error = new Error("Choose a valid BitCraft settlement ID");
+    error.statusCode = 400;
+    throw error;
+  }
+  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, researchPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
+    fetchBitjita(`/claims/${id}`),
+    fetchBitjita(`/claims/${id}/members`),
+    fetchBitjita(`/claims/${id}/citizens`).catch(() => ({ citizens: [] })),
+    fetchBitjita(`/claims/${id}/buildings`),
+    fetchBitjita(`/claims/${id}/construction`).catch(() => ({ projects: [] })),
+    fetchBitjita(`/claims/${id}/research`).catch(() => ({ research: [] })),
+    fetchAllClaimListings(id).catch(() => ({ listings: [] })),
+    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`).catch(() => ({ craftResults: [] })),
+    fetchBitjita("/regions/status").catch(() => ({ regions: [] })),
+  ]);
+  const claim = claimPayload.claim ?? claimPayload;
+  const members = unwrap(membersPayload, "members", []);
+  const crafts = unwrap(craftsPayload, "craftResults", []);
+  const [playerPayload, contributionEntries, region, tradeVolume] = await Promise.all([
+    playerDetailSummaries({ members }),
+    mapWithConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
+      try {
+        return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId)];
+      } catch {
+        return [String(craft.entityId), []];
+      }
+    }),
+    claim?.regionId ? fetchCachedRegionClaims(claim.regionId).catch(() => ({ claims: [] })) : Promise.resolve({ claims: [] }),
+    claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
+  ]);
+  return {
+    claim: claimPayload,
+    members: membersPayload,
+    citizens: citizensPayload,
+    buildings: buildingsPayload,
+    construction: constructionPayload,
+    research: researchPayload,
+    market: marketPayload,
+    crafts: craftsPayload,
+    players: playerPayload.players ?? [],
+    contributions: Object.fromEntries(contributionEntries),
+    region,
+    regionStatus,
+    tradeVolume,
+  };
 }
 
 let snapshotQueue = Promise.resolve();
@@ -3947,6 +4200,104 @@ function activityHistory(claimId, limit = 500) {
   const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, eventLimit);
   const total = toNumber(db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE claim_id = ?").get(claimId)?.count);
   return { events, total };
+}
+
+function contributionLeaderboard(claimId) {
+  const rows = db.prepare(`
+    SELECT *
+    FROM production_contributions
+    WHERE claim_id = ?
+    ORDER BY last_contributed_at DESC, updated_at DESC
+    LIMIT 5000
+  `).all(claimId);
+  const contributors = new Map();
+  const professions = new Map();
+  for (const row of rows) {
+    const contributorKey = String(row.contributor_entity_id || row.contributor_name);
+    const profession = String(row.profession || "Unknown");
+    const contributor = contributors.get(contributorKey) ?? {
+      contributorId: row.contributor_entity_id,
+      name: row.contributor_name,
+      totalProgress: 0,
+      totalXp: 0,
+      contributionCount: 0,
+      craftCount: 0,
+      lastContributedAt: null,
+      professions: {},
+    };
+    contributor.totalProgress += toNumber(row.contributed_progress);
+    contributor.totalXp += toNumber(row.contributed_xp);
+    contributor.contributionCount += toNumber(row.contribution_count);
+    contributor.craftCount += 1;
+    if (!contributor.lastContributedAt || String(row.last_contributed_at ?? row.updated_at) > contributor.lastContributedAt) contributor.lastContributedAt = row.last_contributed_at ?? row.updated_at;
+    contributor.professions[profession] = {
+      progress: toNumber(contributor.professions[profession]?.progress) + toNumber(row.contributed_progress),
+      xp: toNumber(contributor.professions[profession]?.xp) + toNumber(row.contributed_xp),
+      crafts: toNumber(contributor.professions[profession]?.crafts) + 1,
+    };
+    contributors.set(contributorKey, contributor);
+
+    const professionRow = professions.get(profession) ?? {
+      profession,
+      totalProgress: 0,
+      totalXp: 0,
+      craftCount: 0,
+      contributorCount: new Set(),
+      topContributor: "",
+      topContributorProgress: 0,
+      contributors: new Map(),
+    };
+    professionRow.totalProgress += toNumber(row.contributed_progress);
+    professionRow.totalXp += toNumber(row.contributed_xp);
+    professionRow.craftCount += 1;
+    professionRow.contributorCount.add(contributorKey);
+    const professionContributor = toNumber(professionRow.contributors.get(contributorKey)?.progress) + toNumber(row.contributed_progress);
+    professionRow.contributors.set(contributorKey, { name: row.contributor_name, progress: professionContributor });
+    if (professionContributor > professionRow.topContributorProgress) {
+      professionRow.topContributor = row.contributor_name;
+      professionRow.topContributorProgress = professionContributor;
+    }
+    professions.set(profession, professionRow);
+  }
+  const contributorList = Array.from(contributors.values())
+    .map((entry) => ({ ...entry, professions: Object.entries(entry.professions).map(([profession, values]) => ({ profession, ...values })).sort((a, b) => b.progress - a.progress) }))
+    .sort((a, b) => b.totalProgress - a.totalProgress);
+  const professionList = Array.from(professions.values())
+    .map((entry) => ({
+      profession: entry.profession,
+      totalProgress: entry.totalProgress,
+      totalXp: entry.totalXp,
+      craftCount: entry.craftCount,
+      contributorCount: entry.contributorCount.size,
+      topContributor: entry.topContributor,
+      topContributorProgress: entry.topContributorProgress,
+    }))
+    .sort((a, b) => b.totalProgress - a.totalProgress);
+  return {
+    summary: {
+      contributorCount: contributorList.length,
+      professionCount: professionList.length,
+      totalProgress: contributorList.reduce((sum, row) => sum + row.totalProgress, 0),
+      totalXp: contributorList.reduce((sum, row) => sum + row.totalXp, 0),
+      recordedCrafts: new Set(rows.map((row) => row.craft_entity_id)).size,
+      lastContributedAt: rows[0]?.last_contributed_at ?? null,
+    },
+    contributors: contributorList.slice(0, 100),
+    professions: professionList,
+    recent: rows.slice(0, 50).map((row) => ({
+      contributorId: row.contributor_entity_id,
+      contributorName: row.contributor_name,
+      profession: row.profession,
+      craftLabel: row.craft_label,
+      structureName: row.structure_name,
+      itemTier: row.item_tier,
+      totalProgress: toNumber(row.contributed_progress),
+      totalXp: toNumber(row.contributed_xp),
+      contributionCount: toNumber(row.contribution_count),
+      firstContributedAt: row.first_contributed_at,
+      lastContributedAt: row.last_contributed_at,
+    })),
+  };
 }
 
 function dashboardHistory(claimId) {
@@ -4811,9 +5162,16 @@ function pruneUpstreamCache(now = Date.now()) {
   }
 }
 
+function bitjitaProxyCacheTtl(upstream) {
+  const pathname = upstream.pathname;
+  const policy = BITJITA_PROXY_CACHE_POLICIES.find((entry) => entry.pattern.test(pathname));
+  return policy?.ttlMs ?? UPSTREAM_CACHE_TTL_MS;
+}
+
 async function fetchUpstreamCached(upstream) {
   const key = upstream.toString();
   const now = Date.now();
+  const ttlMs = bitjitaProxyCacheTtl(upstream);
   const cached = upstreamCache.get(key);
   if (cached && cached.expiresAt > now) return { ...cached, cacheState: "hit" };
   if (cached) upstreamCache.delete(key);
@@ -4831,9 +5189,9 @@ async function fetchUpstreamCached(upstream) {
     const body = Buffer.from(await response.arrayBuffer());
     const headers = {
       "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
-      "cache-control": response.headers.get("cache-control") ?? `public, max-age=${Math.max(1, Math.floor(UPSTREAM_CACHE_TTL_MS / 1000))}`,
+      "cache-control": `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
     };
-    const value = { status: response.status, headers, body, expiresAt: Date.now() + UPSTREAM_CACHE_TTL_MS };
+    const value = { status: response.status, headers, body, expiresAt: Date.now() + ttlMs, ttlMs };
     if (response.ok) {
       upstreamCache.set(key, value);
       pruneUpstreamCache();
@@ -4929,11 +5287,7 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "region-claims", RATE_LIMITS.expensiveLocal)) return;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      const cached = regionCache.get(regionId);
-      if (cached && cached.expiresAt > Date.now()) return send(res, 200, cached.value);
-      const value = await fetchAllRegionClaims(regionId);
-      regionCache.set(regionId, { expiresAt: Date.now() + 10 * 60 * 1000, value });
-      return send(res, 200, value);
+      return send(res, 200, await fetchCachedRegionClaims(regionId));
     }
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
@@ -5393,13 +5747,28 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
+    if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
+      return send(res, 200, contributionLeaderboard(url.searchParams.get("claimId") ?? ""));
+    }
     if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
       if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
       return send(res, 200, await passiveCraftSummaries(await readJson(req, BODY_LIMITS.json)));
     }
+    if (req.method === "POST" && url.pathname === "/api/local/player-details") {
+      if (!rateLimit(req, res, "player-details", RATE_LIMITS.expensiveLocal)) return;
+      return send(res, 200, await playerDetailSummaries(await readJson(req, BODY_LIMITS.json)));
+    }
     if (req.method === "POST" && url.pathname === "/api/local/production/crafts") {
       if (!rateLimit(req, res, "production-crafts", RATE_LIMITS.expensiveLocal)) return;
       return send(res, 200, await settlementProductionCrafts(await readJson(req, BODY_LIMITS.json)));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/dashboard-data") {
+      if (!rateLimit(req, res, "dashboard-data", RATE_LIMITS.expensiveLocal)) return;
+      try {
+        return send(res, 200, await dashboardData(url.searchParams.get("claimId") ?? ""));
+      } catch (error) {
+        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load dashboard data" });
+      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);

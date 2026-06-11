@@ -6,11 +6,12 @@
   "scripts": {
     "preinstall": "node ./scripts/verify-pnpm.mjs",
     "dev": "node ./scripts/dev.mjs",
-    "dev:api": "corepack pnpm --filter @workspace/api-server run dev",
-    "dev:web": "corepack pnpm --filter @workspace/bitcraft-monitor run dev",
+    "dev:app": "corepack pnpm --filter @workspace/bitcraft-local run dev",
+    "dev:web": "corepack pnpm --filter @workspace/bitcraft-local run dev:web",
+    "dev:api": "corepack pnpm --filter @workspace/bitcraft-local run dev:db",
     "build": "corepack pnpm run typecheck && corepack pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build --force",
-    "typecheck": "corepack pnpm run typecheck:libs && corepack pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "corepack pnpm run typecheck:libs && corepack pnpm --filter @workspace/bitcraft-local run typecheck && corepack pnpm -r --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {

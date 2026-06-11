@@ -1,1 +1,0 @@
-export const CLAIM_ID = "1369094286777412590";

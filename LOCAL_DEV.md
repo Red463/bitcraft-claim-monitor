@@ -1,57 +1,66 @@
 # Local Development
 
-This project was exported from Replit. The local setup uses the same pnpm workspace, with defaults added so it runs on Windows without Replit environment variables.
+The maintained app lives in `apps/bitcraft-local`. Historical Replit export artifacts are no longer part of the active workspace.
 
 ## Requirements
 
-- Node.js 24, matching `.replit`. Node 22 may also work, but 24 is the known target.
-- pnpm. If needed, run `corepack enable` and then `corepack prepare pnpm@latest --activate`.
+- Node.js 24 or newer.
+- Corepack-enabled pnpm. From a fresh machine, run `corepack enable` before installing.
 
 ## Install
 
 ```sh
-pnpm install
+corepack pnpm install
 ```
 
-## Run
+## Run The App
 
-Run API and frontend together:
-
-```sh
-pnpm run dev
-```
-
-Or run them separately:
+Run the local frontend and API together:
 
 ```sh
-pnpm run dev:api
-pnpm run dev:web
+corepack pnpm --filter @workspace/bitcraft-local run dev
 ```
 
 Default local ports:
 
-- API: `http://localhost:8080`
 - Frontend: `http://localhost:18428`
+- Local API: `http://127.0.0.1:18430`
 
-The Vite dev server proxies `/api` to `http://localhost:8080`, so browser requests use the same relative `/api/...` URLs as the generated client.
-
-## Useful Checks
-
-```sh
-pnpm run typecheck
-pnpm run build
-```
-
-Override ports when needed:
+Useful separate commands:
 
 ```sh
-PORT=5173 pnpm run dev:web
-PORT=8081 pnpm run dev:api
+corepack pnpm --filter @workspace/bitcraft-local run dev:web
+corepack pnpm --filter @workspace/bitcraft-local run dev:db
 ```
 
-On PowerShell, set environment variables first:
+## Stable Browser Smoke Server
+
+For Codex/in-app-browser testing, prefer the production-style smoke server on port `18449`:
 
 ```powershell
-$env:PORT = "5173"
-pnpm run dev:web
+corepack pnpm --filter @workspace/bitcraft-local run build
+node scripts/start-bitcraft-local-smoke.mjs --restart
+curl.exe -s http://127.0.0.1:18449/api/local/health
+```
+
+Open:
+
+```txt
+http://127.0.0.1:18449/?page=dashboard
+```
+
+The smoke server uses `.dev-data` and has background polling disabled, so it is safe for local UI verification.
+
+## Checks
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run test
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Root workspace checks:
+
+```sh
+corepack pnpm run typecheck
+corepack pnpm run build
 ```

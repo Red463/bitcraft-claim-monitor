@@ -4,14 +4,14 @@
 
 BitCraft Claim Monitor is a local-first settlement operations dashboard for BitCraft. It uses the public BitJita API, records local SQLite history, and includes a Discord bot/admin dashboard.
 
-The maintained application is `apps/bitcraft-local`. The `artifacts/` directory is historical Replit-exported code and should not be treated as the active app unless the user explicitly asks about it.
+The maintained application is `apps/bitcraft-local`. Historical Replit-exported `artifacts/` code has been removed from the active workspace and should not be recreated unless the user explicitly asks to inspect an old export.
 
 ## Tech Stack
 
 - Package manager: `pnpm` via Corepack. Use the pinned workspace version.
 - Runtime target: Node.js 24+.
 - Active frontend: React + TypeScript + Vite in `apps/bitcraft-local/src/main.tsx`, with extracted feature components under `apps/bitcraft-local/src/components/`.
-- Active styling: plain CSS in `apps/bitcraft-local/src/styles.css`.
+- Active styling: plain CSS in `apps/bitcraft-local/src/styles.css`, with focused newer modules under `apps/bitcraft-local/src/styles/`.
 - Active backend: Node HTTP server in `apps/bitcraft-local/server.mjs`.
 - Database: Node built-in SQLite (`node:sqlite`), stored locally under `apps/bitcraft-local/data/` in development and `/var/lib/bitcraft-claim-monitor` in production.
 
@@ -191,6 +191,7 @@ Use existing local patterns:
 - For larger or messy features, prefer a sensible split into smaller focused modules before implementing. The bot dashboard split under `src/components/bot/` is the current pattern to follow.
 - Avoid re-centralising extracted bot UI back into `main.tsx`.
 - Do not introduce a new framework, state library, styling system, or heavy dependency without first explaining the tradeoff.
+- For new CSS that belongs to a focused feature or cleanup pass, prefer a small module in `apps/bitcraft-local/src/styles/` imported from TypeScript instead of appending more unrelated rules to the main stylesheet.
 
 ### Backend
 
@@ -402,7 +403,7 @@ Before finishing UI work, check:
 
 ## Do Not Touch Unless Asked
 
-- Do not work in `artifacts/` unless the user specifically asks about the old Replit export.
+- Do not recreate or work from historical Replit artifacts unless the user specifically asks about an old export.
 - Do not change deployment domains, Caddy config, systemd config, or VPS update instructions unless the request involves deployment.
 - Do not change database schema unless the feature or fix requires it.
 - Do not reset admin passwords, clear production settings, or alter Discord live configuration without explicit permission.

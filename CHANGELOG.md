@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.25-beta.1] - 2026-06-11
+
+### Added
+
+- Added a Contribution Leaderboard page that records observed settlement craft contributions by member and profession.
+- Added a first-visit Discord sign-in prompt so users can link their character and save server-side preferences when Discord login is enabled.
+
+### Changed
+
+- Grouped utility pages under a Tools flyout in the sidebar.
+- Reworked Browser Settings into focused sections for account, theme, preferences, and local data.
+- Added endpoint-specific BitJita proxy cache policies so stable catalog data is cached longer while live settlement data stays short-lived.
+- Added a server-side Dashboard data aggregate so the Dashboard loads its live BitJita bundle through one local endpoint instead of many browser proxy requests.
+- Moved dashboard/member/map player detail loading behind one cached local endpoint to reduce browser request fan-out.
+- Consolidated local history polling onto the main app refresh cycle to avoid duplicate background timers per page.
+- Added an Admin setup checklist and a clearer Discord bot workflow summary to make setup gaps easier to find.
+- Improved admin success/error feedback and changed destructive admin/bot actions to require typed confirmation.
+- Added a focused Phase 6 stylesheet module for setup, workflow and mobile shell polish.
+- Updated local development and agent documentation for the current maintained app and smoke-server workflow.
+
+### Fixed
+
+- Fixed duplicate Discord craft-start notifications when BitJita reports the same active craft with a different current crafter.
+- Fixed the sidebar Tools menu visibility, changed it to an overlay so it no longer compresses the sidebar, and moved Browser Settings navigation to top tabs so the dialog no longer stays oversized on short sections.
+
+### Removed
+
+- Removed historical Replit export artifacts from the active workspace.
+
 ## [0.9.24-beta.1] - 2026-06-10
 
 ### Fixed
