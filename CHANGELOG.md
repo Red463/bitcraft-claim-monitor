@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.26-beta.1] - 2026-06-11
+
+### Fixed
+
+- Updated Leaderboard cards and filter controls to match the current dashboard-style card surfaces and metric styling.
+- Renamed the Leaderboard summary metric from Recorded Progress to Recorded Contribution.
+
 ## [0.9.25-beta.1] - 2026-06-11
 
 ### Added

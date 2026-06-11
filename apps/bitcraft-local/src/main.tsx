@@ -2516,7 +2516,7 @@ function Leaderboard({ claimId, refreshToken }: { claimId: string; refreshToken:
         </div>
       </header>
       <div className="summary-grid leaderboard-summary">
-        <MiniStat icon={<Trophy />} label="Recorded Progress" value={formatNumber(summary.totalProgress)} />
+        <MiniStat icon={<Trophy />} label="Recorded Contribution" value={formatNumber(summary.totalProgress)} />
         <MiniStat icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />
         <MiniStat icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />
         <MiniStat icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />
@@ -2525,7 +2525,7 @@ function Leaderboard({ claimId, refreshToken }: { claimId: string; refreshToken:
         <header className="dashboard-card-title">
           <span><Trophy size={14} /> Member standings</span>
           <label className="inline-field leaderboard-filter"><span>Profession</span>
-            <select value={professionFilter} onChange={(event) => setProfessionFilter(event.target.value)}>
+            <select className="select-control" value={professionFilter} onChange={(event) => setProfessionFilter(event.target.value)}>
               <option value="All">All professions</option>
               {professions.map((profession) => <option key={profession.profession} value={profession.profession}>{profession.profession}</option>)}
             </select>
