@@ -1119,6 +1119,7 @@ function getSettings() {
     refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
     defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
+    additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
@@ -1204,6 +1205,7 @@ const loginAttempts = new Map();
 const upstreamCache = new Map();
 const upstreamInflight = new Map();
 const regionCache = new Map();
+let activeRegionsCache = null;
 const claimDetailCache = new Map();
 const playerDetailCache = new Map();
 const craftContributionCache = new Map();
@@ -3779,6 +3781,71 @@ async function fetchCachedRegionClaims(regionId) {
   return value;
 }
 
+function parseRegionIds(value) {
+  return String(value ?? "")
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => /^\d+$/.test(entry));
+}
+
+function normalizeRegionRow(row, source = "bitjita") {
+  const regionId = String(row?.regionId ?? row?.id ?? "").trim();
+  if (!/^\d+$/.test(regionId)) return null;
+  return {
+    regionId,
+    regionName: String(row?.regionName ?? row?.name ?? `Region ${regionId}`),
+    active: row?.active !== false,
+    syncing: row?.syncing === true,
+    signedInPlayers: toNumber(row?.signedInPlayers ?? row?.playersOnline ?? row?.onlinePlayers),
+    playersInQueue: toNumber(row?.playersInQueue ?? row?.queuedPlayers),
+    updatedAt: row?.updatedAt ?? null,
+    source,
+  };
+}
+
+async function fetchCachedActiveRegions(extraRegionIds = []) {
+  const settings = getSettings();
+  const overrideIds = parseRegionIds(settings.additionalActiveRegions);
+  const includeIds = parseRegionIds(extraRegionIds.join(","));
+  const cacheKey = [...overrideIds, ...includeIds].sort((a, b) => toNumber(a) - toNumber(b)).join(",");
+  if (activeRegionsCache && activeRegionsCache.key === cacheKey && activeRegionsCache.expiresAt > Date.now()) return activeRegionsCache.value;
+  const [statusPayload, regionsPayload] = await Promise.all([
+    fetchBitjita("/regions/status").catch(() => ({ regions: [] })),
+    fetchBitjita("/regions").catch(() => []),
+  ]);
+  const byId = new Map();
+  for (const row of unwrap(statusPayload, "regions", [])) {
+    const normalized = normalizeRegionRow(row, "status");
+    if (normalized) byId.set(normalized.regionId, normalized);
+  }
+  for (const row of unwrap(regionsPayload, "regions", Array.isArray(regionsPayload) ? regionsPayload : [])) {
+    const normalized = normalizeRegionRow(row, "regions");
+    if (!normalized) continue;
+    byId.set(normalized.regionId, { ...normalized, ...byId.get(normalized.regionId), regionName: byId.get(normalized.regionId)?.regionName ?? normalized.regionName });
+  }
+  for (const regionId of [...overrideIds, ...includeIds]) {
+    byId.set(regionId, {
+      regionId,
+      regionName: byId.get(regionId)?.regionName ?? `Region ${regionId}`,
+      active: true,
+      syncing: byId.get(regionId)?.syncing ?? false,
+      signedInPlayers: byId.get(regionId)?.signedInPlayers ?? 0,
+      playersInQueue: byId.get(regionId)?.playersInQueue ?? 0,
+      updatedAt: byId.get(regionId)?.updatedAt ?? null,
+      source: byId.has(regionId) ? byId.get(regionId).source : "admin",
+    });
+  }
+  const value = {
+    regions: [...byId.values()]
+      .filter((region) => region.active !== false)
+      .sort((a, b) => toNumber(a.regionId) - toNumber(b.regionId)),
+    overrideRegionIds: overrideIds,
+    updatedAt: new Date().toISOString(),
+  };
+  activeRegionsCache = { key: cacheKey, expiresAt: Date.now() + 5 * 60 * 1000, value };
+  return value;
+}
+
 async function fetchMapCatalog() {
   if (mapCatalogCache && mapCatalogCache.expiresAt > Date.now()) return mapCatalogCache.value;
   const [resources, creatures] = await Promise.all([
@@ -5289,6 +5356,11 @@ const server = createServer(async (req, res) => {
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       return send(res, 200, await fetchCachedRegionClaims(regionId));
     }
+    if (req.method === "GET" && url.pathname === "/api/local/regions/active") {
+      if (!rateLimit(req, res, "regions-active", RATE_LIMITS.expensiveLocal)) return;
+      const include = parseRegionIds(url.searchParams.get("include"));
+      return send(res, 200, await fetchCachedActiveRegions(include));
+    }
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
       return send(res, 200, await fetchMapCatalog());
@@ -5548,6 +5620,8 @@ const server = createServer(async (req, res) => {
         if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
         if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
+        const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
+        if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
         if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
@@ -5570,12 +5644,14 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
+        statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
         statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        activeRegionsCache = null;
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());

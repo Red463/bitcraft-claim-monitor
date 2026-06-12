@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.1-beta.1] - 2026-06-12
+
+### Added
+
+- Added a shared active-region source backed by BitJita region status data, including admin fallback IDs for temporary seasonal regions.
+
+### Changed
+
+- Updated Map, Market tools and Public Craft Finder region selectors to use the shared active-region list instead of stale hardcoded region IDs.
+
 ## [1.0.0-beta.1] - 2026-06-12
 
 ### Changed

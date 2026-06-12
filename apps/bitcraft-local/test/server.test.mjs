@@ -98,7 +98,8 @@ test("server collection paginates listings and protects production mutations", a
       playerDetailRequests += 1;
       return json(res, { player: { playerEntityId: "player-1", username: "Tester", signedIn: true } });
     }
-    if (url.pathname === "/api/regions/status") return json(res, { regions: [{ id: "19", name: "Zephra" }] });
+    if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
+    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
       items: [{ id: "item-1", name: "Bronze Ingot" }],
@@ -221,6 +222,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(mapCatalogTwo.creatures, [{ enemyType: 42, name: "Sagi Bird", huntable: true }]);
   assert.equal(resourceCatalogRequests, 2);
   assert.equal(creatureCatalogRequests, 1);
+  const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
+  assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
+  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");
   const playerDetailPayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
   const playerDetailsOne = await fetch(`${origin}/api/local/player-details`, {
     method: "POST",

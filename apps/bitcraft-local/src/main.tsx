@@ -156,6 +156,7 @@ type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; o
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
+type ActiveRegion = { regionId: string; regionName?: string; active?: boolean; syncing?: boolean; signedInPlayers?: number; playersInQueue?: number; updatedAt?: string | null; source?: string };
 type AppUser = {
   id: number;
   discordId: string;
@@ -211,6 +212,7 @@ type AppSettings = {
   refreshSeconds: number;
   defaultPage: ActivePanel;
   defaultRegion: string;
+  additionalActiveRegions: string;
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
@@ -578,6 +580,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   refreshSeconds: 30,
   defaultPage: "dashboard",
   defaultRegion: "",
+  additionalActiveRegions: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
   snapshotRetentionDays: 365,
@@ -624,6 +627,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
     defaultPage,
+    additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
     theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
     toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
     branding: (config as AnyRecord)?.branding ?? {},
@@ -694,7 +698,37 @@ const THEME_FIELD_GROUPS: Array<{ title: string; keys: ThemeColorKey[] }> = [
 ];
 
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
-const ACTIVE_MAP_REGIONS = ["7", "8", "9", "12", "13", "14", "17", "18", "19"];
+
+function activeRegionLabel(region: ActiveRegion, settlementRegionId?: string): string {
+  const suffixes = [
+    String(region.regionId) === String(settlementRegionId ?? "") ? "settlement" : "",
+    region.source === "admin" ? "manual" : "",
+    region.syncing === false ? "not syncing" : "",
+  ].filter(Boolean);
+  return `R${region.regionId}${region.regionName ? ` - ${region.regionName}` : ""}${suffixes.length ? ` (${suffixes.join(", ")})` : ""}`;
+}
+
+function useActiveRegions(includeRegionId?: string): ActiveRegion[] {
+  const [regions, setRegions] = React.useState<ActiveRegion[]>([]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const include = includeRegionId && /^\d+$/.test(String(includeRegionId)) ? `?include=${encodeURIComponent(String(includeRegionId))}` : "";
+    fetch(`${LOCAL_API}/regions/active${include}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`active regions HTTP ${response.status}`)))
+      .then((payload) => {
+        const rows = Array.isArray(payload.regions) ? payload.regions : [];
+        setRegions(rows.map((region: AnyRecord) => ({
+          ...region,
+          regionId: String(region.regionId ?? ""),
+        })).filter((region: ActiveRegion) => /^\d+$/.test(region.regionId)));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && includeRegionId) setRegions([{ regionId: String(includeRegionId), regionName: `Region ${includeRegionId}`, source: "fallback" }]);
+      });
+    return () => controller.abort();
+  }, [includeRegionId]);
+  return regions;
+}
 
 function urlPanel(): ActivePanel | null {
   const panel = new URLSearchParams(window.location.search).get("page");
@@ -1656,8 +1690,7 @@ function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.price.region", defaultRegion);
-  const [customRegion] = usePersistedState("market.price.customRegion", defaultRegion);
-  const [availableRegions, setAvailableRegions] = React.useState<AnyRecord[]>([]);
+  const activeRegions = useActiveRegions(defaultRegion);
   const [priceState, setPriceState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const activeRegion = regionChoice === "All" ? "" : regionChoice;
 
@@ -1673,22 +1706,6 @@ function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
     }
     if (region) setRegionChoice(region === "all" ? "All" : region);
   }, [setRegionChoice]);
-
-  React.useEffect(() => {
-    if (regionChoice !== "Custom") return;
-    setRegionChoice(/^\d+$/.test(customRegion.trim()) ? customRegion.trim() : defaultRegion);
-  }, [customRegion, defaultRegion, regionChoice, setRegionChoice]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${API}/regions/status`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`regions HTTP ${response.status}`)))
-      .then((payload) => setAvailableRegions(payload.regions ?? []))
-      .catch(() => {
-        if (!controller.signal.aborted) setAvailableRegions([]);
-      });
-    return () => controller.abort();
-  }, []);
 
   React.useEffect(() => {
     if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
@@ -1719,7 +1736,7 @@ function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   }, [query, selectedItem?.name]);
 
   React.useEffect(() => {
-    if (!selectedItem || regionChoice === "Custom") {
+    if (!selectedItem) {
       setPriceState({ data: null, error: null, loading: false });
       return;
     }
@@ -1754,8 +1771,8 @@ function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const regionLabel = activeRegion ? `R${activeRegion}` : "All Regions";
   const regionIds = unique([
     defaultRegion,
-    regionChoice !== "All" && regionChoice !== "Custom" ? regionChoice : "",
-    ...availableRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
+    regionChoice !== "All" ? regionChoice : "",
+    ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
   return (
     <section className="price-finder">
@@ -1783,7 +1800,10 @@ function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
         <label className="research-filter-field price-region-field">
           <span>Region</span>
           <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("price_finder_region_changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
-            {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
+            {regionIds.map((regionId) => {
+              const region = activeRegions.find((entry) => String(entry.regionId) === String(regionId)) ?? { regionId };
+              return <option value={regionId} key={regionId}>{activeRegionLabel(region, defaultRegion)}</option>;
+            })}
             <option value="All">All Regions</option>
           </select>
         </label>
@@ -1833,7 +1853,7 @@ function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.buyOrders.region", defaultRegion);
-  const [availableRegions, setAvailableRegions] = React.useState<AnyRecord[]>([]);
+  const activeRegions = useActiveRegions(defaultRegion);
   const [orderState, setOrderState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const activeRegion = regionChoice === "All" ? "" : regionChoice;
 
@@ -1849,17 +1869,6 @@ function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
     }
     if (region) setRegionChoice(region === "all" ? "All" : region);
   }, [setRegionChoice]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${API}/regions/status`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`regions HTTP ${response.status}`)))
-      .then((payload) => setAvailableRegions(payload.regions ?? []))
-      .catch(() => {
-        if (!controller.signal.aborted) setAvailableRegions([]);
-      });
-    return () => controller.abort();
-  }, []);
 
   React.useEffect(() => {
     if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
@@ -1925,7 +1934,7 @@ function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const regionIds = unique([
     defaultRegion,
     regionChoice !== "All" ? regionChoice : "",
-    ...availableRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
+    ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
   const orders = sortBuyOrdersByBestPrice((orderState.data?.buyOrders ?? [])
     .map((order: AnyRecord) => normalizeBuyOrder(order, toNumber(selectedItem?.itemType)))
@@ -1963,7 +1972,10 @@ function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
         <label className="research-filter-field price-region-field">
           <span>Region</span>
           <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ buyRegion: event.target.value === "All" ? "all" : event.target.value }); }}>
-            {regionIds.map((regionId) => <option value={regionId} key={regionId}>R{regionId}{regionId === defaultRegion ? " - Settlement Region" : ""}</option>)}
+            {regionIds.map((regionId) => {
+              const region = activeRegions.find((entry) => String(entry.regionId) === String(regionId)) ?? { regionId };
+              return <option value={regionId} key={regionId}>{activeRegionLabel(region, defaultRegion)}</option>;
+            })}
             <option value="All">All Regions</option>
           </select>
         </label>
@@ -2057,6 +2069,7 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName
   const [sortKey, setSortKey] = usePersistedState<PublicCraftSortKey>("public-crafts.sort", "remaining");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("public-crafts.direction", "desc");
   const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
+  const activeRegions = useActiveRegions(monitoredRegionId);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2103,7 +2116,11 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName
       minimumLevel: toNumber(job.levelRequirements?.find((requirement: AnyRecord) => toNumber(requirement.skill_id) === requiredSkillId)?.level ?? job.levelRequirements?.[0]?.level),
     };
   }).filter((job) => job.remaining > 0);
-  const regions = unique([...publicJobs.map((job) => String(job.regionId)).filter(Boolean), ...(monitoredRegionId ? [monitoredRegionId] : [])]).sort((a, b) => toNumber(a) - toNumber(b));
+  const regions = unique([
+    ...activeRegions.map((region) => String(region.regionId)).filter(Boolean),
+    ...publicJobs.map((job) => String(job.regionId)).filter(Boolean),
+    ...(monitoredRegionId ? [monitoredRegionId] : []),
+  ]).sort((a, b) => toNumber(a) - toNumber(b));
   const filteredJobs = publicJobs
     .filter((job) => regionId === "All" || String(job.regionId) === regionId)
     .sort((a, b) => {
@@ -2179,7 +2196,10 @@ function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName
           </label>
           <label className="inline-field"><span>Region</span>
             <select className="select-control" value={regionId} onChange={(event) => { setRegionId(event.target.value); updateQueryState({ region: event.target.value }); trackAnalyticsEvent("public_craft_region_filter_used", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
-              <option>All</option>{regions.map((id) => <option key={id} value={id}>R{id}</option>)}
+              <option>All</option>{regions.map((id) => {
+                const region = activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
+                return <option key={id} value={id}>{activeRegionLabel(region, monitoredRegionId)}</option>;
+              })}
             </select>
           </label>
         </div>
@@ -2660,6 +2680,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
   const roster = data.players;
+  const activeRegions = useActiveRegions(String(data.claim.regionId ?? ""));
   React.useEffect(() => {
     const controller = new AbortController();
     fetch(`${LOCAL_API}/map/catalog`, { signal: controller.signal })
@@ -2694,10 +2715,10 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const resourceCategories = React.useMemo(() => MAP_CATEGORY_ORDER.filter((category) => resources.some((resource) => mapResourceCategory(resource) === category)), [resources]);
   const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
   const regionOptions = React.useMemo(() => unique([
-    ...ACTIVE_MAP_REGIONS,
+    ...activeRegions.map((region) => String(region.regionId ?? "")),
     String(data.claim.regionId ?? ""),
     ...data.regionStatus.map((region) => String(region.regionId ?? "")),
-  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [data.claim.regionId, data.regionStatus]);
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [activeRegions, data.claim.regionId, data.regionStatus]);
   const mapMarker = focus ?? defaultFocus;
   const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
@@ -2797,7 +2818,10 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
             </button>
           </div>
           {!resourcePanelCollapsed ? <><div className="map-resource-controls">
-            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => <option key={id} value={id}>Region {id}{String(id) === String(data.claim.regionId) ? " - settlement" : ""}</option>)}</select></label>
+            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
+              const region = activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
+              return <option key={id} value={id}>{activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? ""))}</option>;
+            })}</select></label>
             <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
             <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
             <SearchBox value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
@@ -4662,6 +4686,7 @@ function AdminPanel({
             <label className="field"><span>BitCraft Sync URL</span><input value={draft.syncUrl} onChange={(event) => updateDraft("syncUrl", event.target.value)} /></label>
             <label className="field"><span>Default opening page</span><select value={draft.defaultPage} onChange={(event) => updateDraft("defaultPage", event.target.value as ActivePanel)}>{NAV.filter(([id]) => id !== "admin").map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
             <label className="field"><span>Public Crafts default region ID</span><input value={draft.defaultRegion} onChange={(event) => updateDraft("defaultRegion", event.target.value)} placeholder="Use settlement region" /></label>
+            <label className="field"><span>Additional active region IDs</span><input value={draft.additionalActiveRegions} onChange={(event) => updateDraft("additionalActiveRegions", event.target.value)} placeholder="Optional, e.g. 22,24" /></label>
             <label className="field"><span>Browser refresh interval (seconds)</span><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /></label>
             <label className="field"><span>Snapshot retention (days)</span><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /></label>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
