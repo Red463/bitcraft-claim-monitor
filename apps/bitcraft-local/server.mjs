@@ -10,8 +10,10 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(root, "dist");
 const isProduction = process.env.NODE_ENV === "production";
+const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_ENV === "test";
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
+const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = process.env.ENABLE_DISCORD_STARTUP !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
@@ -315,8 +317,13 @@ ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
 ensureColumn("admin_users", "role", "TEXT NOT NULL DEFAULT 'owner'");
+ensureColumn("admin_users", "discord_id", "TEXT");
+ensureColumn("admin_users", "discord_username", "TEXT");
+ensureColumn("admin_users", "discord_global_name", "TEXT");
+ensureColumn("admin_users", "discord_avatar", "TEXT");
 ensureColumn("production_jobs", "start_notified", "INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';");
 
 const defaultClaimId = "1369094286777412590";
 const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
@@ -465,13 +472,16 @@ const statements = {
   deleteSecret: db.prepare("DELETE FROM app_secrets WHERE key = ?"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
+  adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
   adminBySession: db.prepare(`
-    SELECT admin_users.id, admin_users.username, admin_users.role
+    SELECT admin_users.id, admin_users.username, admin_users.role, admin_users.discord_id, admin_users.discord_username, admin_users.discord_global_name, admin_users.discord_avatar
     FROM admin_sessions
     JOIN admin_users ON admin_users.id = admin_sessions.user_id
     WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ? AND admin_users.active = 1
   `),
   insertAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)"),
+  insertDiscordAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at, discord_id, discord_username, discord_global_name, discord_avatar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+  updateAdminDiscordProfile: db.prepare("UPDATE admin_users SET username = ?, discord_username = ?, discord_global_name = ?, discord_avatar = ?, last_login_at = ? WHERE id = ?"),
   updatePassword: db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?"),
   updateAdminActive: db.prepare("UPDATE admin_users SET active = ? WHERE id = ?"),
   updateAdminRole: db.prepare("UPDATE admin_users SET role = ? WHERE id = ?"),
@@ -550,6 +560,23 @@ const statements = {
   dueDiscordTempBans: db.prepare("SELECT * FROM discord_temp_bans WHERE unban_at <= ? LIMIT 25"),
   deleteDiscordTempBan: db.prepare("DELETE FROM discord_temp_bans WHERE guild_id = ? AND user_id = ?"),
 };
+
+const defaultOwnerDiscordId = String(process.env.DEFAULT_OWNER_DISCORD_ID ?? "145544610234630144").trim();
+
+function seedDefaultDiscordOwner() {
+  if (isTestRuntime || !/^\d+$/.test(defaultOwnerDiscordId)) return;
+  if (db.prepare("SELECT id FROM admin_users WHERE discord_id = ?").get(defaultOwnerDiscordId)) return;
+  const createdAt = new Date().toISOString();
+  const existingRed = db.prepare("SELECT id FROM admin_users WHERE username = ?").get("red463");
+  if (existingRed) {
+    db.prepare("UPDATE admin_users SET discord_id = ?, discord_username = ?, discord_global_name = ?, role = 'owner', active = 1 WHERE id = ?")
+      .run(defaultOwnerDiscordId, "red463", "red463", existingRed.id);
+    return;
+  }
+  statements.insertDiscordAdmin.run("red463", "discord-oauth-admin", "owner", createdAt, defaultOwnerDiscordId, "red463", "red463", "");
+}
+
+seedDefaultDiscordOwner();
 
 function toNumber(value) {
   const n = Number(value ?? 0);
@@ -1293,6 +1320,10 @@ function validAdminUsername(username) {
   return /^[A-Za-z0-9_-]{3,32}$/.test(username);
 }
 
+function validDiscordId(value) {
+  return /^\d{15,25}$/.test(String(value ?? "").trim());
+}
+
 const ADMIN_ROLE_LABELS = {
   owner: "Owner",
   admin: "Administrator",
@@ -1334,6 +1365,10 @@ function publicAdminUser(row) {
   return {
     id: row.id,
     username: row.username,
+    discordId: String(row.discord_id ?? ""),
+    discordUsername: String(row.discord_username ?? ""),
+    discordGlobalName: String(row.discord_global_name ?? ""),
+    avatarUrl: userAvatarUrl(row),
     role,
     roleLabel: ADMIN_ROLE_LABELS[role],
     permissions: adminPermissions(role),
@@ -1501,6 +1536,29 @@ function authStatus(req) {
   return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
 }
 
+function discordProfileDisplayName(profile) {
+  return String(profile.global_name ?? profile.username ?? profile.id ?? "Discord user").trim() || "Discord user";
+}
+
+function createAdminSessionForDiscordProfile(profile, loginAt) {
+  const discordId = String(profile.id ?? "").trim();
+  if (!discordId) return null;
+  const admin = statements.adminByDiscordId.get(discordId);
+  if (!admin) return null;
+  const username = discordProfileDisplayName(profile);
+  statements.updateAdminDiscordProfile.run(
+    username,
+    String(profile.username ?? ""),
+    String(profile.global_name ?? ""),
+    String(profile.avatar ?? ""),
+    loginAt,
+    admin.id,
+  );
+  statements.insertLoginEvent.run(username, 1, loginAt, "discord-oauth");
+  audit({ id: admin.id, username }, "admin.discord_login", { discordId });
+  return createSession(admin.id);
+}
+
 function oauthStateSecret() {
   const stored = String(statements.getSecret.get("discord_oauth_state_secret")?.value ?? "").trim();
   if (stored) return stored;
@@ -1601,7 +1659,8 @@ async function handleDiscordOAuthCallback(req, res, url) {
   const user = statements.userByDiscordId.get(discordId);
   statements.updateUserLastLogin.run(loginAt, user.id);
   const session = createAppUserSession(user.id);
-  res.writeHead(302, { location: returnTo, "set-cookie": [clearAuthStateCookie(), session.cookie] });
+  const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
+  res.writeHead(302, { location: returnTo, "set-cookie": [clearAuthStateCookie(), session.cookie, ...(adminSession ? [adminSession.cookie] : [])] });
   res.end();
   return true;
 }
@@ -1622,6 +1681,7 @@ function requireAppUser(req, res) {
 function adminStatus(req) {
   const setupRequired = toNumber(statements.adminCount.get()?.count) === 0;
   const user = getSessionUser(req);
+  const discordConfig = discordOAuthConfig(req);
   return {
     setupRequired,
     setupKeyRequired: isProduction && setupRequired,
@@ -1629,6 +1689,8 @@ function adminStatus(req) {
     user: publicAdminUser(user),
     csrfToken: user ? csrfToken(req) : null,
     roles: ADMIN_ROLE_LABELS,
+    discordLoginEnabled: discordConfig.enabled,
+    discordLoginUrl: `${originFromRequest(req)}/api/local/auth/discord/start?returnTo=${encodeURIComponent("/?page=admin")}`,
   };
 }
 
@@ -5373,6 +5435,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
+      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Password administrator setup has been replaced by Discord administrator access" });
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
       if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
@@ -5391,6 +5454,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
+      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
@@ -5680,11 +5744,12 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && url.pathname === "/api/local/admin/users") {
         const users = db.prepare(`
           SELECT admin_users.id, admin_users.username, admin_users.role, admin_users.active, admin_users.created_at, admin_users.last_login_at,
+                 admin_users.discord_id, admin_users.discord_username, admin_users.discord_global_name, admin_users.discord_avatar,
                  COUNT(admin_sessions.token_hash) AS sessions
           FROM admin_users LEFT JOIN admin_sessions ON admin_sessions.user_id = admin_users.id AND admin_sessions.expires_at > ?
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
-        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)] })), roles: ADMIN_ROLE_LABELS });
+        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: userAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
@@ -5702,22 +5767,37 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/users") {
         const body = await readJson(req);
-        const username = String(body.username ?? "").trim();
+        const discordId = String(body.discordId ?? "").trim();
+        const displayName = String(body.displayName ?? body.username ?? "").trim();
+        const username = displayName || `Discord ${discordId}`;
         const password = String(body.password ?? "");
         const role = normalizeAdminRole(body.role ?? "admin");
         if (role === "owner" && normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only owners can create owner administrators" });
-        if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-        if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+        if (legacyAdminPasswordAuth && !discordId) {
+          if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
+          if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+          try {
+            const result = statements.insertAdmin.run(username, await hashPassword(password), role, new Date().toISOString());
+            audit(user, "user.create", { id: result.lastInsertRowid, username, role });
+            return send(res, 201, { ok: true });
+          } catch (error) {
+            if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That username is already in use" });
+            throw error;
+          }
+        }
+        if (!validDiscordId(discordId)) return send(res, 400, { error: "Enter a valid Discord user ID" });
+        if (username.length < 2 || username.length > 80) return send(res, 400, { error: "Display name must be between 2 and 80 characters" });
         try {
-          const result = statements.insertAdmin.run(username, await hashPassword(password), role, new Date().toISOString());
-          audit(user, "user.create", { id: result.lastInsertRowid, username, role });
+          const result = statements.insertDiscordAdmin.run(username, "discord-oauth-admin", role, new Date().toISOString(), discordId, "", username, "");
+          audit(user, "user.create", { id: result.lastInsertRowid, username, discordId, role });
           return send(res, 201, { ok: true });
         } catch (error) {
-          if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That username is already in use" });
+          if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That Discord account is already an administrator" });
           throw error;
         }
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/user/password") {
+        if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Administrator passwords have been replaced by Discord sign-in" });
         const body = await readJson(req);
         const userId = Number(body.userId);
         const password = String(body.password ?? "");

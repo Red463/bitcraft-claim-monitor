@@ -176,6 +176,8 @@ test("server collection paginates listings and protects production mutations", a
     env: {
       ...process.env,
       NODE_ENV: "production",
+      BITCRAFT_TEST: "true",
+      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "false",
       ADMIN_SETUP_KEY: "test-setup-key",
       APP_HOST: "127.0.0.1",

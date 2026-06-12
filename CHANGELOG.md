@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.3-beta.1] - 2026-06-12
+
+### Added
+
+- Added Discord-backed administrator access with `red463` seeded as the default owner admin by Discord ID.
+
+### Changed
+
+- Replaced the Admin sign-in and administrator management UI with Discord account approval instead of separate app passwords.
+
 ## [1.0.2-beta.1] - 2026-06-12
 
 ### Changed
