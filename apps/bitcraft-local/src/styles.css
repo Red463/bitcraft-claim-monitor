@@ -590,6 +590,7 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 }
 .api-status-copy small { font-size: 12px; color: #8792a3; }
 .api-status-details {
+  grid-column: 1 / -1;
   min-width: 180px;
   color: var(--muted);
   font-size: 12px;
@@ -600,11 +601,60 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
   list-style-position: inside;
   text-align: right;
 }
+.api-status-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.api-status-diagnostic-grid .info-row {
+  min-height: 58px;
+  border: 1px solid rgba(255,179,71,.14);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  padding: 8px;
+}
+.api-status-diagnostic-grid .info-row span {
+  color: #8f99aa;
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.api-status-diagnostic-grid .info-row strong {
+  color: #f7f8fb;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .api-status-details ul {
   margin: 8px 0 0;
   padding-left: 18px;
 }
 .api-status-details li + li { margin-top: 5px; }
+.api-status-log {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.api-status-log span {
+  color: #ffcf7a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.api-status-log code {
+  display: block;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid rgba(255,179,71,.16);
+  border-radius: 7px;
+  background: #050608;
+  color: #d7e4ff;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
 .api-error-state {
   margin: 26px;
   padding: 24px;
@@ -3989,7 +4039,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .activity-filter-grid {
   display: grid;
-  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 1.1fr) minmax(190px, 260px) minmax(0, 1.6fr);
   gap: 12px;
   align-items: end;
   padding-top: 8px;
@@ -4002,7 +4052,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.activity-filter-grid .select-control {
+.activity-filter-grid .select-control,
+.activity-search-field input {
   width: 100%;
   min-width: 0;
   height: 38px;
@@ -4011,6 +4062,12 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   background: #080d14;
   color: #f4f7fb;
   padding: 0 12px;
+  outline: 0;
+}
+.activity-search-field input:focus,
+.activity-filter-grid .select-control:focus {
+  border-color: rgba(240,198,79,.46);
+  box-shadow: 0 0 0 3px rgba(240,198,79,.1);
 }
 .activity-filters {
   display: flex;
@@ -4430,6 +4487,17 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   font-size: 14px;
   line-height: 1.25;
 }
+.activity-search-loading {
+  min-height: 42px;
+  border: 1px solid rgba(86,213,255,.2);
+  border-radius: 7px;
+  background: rgba(86,213,255,.055);
+  color: #d8ecff;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
 .scheduled-job-list { display: grid; gap: 10px; margin-top: 12px; }
 .scheduled-job-row {
   display: grid;
@@ -4440,12 +4508,66 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   border: 1px solid rgba(108,123,145,.24);
   border-radius: 7px;
   background: linear-gradient(180deg, rgba(11,16,22,.96), rgba(6,9,14,.98));
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease;
+}
+.scheduled-job-row:hover,
+.scheduled-job-row.is-expanded {
+  border-color: color-mix(in srgb, var(--gold) 34%, rgba(108,123,145,.24));
 }
 .scheduled-job-row strong { display: block; color: var(--text); font-size: 14px; }
 .scheduled-job-row span,
 .scheduled-job-row small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
 .scheduled-job-row .error { color: var(--danger); }
 .scheduled-job-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.scheduled-job-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(108,123,145,.2);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  cursor: default;
+}
+.scheduled-job-editor .inline-field {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+}
+.member-tracking-card {
+  align-content: start;
+}
+.member-tracking-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 3px;
+}
+.member-tracking-row {
+  min-height: 52px;
+}
+.member-tracking-row > span {
+  display: grid;
+  gap: 3px;
+}
+.member-tracking-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.member-tracking-row.is-hidden {
+  border-color: rgba(239,100,97,.28);
+  background: rgba(239,100,97,.055);
+}
+.scheduled-job-editor-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .compact-toggle { min-height: 36px; padding: 7px 9px; min-width: 132px; }
 .admin-page .compact-toggle input[type="checkbox"] { width: 34px; height: 20px; appearance: none; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.08); position: relative; cursor: pointer; }
 .admin-page .compact-toggle input[type="checkbox"]::before { content: ""; position: absolute; width: 14px; height: 14px; top: 2px; left: 2px; border-radius: 50%; background: var(--muted); transition: transform .16s ease, background .16s ease; }

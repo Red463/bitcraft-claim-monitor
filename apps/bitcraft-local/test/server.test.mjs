@@ -312,6 +312,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(auth.user.role, "owner");
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
+  assert.deepEqual(initialConfig.excludedMemberIds, []);
   const adminJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
@@ -323,11 +324,22 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ key: "recipe_catalog_refresh", enabled: false }),
   }).then((response) => response.json());
   assert.equal(disabledJobs.jobs.find((job) => job.key === "recipe_catalog_refresh").enabled, false);
+  const scheduledJobsUpdate = await fetch(`${origin}/api/local/admin/jobs`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ key: "recipe_catalog_refresh", enabled: true, scheduleConfig: { frequency: "weekly", dayOfWeek: 2, time: "03:30" } }),
+  }).then((response) => response.json());
+  const recipeJob = scheduledJobsUpdate.jobs.find((job) => job.key === "recipe_catalog_refresh");
+  assert.equal(recipeJob.enabled, true);
+  assert.deepEqual(recipeJob.scheduleConfig, { frequency: "weekly", dayOfWeek: 2, time: "03:30", dayOfMonth: 1 });
+  assert.equal(recipeJob.scheduleLabel, "Weekly on Tuesday at 03:30");
+  assert.match(recipeJob.nextRunAt, /^\d{4}-\d{2}-\d{2}T/);
   const productionNotificationSettings = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({
       ...initialConfig,
+      excludedMemberIds: ["1369094286756659093", "not-a-player-id"],
       discord: {
         ...initialConfig.discord,
         productionMinXp: 0,
@@ -336,6 +348,8 @@ test("server collection paginates listings and protects production mutations", a
     }),
   });
   assert.equal(productionNotificationSettings.status, 200);
+  const updatedConfig = await productionNotificationSettings.json();
+  assert.deepEqual(updatedConfig.excludedMemberIds, ["1369094286756659093"]);
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
   assert.equal(authStatus.discordLoginEnabled, true);
   assert.equal(authStatus.user, null);
@@ -446,6 +460,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
+  const activitySearch = await fetch(`${origin}/api/local/activity?claimId=${claimId}&q=${encodeURIComponent("Bronze Ingot")}&limit=5`).then((response) => response.json());
+  assert.equal(activitySearch.searchedAllHistory, true);
+  assert.equal(activitySearch.total >= 1, true);
+  assert.equal(activitySearch.events.some((event) => event.summary.includes("Bronze Ingot")), true);
   const baselineSnapshots = await fetch(`${origin}/api/local/snapshots?claimId=${claimId}&limit=10`).then((response) => response.json());
   assert.equal(baselineSnapshots.snapshots.length, 1);
   assert.equal(baselineSnapshots.snapshots[0].treasury, 300);

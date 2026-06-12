@@ -375,6 +375,7 @@ const defaultTheme = {
 const now = new Date().toISOString();
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("claim_id", defaultClaimId, now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("bitcraft_sync_url", defaultSyncUrl, now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("excluded_member_ids_json", JSON.stringify([]), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("refresh_seconds", "30", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "dashboard", now);
@@ -509,13 +510,13 @@ const statements = {
     ON CONFLICT(job_key) DO UPDATE SET
       label = excluded.label,
       description = excluded.description,
-      schedule = excluded.schedule,
       updated_at = excluded.updated_at
   `),
   listScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs ORDER BY job_key"),
   getScheduledJob: db.prepare("SELECT * FROM scheduled_jobs WHERE job_key = ?"),
   dueScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs WHERE enabled = 1 AND running = 0 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC"),
   setScheduledJobEnabled: db.prepare("UPDATE scheduled_jobs SET enabled = ?, updated_at = ? WHERE job_key = ?"),
+  updateScheduledJobSettings: db.prepare("UPDATE scheduled_jobs SET schedule = ?, enabled = ?, next_run_at = ?, updated_at = ? WHERE job_key = ?"),
   markScheduledJobRunning: db.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, last_error = NULL, updated_at = ? WHERE job_key = ?"),
   markScheduledJobSuccess: db.prepare("UPDATE scheduled_jobs SET running = 0, last_success_at = ?, last_error = NULL, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
@@ -662,6 +663,72 @@ function nextDailyMidnightIso(from = new Date()) {
   const next = new Date(from);
   next.setHours(24, 0, 0, 0);
   return next.toISOString();
+}
+
+function parseScheduledJobSchedule(schedule) {
+  const raw = String(schedule ?? "").trim();
+  if (!raw || raw === "daily_midnight") return { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
+  const parts = raw.split("@");
+  const frequency = ["daily", "weekly", "monthly"].includes(parts[0]) ? parts[0] : "daily";
+  if (frequency === "weekly") {
+    return { frequency, dayOfWeek: Math.min(6, Math.max(0, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfMonth: 1 };
+  }
+  if (frequency === "monthly") {
+    return { frequency, dayOfMonth: Math.min(28, Math.max(1, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfWeek: 1 };
+  }
+  return { frequency: "daily", time: validScheduleTime(parts[1]) ? parts[1] : "00:00", dayOfWeek: 1, dayOfMonth: 1 };
+}
+
+function validScheduleTime(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? ""));
+}
+
+function serializeScheduledJobSchedule(input = {}) {
+  const frequency = ["daily", "weekly", "monthly"].includes(String(input.frequency)) ? String(input.frequency) : "daily";
+  const time = validScheduleTime(input.time) ? String(input.time) : "00:00";
+  if (frequency === "weekly") {
+    const dayOfWeek = Math.min(6, Math.max(0, Math.floor(toNumber(input.dayOfWeek) || 1)));
+    return `weekly@${dayOfWeek}@${time}`;
+  }
+  if (frequency === "monthly") {
+    const dayOfMonth = Math.min(28, Math.max(1, Math.floor(toNumber(input.dayOfMonth) || 1)));
+    return `monthly@${dayOfMonth}@${time}`;
+  }
+  return `daily@${time}`;
+}
+
+function nextScheduledRunIso(schedule, from = new Date()) {
+  const config = parseScheduledJobSchedule(schedule);
+  const [hours, minutes] = config.time.split(":").map((part) => Number(part));
+  const next = new Date(from);
+  next.setSeconds(0, 0);
+  if (config.frequency === "weekly") {
+    const dayDelta = (config.dayOfWeek - next.getDay() + 7) % 7;
+    next.setDate(next.getDate() + dayDelta);
+    next.setHours(hours, minutes, 0, 0);
+    if (next <= from) next.setDate(next.getDate() + 7);
+    return next.toISOString();
+  }
+  if (config.frequency === "monthly") {
+    next.setDate(config.dayOfMonth);
+    next.setHours(hours, minutes, 0, 0);
+    if (next <= from) {
+      next.setMonth(next.getMonth() + 1, config.dayOfMonth);
+      next.setHours(hours, minutes, 0, 0);
+    }
+    return next.toISOString();
+  }
+  next.setHours(hours, minutes, 0, 0);
+  if (next <= from) next.setDate(next.getDate() + 1);
+  return next.toISOString();
+}
+
+function scheduledJobScheduleLabel(schedule) {
+  const config = parseScheduledJobSchedule(schedule);
+  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  if (config.frequency === "weekly") return `Weekly on ${weekdays[config.dayOfWeek]} at ${config.time}`;
+  if (config.frequency === "monthly") return `Monthly on day ${config.dayOfMonth} at ${config.time}`;
+  return `Daily at ${config.time}`;
 }
 
 function recipeCatalogKey(kind, id) {
@@ -813,10 +880,10 @@ const scheduledJobRegistry = {
 function seedScheduledJobs() {
   const seededAt = new Date().toISOString();
   for (const [key, job] of Object.entries(scheduledJobRegistry)) {
-    statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextDailyMidnightIso(), seededAt);
+    statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextScheduledRunIso(job.schedule), seededAt);
     const row = statements.getScheduledJob.get(key);
     if (!row?.next_run_at) {
-      db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextDailyMidnightIso(), seededAt, key);
+      db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextScheduledRunIso(row?.schedule ?? job.schedule), seededAt, key);
     }
   }
 }
@@ -827,6 +894,8 @@ function scheduledJobRow(row) {
     label: row.label,
     description: row.description ?? "",
     schedule: row.schedule,
+    scheduleLabel: scheduledJobScheduleLabel(row.schedule),
+    scheduleConfig: parseScheduledJobSchedule(row.schedule),
     enabled: Boolean(row.enabled),
     running: Boolean(row.running),
     lastRunAt: row.last_run_at,
@@ -871,12 +940,12 @@ async function runScheduledJob(jobKey, { manual = false } = {}) {
   try {
     const metadata = await registryEntry.run({ manual });
     const finishedAt = new Date().toISOString();
-    statements.markScheduledJobSuccess.run(finishedAt, nextDailyMidnightIso(new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+    statements.markScheduledJobSuccess.run(finishedAt, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
     return { ok: true, key: jobKey, metadata, nextRunAt: statements.getScheduledJob.get(jobKey)?.next_run_at };
   } catch (error) {
     const finishedAt = new Date().toISOString();
     const message = error instanceof Error ? error.message : String(error);
-    statements.markScheduledJobFailure.run(message, nextDailyMidnightIso(new Date()), JSON.stringify({ manual }), finishedAt, jobKey);
+    statements.markScheduledJobFailure.run(message, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ manual }), finishedAt, jobKey);
     throw error;
   }
 }
@@ -1446,10 +1515,12 @@ function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
+  const excludedMemberIds = safeJson(statements.getSetting.get("excluded_member_ids_json")?.value, []);
   const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "dashboard";
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
+    excludedMemberIds: Array.isArray(excludedMemberIds) ? [...new Set(excludedMemberIds.map((value) => String(value ?? "").trim()).filter(Boolean))] : [],
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
     defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
@@ -4644,6 +4715,36 @@ function activityHistory(claimId, limit = 500) {
   return { events, total };
 }
 
+function escapeSqlLike(value) {
+  return String(value ?? "").replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function activitySearch(claimId, query, limit = 500) {
+  const search = String(query ?? "").trim();
+  const eventLimit = Math.min(Math.max(Number(limit) || 500, 1), 1000);
+  if (!search) return activityHistory(claimId, eventLimit);
+  const pattern = `%${escapeSqlLike(search)}%`;
+  const where = `
+    claim_id = ?
+    AND (
+      summary LIKE ? ESCAPE '\\'
+      OR event_type LIKE ? ESCAPE '\\'
+      OR metadata_json LIKE ? ESCAPE '\\'
+      OR occurred_at LIKE ? ESCAPE '\\'
+    )
+  `;
+  const args = [claimId, pattern, pattern, pattern, pattern];
+  const events = db.prepare(`
+    SELECT *
+    FROM activity_events
+    WHERE ${where}
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT ?
+  `).all(...args, eventLimit);
+  const total = toNumber(db.prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE ${where}`).get(...args)?.count);
+  return { events, total, query: search, searchedAllHistory: true };
+}
+
 function contributionLeaderboard(claimId) {
   const rows = db.prepare(`
     SELECT *
@@ -5834,8 +5935,18 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.json);
         const key = String(body.key ?? "").trim();
         if (!scheduledJobRegistry[key]) return send(res, 404, { error: "Unknown scheduled job" });
-        statements.setScheduledJobEnabled.run(body.enabled === false ? 0 : 1, new Date().toISOString(), key);
-        audit(user, "scheduled_job.toggle", { key, enabled: body.enabled !== false });
+        const row = statements.getScheduledJob.get(key);
+        if (!row) return send(res, 404, { error: "Scheduled job is not configured" });
+        const enabled = body.enabled === false ? 0 : 1;
+        if (body.scheduleConfig && typeof body.scheduleConfig === "object") {
+          const schedule = serializeScheduledJobSchedule(body.scheduleConfig);
+          const updatedAt = new Date().toISOString();
+          statements.updateScheduledJobSettings.run(schedule, enabled, nextScheduledRunIso(schedule), updatedAt, key);
+          audit(user, "scheduled_job.update", { key, enabled: Boolean(enabled), schedule });
+        } else {
+          statements.setScheduledJobEnabled.run(enabled, new Date().toISOString(), key);
+          audit(user, "scheduled_job.toggle", { key, enabled: Boolean(enabled) });
+        }
         return send(res, 200, scheduledJobsStatus());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/jobs/run") {
@@ -6048,6 +6159,9 @@ const server = createServer(async (req, res) => {
         if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
         const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
         if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
+        const excludedMemberIds = Array.isArray(body.excludedMemberIds)
+          ? [...new Set(body.excludedMemberIds.map((value) => String(value ?? "").trim()).filter((value) => /^\d{8,}$/.test(value)))]
+          : [];
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
         if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
@@ -6071,13 +6185,14 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
+        statements.upsertSetting.run("excluded_member_ids_json", JSON.stringify(excludedMemberIds), updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
         statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         activeRegionsCache = null;
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
@@ -6313,7 +6428,10 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/activity") {
       const claimId = url.searchParams.get("claimId") ?? "";
-      return send(res, 200, activityHistory(claimId, Number(url.searchParams.get("limit") ?? 500)));
+      const query = url.searchParams.get("q") ?? "";
+      return send(res, 200, query.trim()
+        ? activitySearch(claimId, query, Number(url.searchParams.get("limit") ?? 500))
+        : activityHistory(claimId, Number(url.searchParams.get("limit") ?? 500)));
     }
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });

@@ -208,6 +208,7 @@ type DiscordSettings = {
 type AppSettings = {
   claimId: string;
   syncUrl: string;
+  excludedMemberIds: string[];
   theme: typeof DEFAULT_THEME;
   refreshSeconds: number;
   defaultPage: ActivePanel;
@@ -576,6 +577,7 @@ const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
   syncUrl: DEFAULT_SYNC_URL,
+  excludedMemberIds: [],
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
   defaultPage: "dashboard",
@@ -619,6 +621,9 @@ const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, m
 function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
   const savedColourRoles = Array.isArray((config as AnyRecord)?.discord?.colourRoles) ? (config as AnyRecord).discord.colourRoles : null;
   const savedRolePanels = Array.isArray((config as AnyRecord)?.discord?.rolePanels) ? (config as AnyRecord).discord.rolePanels : null;
+  const excludedMemberIds = Array.isArray((config as AnyRecord)?.excludedMemberIds)
+    ? unique((config as AnyRecord).excludedMemberIds.map((value: unknown) => String(value ?? "").trim()).filter(Boolean))
+    : [];
   const configuredDefaultPage = String((config as AnyRecord)?.defaultPage ?? DEFAULT_SETTINGS.defaultPage);
   const defaultPage = configuredDefaultPage === "buildings" || !NAV.some(([id]) => id === configuredDefaultPage && id !== "admin")
     ? DEFAULT_SETTINGS.defaultPage
@@ -627,6 +632,7 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
     defaultPage,
+    excludedMemberIds,
     additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
     theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
     toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
@@ -850,6 +856,51 @@ function safeDisplayJson(value: unknown): AnyRecord {
 
 function listingTrackingKey(listing: AnyRecord): string {
   return String(listing.entityId ?? listing.id ?? listing.marketListingId ?? listing.listingId ?? "");
+}
+
+function memberTrackingId(member: AnyRecord | null | undefined): string {
+  return String(
+    member?.playerEntityId
+      ?? member?.player_entity_id
+      ?? member?.playerId
+      ?? member?.player_id
+      ?? member?.entityId
+      ?? member?.entity_id
+      ?? member?.id
+      ?? "",
+  ).trim();
+}
+
+function memberDisplayName(member: AnyRecord | null | undefined): string {
+  return String((member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? memberTrackingId(member)) || "Unknown member");
+}
+
+function memberTrackingKeys(member: AnyRecord | null | undefined): string[] {
+  const id = memberTrackingId(member);
+  const name = memberDisplayName(member).trim();
+  return unique([id, name].filter(Boolean).map((value) => value.toLowerCase()));
+}
+
+function filterTrackedMemberRows<T extends AnyRecord>(rows: T[], excludedKeys: Set<string>): T[] {
+  if (!excludedKeys.size) return rows;
+  return rows.filter((row) => !memberTrackingKeys(row).some((key) => excludedKeys.has(key)));
+}
+
+function applyMemberTrackingFilter<T extends ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }>(data: T, excludedMemberIds: string[]): T {
+  const excludedKeys = new Set(excludedMemberIds.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean));
+  for (const member of data.members) {
+    const id = memberTrackingId(member);
+    if (id && excludedKeys.has(id.toLowerCase())) {
+      for (const key of memberTrackingKeys(member)) excludedKeys.add(key);
+    }
+  }
+  if (!excludedKeys.size) return data;
+  return {
+    ...data,
+    members: filterTrackedMemberRows(data.members, excludedKeys),
+    citizens: filterTrackedMemberRows(data.citizens, excludedKeys),
+    players: filterTrackedMemberRows(data.players, excludedKeys),
+  };
 }
 
 function liveDaysSince(value: unknown): string {
@@ -2534,7 +2585,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
   );
 }
 
-function Leaderboard({ claimId, refreshToken }: { claimId: string; refreshToken: number }) {
+function Leaderboard({ claimId, refreshToken, excludedMemberIds = [] }: { claimId: string; refreshToken: number; excludedMemberIds?: string[] }) {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   const [professionFilter, setProfessionFilter] = React.useState("All");
   React.useEffect(() => {
@@ -2549,10 +2600,46 @@ function Leaderboard({ claimId, refreshToken }: { claimId: string; refreshToken:
     return () => controller.abort();
   }, [claimId, refreshToken]);
   const leaderboard = state.data ?? {};
-  const summary = leaderboard.summary ?? {};
-  const professions: AnyRecord[] = leaderboard.professions ?? [];
-  const contributors: AnyRecord[] = leaderboard.contributors ?? [];
-  const recent: AnyRecord[] = leaderboard.recent ?? [];
+  const excludedLeaderboardKeys = React.useMemo(() => new Set(excludedMemberIds.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean)), [excludedMemberIds]);
+  const contributors: AnyRecord[] = React.useMemo(() => {
+    const rows = leaderboard.contributors ?? [];
+    if (!excludedLeaderboardKeys.size) return rows;
+    return rows.filter((entry: AnyRecord) => !memberTrackingKeys({ playerEntityId: entry.contributorId, userName: entry.name }).some((key) => excludedLeaderboardKeys.has(key)));
+  }, [excludedLeaderboardKeys, leaderboard.contributors]);
+  const recent: AnyRecord[] = React.useMemo(() => {
+    const rows = leaderboard.recent ?? [];
+    if (!excludedLeaderboardKeys.size) return rows;
+    return rows.filter((entry: AnyRecord) => !memberTrackingKeys({ playerEntityId: entry.contributorId, userName: entry.contributorName }).some((key) => excludedLeaderboardKeys.has(key)));
+  }, [excludedLeaderboardKeys, leaderboard.recent]);
+  const professions: AnyRecord[] = React.useMemo(() => {
+    const byProfession = new Map<string, AnyRecord>();
+    for (const contributor of contributors) {
+      for (const row of contributor.professions ?? []) {
+        const profession = String(row.profession ?? "Unknown");
+        const current = byProfession.get(profession) ?? { profession, totalProgress: 0, totalXp: 0, craftCount: 0, contributorCount: 0, topContributor: "", topContributorProgress: 0 };
+        const progress = toNumber(row.progress);
+        current.totalProgress += progress;
+        current.totalXp += toNumber(row.xp);
+        current.craftCount += toNumber(row.crafts);
+        current.contributorCount += 1;
+        if (progress > current.topContributorProgress) {
+          current.topContributor = contributor.name;
+          current.topContributorProgress = progress;
+        }
+        byProfession.set(profession, current);
+      }
+    }
+    return Array.from(byProfession.values()).sort((a, b) => b.totalProgress - a.totalProgress);
+  }, [contributors]);
+  const summary = React.useMemo(() => ({
+    ...(leaderboard.summary ?? {}),
+    contributorCount: contributors.length,
+    professionCount: professions.length,
+    totalProgress: contributors.reduce((sum, row) => sum + toNumber(row.totalProgress), 0),
+    totalXp: contributors.reduce((sum, row) => sum + toNumber(row.totalXp), 0),
+    recordedCrafts: contributors.reduce((sum, row) => sum + toNumber(row.craftCount), 0),
+    lastContributedAt: recent[0]?.lastContributedAt ?? null,
+  }), [contributors, leaderboard.summary, professions.length, recent]);
   const filteredContributors = professionFilter === "All"
     ? contributors
     : contributors.filter((entry) => entry.professions?.some?.((profession: AnyRecord) => profession.profession === professionFilter));
@@ -2962,6 +3049,8 @@ function activityStyle(item: AnyRecord): { label: string; tone: string; icon: Re
 function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
+  const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
+  const [searchState, setSearchState] = React.useState<{ loading: boolean; error: string | null; events: AnyRecord[]; total: number; query: string }>({ loading: false, error: null, events: [], total: 0, query: "" });
   const [compact, setCompact] = usePersistedState("activity.compact", true);
   const [members, setMembers] = React.useState<AnyRecord[]>([]);
   React.useEffect(() => {
@@ -2972,7 +3061,31 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
       .catch(() => undefined);
     return () => controller.abort();
   }, [claimId]);
-  const combined = [...activity].sort((a, b) => timestampMs(b.occurred_at ?? b.occurredAt) - timestampMs(a.occurred_at ?? a.occurredAt) || toNumber(b.id) - toNumber(a.id));
+  const trimmedSearch = searchQuery.trim();
+  React.useEffect(() => {
+    if (!trimmedSearch) {
+      setSearchState({ loading: false, error: null, events: [], total: 0, query: "" });
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearchState((current) => ({ ...current, loading: true, error: null, query: trimmedSearch }));
+      fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)))
+        .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
+        .catch((searchError) => {
+          if (!controller.signal.aborted) setSearchState({ loading: false, error: searchError instanceof Error ? searchError.message : String(searchError), events: [], total: 0, query: trimmedSearch });
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [claimId, trimmedSearch]);
+  const searching = Boolean(trimmedSearch);
+  const sourceActivity = searching ? searchState.events : activity;
+  const sourceTotal = searching ? searchState.total : activityTotal;
+  const combined = [...sourceActivity].sort((a, b) => timestampMs(b.occurred_at ?? b.occurredAt) - timestampMs(a.occurred_at ?? a.occurredAt) || toNumber(b.id) - toNumber(a.id));
   const memberOptions = unique(members.map((member) => String(member.userName ?? member.username ?? "")).filter(Boolean)).sort((a, b) => a.localeCompare(b));
   React.useEffect(() => {
     if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
@@ -2994,7 +3107,7 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         </div>
         <div className="dashboard-top-meta" aria-label="Activity status">
           <div className="dashboard-meta-cluster">
-            <span><Activity size={15} /> {formatNumber(memberActivity.length)} recent events</span>
+            <span><Activity size={15} /> {formatNumber(memberActivity.length)} {searching ? "matching" : "recent"} events</span>
             <span>{latestEvent ? `Last event ${timeAgo(latestEvent)}` : "Awaiting activity"}</span>
           </div>
           <div className="dashboard-meta-cluster">
@@ -3004,8 +3117,9 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         </div>
       </header>
       {error ? <div className="error">Local history unavailable: {error}</div> : null}
+      {searchState.error ? <div className="error">Activity search failed: {searchState.error}</div> : null}
       <div className="activity-overview">
-        <MiniStat icon={<Activity />} label={memberFilter === "All" ? "Total History" : "Member Events"} value={formatNumber(memberFilter === "All" ? activityTotal : memberActivity.length)} title={memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`} />
+        <MiniStat icon={<Activity />} label={searching ? "Search Matches" : memberFilter === "All" ? "Total History" : "Member Events"} value={formatNumber(memberFilter === "All" ? sourceTotal : memberActivity.length)} title={searching ? `${formatNumber(combined.length)} matching rows loaded from full database search` : memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`} />
         <MiniStat icon={<Box />} label="Storage Moves" value={formatNumber(storageMoves)} title="Settlement containers only" />
         <MiniStat icon={<Building2 />} label={memberFilter === "All" ? "System Changes" : "Other Changes"} value={formatNumber(settlementChanges)} title={memberFilter === "All" ? "Within loaded history" : "Not attributed to members"} />
         <MiniStat icon={<RefreshCw />} label="Latest Event" value={latestEvent ? timeAgo(latestEvent) : "-"} title={latestEvent ? dateLabel(latestEvent) : "Awaiting activity"} />
@@ -3016,6 +3130,14 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
           <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>
         </div>
         <div className="activity-filter-grid">
+          <label className="field activity-search-field">
+            <span>Search full history</span>
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search player, item, chest, event, date..."
+            />
+          </label>
           <label className="field">
             <span>Member</span>
             <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("activity_member_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
@@ -3034,9 +3156,11 @@ function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: 
         </div>
         <div className="activity-options">
           <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Combine repeated treasury changes</label>
-          <span>{memberFilter !== "All" ? "Member filtering only includes attributed storage and market events." : "Activity is limited to monitored settlement history."}</span>
+          <span>{searching ? `Searching all stored activity for "${searchState.query || trimmedSearch}". Showing up to 500 newest matches.` : memberFilter !== "All" ? "Member filtering only includes attributed storage and market events." : "Activity is limited to monitored settlement history."}</span>
+          {searching ? <button className="toolbar-button" onClick={() => setSearchQuery("")}>Clear search</button> : null}
         </div>
       </section>
+      {searchState.loading ? <div className="loading activity-search-loading"><RefreshCw size={15} /> Searching full activity history...</div> : null}
       <div className="activity-timeline">
         {filtered.length ? filtered.map((item) => {
           const display = activityStyle(item);
@@ -3833,9 +3957,22 @@ function AppSkeleton() {
   return <div className="panel app-skeleton"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
 }
 
-function ApiStatusBanner({ warnings, lastUpdated }: { warnings: string[]; lastUpdated: Date | null }) {
+type ApiStatusDiagnostics = {
+  appVersion: string;
+  page: string;
+  claimId: string;
+  url: string;
+  loading: boolean;
+  lastSuccessfulRefresh: string | null;
+  warningCount: number;
+  dataCounts: Record<string, number>;
+  warnings: string[];
+};
+
+function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnings: string[]; lastUpdated: Date | null; diagnostics: ApiStatusDiagnostics }) {
   const uniqueWarnings = unique(warnings).slice(0, 6);
   if (!uniqueWarnings.length) return null;
+  const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: uniqueWarnings }, null, 2);
   return (
     <section className="api-status-banner" role="status" aria-live="polite">
       <span className="api-status-icon"><AlertTriangle size={18} /></span>
@@ -3846,9 +3983,21 @@ function ApiStatusBanner({ warnings, lastUpdated }: { warnings: string[]; lastUp
       </div>
       <details className="api-status-details">
         <summary>Details</summary>
+        <div className="api-status-diagnostic-grid">
+          <Info label="Page" value={diagnostics.page} />
+          <Info label="Settlement ID" value={diagnostics.claimId} />
+          <Info label="Warnings" value={formatNumber(uniqueWarnings.length)} />
+          <Info label="Refresh state" value={diagnostics.loading ? "Refreshing" : "Idle"} />
+          <Info label="Members loaded" value={formatNumber(diagnostics.dataCounts.members)} />
+          <Info label="Crafts loaded" value={formatNumber(diagnostics.dataCounts.crafts)} />
+        </div>
         <ul>
           {uniqueWarnings.map((warning) => <li key={warning}>{warning}</li>)}
         </ul>
+        <div className="api-status-log">
+          <span>Copyable diagnostic context</span>
+          <code>{diagnosticLog}</code>
+        </div>
       </details>
     </section>
   );
@@ -3881,27 +4030,31 @@ function bytesLabel(value: unknown) {
 
 function AdminPanel({
   settings,
+  members = [],
   onSettingsSaved,
   botOnly = false,
   onAuthChanged,
 }: {
   settings: AppSettings;
+  members?: AnyRecord[];
   onSettingsSaved: (settings: AppSettings) => void;
   botOnly?: boolean;
   onAuthChanged?: (auth: AnyRecord) => void;
 }) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
-  const [tab, setTab] = React.useState<AdminTab>(botOnly ? "discord" : "status");
+  const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : "status");
   const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [scheduledJobs, setScheduledJobs] = React.useState<AnyRecord | null>(null);
+  const [expandedScheduledJobKey, setExpandedScheduledJobKey] = React.useState<string | null>(null);
+  const [scheduledJobDrafts, setScheduledJobDrafts] = React.useState<Record<string, AnyRecord>>({});
   const [diagnostics, setDiagnostics] = React.useState<AnyRecord[]>([]);
   const [tables, setTables] = React.useState<AnyRecord[]>([]);
-  const [selectedTable, setSelectedTable] = React.useState("");
+  const [selectedTable, setSelectedTable] = usePersistedState("admin.database.selectedTable", "");
   const [tableResult, setTableResult] = React.useState<AnyRecord>({ rows: [], columns: [], total: 0, offset: 0, limit: 50 });
   const [tableSearch, setTableSearch] = React.useState("");
   const [tableOffset, setTableOffset] = React.useState(0);
@@ -3975,6 +4128,15 @@ function AdminPanel({
     setScheduledJobs(await api("/admin/jobs"));
   }
 
+  function scheduledJobConfig(job: AnyRecord) {
+    return scheduledJobDrafts[String(job.key)] ?? job.scheduleConfig ?? { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
+  }
+
+  function updateScheduledJobDraft(job: AnyRecord, patch: AnyRecord) {
+    const key = String(job.key);
+    setScheduledJobDrafts((current) => ({ ...current, [key]: { ...scheduledJobConfig(job), ...patch } }));
+  }
+
   async function refreshTables() {
     const result = await api("/admin/tables");
     setTables(result.tables ?? []);
@@ -4018,6 +4180,7 @@ function AdminPanel({
   }, []);
   React.useEffect(() => setDraft(settings), [settings]);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
+  const adminMemberRows = React.useMemo(() => [...members].sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b))), [members]);
   React.useEffect(() => {
     if (!auth?.authenticated) return;
     run(async () => {
@@ -4058,6 +4221,18 @@ function AdminPanel({
 
   function updateDraft<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function setMemberTracking(member: AnyRecord, tracked: boolean) {
+    const id = memberTrackingId(member);
+    if (!id) return;
+    setDraft((current) => {
+      const currentIds = current.excludedMemberIds ?? [];
+      const nextIds = tracked
+        ? currentIds.filter((value) => String(value) !== id)
+        : unique([...currentIds, id]);
+      return { ...current, excludedMemberIds: nextIds };
+    });
   }
 
   function updateDiscord(value: Partial<DiscordSettings>) {
@@ -4240,7 +4415,17 @@ function AdminPanel({
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs: Array<[AdminTab, string]> = botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]];
+  const tabs = React.useMemo<Array<[AdminTab, string]>>(
+    () => botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]],
+    [botOnly],
+  );
+  React.useEffect(() => {
+    if (botOnly) {
+      if (tab !== "discord") setTab("discord");
+      return;
+    }
+    if (!tabs.some(([key]) => key === tab)) setTab("status");
+  }, [botOnly, setTab, tab, tabs]);
   const discordTestButtons = [
     ["basic", "Basic"],
     ["listing", "Listing"],
@@ -4655,7 +4840,7 @@ function AdminPanel({
             <div className="split-header">
               <div>
                 <h3><Clock size={17} /> Scheduled Jobs</h3>
-                <p className="legend">Background jobs run on the local server. Daily jobs use the server's local midnight.</p>
+                <p className="legend">Background jobs run on the local server. Click a job to edit when and how often it runs.</p>
               </div>
               <button className="toolbar-button" onClick={() => run(refreshScheduledJobs)}><RefreshCw size={15} /> Refresh</button>
             </div>
@@ -4665,43 +4850,123 @@ function AdminPanel({
               <Info label="Server time" value={dateLabel(scheduledJobs?.serverTime)} />
             </div>
             <div className="scheduled-job-list">
-              {(scheduledJobs?.jobs ?? []).map((job: AnyRecord) => (
-                <article className="scheduled-job-row" key={job.key}>
-                  <div>
-                    <strong>{job.label}</strong>
-                    <span>{job.description}</span>
-                    <small>
-                      Last success {dateLabel(job.lastSuccessAt)}
-                      {" | "}
-                      Next run {dateLabel(job.nextRunAt)}
-                    </small>
-                    {job.lastError ? <small className="error">Last error: {job.lastError}</small> : null}
-                  </div>
-                  <div className="scheduled-job-actions">
-                    <span className={`role-option-status ${job.running ? "warn" : job.enabled ? "ok" : ""}`}>{job.running ? "Running" : job.enabled ? "Enabled" : "Disabled"}</span>
-                    <label className="toggle-line compact-toggle">
-                      <span>{job.enabled ? "Enabled" : "Disabled"}</span>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(job.enabled)}
-                        onChange={(event) => run(async () => {
-                          setScheduledJobs(await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: event.target.checked }) }));
-                        }, `Scheduled job ${event.target.checked ? "enabled" : "disabled"}.`)}
-                      />
-                    </label>
-                    <button
-                      className="toolbar-button"
-                      disabled={Boolean(job.running)}
-                      onClick={() => run(async () => {
-                        const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
-                        setScheduledJobs(result);
-                      }, "Scheduled job completed.")}
-                    >
-                      <RefreshCw size={15} /> Run Now
-                    </button>
-                  </div>
-                </article>
-              ))}
+              {(scheduledJobs?.jobs ?? []).map((job: AnyRecord) => {
+                const expanded = expandedScheduledJobKey === job.key;
+                const config = scheduledJobConfig(job);
+                return (
+                  <article
+                    className={`scheduled-job-row ${expanded ? "is-expanded" : ""}`}
+                    key={job.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setExpandedScheduledJobKey((current) => current === job.key ? null : String(job.key))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setExpandedScheduledJobKey((current) => current === job.key ? null : String(job.key));
+                      }
+                    }}
+                  >
+                    <div>
+                      <strong>{job.label}</strong>
+                      <span>{job.description}</span>
+                      <small>
+                        Schedule {job.scheduleLabel ?? job.schedule}
+                        {" | "}
+                        Last success {dateLabel(job.lastSuccessAt)}
+                        {" | "}
+                        Next run {dateLabel(job.nextRunAt)}
+                      </small>
+                      {job.lastError ? <small className="error">Last error: {job.lastError}</small> : null}
+                    </div>
+                    <div className="scheduled-job-actions" onClick={(event) => event.stopPropagation()}>
+                      <span className={`role-option-status ${job.running ? "warn" : job.enabled ? "ok" : ""}`}>{job.running ? "Running" : job.enabled ? "Enabled" : "Disabled"}</span>
+                      <label className="toggle-line compact-toggle">
+                        <span>{job.enabled ? "Enabled" : "Disabled"}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(job.enabled)}
+                          onChange={(event) => run(async () => {
+                            setScheduledJobs(await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: event.target.checked }) }));
+                          }, `Scheduled job ${event.target.checked ? "enabled" : "disabled"}.`)}
+                        />
+                      </label>
+                      <button
+                        className="toolbar-button"
+                        disabled={Boolean(job.running)}
+                        onClick={() => run(async () => {
+                          const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
+                          setScheduledJobs(result);
+                        }, "Scheduled job completed.")}
+                      >
+                        <RefreshCw size={15} /> Run Now
+                      </button>
+                    </div>
+                    {expanded ? (
+                      <div className="scheduled-job-editor" onClick={(event) => event.stopPropagation()}>
+                        <label className="inline-field">
+                          <span>Frequency</span>
+                          <select className="select-control" value={config.frequency ?? "daily"} onChange={(event) => updateScheduledJobDraft(job, { frequency: event.target.value })}>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                          </select>
+                        </label>
+                        {config.frequency === "weekly" ? (
+                          <label className="inline-field">
+                            <span>Day</span>
+                            <select className="select-control" value={String(config.dayOfWeek ?? 1)} onChange={(event) => updateScheduledJobDraft(job, { dayOfWeek: Number(event.target.value) })}>
+                              <option value="0">Sunday</option>
+                              <option value="1">Monday</option>
+                              <option value="2">Tuesday</option>
+                              <option value="3">Wednesday</option>
+                              <option value="4">Thursday</option>
+                              <option value="5">Friday</option>
+                              <option value="6">Saturday</option>
+                            </select>
+                          </label>
+                        ) : null}
+                        {config.frequency === "monthly" ? (
+                          <label className="inline-field">
+                            <span>Day of month</span>
+                            <input className="select-control" type="number" min={1} max={28} value={String(config.dayOfMonth ?? 1)} onChange={(event) => updateScheduledJobDraft(job, { dayOfMonth: Math.min(28, Math.max(1, Math.floor(toNumber(event.target.value) || 1))) })} />
+                          </label>
+                        ) : null}
+                        <label className="inline-field">
+                          <span>Run time</span>
+                          <input className="select-control" type="time" value={String(config.time ?? "00:00")} onChange={(event) => updateScheduledJobDraft(job, { time: event.target.value || "00:00" })} />
+                        </label>
+                        <div className="scheduled-job-editor-actions">
+                          <button
+                            className="toolbar-button"
+                            onClick={() => setScheduledJobDrafts((current) => {
+                              const next = { ...current };
+                              delete next[String(job.key)];
+                              return next;
+                            })}
+                          >
+                            Reset
+                          </button>
+                          <button
+                            className="toolbar-button primary"
+                            onClick={() => run(async () => {
+                              const result = await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: Boolean(job.enabled), scheduleConfig: scheduledJobConfig(job) }) });
+                              setScheduledJobs(result);
+                              setScheduledJobDrafts((current) => {
+                                const next = { ...current };
+                                delete next[String(job.key)];
+                                return next;
+                              });
+                            }, "Scheduled job settings saved.")}
+                          >
+                            <Save size={14} /> Save Schedule
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
               {scheduledJobs && !(scheduledJobs.jobs ?? []).length ? <p className="legend">No scheduled jobs are registered.</p> : null}
               {!scheduledJobs ? <p className="legend">Loading scheduled jobs...</p> : null}
             </div>
@@ -4765,6 +5030,35 @@ function AdminPanel({
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
           <div className="admin-section">
+            <section className="form-card member-tracking-card">
+              <div className="split-header">
+                <div>
+                  <h3><Users size={17} /> Member Tracking</h3>
+                  <p className="legend">Members are visible by default. Disable tracking for players who joined the claim but should be hidden from member-derived pages and filters.</p>
+                </div>
+                <span className="role-option-status">{formatNumber(draft.excludedMemberIds.length)} hidden</span>
+              </div>
+              <div className="member-tracking-list">
+                {adminMemberRows.length ? adminMemberRows.map((member) => {
+                  const id = memberTrackingId(member);
+                  const tracked = id ? !draft.excludedMemberIds.includes(id) : true;
+                  return (
+                    <label className={`toggle-line member-tracking-row ${tracked ? "" : "is-hidden"}`} key={id || memberDisplayName(member)}>
+                      <span>
+                        <strong>{memberDisplayName(member)}</strong>
+                        <small>{id || "No stable player ID returned by BitJita"}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={tracked}
+                        disabled={!id}
+                        onChange={(event) => setMemberTracking(member, event.target.checked)}
+                      />
+                    </label>
+                  );
+                }) : <p className="legend">Member data has not loaded yet. Refresh BitJita data and return here to configure per-player tracking.</p>}
+              </div>
+            </section>
             <section className="form-card">
               <h3><Upload size={17} /> Branding</h3>
               {(["logo", "favicon"] as const).map((type) => {
@@ -5214,10 +5508,11 @@ function DashboardApp() {
   const activityNoticeClaimRef = React.useRef(claimId);
   const craftQueueRef = React.useRef<{ claimId: string; jobs: Map<string, AnyRecord> } | null>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
+  const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
     const normalized = normalizeData(state.data);
-    return { ...normalized, raw: state.data };
-  }, [state.data]);
+    return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
+  }, [state.data, excludedMemberIds]);
   const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
@@ -5487,7 +5782,7 @@ function DashboardApp() {
 
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
-    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} />,
+    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
@@ -5501,7 +5796,7 @@ function DashboardApp() {
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
-    admin: <AdminPanel settings={appSettings} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
   const activePanel = panels[active] ?? panels.dashboard;
   const apiWarnings = React.useMemo(() => {
@@ -5511,6 +5806,25 @@ function DashboardApp() {
       ...partialErrors,
     ];
   }, [data.raw?.partialErrors, state.error]);
+  const apiDiagnostics = React.useMemo<ApiStatusDiagnostics>(() => ({
+    appVersion: APP_VERSION,
+    page: active,
+    claimId,
+    url: window.location.href,
+    loading: state.loading,
+    lastSuccessfulRefresh: lastUpdated?.toISOString() ?? null,
+    warningCount: apiWarnings.length,
+    dataCounts: {
+      members: data.members.length,
+      citizens: data.citizens.length,
+      crafts: data.crafts.length,
+      constructionProjects: Array.isArray(data.construction) ? data.construction.length : toNumber(data.construction?.projects?.length),
+      marketListings: data.market.length,
+      inventories: Array.isArray(data.inventories?.inventories) ? data.inventories.inventories.length : 0,
+      regionClaims: data.region.length,
+    },
+    warnings: apiWarnings,
+  }), [active, apiWarnings, claimId, data.citizens.length, data.construction, data.crafts.length, data.inventories, data.market.length, data.members.length, data.region.length, lastUpdated, state.loading]);
 
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -5576,7 +5890,7 @@ function DashboardApp() {
       <main ref={mainRef}>
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
-            <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} />
+            <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
             <div className="page-view" key={active}>{activePanel}</div>
           </>
         )}

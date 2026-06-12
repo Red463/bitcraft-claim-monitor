@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.8-beta.1] - 2026-06-12
+
+### Added
+
+- Added editable schedules for Admin scheduled jobs, including daily, weekly and monthly run options.
+- Added Admin member tracking controls so specific claim members can be hidden from member-derived app pages while remaining visible for re-enabling in Admin.
+- Added Activity search across the full stored settlement history instead of only the recent loaded event window.
+
+### Changed
+
+- Improved BitJita refresh issue banners with expanded diagnostics, loaded data counts, page context and copyable troubleshooting logs.
+
+### Fixed
+
+- Fixed the Admin database browser returning to the Status tab after refreshes by persisting the selected Admin tab.
+
 ## [1.0.7-beta.1] - 2026-06-12
 
 ### Added
