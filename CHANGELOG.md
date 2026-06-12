@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-06-12
+
+### Changed
+
+- Reworked the floating utility buttons into a compact footer-aware dock with clearer icon contrast and tidier notification badges.
+- Reworked the Construction page into a clearer gather-first view with compact material rows, project filters and a consolidated missing-materials list.
+- Moved Admin out of the main sidebar into the floating utility dock and User Settings to keep normal navigation focused on player-facing pages.
+- Hid Admin shortcuts from the floating dock and User Settings unless an administrator session is active.
+- Removed the listed-time helper notice from Market listings to reduce visual clutter.
+
+### Removed
+
+- Removed inactive pin/watchlist controls from Production, Market pricing and Browser Settings until a visible pinned-items surface is rebuilt.
+
 ## [0.9.27-beta.1] - 2026-06-11
 
 ### Changed

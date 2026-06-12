@@ -351,14 +351,19 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
     linear-gradient(180deg, rgba(11,16,22,.9), rgba(6,9,14,.96));
 }
 .empty-state.compact { min-height: 86px; }
-.floating-actions { position: fixed; right: 20px; bottom: 20px; z-index: var(--z-help); display: grid; gap: 10px; justify-items: end; }
-.floating-actions button { position: relative; width: 43px; height: 43px; border-radius: 999px; border: 1px solid var(--border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 34%, transparent), transparent 38%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 88%, transparent), color-mix(in srgb, var(--card-bottom) 96%, transparent)); color: var(--muted); display: grid; place-items: center; cursor: pointer; box-shadow: 0 14px 30px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.035); backdrop-filter: blur(12px); transition: border-color .16s ease, color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease; }
-.floating-actions button:hover { color: var(--active-color); border-color: var(--hover-border); transform: translateY(-1px); box-shadow: 0 18px 36px rgba(0,0,0,.48), 0 0 0 3px color-mix(in srgb, var(--active-bg) 28%, transparent), inset 0 1px 0 rgba(255,255,255,.05); }
-.floating-actions button:active { transform: translateY(0); }
-.floating-actions button:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 3px; box-shadow: 0 0 0 4px var(--focus-ring), 0 18px 36px rgba(0,0,0,.48); }
-.floating-actions .notification-button b { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 1px 5px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: var(--font-micro); font-weight: 800; line-height: 16px; text-align: center; box-shadow: 0 8px 18px color-mix(in srgb, var(--active-color) 22%, transparent); }
-.floating-actions .floating-help { width: 43px; height: 43px; border-color: var(--border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 34%, transparent), transparent 38%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 88%, transparent), color-mix(in srgb, var(--card-bottom) 96%, transparent)); color: var(--muted); font: 800 19px Rajdhani, sans-serif; }
-.floating-help:hover { color: var(--active-color); border-color: var(--hover-border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 44%, transparent), transparent 40%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 92%, var(--active-bg)), var(--card-bottom)); }
+.floating-actions { position: fixed; right: 18px; bottom: 72px; z-index: var(--z-help); padding: 5px; border: 1px solid rgba(108,123,145,.28); border-radius: 999px; background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--active-bg) 24%, transparent), transparent 46%), linear-gradient(180deg, rgba(10,15,23,.86), rgba(4,7,12,.92)); box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 18px 42px rgba(0,0,0,.44); backdrop-filter: blur(14px); display: grid; gap: 4px; justify-items: center; }
+.floating-actions button,
+.floating-actions a { position: relative; width: 39px; height: 39px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: #aeb8c7; display: grid; place-items: center; cursor: pointer; box-shadow: none; text-decoration: none; transition: border-color .16s ease, color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease; }
+.floating-actions button:hover,
+.floating-actions a:hover,
+.floating-actions a.active { color: var(--active-color); border-color: var(--hover-border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 38%, transparent), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 92%, transparent), color-mix(in srgb, var(--card-bottom) 98%, transparent)); transform: translateY(-1px); box-shadow: 0 10px 22px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.05); }
+.floating-actions button:active,
+.floating-actions a:active { transform: translateY(0); }
+.floating-actions button:focus-visible,
+.floating-actions a:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 3px; box-shadow: 0 0 0 4px var(--focus-ring), 0 10px 22px rgba(0,0,0,.36); }
+.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 900; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
+.floating-actions .floating-help { width: 39px; height: 39px; border-color: transparent; background: transparent; color: #aeb8c7; font: 800 18px Rajdhani, sans-serif; }
+.floating-help:hover { color: var(--active-color); border-color: var(--hover-border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 38%, transparent), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 92%, transparent), color-mix(in srgb, var(--card-bottom) 98%, transparent)); }
 .help-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: radial-gradient(circle at top right, rgba(15,60,180,.16), transparent 38%), rgba(2,5,10,.78); display: grid; place-items: center; padding: 20px; animation: overlay-enter .18s ease-out; backdrop-filter: blur(8px); }
 .help-dialog { width: min(480px, 100%); border: 1px solid var(--border); border-radius: 10px; background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 24%, transparent), transparent 35%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); box-shadow: 0 24px 70px rgba(0,0,0,.62), inset 0 1px 0 rgba(255,255,255,.035); padding: 20px; display: grid; gap: 16px; animation: dialog-enter .2s ease-out; }
 @keyframes overlay-enter { from { opacity: 0; } to { opacity: 1; } }
@@ -1553,8 +1558,6 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .production-card header strong { color: var(--gold); overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .production-card header span { grid-column: 2; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .production-card header p { display: grid; justify-items: end; gap: 4px; margin: 0; flex-shrink: 0; }
-.icon-pin { justify-self: end; width: 24px; height: 22px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
-.icon-pin:hover, .icon-pin.active { color: var(--gold); border-color: rgba(240,198,79,.38); background: var(--gold-dim); }
 .production-card header small { color: var(--muted); font-size: var(--font-micro); }
 .production-card section { padding: 14px; display: grid; gap: 10px; }
 .production-card h3 { color: var(--text); font-size: 16px; }
@@ -2151,10 +2154,16 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   border: 1px solid rgba(108,123,145,.24);
   border-radius: 7px;
   background:
-    radial-gradient(circle at 100% 0%, rgba(240,198,79,.12), transparent 34%),
+    radial-gradient(circle at 100% 0%, rgba(240,198,79,.1), transparent 34%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
   padding: 18px;
+}
+.construction-section-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
 }
 .construction-page .warning-section h3 {
   color: #b8c2cf;
@@ -2165,9 +2174,112 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   text-transform: uppercase;
 }
 .construction-page .warning-section h3 svg { color: #f0c64f; }
+.construction-section-heading p {
+  margin: 5px 0 0;
+  color: #8793a5;
+  font-size: 12px;
+}
 .construction-page .gather-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+.construction-need-card {
+  min-height: 82px;
+  border: 1px solid rgba(240,198,79,.22);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(240,198,79,.055), rgba(5,8,12,.76));
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 5px 9px;
+  align-items: center;
+}
+.construction-need-card .item-thumb {
+  grid-row: 1 / 3;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.construction-need-card strong {
+  display: block;
+  color: #fff;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.construction-need-card span,
+.construction-need-card small {
+  color: #8793a5;
+  font-size: 11px;
+}
+.construction-need-card b {
+  grid-row: 1 / 3;
+  min-width: 40px;
+  color: #f0c64f;
+  font-size: 24px;
+  font-weight: 850;
+  text-align: right;
+}
+.construction-need-card small {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.construction-controls {
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.92), rgba(6,9,14,.97));
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.construction-controls > div:first-child {
+  margin-right: auto;
+  display: grid;
+  gap: 3px;
+}
+.construction-controls > div:first-child span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.construction-controls > div:first-child svg { color: #f0c64f; }
+.construction-controls > div:first-child p {
+  margin: 0;
+  color: #8793a5;
+  font-size: 12px;
+}
+.construction-controls .toggle-row {
+  min-height: 38px;
+  border: 1px solid rgba(154,168,190,.18);
+  border-radius: 7px;
+  background: rgba(5,8,12,.58);
+  padding: 0 10px;
+}
+.construction-sort-field {
+  display: inline-grid;
+  grid-template-columns: auto minmax(190px, 1fr);
+  align-items: center;
+  gap: 9px;
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.construction-sort-field select {
+  min-height: 38px;
 }
 .construction-page .project-list {
   display: grid;
@@ -2182,8 +2294,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
-  padding: 16px;
-  min-height: 236px;
+  padding: 15px;
   align-content: start;
 }
 .construction-page .project-card header {
@@ -2237,69 +2348,135 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .project-progress-row { display: grid; gap: 6px; }
 .project-progress-row small { color: #8f9aaa; font-size: 12px; }
-.construction-material-grid {
+.construction-material-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
+  gap: 7px;
 }
-.construction-material-card {
+.construction-material-row {
   border: 1px solid rgba(154,168,190,.16);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(5,8,12,.78);
-  padding: 10px;
+  padding: 8px 10px;
   display: grid;
-  gap: 8px;
+  grid-template-columns: 34px minmax(0, 1fr) minmax(100px, auto);
+  gap: 10px;
+  align-items: center;
   min-width: 0;
 }
-.construction-material-card.needs-material {
+.construction-material-row .item-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.construction-material-row.needs-material {
   border-color: rgba(240,198,79,.32);
   background: linear-gradient(180deg, rgba(240,198,79,.07), rgba(5,8,12,.78));
 }
-.construction-material-card.available-material {
+.construction-material-row.available-material {
   border-color: rgba(86,213,255,.28);
 }
-.construction-material-card.complete {
+.construction-material-row.complete {
   border-color: rgba(99,235,165,.32);
+  background: rgba(5,8,12,.5);
+  opacity: .82;
 }
-.construction-material-card > div:first-child {
+.construction-material-main {
   display: grid;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
 }
-.construction-material-card strong {
+.construction-material-main > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.construction-material-row strong {
   color: #fff;
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.construction-material-card span {
+.construction-material-row span {
   color: #aab5c4;
   font-size: 12px;
   line-height: 1.35;
 }
-.construction-material-card dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+.construction-material-main .progress {
+  height: 6px;
 }
-.construction-material-card dl div {
-  display: grid;
-  gap: 2px;
+.construction-material-status {
+  flex: 0 0 auto;
+  min-height: 22px;
+  border: 1px solid rgba(154,168,190,.16);
+  border-radius: 999px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .055em;
+  text-transform: uppercase;
 }
-.construction-material-card dt {
+.construction-material-status.needed {
+  border-color: rgba(240,198,79,.36);
+  background: rgba(240,198,79,.08);
+  color: #f0c64f;
+}
+.construction-material-status.covered {
+  border-color: rgba(86,213,255,.28);
+  background: rgba(86,213,255,.08);
+  color: #56d5ff;
+}
+.construction-material-status.complete {
+  border-color: rgba(99,235,165,.3);
+  background: rgba(99,235,165,.08);
+  color: #63eba5;
+}
+.construction-material-numbers {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+.construction-material-numbers span {
   color: #7f8998;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .075em;
   text-transform: uppercase;
 }
-.construction-material-card dd {
-  margin: 0;
+.construction-material-numbers b {
+  display: block;
   color: #f7f8fb;
   font-size: 13px;
   font-weight: 800;
+  text-align: right;
+}
+.construction-complete-note,
+.construction-complete-toggle {
+  min-height: 38px;
+  border: 1px solid rgba(99,235,165,.22);
+  border-radius: 7px;
+  background: rgba(99,235,165,.06);
+  color: #63eba5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.construction-complete-toggle {
+  cursor: pointer;
+  border-color: rgba(154,168,190,.18);
+  background: rgba(5,8,12,.54);
+  color: #aab5c4;
+}
+.construction-complete-toggle:hover {
+  border-color: rgba(240,198,79,.3);
+  color: #f0c64f;
 }
 .construction-page .empty-state {
   border-color: rgba(108,123,145,.24);
@@ -2849,8 +3026,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .market-filter-panel,
 .market-section,
 .market-analytics section,
-.market-page .price-finder,
-.market-page .watchlist-panel {
+.market-page .price-finder {
   border: 1px solid rgba(108,123,145,.24);
   border-radius: 7px;
   background:
@@ -2996,8 +3172,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .market-analytics h3,
 .market-section h3,
-.market-page .price-finder section h3,
-.market-page .watchlist-panel h3 {
+.market-page .price-finder section h3 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3011,8 +3186,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .market-analytics h3 svg,
 .market-section h3 svg,
-.market-page .price-finder section h3 svg,
-.market-page .watchlist-panel h3 svg {
+.market-page .price-finder section h3 svg {
   color: #f0c64f;
   width: 15px;
   height: 15px;
@@ -3161,18 +3335,6 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   display: grid;
   gap: 12px;
 }
-.market-page .pin-action {
-  min-height: 36px;
-  border-color: rgba(240,198,79,.38);
-  border-radius: 7px;
-  background: rgba(240,198,79,.08);
-  color: #f0c64f;
-  font-weight: 800;
-}
-.market-page .pin-action:hover,
-.market-page .pin-action.active {
-  background: rgba(240,198,79,.14);
-}
 .buy-order-finder .table-subline {
   display: block;
   margin-top: 3px;
@@ -3183,10 +3345,6 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .price-recommendation span { color: var(--gold); text-transform: uppercase; font-size: var(--font-micro); }
 .price-recommendation strong { color: var(--text); font: 700 34px Rajdhani, sans-serif; line-height: 1; }
 .price-recommendation small { color: var(--muted); font-size: 11px; }
-.pin-action { min-height: 34px; border: 1px solid rgba(240,198,79,.35); border-radius: 6px; background: transparent; color: var(--gold); padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.pin-action:hover, .pin-action.active { background: var(--gold-dim); border-color: rgba(240,198,79,.62); }
-.watchlist-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
-
 .craftcalc-page {
   background: #030303;
   background: var(--command-page-gradient);
@@ -3358,19 +3516,6 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .craftcalc-empty {
   min-height: 220px;
 }
-.watchlist-panel h3 { color: var(--gold); font-size: 18px; display: flex; align-items: center; gap: 8px; }
-.watch-add { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
-.watch-add button { min-height: 28px; border: 1px solid var(--border); border-radius: 999px; padding: 0 9px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
-.watch-add button:hover, .watch-add button.active { color: var(--gold); border-color: rgba(240,198,79,.46); background: var(--gold-dim); }
-.watch-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
-.watch-grid article { position: relative; min-height: 94px; border: 1px solid rgba(255,255,255,.07); border-radius: 7px; background: var(--panel-2); padding: 11px; display: grid; gap: 3px; }
-.watch-grid article > span { color: var(--muted); font-size: var(--font-micro); text-transform: uppercase; }
-.watch-grid article > strong { max-width: calc(100% - 25px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.watch-grid article b { color: var(--gold); font: 600 20px Rajdhani, sans-serif; }
-.watch-remove { position: absolute; right: 8px; top: 8px; width: 23px; height: 23px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
-.watch-remove:hover { background: var(--gold-dim); color: var(--gold); }
-.watch-link { justify-self: start; border: 0; background: transparent; padding: 0; color: var(--muted); font-size: 11px; cursor: pointer; }
-.watch-link:hover { color: var(--gold); }
 .mine-panel { border: 1px solid rgba(240,198,79,.48); background: var(--gold-dim); border-radius: 8px; padding: 13px 15px; display: grid; grid-template-columns: 22px auto 1fr; align-items: center; gap: 10px; }
 .mine-panel svg, .mine-panel strong { color: var(--gold); }
 .mine-panel span { color: var(--text); }
@@ -5061,7 +5206,6 @@ body .inventory-page .container-card,
 body .construction-page .project-card,
 body .construction-page .warning-section,
 body .market-page .price-finder,
-body .market-page .watchlist-panel,
 body .market-page .table-wrap,
 body .region-panel .bar-panel,
 body .activity-panel .activity-card,
@@ -5097,8 +5241,7 @@ body .activity-panel .mini-stat > span,
 body .dashboard-section-heading,
 body .production-page .production-card header strong,
 body .construction-page .warning-section h3,
-body .market-page .price-finder section h3,
-body .market-page .watchlist-panel h3 {
+body .market-page .price-finder section h3 {
   color: var(--card-title);
 }
 
@@ -5135,8 +5278,7 @@ body .public-craft-page .select-control {
 body .segmented button.active,
 body .player-pills button.active,
 body .production-page .segmented button.active,
-body .map-panel .player-pills button.active,
-body .pin-action.active {
+body .map-panel .player-pills button.active {
   color: var(--active-color);
   border-color: var(--active-border);
   background: var(--gold-dim);
@@ -5168,8 +5310,9 @@ body .market-page tbody tr:hover td {
   .production-command-title,
   .production-crafter-line > span { min-width: 0; }
   .production-page .crafter-pills { justify-content: flex-start; }
-  .construction-page .project-list,
-  .construction-material-grid { grid-template-columns: 1fr; }
+  .construction-page .project-list { grid-template-columns: 1fr; }
+  .construction-material-row { grid-template-columns: 34px minmax(0, 1fr); }
+  .construction-material-numbers { grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: start; }
   .inventory-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-member-field { grid-template-columns: 1fr; }
@@ -5287,7 +5430,7 @@ body .market-page tbody tr:hover td {
   .refresh-status { display: none; }
   .refresh { margin-top: 0; }
   main { max-height: none; }
-  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .overview-kpi-row, .overview-dashboard-grid, .overview-detail-grid, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .watch-grid, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-layout, .members-summary-grid, .leaderboard-grid, .settings-shell { grid-template-columns: 1fr; }
+  .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .overview-kpi-row, .overview-dashboard-grid, .overview-detail-grid, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-layout, .members-summary-grid, .leaderboard-grid, .settings-shell { grid-template-columns: 1fr; }
   .settings-section-tabs { position: static; display: flex; overflow-x: auto; }
   .settings-section-tabs button { flex: 0 0 auto; }
   .leaderboard-card .dashboard-card-title { align-items: stretch; flex-direction: column; }
@@ -5361,8 +5504,8 @@ body .market-page tbody tr:hover td {
   .map-resource-panel { max-height: 42dvh; }
   .map-resource-panel.collapsed { max-height: 48px; }
   .map-frame { min-height: 420px; height: 58dvh; }
-  .floating-actions { right: 12px; bottom: 12px; }
-  .toast-stack { right: 12px; bottom: 69px; width: calc(100vw - 24px); }
+  .floating-actions { right: 12px; bottom: 72px; }
+  .toast-stack { right: 12px; bottom: 122px; width: calc(100vw - 24px); }
   .floating-save { bottom: 12px; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .floating-save div { grid-column: 1 / -1; }
   .floating-save .toolbar-button { justify-content: center; }
@@ -5390,10 +5533,8 @@ body .market-page tbody tr:hover td {
   .sort-button,
   .map-location-link,
   .map-panel .player-pills button,
-  .icon-pin,
   .footer-link,
-  .toast button,
-  .watch-remove {
+  .toast button {
     min-width: 44px;
     min-height: 44px;
   }

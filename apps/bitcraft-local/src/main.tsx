@@ -41,7 +41,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
-  PinOff,
   Plus,
   RefreshCw,
   Save,
@@ -154,7 +153,6 @@ const APP_VERSION = packageJson.version;
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
 type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel; item?: AnyRecord | null };
-type WatchEntry = { id: string; type: "market" | "material" | "craft"; label: string; itemId?: string; itemType?: number; tier?: number };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
@@ -247,15 +245,13 @@ const NAV_GROUPS = [
     ["craftcalc", "Craft Calculator", Calculator],
     ["sync", "Sync", Share2],
   ] },
-  { id: "admin", label: "Admin", items: [
-    ["admin", "Admin", KeyRound],
-  ] },
 ] as const satisfies readonly NavGroup[];
 
+const ADMIN_NAV_ITEM = ["admin", "Admin", KeyRound] as const satisfies NavItem;
 const NAV: readonly NavItem[] = NAV_GROUPS.reduce<NavItem[]>((items, group) => {
   items.push(...group.items);
   return items;
-}, []);
+}, [ADMIN_NAV_ITEM]);
 const DEFAULT_SIDEBAR_GROUPS = Object.fromEntries(NAV_GROUPS.map((group) => [group.id, true])) as Record<string, boolean>;
 
 const DEFAULT_THEME = {
@@ -699,16 +695,6 @@ const THEME_FIELD_GROUPS: Array<{ title: string; keys: ThemeColorKey[] }> = [
 
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 const ACTIVE_MAP_REGIONS = ["7", "8", "9", "12", "13", "14", "17", "18", "19"];
-
-function legacyDefaultWatchlist(): WatchEntry[] {
-  try {
-    const saved = window.localStorage.getItem("claim-monitor.overview.watchlists");
-    const parsed = saved ? JSON.parse(saved) : null;
-    return Array.isArray(parsed?.default) ? parsed.default : [];
-  } catch {
-    return [];
-  }
-}
 
 function urlPanel(): ActivePanel | null {
   const panel = new URLSearchParams(window.location.search).get("page");
@@ -1406,7 +1392,7 @@ function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
-function Market({ data, history, claimId, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders">("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
@@ -1557,7 +1543,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
         </div>
       </section>
       {view === "pricing" ? (
-        <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} watches={watches} onToggleWatch={onToggleWatch} />
+        <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : view === "buyOrders" ? (
         <BuyOrderFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : view === "analytics" ? (
@@ -1645,7 +1631,6 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
           </label>
         </div>
       </section>
-      <p className="legend market-legend">Listed time uses the BitJita listing timestamp when available; monitor tracking time is used only as a fallback.</p>
       <DataTable rows={rows} columns={[
         ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
@@ -1664,7 +1649,7 @@ function Market({ data, history, claimId, watches, onToggleWatch }: { data: Retu
   );
 }
 
-function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredRegionId: string; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const defaultRegion = monitoredRegionId || "19";
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
@@ -1772,9 +1757,6 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
     regionChoice !== "All" && regionChoice !== "Custom" ? regionChoice : "",
     ...availableRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
-  const selectedWatch = selectedItem ? { id: `market-${selectedItem.itemType ?? 0}-${selectedItem.id}`, type: "market" as const, label: String(selectedItem.name), itemId: String(selectedItem.id), itemType: toNumber(selectedItem.itemType), tier: toNumber(selectedItem.tier) } : null;
-  const pinned = selectedWatch ? watches.some((watch) => watch.id === selectedWatch.id) : false;
-
   return (
     <section className="price-finder">
       <div className="market-command-header price-finder-header">
@@ -1818,7 +1800,6 @@ function PriceFinder({ monitoredRegionId, watches, onToggleWatch }: { monitoredR
               <strong>{suggestedPrice == null ? "-" : `${formatNumber(suggestedPrice)}g`}</strong>
                 <small>{suggestedWindow ? `Based on ${suggestedWindow.toLowerCase()} average` : "No completed trades in this selection"}</small>
               </div>
-              {selectedWatch ? <button className={`pin-action ${pinned ? "active" : ""}`} onClick={() => onToggleWatch(selectedWatch)} title={pinned ? "Remove from watchlist" : "Pin to watchlist"}>{pinned ? <PinOff size={14} /> : <Pin size={14} />}{pinned ? "Pinned" : "Pin"}</button> : null}
             </div>
             <div className="metric-grid">
             <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
@@ -2290,7 +2271,7 @@ function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; 
   );
 }
 
-function Production({ data, refreshToken, selectedMemberId, onSelectMember, watches, onToggleWatch }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void; watches: WatchEntry[]; onToggleWatch: (watch: WatchEntry) => void }) {
+function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
@@ -2469,13 +2450,11 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember, watc
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Active now" : isDone ? "Ready" : progress > 0 ? "Paused" : "Queued";
           const eligibilityStatus = eligibility(job);
-          const craftWatch = { id: `craft-${String(job.entityId ?? index)}`, type: "craft" as const, label: String(item?.name ?? job.recipeName ?? "Production craft") };
-          const craftPinned = watches.some((watch) => watch.id === craftWatch.id);
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
                 <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft. BitJita returned this through member craft data with isPublic false."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} /></span></div>
-                <p><button className={`icon-pin ${craftPinned ? "active" : ""}`} onClick={() => onToggleWatch(craftWatch)} title={craftPinned ? "Remove from watchlist" : "Pin craft to watchlist"}>{craftPinned ? <PinOff size={12} /> : <Pin size={12} />}</button><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
+                <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
                 <div className={`craft-title ${item?.iconAssetName ? "has-icon" : ""}`}>{item?.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
@@ -3380,8 +3359,8 @@ function UserSettingsDialog({
   onLinkCharacter,
   onSaveAccountSettings,
   onLoadAccountSettings,
-  watchCount,
-  onClearWatches,
+  showAdminTools,
+  onOpenAdmin,
   onResetSettings,
   onClose,
 }: {
@@ -3398,8 +3377,8 @@ function UserSettingsDialog({
   onLinkCharacter: (member: AnyRecord | null) => Promise<void>;
   onSaveAccountSettings: () => Promise<void>;
   onLoadAccountSettings: () => void;
-  watchCount: number;
-  onClearWatches: () => void;
+  showAdminTools: boolean;
+  onOpenAdmin: () => void;
   onResetSettings: () => void;
   onClose: () => void;
 }) {
@@ -3579,7 +3558,12 @@ function UserSettingsDialog({
           </section> : null}
           {settingsSection === "account" ? <section>
             <h3>This Browser</h3>
-            <p className="legend">Your page, filters, density, notifications and pinned overview items are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+            <p className="legend">Your page, filters, density and notification preferences are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+          </section> : null}
+          {settingsSection === "account" && showAdminTools ? <section>
+            <h3>Admin Tools</h3>
+            <p className="legend">For settlement monitor administrators. Opens the admin console where configuration, database, accounts and diagnostics are managed.</p>
+            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> Open Admin Console</button>
           </section> : null}
           {settingsSection === "theme" ? <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
             <div className="settings-section-heading">
@@ -3731,11 +3715,6 @@ function UserSettingsDialog({
               <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
             ))}
           </section> : null}
-          {settingsSection === "preferences" ? <section>
-            <h3>Pinned Items</h3>
-            <p className="legend">{watchCount ? `${watchCount} pinned item${watchCount === 1 ? "" : "s"} saved in this browser.` : "No pinned items saved in this browser."}</p>
-            <button className="toolbar-button" disabled={!watchCount} onClick={onClearWatches}><PinOff size={14} /> Clear pinned items</button>
-          </section> : null}
           {settingsSection === "data" ? <section>
             <h3>Reset</h3>
             <p className="legend">Reset this browser's local app preferences. Admin settings and settlement data are not affected.</p>
@@ -3848,7 +3827,17 @@ function bytesLabel(value: unknown) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: AppSettings; onSettingsSaved: (settings: AppSettings) => void; botOnly?: boolean }) {
+function AdminPanel({
+  settings,
+  onSettingsSaved,
+  botOnly = false,
+  onAuthChanged,
+}: {
+  settings: AppSettings;
+  onSettingsSaved: (settings: AppSettings) => void;
+  botOnly?: boolean;
+  onAuthChanged?: (auth: AnyRecord) => void;
+}) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [username, setUsername] = React.useState("admin");
@@ -3894,6 +3883,10 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   const discordToolResult = discordToolResults[botSection] ?? null;
   const adminRoles: Record<string, string> = auth?.roles ?? { owner: "Owner", admin: "Administrator", "discord-manager": "Discord Manager", moderator: "Moderator", viewer: "Viewer" };
   const canManageAdmins = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("users.manage"));
+  const setAdminAuthState = React.useCallback((next: AnyRecord) => {
+    setAuth(next);
+    onAuthChanged?.(next);
+  }, [onAuthChanged]);
   const setDiscordToolResult = React.useCallback((result: AnyRecord | null) => {
     setDiscordToolResults((current) => ({ ...current, [botSection]: result }));
   }, [botSection]);
@@ -3965,7 +3958,8 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
   }
 
   React.useEffect(() => {
-    api("/admin/me").then(setAuth).catch((error) => {
+    api("/admin/me").then(setAdminAuthState).catch((error) => {
+      setAdminAuthState({ authenticated: false, setupRequired: false, error: error instanceof Error ? error.message : String(error) });
       setMessageKind("error");
       setMessage(error.message);
     }).finally(() => setAuthLoading(false));
@@ -3999,7 +3993,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
     await run(async () => {
       const route = auth?.setupRequired ? "/admin/setup" : "/admin/login";
       const result = await api(route, { method: "POST", body: JSON.stringify({ username, password, setupKey }) });
-      setAuth(result);
+      setAdminAuthState(result);
       setPassword("");
       setSetupKey("");
     });
@@ -4552,7 +4546,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
           <Header title="Discord Bot Control">Manage bot setup, notifications, self-assign roles, tools and diagnostics</Header>
           <div className="toolbar">
             <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>
-            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
           </div>
         </div>
       ) : (
@@ -4568,7 +4562,7 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             </div>
             <div className="toolbar">
               <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a>
-              <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAuth({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+              <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
             </div>
           </div>
         </header>
@@ -5005,11 +4999,11 @@ function AdminPanel({ settings, onSettingsSaved, botOnly = false }: { settings: 
             <h3><KeyRound size={17} /> Reset Password</h3>
             <label className="field"><span>Administrator</span><select value={resetUser} onChange={(event) => setResetUser(event.target.value)}><option value="">Select user</option>{users.map((entry) => <option value={entry.id} key={entry.id}>{entry.username}</option>)}</select></label>
             <label className="field"><span>New password</span><input type="password" minLength={12} value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /></label>
-            <button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { const result = await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
+            <button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { const result = await api("/admin/user/password", { method: "PUT", body: JSON.stringify({ userId: Number(resetUser), password: resetPassword }) }); setResetPassword(""); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Password reset; existing sessions for that user were signed out.")}><Save size={15} /> Reset Password</button>
           </section>
           <section className="form-card">
             <h3><Users size={17} /> Administrators</h3>
-            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAuth({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
+            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
           </section>
         </div>
       ) : null}
@@ -5097,6 +5091,7 @@ function DashboardApp() {
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
+  const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
@@ -5107,7 +5102,6 @@ function DashboardApp() {
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
-  const [watches, setWatches] = usePersistedState<WatchEntry[]>("overview.watches", legacyDefaultWatchlist());
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
@@ -5144,6 +5138,18 @@ function DashboardApp() {
     if (!response.ok) return;
     setUserAuth(await response.json());
   }, []);
+  const refreshAdminAuth = React.useCallback(async () => {
+    try {
+      const response = await fetch(`${LOCAL_API}/admin/me`);
+      if (!response.ok) {
+        setAdminAuth({ authenticated: false });
+        return;
+      }
+      setAdminAuth(await response.json());
+    } catch {
+      setAdminAuth({ authenticated: false });
+    }
+  }, []);
   const discordLogin = React.useCallback(() => {
     setDiscordPromptDismissed(true);
     window.location.href = discordAuthHref;
@@ -5162,12 +5168,12 @@ function DashboardApp() {
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, []);
   const saveAccountSettings = React.useCallback(async () => {
-    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId, watches };
+    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
     const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save account settings");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, sidebarGroups, userToastSettings, watches]);
+  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, sidebarGroups, userToastSettings]);
   const loadAccountSettings = React.useCallback(() => {
     const saved = userAuth.user?.settings ?? {};
     if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
@@ -5177,8 +5183,7 @@ function DashboardApp() {
     if (typeof saved.sidebarCollapsed === "boolean") setSidebarCollapsed(saved.sidebarCollapsed);
     if (saved.sidebarGroups && typeof saved.sidebarGroups === "object" && !Array.isArray(saved.sidebarGroups)) setSidebarGroups({ ...DEFAULT_SIDEBAR_GROUPS, ...saved.sidebarGroups });
     if (typeof saved.selectedMemberId === "string") setSelectedMemberId(saved.selectedMemberId);
-    if (Array.isArray(saved.watches)) setWatches(saved.watches.slice(0, 12));
-  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings, setWatches, userAuth.user?.settings]);
+  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings, userAuth.user?.settings]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -5198,9 +5203,6 @@ function DashboardApp() {
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
     });
   }, [mapFocus, setActive]);
-  const toggleWatch = React.useCallback((watch: WatchEntry) => {
-    setWatches((current) => current.some((entry) => entry.id === watch.id) ? current.filter((entry) => entry.id !== watch.id) : [...current, watch].slice(-12));
-  }, [setWatches]);
   const pushToast = React.useCallback((title: string, body: string, kind: ToastKind, item?: AnyRecord | null) => {
     const id = `${Date.now()}-${Math.random()}`;
     const notice: ToastNotice = { id, title, body, kind, occurredAt: new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null };
@@ -5272,6 +5274,9 @@ function DashboardApp() {
   React.useEffect(() => {
     refreshUserAuth().catch(() => undefined);
   }, [refreshUserAuth]);
+  React.useEffect(() => {
+    refreshAdminAuth().catch(() => undefined);
+  }, [refreshAdminAuth]);
   React.useEffect(() => {
     applyTheme(browserTheme);
   }, [browserTheme]);
@@ -5390,18 +5395,18 @@ function DashboardApp() {
     leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} watches={watches} onToggleWatch={toggleWatch} />,
+    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     craftcalc: <CraftCalculatorPage />,
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} watches={watches} onToggleWatch={toggleWatch} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} />,
     empire: <Region data={data} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
-    admin: <AdminPanel settings={appSettings} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
   const activePanel = panels[active] ?? panels.dashboard;
   const apiWarnings = React.useMemo(() => {
@@ -5496,6 +5501,19 @@ function DashboardApp() {
         </footer>
       </main>
       <div className="floating-actions" aria-label="Application tools">
+        {adminAuth.authenticated ? <a
+          className={active === "admin" ? "active" : ""}
+          href={panelHref("admin")}
+          aria-label="Admin console"
+          title="Admin console"
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            navigate("admin");
+          }}
+        >
+          <KeyRound size={18} />
+        </a> : null}
         <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
         <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
@@ -5504,7 +5522,7 @@ function DashboardApp() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette data={data} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} watchCount={watches.length} onClearWatches={() => setWatches([])} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
