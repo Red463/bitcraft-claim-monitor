@@ -16,6 +16,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = process.env.ENABLE_DISCORD_STARTUP !== "false";
+const scheduledJobsEnabled = process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
@@ -149,6 +150,36 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    job_key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    description TEXT,
+    schedule TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    last_success_at TEXT,
+    last_error TEXT,
+    next_run_at TEXT,
+    running INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS recipe_catalog_entries (
+    catalog_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    item_type INTEGER NOT NULL DEFAULT 0,
+    name TEXT,
+    tier INTEGER,
+    rarity TEXT,
+    tag TEXT,
+    icon_asset_name TEXT,
+    detail_json TEXT NOT NULL,
+    source TEXT NOT NULL,
+    last_synced_at TEXT NOT NULL,
+    last_error TEXT,
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS production_jobs (
@@ -299,6 +330,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_notes_user ON discord_mod_notes (guild_id, user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
+  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -470,6 +503,44 @@ const statements = {
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
   deleteSecret: db.prepare("DELETE FROM app_secrets WHERE key = ?"),
+  upsertScheduledJob: db.prepare(`
+    INSERT INTO scheduled_jobs (job_key, label, description, schedule, enabled, next_run_at, running, metadata_json, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', ?)
+    ON CONFLICT(job_key) DO UPDATE SET
+      label = excluded.label,
+      description = excluded.description,
+      schedule = excluded.schedule,
+      updated_at = excluded.updated_at
+  `),
+  listScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs ORDER BY job_key"),
+  getScheduledJob: db.prepare("SELECT * FROM scheduled_jobs WHERE job_key = ?"),
+  dueScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs WHERE enabled = 1 AND running = 0 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC"),
+  setScheduledJobEnabled: db.prepare("UPDATE scheduled_jobs SET enabled = ?, updated_at = ? WHERE job_key = ?"),
+  markScheduledJobRunning: db.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, last_error = NULL, updated_at = ? WHERE job_key = ?"),
+  markScheduledJobSuccess: db.prepare("UPDATE scheduled_jobs SET running = 0, last_success_at = ?, last_error = NULL, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
+  markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
+  getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
+  listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
+  recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),
+  upsertRecipeCatalogEntry: db.prepare(`
+    INSERT INTO recipe_catalog_entries (
+      catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
+      detail_json, source, last_synced_at, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    ON CONFLICT(catalog_key) DO UPDATE SET
+      item_type = excluded.item_type,
+      name = COALESCE(excluded.name, recipe_catalog_entries.name),
+      tier = COALESCE(excluded.tier, recipe_catalog_entries.tier),
+      rarity = COALESCE(excluded.rarity, recipe_catalog_entries.rarity),
+      tag = COALESCE(excluded.tag, recipe_catalog_entries.tag),
+      icon_asset_name = COALESCE(excluded.icon_asset_name, recipe_catalog_entries.icon_asset_name),
+      detail_json = excluded.detail_json,
+      source = excluded.source,
+      last_synced_at = excluded.last_synced_at,
+      last_error = NULL,
+      updated_at = excluded.updated_at
+  `),
+  updateRecipeCatalogError: db.prepare("UPDATE recipe_catalog_entries SET last_error = ?, updated_at = ? WHERE catalog_key = ?"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
@@ -582,6 +653,243 @@ function toNumber(value) {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nextDailyMidnightIso(from = new Date()) {
+  const next = new Date(from);
+  next.setHours(24, 0, 0, 0);
+  return next.toISOString();
+}
+
+function recipeCatalogKey(kind, id) {
+  const normalizedKind = String(kind ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
+  return `${normalizedKind}:${String(id ?? "").trim()}`;
+}
+
+function recipeKindFromItemType(value) {
+  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
+}
+
+function recipeTargetFromDetail(detail, fallback = {}) {
+  const source = detail?.item ?? detail?.cargo ?? detail ?? {};
+  const kind = detail?.cargo ? "cargo" : recipeKindFromItemType(source.itemType ?? source.item_type ?? fallback.itemType ?? fallback.kind);
+  return {
+    id: String(source.id ?? source.itemId ?? fallback.id ?? ""),
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    name: String(source.name ?? fallback.name ?? "Unknown item"),
+    tier: Number.isFinite(Number(source.tier ?? fallback.tier)) ? Number(source.tier ?? fallback.tier) : null,
+    rarity: source.rarityStr ?? source.rarity ?? fallback.rarity ?? null,
+    tag: source.tag ?? fallback.tag ?? null,
+    iconAssetName: source.iconAssetName ?? fallback.iconAssetName ?? null,
+  };
+}
+
+function recipeTargetFromRow(row) {
+  return {
+    id: String(row.target_id),
+    kind: String(row.kind) === "cargo" ? "cargo" : "items",
+    itemType: toNumber(row.item_type),
+    name: row.name ?? "Unknown item",
+    tier: row.tier == null ? null : toNumber(row.tier),
+    rarity: row.rarity ?? null,
+    tag: row.tag ?? null,
+    iconAssetName: row.icon_asset_name ?? null,
+  };
+}
+
+function upsertRecipeCatalogDetail(target, detail, source = "bitjita") {
+  const normalized = recipeTargetFromDetail(detail, target);
+  const now = new Date().toISOString();
+  statements.upsertRecipeCatalogEntry.run(
+    recipeCatalogKey(normalized.kind, normalized.id),
+    normalized.kind,
+    normalized.id,
+    normalized.itemType,
+    normalized.name,
+    normalized.tier,
+    normalized.rarity,
+    normalized.tag,
+    normalized.iconAssetName,
+    JSON.stringify(detail),
+    source,
+    now,
+    now,
+  );
+  return normalized;
+}
+
+async function fetchAndStoreRecipeDetail(target, source = "on_demand") {
+  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
+  const id = String(target.id ?? "").trim();
+  if (!id) {
+    const error = new Error("Recipe target id is required");
+    error.statusCode = 400;
+    throw error;
+  }
+  const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`);
+  upsertRecipeCatalogDetail({ ...target, id, kind }, detail, source);
+  return detail;
+}
+
+async function recipeDetailFromCatalogOrFetch(target) {
+  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
+  const id = String(target.id ?? "").trim();
+  const key = recipeCatalogKey(kind, id);
+  const cached = statements.getRecipeCatalogEntry.get(key);
+  if (cached?.detail_json) {
+    return {
+      detail: safeJson(cached.detail_json, {}),
+      cached: true,
+      lastSyncedAt: cached.last_synced_at,
+      lastError: cached.last_error,
+    };
+  }
+  const detail = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "on_demand");
+  return {
+    detail,
+    cached: false,
+    lastSyncedAt: new Date().toISOString(),
+    lastError: null,
+  };
+}
+
+async function runRecipeCatalogRefreshJob() {
+  const limit = Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_REFRESH_LIMIT ?? 250), 1000));
+  const rows = statements.listRecipeCatalogEntries.all(limit);
+  if (!rows.length) {
+    return {
+      refreshed: 0,
+      failed: 0,
+      skipped: 0,
+      knownRecipes: 0,
+      message: "No recipe records are cached yet. The Craft Calculator will add records as users look up items.",
+    };
+  }
+
+  let refreshed = 0;
+  let failed = 0;
+  let stoppedEarly = false;
+  for (const row of rows) {
+    const target = recipeTargetFromRow(row);
+    try {
+      await fetchAndStoreRecipeDetail(target, "scheduled_job");
+      refreshed += 1;
+    } catch (error) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), row.catalog_key);
+      if (message.includes("HTTP 429")) {
+        stoppedEarly = true;
+        break;
+      }
+    }
+    await delay(250);
+  }
+
+  const knownRecipes = toNumber(statements.recipeCatalogCount.get()?.count);
+  return {
+    refreshed,
+    failed,
+    skipped: Math.max(knownRecipes - refreshed - failed, 0),
+    knownRecipes,
+    stoppedEarly,
+  };
+}
+
+const scheduledJobRegistry = {
+  recipe_catalog_refresh: {
+    label: "Recipe catalog refresh",
+    description: "Refreshes known Craft Calculator recipe records from BitJita once per day at midnight.",
+    schedule: "daily_midnight",
+    enabled: true,
+    run: runRecipeCatalogRefreshJob,
+  },
+};
+
+function seedScheduledJobs() {
+  const seededAt = new Date().toISOString();
+  for (const [key, job] of Object.entries(scheduledJobRegistry)) {
+    statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextDailyMidnightIso(), seededAt);
+    const row = statements.getScheduledJob.get(key);
+    if (!row?.next_run_at) {
+      db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextDailyMidnightIso(), seededAt, key);
+    }
+  }
+}
+
+function scheduledJobRow(row) {
+  return {
+    key: row.job_key,
+    label: row.label,
+    description: row.description ?? "",
+    schedule: row.schedule,
+    enabled: Boolean(row.enabled),
+    running: Boolean(row.running),
+    lastRunAt: row.last_run_at,
+    lastSuccessAt: row.last_success_at,
+    lastError: row.last_error,
+    nextRunAt: row.next_run_at,
+    metadata: safeJson(row.metadata_json, {}),
+    updatedAt: row.updated_at,
+  };
+}
+
+function scheduledJobsStatus() {
+  const recipeCatalogCount = toNumber(statements.recipeCatalogCount.get()?.count);
+  return {
+    enabled: scheduledJobsEnabled,
+    serverTime: new Date().toISOString(),
+    recipeCatalogCount,
+    jobs: statements.listScheduledJobs.all().map(scheduledJobRow),
+  };
+}
+
+async function runScheduledJob(jobKey, { manual = false } = {}) {
+  const registryEntry = scheduledJobRegistry[jobKey];
+  if (!registryEntry) {
+    const error = new Error("Unknown scheduled job");
+    error.statusCode = 404;
+    throw error;
+  }
+  const row = statements.getScheduledJob.get(jobKey);
+  if (!row) {
+    const error = new Error("Scheduled job is not configured");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (row.running) {
+    const error = new Error("Scheduled job is already running");
+    error.statusCode = 409;
+    throw error;
+  }
+  const startedAt = new Date().toISOString();
+  statements.markScheduledJobRunning.run(startedAt, startedAt, jobKey);
+  try {
+    const metadata = await registryEntry.run({ manual });
+    const finishedAt = new Date().toISOString();
+    statements.markScheduledJobSuccess.run(finishedAt, nextDailyMidnightIso(new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+    return { ok: true, key: jobKey, metadata, nextRunAt: statements.getScheduledJob.get(jobKey)?.next_run_at };
+  } catch (error) {
+    const finishedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : String(error);
+    statements.markScheduledJobFailure.run(message, nextDailyMidnightIso(new Date()), JSON.stringify({ manual }), finishedAt, jobKey);
+    throw error;
+  }
+}
+
+function checkScheduledJobs() {
+  if (!scheduledJobsEnabled || isTestRuntime) return;
+  const due = statements.dueScheduledJobs.all(new Date().toISOString());
+  for (const row of due) {
+    void runScheduledJob(row.job_key).catch((error) => console.warn(`Scheduled job ${row.job_key} failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+}
+
+seedScheduledJobs();
 
 function currentAppBuildId() {
   const envRevision = String(process.env.SOURCE_VERSION ?? process.env.RENDER_GIT_COMMIT ?? process.env.GITHUB_SHA ?? "").trim();
@@ -1393,6 +1701,7 @@ function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/status") return "status.view";
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/diagnostics") return "data.manage";
+  if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
   if (pathname === "/api/local/admin/branding") return "settings.manage";
   if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
   if (pathname === "/api/local/admin/sessions/clear") return "users.manage";
@@ -5367,6 +5676,28 @@ const server = createServer(async (req, res) => {
       return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
+      try {
+        const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
+        const id = String(url.searchParams.get("id") ?? "").trim();
+        if (!/^\d+$/.test(id)) return send(res, 400, { error: "Recipe item id is required" });
+        const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
+        if (!cached && !rateLimit(req, res, "recipe-detail", RATE_LIMITS.expensiveLocal)) return;
+        const target = {
+          id,
+          kind,
+          itemType: kind === "cargo" ? 1 : 0,
+          name: url.searchParams.get("name") ?? undefined,
+          tier: url.searchParams.get("tier") ?? undefined,
+          rarity: url.searchParams.get("rarity") ?? undefined,
+          tag: url.searchParams.get("tag") ?? undefined,
+          iconAssetName: url.searchParams.get("iconAssetName") ?? undefined,
+        };
+        return send(res, 200, await recipeDetailFromCatalogOrFetch(target));
+      } catch (error) {
+        return send(res, error?.statusCode ?? 502, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
     if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
@@ -5498,6 +5829,26 @@ const server = createServer(async (req, res) => {
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
+      if (req.method === "GET" && url.pathname === "/api/local/admin/jobs") return send(res, 200, scheduledJobsStatus());
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/jobs") {
+        const body = await readJson(req, BODY_LIMITS.json);
+        const key = String(body.key ?? "").trim();
+        if (!scheduledJobRegistry[key]) return send(res, 404, { error: "Unknown scheduled job" });
+        statements.setScheduledJobEnabled.run(body.enabled === false ? 0 : 1, new Date().toISOString(), key);
+        audit(user, "scheduled_job.toggle", { key, enabled: body.enabled !== false });
+        return send(res, 200, scheduledJobsStatus());
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/jobs/run") {
+        const body = await readJson(req, BODY_LIMITS.json);
+        const key = String(body.key ?? "").trim();
+        try {
+          const result = await runScheduledJob(key, { manual: true });
+          audit(user, "scheduled_job.run", { key, metadata: result.metadata });
+          return send(res, 200, { ...scheduledJobsStatus(), result });
+        } catch (error) {
+          return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Scheduled job failed", ...scheduledJobsStatus() });
+        }
+      }
       if (req.method === "POST" && url.pathname === "/api/local/admin/poll") {
         await collectServerSnapshot(true);
         audit(user, "data.poll");
@@ -5984,5 +6335,10 @@ server.listen(port, host, () => {
     console.log(`Server snapshot polling enabled every ${snapshotIntervalMs / 1000} seconds`);
     collectServerSnapshot();
     setInterval(collectServerSnapshot, snapshotIntervalMs);
+  }
+  if (scheduledJobsEnabled && !isTestRuntime) {
+    console.log("Scheduled jobs enabled; checking every 60 seconds");
+    checkScheduledJobs();
+    setInterval(checkScheduledJobs, 60 * 1000);
   }
 });

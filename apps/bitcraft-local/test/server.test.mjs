@@ -67,6 +67,7 @@ test("server collection paginates listings and protects production mutations", a
   let playerDetailRequests = 0;
   let craftContributionRequests = 0;
   let playerCraftRequests = 0;
+  let recipeDetailRequests = 0;
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
   const upstream = createServer((req, res) => {
@@ -97,6 +98,14 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === "/api/players/player-1") {
       playerDetailRequests += 1;
       return json(res, { player: { playerEntityId: "player-1", username: "Tester", signedIn: true } });
+    }
+    if (url.pathname === "/api/items/2020003") {
+      recipeDetailRequests += 1;
+      return json(res, {
+        item: { id: "2020003", name: "Simple Plank", itemType: 0, tier: 2, rarityStr: "Common" },
+        craftingRecipes: [],
+        extractionRecipes: [],
+      });
     }
     if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
     if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
@@ -227,6 +236,13 @@ test("server collection paginates listings and protects production mutations", a
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
   assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");
+  const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
+  const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
+  assert.equal(recipeDetailOne.detail.item.name, "Simple Plank");
+  assert.equal(recipeDetailOne.cached, false);
+  assert.equal(recipeDetailTwo.detail.item.name, "Simple Plank");
+  assert.equal(recipeDetailTwo.cached, true);
+  assert.equal(recipeDetailRequests, 1);
   const playerDetailPayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
   const playerDetailsOne = await fetch(`${origin}/api/local/player-details`, {
     method: "POST",
@@ -296,6 +312,17 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(auth.user.role, "owner");
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
+  const adminJobs = await fetch(`${origin}/api/local/admin/jobs`, {
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(adminJobs.recipeCatalogCount, 1);
+  assert.equal(adminJobs.jobs.some((job) => job.key === "recipe_catalog_refresh" && job.enabled === true), true);
+  const disabledJobs = await fetch(`${origin}/api/local/admin/jobs`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ key: "recipe_catalog_refresh", enabled: false }),
+  }).then((response) => response.json());
+  assert.equal(disabledJobs.jobs.find((job) => job.key === "recipe_catalog_refresh").enabled, false);
   const productionNotificationSettings = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

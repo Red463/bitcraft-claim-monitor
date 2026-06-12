@@ -3898,6 +3898,7 @@ function AdminPanel({
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
+  const [scheduledJobs, setScheduledJobs] = React.useState<AnyRecord | null>(null);
   const [diagnostics, setDiagnostics] = React.useState<AnyRecord[]>([]);
   const [tables, setTables] = React.useState<AnyRecord[]>([]);
   const [selectedTable, setSelectedTable] = React.useState("");
@@ -3970,6 +3971,10 @@ function AdminPanel({
     setStatus(await api("/admin/status"));
   }
 
+  async function refreshScheduledJobs() {
+    setScheduledJobs(await api("/admin/jobs"));
+  }
+
   async function refreshTables() {
     const result = await api("/admin/tables");
     setTables(result.tables ?? []);
@@ -4017,6 +4022,7 @@ function AdminPanel({
     if (!auth?.authenticated) return;
     run(async () => {
       if (tab === "status" || tab === "discord") await refreshStatus();
+      if (tab === "status") await refreshScheduledJobs();
       if (botOnly && tab === "discord") await refreshDiscordDiscovery();
       if (botOnly && tab === "discord" && botSection === "commands") await refreshCustomCommands();
       if (tab === "analytics") await refreshAnalytics();
@@ -4643,6 +4649,61 @@ function AdminPanel({
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
               <Info label="Discord delivery" value={discordDeliveryLabel} />
               <Info label="Storage" value={status?.storageLabel ?? "-"} />
+            </div>
+          </section>
+          <section className="form-card scheduled-jobs-card">
+            <div className="split-header">
+              <div>
+                <h3><Clock size={17} /> Scheduled Jobs</h3>
+                <p className="legend">Background jobs run on the local server. Daily jobs use the server's local midnight.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => run(refreshScheduledJobs)}><RefreshCw size={15} /> Refresh</button>
+            </div>
+            <div className="status-detail">
+              <Info label="Scheduler" value={scheduledJobs?.enabled ? "Enabled" : "Disabled"} />
+              <Info label="Recipe records" value={formatNumber(scheduledJobs?.recipeCatalogCount)} />
+              <Info label="Server time" value={dateLabel(scheduledJobs?.serverTime)} />
+            </div>
+            <div className="scheduled-job-list">
+              {(scheduledJobs?.jobs ?? []).map((job: AnyRecord) => (
+                <article className="scheduled-job-row" key={job.key}>
+                  <div>
+                    <strong>{job.label}</strong>
+                    <span>{job.description}</span>
+                    <small>
+                      Last success {dateLabel(job.lastSuccessAt)}
+                      {" | "}
+                      Next run {dateLabel(job.nextRunAt)}
+                    </small>
+                    {job.lastError ? <small className="error">Last error: {job.lastError}</small> : null}
+                  </div>
+                  <div className="scheduled-job-actions">
+                    <span className={`role-option-status ${job.running ? "warn" : job.enabled ? "ok" : ""}`}>{job.running ? "Running" : job.enabled ? "Enabled" : "Disabled"}</span>
+                    <label className="toggle-line compact-toggle">
+                      <span>{job.enabled ? "Enabled" : "Disabled"}</span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(job.enabled)}
+                        onChange={(event) => run(async () => {
+                          setScheduledJobs(await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: event.target.checked }) }));
+                        }, `Scheduled job ${event.target.checked ? "enabled" : "disabled"}.`)}
+                      />
+                    </label>
+                    <button
+                      className="toolbar-button"
+                      disabled={Boolean(job.running)}
+                      onClick={() => run(async () => {
+                        const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
+                        setScheduledJobs(result);
+                      }, "Scheduled job completed.")}
+                    >
+                      <RefreshCw size={15} /> Run Now
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {scheduledJobs && !(scheduledJobs.jobs ?? []).length ? <p className="legend">No scheduled jobs are registered.</p> : null}
+              {!scheduledJobs ? <p className="legend">Loading scheduled jobs...</p> : null}
             </div>
           </section>
           <section className="form-card">

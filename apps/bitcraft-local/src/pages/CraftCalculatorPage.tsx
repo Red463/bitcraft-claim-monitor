@@ -9,6 +9,9 @@ import { formatNumber } from "../utils/format";
 import { itemTypeFromKind, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
 const API = "/api/bitjita";
+const LOCAL_API = "/api/local";
+const RECIPE_DETAIL_CACHE_MS = 30 * 60 * 1000;
+const recipeDetailCache = new Map<string, { expiresAt: number; detail: RecipeDetail }>();
 
 type CalculatorState = {
   loading: boolean;
@@ -16,10 +19,6 @@ type CalculatorState = {
   plan: ReturnType<typeof buildRecipePlan> | null;
   details: Map<string, RecipeDetail>;
 };
-
-function pathForTarget(target: RecipeTarget) {
-  return `/${target.kind}/${encodeURIComponent(target.id)}`;
-}
 
 function catalogItemToTarget(item: AnyRecord): RecipeTarget {
   const kind = recipeKindFromType(item.itemType ?? item.item_type);
@@ -36,9 +35,25 @@ function catalogItemToTarget(item: AnyRecord): RecipeTarget {
 }
 
 async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Promise<RecipeDetail> {
-  const response = await fetch(`${API}${pathForTarget(target)}`, { signal });
-  if (!response.ok) throw new Error(`${target.name}: HTTP ${response.status}`);
-  return response.json();
+  const cacheKey = recipeKey(target.kind, target.id);
+  const cached = recipeDetailCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.detail;
+  const params = new URLSearchParams({
+    kind: target.kind,
+    id: String(target.id),
+    name: target.name,
+    itemType: String(target.itemType),
+  });
+  if (target.tier != null) params.set("tier", String(target.tier));
+  if (target.rarityStr) params.set("rarity", target.rarityStr);
+  if (target.tag) params.set("tag", target.tag);
+  if (target.iconAssetName) params.set("iconAssetName", target.iconAssetName);
+  const response = await fetch(`${LOCAL_API}/recipe-detail?${params.toString()}`, { signal });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`${target.name}: ${body.error ?? `HTTP ${response.status}`}`);
+  const detail = body.detail ?? body;
+  recipeDetailCache.set(cacheKey, { detail, expiresAt: Date.now() + RECIPE_DETAIL_CACHE_MS });
+  return detail;
 }
 
 function isPackageRecipe(recipe: AnyRecord) {
@@ -66,7 +81,10 @@ async function findOutputAliasDetail(target: RecipeTarget, signal: AbortSignal):
 
 async function augmentDetailWithOutputAlias(detail: RecipeDetail, target: RecipeTarget, signal: AbortSignal): Promise<RecipeDetail> {
   if (recipeHasProductionRoute(detail, target)) return detail;
-  const aliasDetail = await findOutputAliasDetail(target, signal);
+  const aliasDetail = await findOutputAliasDetail(target, signal).catch((error) => {
+    if (signal.aborted) throw error;
+    return null;
+  });
   if (!aliasDetail) return detail;
   const possibilities: AnyRecord[] = Array.isArray(aliasDetail.itemListPossibilities) ? aliasDetail.itemListPossibilities : [];
   const matchingPossibilities = possibilities.filter((possibility) =>
@@ -99,7 +117,15 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
     const key = recipeKey(nextTarget.kind, nextTarget.id);
     if (details.has(key) || pending.has(key) || depth > maxDepth) return;
     pending.add(key);
-    const fetchedDetail = await fetchRecipeDetail(nextTarget, signal);
+    let fetchedDetail: RecipeDetail;
+    try {
+      fetchedDetail = await fetchRecipeDetail(nextTarget, signal);
+    } catch (error) {
+      pending.delete(key);
+      if (signal.aborted) throw error;
+      if (depth === 0) throw error;
+      return;
+    }
     pending.delete(key);
     const normalizedTarget = { ...detailTarget(fetchedDetail), ...nextTarget };
     const detail = await augmentDetailWithOutputAlias(fetchedDetail, normalizedTarget, signal);
@@ -108,10 +134,11 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
     if (!recipe) return;
     const inputStacks: AnyRecord[] = Array.isArray(recipe.consumedItemStacks) ? recipe.consumedItemStacks : [];
     const displays: AnyRecord[] = Array.isArray(recipe.consumedItems) ? recipe.consumedItems : [];
-    await Promise.all(inputStacks.map((stack, index) => {
+    for (let index = 0; index < inputStacks.length; index += 1) {
+      const stack = inputStacks[index];
       const kind = recipeKindFromType(stack.item_type ?? stack.itemType);
       const display = displays[index] ?? {};
-      return visit({
+      await visit({
         id: String(stack.item_id ?? stack.itemId ?? stack.id),
         kind,
         itemType: kind === "cargo" ? 1 : 0,
@@ -121,7 +148,7 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
         tag: display.tag == null ? undefined : String(display.tag),
         iconAssetName: display.iconAssetName == null ? undefined : String(display.iconAssetName),
       }, depth + 1);
-    }));
+    }
   }
 
   await visit(target, 0);

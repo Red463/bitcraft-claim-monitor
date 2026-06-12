@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.6-beta.1] - 2026-06-12
+
+### Added
+
+- Added a reusable scheduled-jobs system with an Admin status panel for viewing, enabling, disabling and manually running background jobs.
+- Added a local recipe catalog cache used by Craft Calculator, with a daily midnight job to refresh known recipe records from BitJita.
+
+### Changed
+
+- Changed Craft Calculator recipe expansion to use locally cached recipe details where possible instead of repeatedly fetching each recipe directly from BitJita.
+
+### Fixed
+
+- Made Craft Calculator ingredient lookups more resilient to BitJita rate limits by caching recipe details, reducing lookup bursts, and treating failed child ingredients as source materials instead of failing the whole plan.
+
 ## [1.0.5-beta.1] - 2026-06-12
 
 ### Changed

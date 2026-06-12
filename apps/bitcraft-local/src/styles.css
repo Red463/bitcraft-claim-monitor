@@ -4430,6 +4430,27 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   font-size: 14px;
   line-height: 1.25;
 }
+.scheduled-job-list { display: grid; gap: 10px; margin-top: 12px; }
+.scheduled-job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 13px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background: linear-gradient(180deg, rgba(11,16,22,.96), rgba(6,9,14,.98));
+}
+.scheduled-job-row strong { display: block; color: var(--text); font-size: 14px; }
+.scheduled-job-row span,
+.scheduled-job-row small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+.scheduled-job-row .error { color: var(--danger); }
+.scheduled-job-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.compact-toggle { min-height: 36px; padding: 7px 9px; min-width: 132px; }
+.admin-page .compact-toggle input[type="checkbox"] { width: 34px; height: 20px; appearance: none; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.08); position: relative; cursor: pointer; }
+.admin-page .compact-toggle input[type="checkbox"]::before { content: ""; position: absolute; width: 14px; height: 14px; top: 2px; left: 2px; border-radius: 50%; background: var(--muted); transition: transform .16s ease, background .16s ease; }
+.admin-page .compact-toggle input[type="checkbox"]:checked { border-color: color-mix(in srgb, var(--gold) 72%, transparent); background: color-mix(in srgb, var(--gold) 22%, transparent); }
+.admin-page .compact-toggle input[type="checkbox"]:checked::before { transform: translateX(14px); background: var(--gold); }
 .linked-accounts-card { align-content: start; }
 .linked-account-list { display: grid; gap: 9px; }
 .linked-account-row {
@@ -5431,6 +5452,8 @@ body .market-page tbody tr:hover td {
   .refresh { margin-top: 0; }
   main { max-height: none; }
   .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .overview-kpi-row, .overview-dashboard-grid, .overview-detail-grid, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-layout, .members-summary-grid, .leaderboard-grid, .settings-shell { grid-template-columns: 1fr; }
+  .scheduled-job-row { grid-template-columns: 1fr; }
+  .scheduled-job-actions { justify-content: flex-start; }
   .settings-section-tabs { position: static; display: flex; overflow-x: auto; }
   .settings-section-tabs button { flex: 0 0 auto; }
   .leaderboard-card .dashboard-card-title { align-items: stretch; flex-direction: column; }
