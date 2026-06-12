@@ -5,7 +5,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
   const now = Math.floor(Date.now() / 1000);
   return {
     ...player,
-    entityId: String(player.entityId ?? ""),
+    entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
     signedIn: player.signedIn === true,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : null,

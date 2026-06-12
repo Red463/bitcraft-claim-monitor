@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.9-beta.1] - 2026-06-12
+
+### Changed
+
+- Improved Map player tracking diagnostics and prevented temporary player-detail failures from emptying the member roster used by the map.
+
 ## [1.0.8-beta.1] - 2026-06-12
 
 ### Added

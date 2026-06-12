@@ -37,6 +37,19 @@ function httpErrorMessage(path: string, status: number) {
   return `Unable to refresh ${label} (HTTP ${status}). ${statusText}`;
 }
 
+function fallbackPlayerFromMember(member: AnyRecord, error: string): AnyRecord {
+  const playerId = String(member.playerEntityId ?? member.entityId ?? member.playerId ?? "");
+  return normalizePlayer({
+    entityId: playerId,
+    playerEntityId: playerId,
+    username: member.userName ?? member.username ?? member.playerUsername ?? member.name ?? playerId,
+    userName: member.userName ?? member.username ?? member.playerUsername ?? member.name ?? playerId,
+    signedIn: false,
+    detailAvailable: false,
+    detailError: error,
+  });
+}
+
 function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
   const endpoints = {
     claim: `/claims/${claimId}`,
@@ -166,8 +179,21 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
             body: JSON.stringify({ members }),
           })
             .then((response) => response.ok ? response.json() : Promise.reject(new Error(`player details HTTP ${response.status}`)))
-            .then((payload) => unwrap<AnyRecord[]>(payload, "players", []).map((player) => ({ status: "fulfilled", value: player }) as PromiseFulfilledResult<AnyRecord>))
-            .catch((): Array<PromiseFulfilledResult<AnyRecord>> => []) : Promise.resolve([] as Array<PromiseFulfilledResult<AnyRecord>>),
+            .then((payload) => {
+              raw.playerDetailDiagnostics = {
+                requested: payload.requested ?? members.length,
+                failed: payload.failed ?? 0,
+                failures: payload.failures ?? [],
+              };
+              if (payload.failed) appendPartialError(raw, `${payload.failed} player detail request${payload.failed === 1 ? "" : "s"} failed. Player names remain available, but online status may be incomplete.`);
+              return unwrap<AnyRecord[]>(payload, "players", []).map((player) => ({ status: "fulfilled", value: player }) as PromiseFulfilledResult<AnyRecord>);
+            })
+            .catch((error): Array<PromiseFulfilledResult<AnyRecord>> => {
+              const message = error instanceof Error ? error.message : String(error);
+              raw.playerDetailDiagnostics = { requested: members.length, failed: members.length, failures: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), error: message })).slice(0, 20) };
+              appendPartialError(raw, `Player detail refresh failed: ${message}. Using settlement member names without live online status.`);
+              return members.map((member) => ({ status: "fulfilled", value: fallbackPlayerFromMember(member, message) }) as PromiseFulfilledResult<AnyRecord>);
+            }) : Promise.resolve([] as Array<PromiseFulfilledResult<AnyRecord>>),
           readsProductionDetail ? mapWithBrowserConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
             try {
               return {

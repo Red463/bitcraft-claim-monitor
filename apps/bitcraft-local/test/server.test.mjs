@@ -256,6 +256,15 @@ test("server collection paginates listings and protects production mutations", a
   }).then((response) => response.json());
   assert.equal(playerDetailsOne.players[0].username, "Tester");
   assert.equal(playerDetailsTwo.players[0].signedIn, true);
+  const missingPlayerDetails = await fetch(`${origin}/api/local/player-details`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ members: [{ playerEntityId: "player-missing", userName: "Fallback Tester" }] }),
+  }).then((response) => response.json());
+  assert.equal(missingPlayerDetails.players[0].entityId, "player-missing");
+  assert.equal(missingPlayerDetails.players[0].username, "Fallback Tester");
+  assert.equal(missingPlayerDetails.players[0].detailAvailable, false);
+  assert.equal(missingPlayerDetails.failed, 1);
   assert.equal(playerDetailRequests, 1);
   const dashboardDataOne = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
   const dashboardDataTwo = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());

@@ -3903,6 +3903,73 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 }
 .map-selected-resources { display: flex; flex-wrap: wrap; gap: 6px; }
 .map-selected-resources button { min-height: 28px; border: 1px solid rgba(240,198,79,.38); border-radius: 999px; background: rgba(240,198,79,.1); color: #f0c64f; padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
+.map-url-diagnostics {
+  border: 1px solid rgba(108,123,145,.2);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(11,16,22,.92), rgba(6,9,14,.96));
+  padding: 10px 12px;
+}
+.map-url-diagnostics summary {
+  cursor: pointer;
+  color: #c6d8f1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.map-url-diagnostics summary svg { color: var(--gold); }
+.map-url-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.map-url-diagnostic-grid .info-row {
+  min-height: 54px;
+  border: 1px solid rgba(154,168,190,.16);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  padding: 8px;
+}
+.map-url-diagnostics code {
+  display: block;
+  max-height: 170px;
+  overflow: auto;
+  margin-top: 9px;
+  border: 1px solid rgba(154,168,190,.16);
+  border-radius: 7px;
+  background: #050608;
+  color: #d7e4ff;
+  padding: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+.map-url-log-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+.map-url-log-list article {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 4px 10px;
+  border: 1px solid rgba(154,168,190,.13);
+  border-radius: 7px;
+  background: rgba(255,255,255,.018);
+  padding: 7px 9px;
+  font-size: 12px;
+}
+.map-url-log-list time { color: var(--gold); font-weight: 800; }
+.map-url-log-list span { color: #d7e0ec; }
+.map-url-log-list small {
+  grid-column: 2;
+  color: #8f9aaa;
+  overflow-wrap: anywhere;
+}
 .map-resource-list { flex: 1 1 220px; min-height: 180px; overflow: auto; display: grid; gap: 6px; align-content: start; padding-right: 2px; }
 .map-resource-list > button {
   min-height: 50px;

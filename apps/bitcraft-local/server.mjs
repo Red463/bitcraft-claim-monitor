@@ -4184,6 +4184,19 @@ async function fetchCachedPlayerDetail(playerId) {
   return value;
 }
 
+function fallbackPlayerFromMember(member, error) {
+  const playerId = String(member?.playerEntityId ?? member?.entityId ?? member?.playerId ?? "").trim();
+  return {
+    entityId: playerId,
+    playerEntityId: playerId,
+    username: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
+    userName: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
+    signedIn: false,
+    detailAvailable: false,
+    detailError: error instanceof Error ? error.message : String(error ?? "Player detail unavailable"),
+  };
+}
+
 async function fetchCachedCraftContributions(craftId) {
   const key = String(craftId);
   const cached = craftContributionCache.get(key);
@@ -4399,15 +4412,17 @@ async function playerDetailSummaries(body) {
   const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     try {
-      return { ok: true, player: await fetchCachedPlayerDetail(playerId) };
+      const player = await fetchCachedPlayerDetail(playerId);
+      return { ok: true, player: { ...player, detailAvailable: true } };
     } catch (error) {
-      return { ok: false, playerId, error: error instanceof Error ? error.message : String(error) };
+      return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
     }
   });
   return {
-    players: results.filter((result) => result.ok).map((result) => result.player),
+    players: results.map((result) => result.player),
     requested: uniqueMembers.length,
     failed: results.filter((result) => !result.ok).length,
+    failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
   };
 }
 
@@ -4553,6 +4568,11 @@ async function dashboardData(claimId) {
     market: marketPayload,
     crafts: craftsPayload,
     players: playerPayload.players ?? [],
+    playerDetailDiagnostics: {
+      requested: playerPayload.requested ?? 0,
+      failed: playerPayload.failed ?? 0,
+      failures: playerPayload.failures ?? [],
+    },
     contributions: Object.fromEntries(contributionEntries),
     region,
     regionStatus,

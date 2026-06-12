@@ -2766,6 +2766,21 @@ function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false,
   return `https://bitcraftmap.com/${query}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
 }
 
+function parseBitcraftMapUrl(url: string): AnyRecord {
+  try {
+    const parsed = new URL(url);
+    return {
+      playerId: parsed.searchParams.get("playerId") ?? "",
+      resourceId: parsed.searchParams.get("resourceId") ?? "",
+      enemyId: parsed.searchParams.get("enemyId") ?? "",
+      regionId: parsed.searchParams.get("regionId") ?? "",
+      hasWaypoint: Boolean(parsed.hash),
+    };
+  } catch {
+    return {};
+  }
+}
+
 function mapResourceToken(entry: AnyRecord): string {
   const kind = String(entry.mapKind ?? "resource");
   return kind === "enemy" ? `enemy:${entry.mapId ?? entry.enemyType ?? entry.id}` : `resource:${entry.mapId ?? entry.id}`;
@@ -2794,7 +2809,39 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
-  const roster = data.players;
+  const [mapUrlLog, setMapUrlLog] = React.useState<AnyRecord[]>([]);
+  const memberRoster = React.useMemo(() => {
+    const detailById = new Map(data.players
+      .map((player) => [String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""), player] as const)
+      .filter(([id]) => Boolean(id)));
+    const rows: AnyRecord[] = data.members.map((member) => {
+      const playerId = memberTrackingId(member);
+      const detail = detailById.get(playerId);
+      return {
+        ...(detail ?? {}),
+        ...member,
+        entityId: playerId,
+        playerEntityId: playerId,
+        username: detail?.username ?? detail?.userName ?? memberDisplayName(member),
+        userName: detail?.userName ?? detail?.username ?? memberDisplayName(member),
+        signedIn: detail?.signedIn === true,
+        sessionSeconds: detail?.sessionSeconds ?? null,
+        detailAvailable: detail ? detail.detailAvailable !== false : false,
+        detailError: detail?.detailError,
+      };
+    });
+    const memberIds = new Set(rows.map((player) => String(player.entityId)).filter(Boolean));
+    for (const player of data.players) {
+      const playerId = String(player.entityId ?? player.playerEntityId ?? player.playerId ?? "");
+      if (playerId && !memberIds.has(playerId)) rows.push({ ...player, entityId: playerId, playerEntityId: playerId });
+    }
+    return rows;
+  }, [data.members, data.players]);
+  const roster = memberRoster;
+  const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
+  const playerDetailDiagnostics = rawData?.playerDetailDiagnostics ?? {};
+  const degradedPlayerCount = roster.filter((player) => player.detailAvailable === false).length;
+  const rosterSource = degradedPlayerCount ? "members + partial detail" : roster.length ? "members + player detail" : "empty";
   const activeRegions = useActiveRegions(String(data.claim.regionId ?? ""));
   React.useEffect(() => {
     const controller = new AbortController();
@@ -2839,6 +2886,26 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
   const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [current, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
+  React.useEffect(() => {
+    const parsed = parseBitcraftMapUrl(mapUrl);
+    setMapUrlLog((currentLog) => [{
+      at: new Date().toISOString(),
+      rosterSource,
+      rosterCount: roster.length,
+      memberCount: data.members.length,
+      playerDetailCount: data.players.length,
+      playerDetailRequested: playerDetailDiagnostics.requested ?? roster.length,
+      playerDetailFailed: playerDetailDiagnostics.failed ?? degradedPlayerCount,
+      selectedMode: selectedIds === null ? "auto-online" : "manual",
+      selectedPlayerIds: [...current].sort(),
+      playerIdParam: parsed.playerId ?? "",
+      resourceIdParam: parsed.resourceId ?? "",
+      enemyIdParam: parsed.enemyId ?? "",
+      regionIdParam: parsed.regionId ?? "",
+      hasWaypoint: Boolean(parsed.hasWaypoint),
+      url: mapUrl,
+    }, ...currentLog].slice(0, 20));
+  }, [mapUrl, rosterSource, roster.length, selectedIds, current]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
     if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
@@ -2923,6 +2990,27 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
+      <details className="map-url-diagnostics">
+        <summary><Activity size={14} /> Map URL diagnostics</summary>
+        <div className="map-url-diagnostic-grid">
+          <Info label="Roster source" value={rosterSource} />
+          <Info label="Settlement members" value={formatNumber(data.members.length)} />
+          <Info label="Roster players" value={formatNumber(roster.length)} />
+          <Info label="Detail failures" value={formatNumber(playerDetailDiagnostics.failed ?? degradedPlayerCount)} />
+          <Info label="Tracked players" value={formatNumber(current.size)} />
+          <Info label="Mode" value={selectedIds === null ? "Auto online" : "Manual"} />
+        </div>
+        <code>{JSON.stringify(mapUrlLog[0] ?? { url: currentFrameUrl }, null, 2)}</code>
+        <div className="map-url-log-list">
+          {mapUrlLog.map((entry) => (
+            <article key={`${entry.at}-${entry.url}`}>
+              <time>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+              <span>{entry.rosterSource} roster, {entry.selectedPlayerIds.length} players, R {entry.regionIdParam || "-"}</span>
+              <small>{entry.playerIdParam || "no playerId"}</small>
+            </article>
+          ))}
+        </div>
+      </details>
       <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
         <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
           <div className="map-resource-heading">
