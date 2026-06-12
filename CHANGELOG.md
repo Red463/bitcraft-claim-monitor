@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.4-beta.1] - 2026-06-12
+
+### Changed
+
+- Reduced avoidable BitJita polling while viewing Admin and increased the local BitJita proxy rate-limit ceiling for normal dashboard refresh workloads.
+
+### Fixed
+
+- Improved HTTP 429 refresh warnings so local rate limiting is easier to distinguish from upstream BitJita issues.
+
 ## [1.0.3-beta.1] - 2026-06-12
 
 ### Added

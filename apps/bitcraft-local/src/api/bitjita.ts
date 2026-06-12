@@ -31,6 +31,8 @@ function httpErrorMessage(path: string, status: number) {
   const label = dataAreaLabel(path);
   const statusText = status >= 500
     ? "BitJita may be having a temporary issue."
+    : status === 429
+      ? "The local app or BitJita is rate limiting requests. Refresh will retry automatically."
     : "The request could not be completed.";
   return `Unable to refresh ${label} (HTTP ${status}). ${statusText}`;
 }
@@ -51,7 +53,7 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
     skills: `/skills`,
   } as const;
   if (!activePanel) return endpoints;
-  if (activePanel === "activity") return {};
+  if (activePanel === "activity" || activePanel === "admin") return {};
 
   const keys = new Set<keyof typeof endpoints>(["claim", "members", "crafts"]);
   const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
