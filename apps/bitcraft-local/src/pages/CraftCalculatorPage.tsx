@@ -241,6 +241,7 @@ export function CraftCalculatorPage() {
   }, [state.details]);
 
   const rawCount = state.plan?.rawMaterials.length ?? 0;
+  const directCount = state.plan?.directMaterials.length ?? 0;
   const stepCount = state.plan?.steps.length ?? 0;
 
   return (
@@ -253,6 +254,7 @@ export function CraftCalculatorPage() {
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Workflow size={14} /> {formatNumber(stepCount)} steps</span>
+            <span>{formatNumber(directCount)} recipe materials</span>
             <span>{formatNumber(rawCount)} source materials</span>
           </div>
           {selectedTarget ? (
@@ -332,6 +334,7 @@ export function CraftCalculatorPage() {
         <>
           <div className="summary-grid craftcalc-summary">
             <MiniStat icon={<Package />} label="Output" value={formatNumber(state.plan.target.quantity)} title={state.plan.target.name} />
+            <MiniStat icon={<ClipboardList />} label="Recipe Materials" value={formatNumber(state.plan.directMaterials.length)} />
             <MiniStat icon={<ClipboardList />} label="Source Materials" value={formatNumber(state.plan.rawMaterials.length)} />
             <MiniStat icon={<Factory />} label="Crafting Steps" value={formatNumber(state.plan.steps.length)} />
           </div>
@@ -345,6 +348,15 @@ export function CraftCalculatorPage() {
             <h3><Package size={16} /> Source materials</h3>
             <div className="craftcalc-material-grid">
               {state.plan.rawMaterials.map((material) => <MaterialRow key={`${material.kind}-${material.id}`} material={material} />)}
+            </div>
+          </section>
+          <section className="craftcalc-section">
+            <h3><ClipboardList size={16} /> Recipe materials</h3>
+            <p className="legend">These are the direct inputs for the selected recipe before expanding the full material chain.</p>
+            <div className="craftcalc-material-grid">
+              {state.plan.directMaterials.length
+                ? state.plan.directMaterials.map((material) => <MaterialRow key={`${material.kind}-${material.id}`} material={material} />)
+                : <div className="empty-state">No direct recipe materials were exposed by BitJita for this item.</div>}
             </div>
           </section>
           <section className="craftcalc-section">

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.7-beta.1] - 2026-06-12
+
+### Added
+
+- Added direct recipe materials to Craft Calculator so users can compare immediate recipe inputs with fully expanded source materials.
+- Added a technical application overview covering current architecture, pages, data flow, integrations, security, and risk areas.
+
 ## [1.0.6-beta.1] - 2026-06-12
 
 ### Added

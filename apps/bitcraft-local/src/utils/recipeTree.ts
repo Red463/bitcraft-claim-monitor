@@ -34,6 +34,7 @@ export type RecipeStep = {
 
 export type RecipePlan = {
   target: RecipeMaterial;
+  directMaterials: RecipeMaterial[];
   rawMaterials: RecipeMaterial[];
   steps: RecipeStep[];
   warnings: string[];
@@ -135,6 +136,7 @@ export function selectedRecipeForTarget(detail: RecipeDetail, target: RecipeTarg
 
 export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByKey: Map<string, RecipeDetail>, maxDepth = 14, selections: RecipeSelections = {}): RecipePlan {
   const raw = new Map<string, RecipeMaterial>();
+  let directMaterials: RecipeMaterial[] = [];
   const steps: RecipeStep[] = [];
   const warnings: string[] = [];
   const safeAmount = Math.max(1, Math.ceil(Number(amount) || 1));
@@ -174,9 +176,20 @@ export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByK
     const outputStack = recipeOutputs(recipe).find((candidate) => stackMatches(candidate, nextTarget));
     const outputPerCraft = Math.max(1, Number(outputStack?.quantity ?? recipe.outputQuantity ?? 1) || 1);
     const craftCount = Math.ceil(quantity / outputPerCraft);
-    const inputs = recipeInputs(recipe).map((inputStack, index) => {
+    const directInputs = recipeInputs(recipe).map((inputStack, index) => {
       const material = enrichStack(inputStack, recipe.consumedItems?.[index]);
-      const required = material.quantity * craftCount;
+      return { material, required: material.quantity * craftCount };
+    });
+    if (depth === 0) {
+      const mergedDirect = new Map<string, RecipeMaterial>();
+      for (const { material, required } of directInputs) {
+        const materialKey = recipeKey(material.kind, material.id);
+        const current = mergedDirect.get(materialKey);
+        mergedDirect.set(materialKey, { ...material, quantity: (current?.quantity ?? 0) + required });
+      }
+      directMaterials = [...mergedDirect.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    const inputs = directInputs.map(({ material, required }) => {
       const inputTarget: RecipeTarget = {
         id: material.id,
         kind: material.kind,
@@ -210,6 +223,7 @@ export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByK
   resolve(target, safeAmount, [], 0);
   return {
     target: { ...target, quantity: safeAmount },
+    directMaterials,
     rawMaterials: [...raw.values()].sort((a, b) => a.name.localeCompare(b.name)),
     steps,
     warnings: [...new Set(warnings)],

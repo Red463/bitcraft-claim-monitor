@@ -76,6 +76,10 @@ test("buildRecipePlan recursively rolls up raw materials using output quantities
 
   const plan = buildRecipePlan(target, 2, details);
   assert.equal(plan.steps.length, 2);
+  assert.deepEqual(plan.directMaterials.map((material) => [material.name, material.quantity]), [
+    ["Sturdy Stripped Wood", 4],
+    ["Woodworking Sandpaper", 2],
+  ]);
   assert.deepEqual(plan.rawMaterials.map((material) => [material.name, material.quantity]), [
     ["Sturdy Wood Log", 12],
     ["Woodworking Sandpaper", 2],
@@ -109,6 +113,7 @@ test("buildRecipePlan honors selected alternate recipes", () => {
   ]);
 
   const plan = buildRecipePlan(target, 3, details, 14, { [recipeKey("items", "plank")]: "alternate-route" });
+  assert.deepEqual(plan.directMaterials.map((material) => [material.name, material.quantity]), [["Simple Board", 6]]);
   assert.deepEqual(plan.rawMaterials.map((material) => [material.name, material.quantity]), [["Simple Board", 6]]);
   assert.equal(plan.steps[0].recipeName, "Make Plank From Boards");
 });
