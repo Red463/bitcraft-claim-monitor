@@ -5301,6 +5301,12 @@ function bitjitaProxyCacheTtl(upstream) {
   return policy?.ttlMs ?? UPSTREAM_CACHE_TTL_MS;
 }
 
+function hasFreshUpstreamCache(upstream) {
+  const key = upstream.toString();
+  const cached = upstreamCache.get(key);
+  return Boolean(cached && cached.expiresAt > Date.now());
+}
+
 async function fetchUpstreamCached(upstream) {
   const key = upstream.toString();
   const now = Date.now();
@@ -5341,10 +5347,12 @@ async function fetchUpstreamCached(upstream) {
   }
 }
 
-async function proxyBitjita(url, res) {
+async function proxyBitjita(req, url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
+  const cacheKey = upstream.toString();
+  if (!hasFreshUpstreamCache(upstream) && !upstreamInflight.has(cacheKey) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
   const response = await fetchUpstreamCached(upstream);
   res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState }));
   res.end(response.body);
@@ -5356,8 +5364,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
-      if (!rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-      return proxyBitjita(url, res);
+      return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));

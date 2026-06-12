@@ -116,6 +116,10 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
         const requestedEndpoints = endpointMap(claimId, activePanel);
+        if (Object.keys(requestedEndpoints).length === 0) {
+          React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
+          return;
+        }
         if (activePanel === "dashboard") {
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);

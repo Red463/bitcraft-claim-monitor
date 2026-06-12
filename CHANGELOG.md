@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.5-beta.1] - 2026-06-12
+
+### Changed
+
+- Changed local BitJita proxy rate limiting so cached and deduplicated responses do not count as new upstream request pressure.
+
+### Fixed
+
+- Fixed Admin and Activity no-poll pages clearing the last good BitJita data snapshot during navigation.
+
 ## [1.0.4-beta.1] - 2026-06-12
 
 ### Changed
