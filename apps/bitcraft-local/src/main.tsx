@@ -703,7 +703,6 @@ function activeRegionLabel(region: ActiveRegion, settlementRegionId?: string): s
   const suffixes = [
     String(region.regionId) === String(settlementRegionId ?? "") ? "settlement" : "",
     region.source === "admin" ? "manual" : "",
-    region.syncing === false ? "not syncing" : "",
   ].filter(Boolean);
   return `R${region.regionId}${region.regionName ? ` - ${region.regionName}` : ""}${suffixes.length ? ` (${suffixes.join(", ")})` : ""}`;
 }
@@ -2299,9 +2298,38 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
   const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
   const [toolbeltError, setToolbeltError] = React.useState(false);
   const toolsForMemberRef = React.useRef<string | null>(null);
+  const observedCraftProgressRef = React.useRef<Map<string, number>>(new Map());
+  const [observedMovingCrafts, setObservedMovingCrafts] = React.useState<Set<string>>(() => new Set());
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === String(selectedMember.userName ?? selectedMember.username)) ?? null : null;
+  function craftProgressKey(job: AnyRecord) {
+    return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.buildingName ?? "structure"}:${job.recipeId ?? ""}:${job.craftedItem?.[0]?.item_id ?? ""}`);
+  }
+  const craftProgressSignature = React.useMemo(() => data.crafts.map((job: AnyRecord) => [
+    craftProgressKey(job),
+    toNumber(job.progress),
+    toNumber(job.totalActionsRequired),
+  ].join(":")).join("|"), [data.crafts]);
+  React.useEffect(() => {
+    const previous = observedCraftProgressRef.current;
+    const next = new Map<string, number>();
+    const moving = new Set<string>();
+    for (const job of data.crafts) {
+      const key = craftProgressKey(job);
+      const progress = toNumber(job.progress);
+      const total = toNumber(job.totalActionsRequired);
+      const previousProgress = previous.get(key);
+      if (previousProgress != null && progress > previousProgress && (!total || progress < total)) moving.add(key);
+      next.set(key, progress);
+    }
+    observedCraftProgressRef.current = next;
+    setObservedMovingCrafts(moving);
+  }, [craftProgressSignature]);
+  const isCraftObservedMoving = React.useCallback((job: AnyRecord) => observedMovingCrafts.has(craftProgressKey(job)), [observedMovingCrafts]);
+  const isCraftWorking = React.useCallback((job: AnyRecord, contributors: AnyRecord[]) => {
+    return hasRecentCraftContribution(contributors) || isCraftObservedMoving(job);
+  }, [isCraftObservedMoving]);
   React.useEffect(() => {
     if (!selectedMember?.playerEntityId) {
       setToolbeltTools(null);
@@ -2377,8 +2405,8 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
       ? String(aValue).localeCompare(String(bValue))
       : toNumber(aValue) - toNumber(bValue);
     if (comparison !== 0) return sortDir === "asc" ? comparison : -comparison;
-    const aActive = hasRecentCraftContribution(data.contributions[String(a.entityId)] ?? []) ? 1 : 0;
-    const bActive = hasRecentCraftContribution(data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
+    const aActive = isCraftWorking(a, data.contributions[String(a.entityId)] ?? []) ? 1 : 0;
+    const bActive = isCraftWorking(b, data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
     return bActive - aActive || bMetrics.completion - aMetrics.completion;
   });
   const crafterCounts = visibleCrafts.reduce<Record<string, number>>((acc, job) => {
@@ -2388,7 +2416,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
   }, {});
   const activeJobs = jobs.filter((job) => {
     const total = toNumber(job.totalActionsRequired);
-    return total > toNumber(job.progress) && hasRecentCraftContribution(data.contributions[String(job.entityId)] ?? []);
+    return total > toNumber(job.progress) && isCraftWorking(job, data.contributions[String(job.entityId)] ?? []);
   }).length;
   const totalProductionXp = jobs.reduce((sum, job) => sum + metrics(job).totalXp, 0);
   const remainingProductionXp = jobs.reduce((sum, job) => sum + metrics(job).remainingXp, 0);
@@ -2466,7 +2494,7 @@ function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { 
           const skillName = SKILL_NAMES[skillId] ?? job.levelRequirements?.[0]?.skillName ?? (skillId ? `Skill ${skillId}` : null);
           const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
           const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
-          const isWorking = total > progress && hasRecentCraftContribution(contributors);
+          const isWorking = total > progress && isCraftWorking(job, contributors);
           const isDone = total > 0 && progress >= total;
           const status = isWorking ? "Active now" : isDone ? "Ready" : progress > 0 ? "Paused" : "Queued";
           const eligibilityStatus = eligibility(job);

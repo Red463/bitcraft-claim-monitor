@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.2-beta.1] - 2026-06-12
+
+### Changed
+
+- Removed the visible "not syncing" suffix from active-region dropdown labels.
+- Updated Production's active/paused state to recognize craft progress that moves during refreshes, while keeping contribution recording limited to BitJita contribution data.
+
 ## [1.0.1-beta.1] - 2026-06-12
 
 ### Added
