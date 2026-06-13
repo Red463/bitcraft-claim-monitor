@@ -32,6 +32,7 @@ const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 const geoipDir = path.join(dataDir, "geoip");
 const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
+const maxGeoipJsonFallbackBytes = 25 * 1024 * 1024;
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(brandingDir, { recursive: true });
 mkdirSync(backupDir, { recursive: true });
@@ -1149,6 +1150,9 @@ async function runGeoipRefreshJob({ jobKey } = {}) {
   if (looksZip || /zip/i.test(contentType)) {
     const result = await importMaxMindCityCsvZipToSqlite(body, (metadata) => updateScheduledJobProgress(jobKey, { downloadedBytes: body.length, storage, ...metadata }));
     entriesCount = result.entries;
+    try {
+      if (existsSync(geoipDataPath)) unlinkSync(geoipDataPath);
+    } catch {}
   } else {
     mkdirSync(geoipDir, { recursive: true });
     const tempPath = `${geoipDataPath}.tmp`;
@@ -2395,6 +2399,14 @@ function parseGeoipDownload(body, contentType = "") {
 function geoipFileEntryCount() {
   if (!existsSync(geoipDataPath)) return 0;
   const stat = statSync(geoipDataPath);
+  if (stat.size > maxGeoipJsonFallbackBytes) {
+    geoipCache = {
+      mtimeMs: stat.mtimeMs,
+      entries: [],
+      error: `GeoIP JSON fallback is too large to load safely (${Math.round(stat.size / 1024 / 1024)} MB). Run the GeoIP refresh again to import it into SQLite.`,
+    };
+    return 0;
+  }
   const tailLength = Math.min(stat.size, 4096);
   if (!tailLength) return 0;
   const fd = openSync(geoipDataPath, "r");
@@ -2427,6 +2439,16 @@ function geoipStatus() {
   }
   try {
     const stat = statSync(geoipDataPath);
+    if (stat.size > maxGeoipJsonFallbackBytes) {
+      return {
+        configured: false,
+        storage: "json-skipped",
+        path: geoipDataPath,
+        entries: 0,
+        lastUpdatedAt: new Date(stat.mtimeMs).toISOString(),
+        error: `GeoIP JSON fallback is too large to load safely (${Math.round(stat.size / 1024 / 1024)} MB). Run the GeoIP refresh again to import it into SQLite.`,
+      };
+    }
     return { configured: true, storage: "json", path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
   } catch (error) {
     return { configured: false, storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
@@ -2436,6 +2458,14 @@ function geoipStatus() {
 function loadGeoipEntries() {
   if (!existsSync(geoipDataPath)) return [];
   const stat = statSync(geoipDataPath);
+  if (stat.size > maxGeoipJsonFallbackBytes) {
+    geoipCache = {
+      mtimeMs: stat.mtimeMs,
+      entries: [],
+      error: `GeoIP JSON fallback is too large to load safely (${Math.round(stat.size / 1024 / 1024)} MB). Run the GeoIP refresh again to import it into SQLite.`,
+    };
+    return [];
+  }
   if (geoipCache.entries && geoipCache.mtimeMs === stat.mtimeMs) return geoipCache.entries;
   try {
     const entries = parseGeoipData(readFileSync(geoipDataPath, "utf8"));
