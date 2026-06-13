@@ -134,6 +134,7 @@ test("server collection paginates listings and protects production mutations", a
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
   let failClaimRefresh = false;
+  let failResearchRefresh = false;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
@@ -176,7 +177,10 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
     if (url.pathname === `/api/claims/${claimId}/inventories`) return json(res, { buildings: [{ entityId: "storage-1", buildingName: "Basic Storage Chest", buildingNickname: "Ingots" }] });
     if (url.pathname === `/api/claims/${claimId}/construction`) return json(res, { projects: [] });
-    if (url.pathname === `/api/claims/${claimId}/research`) return json(res, { research: [] });
+    if (url.pathname === `/api/claims/${claimId}/research`) {
+      if (failResearchRefresh) return json(res, { error: "research unavailable" }, 500);
+      return json(res, { research: [{ entityId: "research-1", name: "Claim Upgrades", tier: 1, unlocked: true }] });
+    }
     if (url.pathname === "/api/players/player-1") {
       playerDetailRequests += 1;
       return json(res, { player: { playerEntityId: "player-1", username: "Tester", signedIn: true } });
@@ -189,6 +193,7 @@ test("server collection paginates listings and protects production mutations", a
         extractionRecipes: [],
       });
     }
+    if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
     if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
     if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
@@ -411,12 +416,15 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(pageDataOne.claim.claim.supplies, 500);
   assert.equal(pageDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
   assert.equal(pageDataOne.collectorStatus.collectors.production.label, "Production");
+  const researchBeforeFailure = await fetch(`${origin}/api/local/pages/research?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(researchBeforeFailure.research.technologies.length, 1);
+  assert.equal(researchBeforeFailure.research.technologies[0].name, "Claim Upgrades");
   const appDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
   assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
   appDb.close();
-  const writableAppDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"));
+  const writableAppDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   writableAppDb.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, updated_at = ? WHERE job_key = ?")
     .run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "geoip_database_refresh");
   writableAppDb.close();
@@ -699,6 +707,19 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(marketSnapshotHistory.market.totals.confirmedSales, 1);
   assert.equal(marketSnapshotHistory.snapshots.snapshots.length, 1);
   assert.equal("activity" in marketSnapshotHistory, false);
+
+  failResearchRefresh = true;
+  const failedResearchCollectResponse = await fetch(`${origin}/api/local/admin/collect-now`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(failedResearchCollectResponse.status, 200);
+  const researchAfterFailure = await fetch(`${origin}/api/local/pages/research?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(researchAfterFailure.research.technologies.length, 1);
+  assert.equal(researchAfterFailure.research.technologies[0].name, "Claim Upgrades");
+  assert.equal(researchAfterFailure.partialErrors.some((error) => String(error).includes("Research refresh failed")), true);
+  failResearchRefresh = false;
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   craftEntityRevision = 1;

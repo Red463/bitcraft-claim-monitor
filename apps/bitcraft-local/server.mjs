@@ -6358,6 +6358,23 @@ function previousPayload(previous, domain, fallback) {
   return previous[domain]?.data ?? fallback;
 }
 
+async function fetchDomainPayload(previous, domain, fallback, label, load) {
+  try {
+    return await load();
+  } catch (error) {
+    const fallbackPayload = previousPayload(previous, domain, fallback);
+    const message = `${label} refresh failed: ${error instanceof Error ? error.message : String(error)}`;
+    if (!fallbackPayload || typeof fallbackPayload !== "object" || Array.isArray(fallbackPayload)) {
+      return { value: fallbackPayload, partialError: message, partialErrors: [message] };
+    }
+    return {
+      ...fallbackPayload,
+      partialError: message,
+      partialErrors: [...(Array.isArray(fallbackPayload.partialErrors) ? fallbackPayload.partialErrors : []), message],
+    };
+  }
+}
+
 async function buildCurrentClaimData(claimId, options = {}) {
   const id = String(claimId ?? "").trim();
   if (!/^\d{8,}$/.test(id)) {
@@ -6389,31 +6406,31 @@ async function buildCurrentClaimData(claimId, options = {}) {
     skillsPayload,
     regionStatus,
   ] = await Promise.all([
-    collectorDue(id, "professions", "citizens", options) ? fetchBitjita(`/claims/${id}/citizens`).catch(() => ({ citizens: [] })) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
-    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchBitjita(`/claims/${id}/buildings`).catch(() => ({ buildings: [] })) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
-    collectorDue(id, "construction", "construction", options) ? fetchBitjita(`/claims/${id}/construction`).catch(() => ({ projects: [] })) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
-    collectorDue(id, "research", "research", options) ? fetchBitjita(`/claims/${id}/research`).catch(() => ({ research: [] })) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
-    collectorDue(id, "market", "market", options) ? fetchAllClaimListings(id).catch(() => ({ listings: [] })) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
+    collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => fetchBitjita(`/claims/${id}/citizens`)) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
+    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => fetchBitjita(`/claims/${id}/buildings`)) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
+    collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => fetchBitjita(`/claims/${id}/construction`)) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
+    collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => fetchBitjita(`/claims/${id}/research`)) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
+    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => fetchAllClaimListings(id)) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
     collectorDue(id, "production", "crafts", options)
       ? settlementProductionCrafts({ claimId: id, members, forceRefresh: true }).catch((error) => {
         const fallback = previousPayload(previous, "crafts", { craftResults: [] });
         return { ...fallback, partialError: error instanceof Error ? error.message : String(error) };
       })
       : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
-    collectorDue(id, "players", "players", options) ? playerDetailSummaries({ members }) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
-    collectorDue(id, "inventory", "inventories", options) ? fetchBitjita(`/claims/${id}/inventories`).catch(() => ({ buildings: [] })) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "inventory", "recruitment", options) ? fetchBitjita(`/claims/${id}/recruitment`).catch(() => ({ applications: [] })) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
-    collectorDue(id, "inventory", "layout", options) ? fetchBitjita(`/claims/${id}/layout`).catch(() => ({ layout: [] })) : Promise.resolve(previousPayload(previous, "layout", {})),
-    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchBitjita("/skills").catch(() => ({ skills: [] })) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
-    collectorDue(id, "region", "regionStatus", options) ? fetchBitjita("/regions/status").catch(() => ({ regions: [] })) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
+    collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => playerDetailSummaries({ members })) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
+    collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => fetchBitjita(`/claims/${id}/inventories`)) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
+    collectorDue(id, "inventory", "recruitment", options) ? fetchDomainPayload(previous, "recruitment", { applications: [] }, "Recruitment", () => fetchBitjita(`/claims/${id}/recruitment`)) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
+    collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => fetchBitjita(`/claims/${id}/layout`)) : Promise.resolve(previousPayload(previous, "layout", {})),
+    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => fetchBitjita("/skills")) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
+    collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => fetchBitjita("/regions/status")) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
   const contributionEntries = collectorDue(id, "production", "contributions", options)
     ? Object.entries(await craftContributionMap(productionCrafts))
     : Object.entries(previousPayload(previous, "contributions", {}));
   const [region, tradeVolume] = await Promise.all([
-    collectorDue(id, "region", "region", options) && claim?.regionId ? fetchCachedRegionClaims(claim.regionId).catch(() => ({ claims: [] })) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
-    collectorDue(id, "market", "tradeVolume", options) && claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
+    collectorDue(id, "region", "region", options) && claim?.regionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => fetchCachedRegionClaims(claim.regionId)) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
+    collectorDue(id, "market", "tradeVolume", options) && claim?.regionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`)) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
   ]);
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
