@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.19-beta.1] - 2026-06-13
+
+### Changed
+
+- Changed the first-visit analytics consent prompt into a blocking modal with clearer anonymous usage-tracking wording.
+- Rotated the analytics consent storage key so users are prompted again after the wording change.
+
+### Fixed
+
+- Fixed the Admin database browser showing stale rows when switching tables quickly.
+
 ## [1.0.18-beta.1] - 2026-06-13
 
 ### Changed

@@ -574,12 +574,26 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 .analytics-status.enabled strong { color: var(--good); }
 .analytics-status span { color: var(--text); font-size: 12px; line-height: 1.4; }
 .privacy-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.cookie-banner { position: fixed; z-index: var(--z-cookie); bottom: 18px; left: max(18px, calc((100vw - 810px) / 2)); width: min(810px, calc(100vw - 36px)); border: 1px solid rgba(240,198,79,.38); border-radius: 8px; background: var(--panel); box-shadow: 0 18px 45px rgba(0,0,0,.56); padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 22px; animation: dialog-enter .18s ease-out; }
-.cookie-banner strong { display: block; color: var(--gold); font: 600 19px Rajdhani, sans-serif; margin-bottom: 4px; }
-.cookie-banner p { max-width: 535px; margin: 0 0 8px; color: var(--text); font-size: 13px; line-height: 1.45; }
+.cookie-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-cookie);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--active-bg) 28%, transparent), transparent 42%), rgba(0,0,0,.66);
+  backdrop-filter: blur(10px);
+  overscroll-behavior: contain;
+  animation: overlay-enter .16s ease-out;
+}
+.cookie-banner { width: min(660px, 100%); border: 1px solid rgba(240,198,79,.42); border-radius: 12px; background: radial-gradient(circle at top right, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 38%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); box-shadow: 0 24px 80px rgba(0,0,0,.68), inset 0 1px 0 rgba(255,255,255,.05); padding: 22px; display: grid; gap: 18px; animation: dialog-enter .18s ease-out; }
+.cookie-banner strong { display: block; color: var(--gold); font: 800 24px/1.05 Rajdhani, Outfit, sans-serif; letter-spacing: .01em; margin-bottom: 9px; }
+.cookie-banner p { max-width: 590px; margin: 0 0 9px; color: var(--text); font-size: 14px; line-height: 1.55; }
+.cookie-banner .cookie-note { color: #b9c4d3; font-size: 13px; }
 .cookie-details { border: 0; padding: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
 .cookie-details:hover { color: var(--gold); }
-.cookie-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.cookie-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.cookie-actions .toolbar-button { min-height: 40px; }
 .drawer-overlay, .command-overlay { position: fixed; inset: 0; z-index: 29; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }
 .notice-drawer { margin-left: auto; width: min(430px, 100vw); min-height: 100vh; border-left: 1px solid var(--border); background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 34%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 20px; display: grid; align-content: start; gap: 16px; animation: drawer-enter .2s ease-out; box-shadow: -24px 0 70px rgba(0,0,0,.46); }
 .notice-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

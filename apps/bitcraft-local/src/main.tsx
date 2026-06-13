@@ -801,7 +801,7 @@ function panelHref(panel: ActivePanel): string {
   return `/?page=${encodeURIComponent(panel)}`;
 }
 
-const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent";
+const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent_v2";
 const ANALYTICS_VISITOR_COOKIE = "claim_monitor_analytics_visitor";
 const ANALYTICS_SESSION_KEY = "claim-monitor.analytics.session";
 let analyticsConsent: AnalyticsConsent = null;
@@ -4243,17 +4243,20 @@ function UserSettingsDialog({
 
 function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exclude<AnalyticsConsent, null>) => void; onPrivacy: () => void }) {
   return (
-    <section className="cookie-banner" role="dialog" aria-label="Analytics cookies">
-      <div>
-        <strong>Help improve Claim Monitor</strong>
-        <p>We would like to use analytics cookies to see which pages and tools are useful. This data is genuinely helpful for development, so please accept if you are happy to help.</p>
-        <button className="cookie-details" onClick={onPrivacy}>Privacy & Analytics details</button>
-      </div>
-      <div className="cookie-actions">
-        <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
-        <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
-      </div>
-    </section>
+    <div className="cookie-consent-overlay" role="presentation">
+      <section className="cookie-banner" role="dialog" aria-modal="true" aria-labelledby="cookie-consent-title">
+        <div>
+          <strong id="cookie-consent-title">Help improve Claim Monitor</strong>
+          <p>We use optional anonymous analytics to understand which pages, tools, and features are used most. This helps prioritise development and improve the app without collecting your name, Discord account, character identity, or personal messages.</p>
+          <p className="cookie-note">Please choose whether this browser can share anonymous feature-usage data. You can change this later from Privacy & Analytics.</p>
+          <button className="cookie-details" onClick={onPrivacy}>Privacy & Analytics details</button>
+        </div>
+        <div className="cookie-actions">
+          <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Anonymous Analytics</button>
+          <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -4443,7 +4446,7 @@ function AdminPanel({
   const [mapUrlLog, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
   const [tables, setTables] = React.useState<AnyRecord[]>([]);
   const [selectedTable, setSelectedTable] = usePersistedState("admin.database.selectedTable", "");
-  const [tableResult, setTableResult] = React.useState<AnyRecord>({ rows: [], columns: [], total: 0, offset: 0, limit: 50 });
+  const [tableResult, setTableResult] = React.useState<AnyRecord>({ table: "", rows: [], columns: [], total: 0, offset: 0, limit: 50 });
   const [tableSearch, setTableSearch] = React.useState("");
   const [tableOffset, setTableOffset] = React.useState(0);
   const [users, setUsers] = React.useState<AnyRecord[]>([]);
@@ -4586,10 +4589,19 @@ function AdminPanel({
   }, [auth?.authenticated, tab, analyticsDays, botSection]);
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
+    let stale = false;
+    setTableResult((current) => current.table === selectedTable ? current : { table: selectedTable, rows: [], columns: [], total: 0, offset: tableOffset, limit: 50 });
     const timer = window.setTimeout(() => {
-      run(async () => setTableResult(await api(`/admin/table?name=${encodeURIComponent(selectedTable)}&limit=50&offset=${tableOffset}&search=${encodeURIComponent(tableSearch)}`)));
+      const requestedTable = selectedTable;
+      run(async () => {
+        const result = await api(`/admin/table?name=${encodeURIComponent(requestedTable)}&limit=50&offset=${tableOffset}&search=${encodeURIComponent(tableSearch)}`);
+        if (!stale) setTableResult({ ...result, table: requestedTable });
+      });
     }, 150);
-    return () => window.clearTimeout(timer);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer);
+    };
   }, [auth?.authenticated, selectedTable, tableOffset, tableSearch, tab]);
 
   async function saveSettings() {
@@ -4854,11 +4866,12 @@ function AdminPanel({
     );
   }
 
-  const tableRows: AnyRecord[] = tableResult.rows ?? [];
-  const tableColumns = (tableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
+  const activeTableResult = tableResult.table === selectedTable ? tableResult : { table: selectedTable, rows: [], columns: [], total: 0, offset: tableOffset, limit: 50 };
+  const tableRows: AnyRecord[] = activeTableResult.rows ?? [];
+  const tableColumns = (activeTableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
   const selectedTableInfo = tables.find((table) => table.name === selectedTable);
-  const tableRangeStart = tableResult.total ? tableOffset + 1 : 0;
-  const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(tableResult.total));
+  const tableRangeStart = activeTableResult.total ? tableOffset + 1 : 0;
+  const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(activeTableResult.total));
   const endpointChecks = [...diagnostics].sort((a, b) => {
     if (Boolean(a.ok) !== Boolean(b.ok)) return a.ok ? 1 : -1;
     return toNumber(b.durationMs) - toNumber(a.durationMs);
@@ -5921,7 +5934,7 @@ function AdminPanel({
           </div>
           <div className="database-inspector-stats">
             <Info label="Selected table" value={selectedTable || "-"} />
-            <Info label="Total rows" value={formatNumber(selectedTableInfo?.rows ?? tableResult.total)} />
+            <Info label="Total rows" value={formatNumber(selectedTableInfo?.rows ?? activeTableResult.total)} />
             <Info label="Visible columns" value={formatNumber(tableColumns.length)} />
             <Info label="Showing" value={`${formatNumber(tableRangeStart)}-${formatNumber(tableRangeEnd)}`} />
           </div>
@@ -5933,7 +5946,7 @@ function AdminPanel({
             </div>
           </div>
           {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
-          <div className="pager"><span>{formatNumber(tableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= tableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
+          <div className="pager"><span>{formatNumber(activeTableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= activeTableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
         </section>
       ) : null}
 
