@@ -1,5 +1,14 @@
 import React from "react";
 import type { AnyRecord } from "../../main-app-data";
+import { compareSortValues, type SortDirection } from "../../utils/tableSort";
+
+function cellSortText(value: React.ReactNode): string {
+  if (value == null || typeof value === "boolean") return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(cellSortText).join(" ");
+  if (React.isValidElement<{ children?: React.ReactNode }>(value)) return cellSortText(value.props.children);
+  return "";
+}
 
 export function DataTable({
   rows,
@@ -12,12 +21,43 @@ export function DataTable({
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
 }) {
+  const [sort, setSort] = React.useState<{ column: number; direction: SortDirection } | null>(null);
+  const indexedRows = React.useMemo(() => rows.map((row, index) => ({ row, index })), [rows]);
+  const visibleRows = React.useMemo(() => {
+    if (!sort) return indexedRows;
+    const [, render] = columns[sort.column] ?? [];
+    if (!render) return indexedRows;
+    return [...indexedRows].sort((left, right) => {
+      const result = compareSortValues(cellSortText(render(left.row, left.index)), cellSortText(render(right.row, right.index)), sort.direction);
+      return result || left.index - right.index;
+    });
+  }, [columns, indexedRows, sort]);
+  const toggleSort = (column: number) => {
+    setSort((current) => {
+      if (!current || current.column !== column) return { column, direction: "asc" };
+      if (current.direction === "asc") return { column, direction: "desc" };
+      return null;
+    });
+  };
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr>{columns.map(([label]) => <th key={label}>{label}</th>)}</tr></thead>
+        <thead><tr>{columns.map(([label], columnIndex) => (
+          <th key={label}>
+            <button
+              type="button"
+              className={`table-sort-button ${sort?.column === columnIndex ? "is-sorted" : ""}`}
+              onClick={() => toggleSort(columnIndex)}
+              aria-label={`Sort by ${label}`}
+              aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+            >
+              <span>{label}</span>
+              <span className="table-sort-indicator">{sort?.column === columnIndex ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+            </button>
+          </th>
+        ))}</tr></thead>
         <tbody>
-          {rows.length ? rows.map((row, index) => (
+          {visibleRows.length ? visibleRows.map(({ row, index }) => (
             <tr
               className={`data-row ${rowClassName?.(row) ?? ""}`}
               key={row.entityId ?? row.id ?? index}

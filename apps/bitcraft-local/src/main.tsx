@@ -2923,7 +2923,7 @@ function Leaderboard({
             <DataTable rows={onlineRows} columns={[
               ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} /></strong>],
               ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
-              ["Current session", (entry) => entry.signedIn && entry.sessionSeconds != null ? `Playing ${formatDuration(entry.sessionSeconds)}` : "Unavailable"],
+              ["Current session", (entry) => entry.signedIn && entry.sessionSeconds != null ? `Playing ${formatDuration(entry.sessionSeconds)}` : "-"],
               ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds)],
               ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds)],
               ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown"],

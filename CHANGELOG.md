@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.14-beta.1] - 2026-06-13
+
+### Added
+
+- Added sortable column headers to shared app data tables.
+
+### Changed
+
+- Changed offline Leaderboard current-session values to show a dash instead of "Unavailable".
+
 ## [1.0.13-beta.1] - 2026-06-13
 
 ### Fixed

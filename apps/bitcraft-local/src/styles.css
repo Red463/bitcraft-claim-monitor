@@ -1371,6 +1371,43 @@ button.overview-kpi-card:hover { border-color: var(--hover-border); background: 
 table { width: 100%; border-collapse: collapse; min-width: 780px; }
 th, td { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.055); text-align: left; vertical-align: middle; }
 th { color: var(--gold); font: 600 12px Rajdhani, sans-serif; text-transform: uppercase; background: #12151b; position: sticky; top: 0; }
+.table-sort-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.table-sort-button:hover,
+.table-sort-button:focus-visible,
+.table-sort-button.is-sorted {
+  color: var(--text);
+}
+.table-sort-button:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.table-sort-indicator {
+  color: var(--muted);
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  line-height: 1;
+  opacity: .75;
+}
+.table-sort-button.is-sorted .table-sort-indicator {
+  color: var(--gold);
+  opacity: 1;
+}
 td { color: #e9e6dc; font-size: 13px; }
 tbody tr:hover { background: rgba(255,255,255,.025); }
 .data-row { animation: none; }
