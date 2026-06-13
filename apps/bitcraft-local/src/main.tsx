@@ -4444,6 +4444,7 @@ function AdminPanel({
 }) {
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
+  const [authLoaderMinimumActive, setAuthLoaderMinimumActive] = React.useState(true);
   const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : "status");
   const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
@@ -4575,6 +4576,10 @@ function AdminPanel({
     setCustomCommands((await api("/admin/discord/custom-commands")).commands ?? []);
   }
 
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setAuthLoaderMinimumActive(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
   React.useEffect(() => {
     api("/admin/me").then(setAdminAuthState).catch((error) => {
       setAdminAuthState({ authenticated: false, setupRequired: false, error: error instanceof Error ? error.message : String(error) });
@@ -4865,7 +4870,7 @@ function AdminPanel({
     ["supplies", "Supplies"],
     ["appUpdate", "App Update"],
   ] as const;
-  if (authLoading) return (
+  if (authLoading || authLoaderMinimumActive) return (
     <div className="panel admin-login admin-loading-panel">
       <section className="admin-session-loader" role="status" aria-live="polite" aria-label="Checking administrator session">
         <div className="admin-loader-orb" aria-hidden="true">

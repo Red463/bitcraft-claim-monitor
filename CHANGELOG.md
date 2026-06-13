@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.23-beta.1] - 2026-06-13
+
+### Changed
+
+- Changed the Admin session-loading animation to remain visible briefly before entering the console.
+
 ## [1.0.22-beta.1] - 2026-06-13
 
 ### Added
