@@ -221,7 +221,7 @@ type AppSettings = {
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
-  visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipSourceUrl: string };
+  visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
   browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
@@ -609,7 +609,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
   snapshotRetentionDays: 365,
-  visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "" },
+  visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
   browserSnapshotsEnabled: true,
   discord: {
     enabled: false,
@@ -678,6 +678,10 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
       fullIpRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.fullIpRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.fullIpRetentionDays, 1), 30),
       statsRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.statsRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.statsRetentionDays, 30), 730),
       geoipSourceUrl: String((config as AnyRecord)?.visitorSecurity?.geoipSourceUrl ?? ""),
+      geoipAccountId: String((config as AnyRecord)?.visitorSecurity?.geoipAccountId ?? ""),
+      geoipLicenseKey: String((config as AnyRecord)?.visitorSecurity?.geoipLicenseKey ?? ""),
+      geoipLicenseKeyConfigured: Boolean((config as AnyRecord)?.visitorSecurity?.geoipLicenseKeyConfigured),
+      geoipClearLicenseKey: Boolean((config as AnyRecord)?.visitorSecurity?.geoipClearLicenseKey),
     },
     discord: {
       ...DEFAULT_SETTINGS.discord,
@@ -4861,7 +4865,30 @@ function AdminPanel({
     ["supplies", "Supplies"],
     ["appUpdate", "App Update"],
   ] as const;
-  if (authLoading) return <div className="panel admin-login"><Header title="Admin">Checking administrator session</Header><div className="loading">Loading...</div></div>;
+  if (authLoading) return (
+    <div className="panel admin-login admin-loading-panel">
+      <section className="admin-session-loader" role="status" aria-live="polite" aria-label="Checking administrator session">
+        <div className="admin-loader-orb" aria-hidden="true">
+          <span className="admin-loader-ring" />
+          <span className="admin-loader-ring delay" />
+          <KeyRound size={30} />
+        </div>
+        <div className="admin-loader-copy">
+          <span className="eyebrow">Admin Console</span>
+          <h2>Verifying Access</h2>
+          <p>Checking your encrypted session and administrator permissions.</p>
+        </div>
+        <div className="admin-loader-track" aria-hidden="true">
+          <span />
+        </div>
+        <div className="admin-loader-steps" aria-hidden="true">
+          <span><Shield size={14} /> Session</span>
+          <span><Database size={14} /> Roles</span>
+          <span><CheckCircle2 size={14} /> Console</span>
+        </div>
+      </section>
+    </div>
+  );
   if (!auth?.authenticated) {
     const adminDiscordLogin = String(auth?.discordLoginUrl ?? `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent("/?page=admin")}`);
     return (
@@ -5626,7 +5653,28 @@ function AdminPanel({
                 <small>How long anonymised security/location statistics are kept.</small>
               </label>
             </div>
-            <label className="field"><span>GeoIP source URL</span><input value={draft.visitorSecurity.geoipSourceUrl} onChange={(event) => updateVisitorSecuritySetting({ geoipSourceUrl: event.target.value })} placeholder="Optional JSON/CSV URL for scheduled local GeoIP refresh" /></label>
+            <div className="form-card nested-card">
+              <h3><MapPin size={17} /> GeoIP Refresh Source</h3>
+              <p className="legend">Paste the MaxMind GeoLite2 City CSV ZIP URL and store the account credentials separately. The license key is write-only and is not shown again after saving.</p>
+              <label className="field">
+                <span>GeoIP source URL</span>
+                <input value={draft.visitorSecurity.geoipSourceUrl} onChange={(event) => updateVisitorSecuritySetting({ geoipSourceUrl: event.target.value })} placeholder="https://download.maxmind.com/geoip/databases/GeoLite2-City-CSV/download?suffix=zip" />
+              </label>
+              <div className="form-grid two">
+                <label className="field">
+                  <span>MaxMind account ID</span>
+                  <input value={draft.visitorSecurity.geoipAccountId} onChange={(event) => updateVisitorSecuritySetting({ geoipAccountId: event.target.value })} placeholder="Account ID" />
+                </label>
+                <label className="field">
+                  <span>MaxMind license key</span>
+                  <input type="password" value={draft.visitorSecurity.geoipLicenseKey ?? ""} onChange={(event) => updateVisitorSecuritySetting({ geoipLicenseKey: event.target.value, geoipClearLicenseKey: false })} placeholder={draft.visitorSecurity.geoipLicenseKeyConfigured ? "Configured - enter a new key to replace" : "License key"} />
+                </label>
+              </div>
+              <div className="toolbar-row">
+                <span className={draft.visitorSecurity.geoipLicenseKeyConfigured ? "status-pill ok" : "status-pill"}>{draft.visitorSecurity.geoipLicenseKeyConfigured ? "License key configured" : "No license key saved"}</span>
+                {draft.visitorSecurity.geoipLicenseKeyConfigured ? <button className="toolbar-button" type="button" onClick={() => updateVisitorSecuritySetting({ geoipLicenseKey: "", geoipLicenseKeyConfigured: false, geoipClearLicenseKey: true })}>Clear saved key</button> : null}
+              </div>
+            </div>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
           <section className="form-card">

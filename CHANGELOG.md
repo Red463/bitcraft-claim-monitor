@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.22-beta.1] - 2026-06-13
+
+### Added
+
+- Added MaxMind GeoLite2 City CSV ZIP support for scheduled local GeoIP refreshes using separate account ID and license key fields.
+- Added an animated Admin session-loading screen.
+
+### Changed
+
+- Improved Admin GeoIP configuration wording and masked saved MaxMind license keys in settings/database views.
+
 ## [1.0.21-beta.1] - 2026-06-13
 
 ### Added

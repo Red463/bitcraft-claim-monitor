@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -583,7 +584,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "" }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
@@ -1093,18 +1094,22 @@ async function runRecipeCatalogRefreshJob() {
 }
 
 async function runGeoipRefreshJob() {
-  const settings = visitorSecuritySettings();
+  const settings = visitorSecuritySettings(true);
   if (!settings.geoipSourceUrl) {
     return {
       refreshed: false,
       configured: false,
-      message: "No GeoIP source URL is configured. Add a local JSON/CSV GeoIP update URL in Admin settings to enable automatic refreshes.",
+      message: "No GeoIP source URL is configured. Add a MaxMind GeoLite2 City CSV ZIP, JSON, or CSV update URL in Admin settings to enable automatic refreshes.",
     };
   }
-  const response = await fetch(settings.geoipSourceUrl, { headers: { "user-agent": appIdentifier } });
+  const headers = { "user-agent": appIdentifier };
+  if (settings.geoipAccountId && settings.geoipLicenseKey) {
+    headers.authorization = `Basic ${Buffer.from(`${settings.geoipAccountId}:${settings.geoipLicenseKey}`).toString("base64")}`;
+  }
+  const response = await fetch(settings.geoipSourceUrl, { headers });
   if (!response.ok) throw new Error(`GeoIP download failed with HTTP ${response.status}`);
-  const body = await response.text();
-  const entries = parseGeoipData(body);
+  const body = Buffer.from(await response.arrayBuffer());
+  const entries = parseGeoipDownload(body, response.headers.get("content-type") ?? "");
   if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
   mkdirSync(geoipDir, { recursive: true });
   const tempPath = `${geoipDataPath}.tmp`;
@@ -2039,13 +2044,18 @@ function ipHash(value) {
   return createHash("sha256").update(`${appIdentifier}|${normalizeIpAddress(value)}`).digest("hex");
 }
 
-function visitorSecuritySettings() {
+function visitorSecuritySettings(includeSecrets = false) {
   const saved = safeJson(statements.getSetting.get("visitor_security_json")?.value, {});
-  return {
+  const licenseKey = String(saved.geoipLicenseKey ?? "").trim();
+  const settings = {
     fullIpRetentionDays: Math.min(Math.max(toNumber(saved.fullIpRetentionDays) || 7, 1), 30),
     statsRetentionDays: Math.min(Math.max(toNumber(saved.statsRetentionDays) || 180, 30), 730),
     geoipSourceUrl: String(saved.geoipSourceUrl ?? "").trim(),
+    geoipAccountId: String(saved.geoipAccountId ?? "").trim(),
+    geoipLicenseKeyConfigured: Boolean(licenseKey),
   };
+  if (includeSecrets) settings.geoipLicenseKey = licenseKey;
+  return settings;
 }
 
 function routeGroup(pathname) {
@@ -2097,6 +2107,110 @@ function parseGeoipData(text) {
       return { cidr, country: country || "Unknown", city: city || "" };
     }).filter((entry) => entry.cidr);
   }
+}
+
+function parseCsvLine(line) {
+  const values = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < String(line).length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      values.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  values.push(current);
+  return values;
+}
+
+function parseCsvRecords(text) {
+  const lines = String(text ?? "").split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map((header) => header.trim());
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, String(values[index] ?? "").trim()]));
+  });
+}
+
+function readZipEntries(buffer) {
+  const bytes = Buffer.from(buffer);
+  const endSignature = 0x06054b50;
+  let endOffset = -1;
+  for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65557); offset -= 1) {
+    if (bytes.readUInt32LE(offset) === endSignature) {
+      endOffset = offset;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error("ZIP archive is missing an end-of-central-directory record");
+  const totalEntries = bytes.readUInt16LE(endOffset + 10);
+  const centralOffset = bytes.readUInt32LE(endOffset + 16);
+  const entries = new Map();
+  let pointer = centralOffset;
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (bytes.readUInt32LE(pointer) !== 0x02014b50) throw new Error("ZIP archive has an invalid central directory");
+    const compression = bytes.readUInt16LE(pointer + 10);
+    const compressedSize = bytes.readUInt32LE(pointer + 20);
+    const uncompressedSize = bytes.readUInt32LE(pointer + 24);
+    const nameLength = bytes.readUInt16LE(pointer + 28);
+    const extraLength = bytes.readUInt16LE(pointer + 30);
+    const commentLength = bytes.readUInt16LE(pointer + 32);
+    const localOffset = bytes.readUInt32LE(pointer + 42);
+    const name = bytes.subarray(pointer + 46, pointer + 46 + nameLength).toString("utf8");
+    if (bytes.readUInt32LE(localOffset) !== 0x04034b50) throw new Error(`ZIP archive has an invalid local header for ${name}`);
+    const localNameLength = bytes.readUInt16LE(localOffset + 26);
+    const localExtraLength = bytes.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
+    let data;
+    if (compression === 0) data = compressed;
+    else if (compression === 8) data = inflateRawSync(compressed);
+    else throw new Error(`ZIP entry ${name} uses unsupported compression method ${compression}`);
+    if (uncompressedSize && data.length !== uncompressedSize) throw new Error(`ZIP entry ${name} has an unexpected size`);
+    entries.set(name, data.toString("utf8"));
+    pointer += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function parseMaxMindCityCsvZip(buffer) {
+  const entries = readZipEntries(buffer);
+  const locationsEntry = [...entries.entries()].find(([name]) => /GeoLite2-City-Locations-en\.csv$/i.test(name));
+  const blocksEntry = [...entries.entries()].find(([name]) => /GeoLite2-City-Blocks-IPv4\.csv$/i.test(name));
+  if (!locationsEntry || !blocksEntry) throw new Error("GeoIP ZIP must contain GeoLite2-City-Locations-en.csv and GeoLite2-City-Blocks-IPv4.csv");
+  const locations = new Map(parseCsvRecords(locationsEntry[1]).map((row) => [
+    String(row.geoname_id ?? ""),
+    {
+      country: String(row.country_name || row.country_iso_code || "Unknown").trim() || "Unknown",
+      city: String(row.city_name || "").trim(),
+    },
+  ]));
+  return parseCsvRecords(blocksEntry[1]).map((row) => {
+    const location = locations.get(String(row.geoname_id ?? "")) || locations.get(String(row.registered_country_geoname_id ?? "")) || {};
+    return {
+      cidr: String(row.network ?? "").trim(),
+      country: String(location.country ?? "Unknown").trim() || "Unknown",
+      city: String(location.city ?? "").trim(),
+    };
+  }).filter((entry) => entry.cidr);
+}
+
+function parseGeoipDownload(body, contentType = "") {
+  const buffer = Buffer.from(body);
+  const looksZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
+  if (looksZip || /zip/i.test(contentType)) return parseMaxMindCityCsvZip(buffer);
+  return parseGeoipData(buffer.toString("utf8"));
 }
 
 function geoipStatus() {
@@ -2687,7 +2801,23 @@ function tableQuery(name, params, exporting = false) {
   const limit = exporting ? Math.min(Math.max(Number(params.limit) || 10000, 1), 50000) : Math.min(Math.max(Number(params.limit) || 50, 1), 200);
   const offset = exporting ? 0 : Math.max(Number(params.offset) || 0, 0);
   const rows = db.prepare(`SELECT * FROM "${safeName}"${where} ORDER BY "${orderBy.replaceAll('"', '""')}" ${direction} LIMIT ? OFFSET ?`).all(...values, limit, offset);
-  return { table: name, columns, rows, total, limit, offset, timeColumn };
+  return { table: name, columns, rows: maskSensitiveTableRows(name, rows), total, limit, offset, timeColumn };
+}
+
+function maskSensitiveTableRows(name, rows) {
+  if (name !== "app_settings") return rows;
+  return rows.map((row) => {
+    if (row?.key !== "visitor_security_json" || typeof row.value !== "string") return row;
+    const value = safeJson(row.value, null);
+    if (!value || typeof value !== "object") return row;
+    return {
+      ...row,
+      value: JSON.stringify({
+        ...value,
+        geoipLicenseKey: value.geoipLicenseKey ? "[configured]" : "",
+      }),
+    };
+  });
 }
 
 const analyticsEvents = new Set([
@@ -7786,10 +7916,14 @@ const server = createServer(async (req, res) => {
           : [];
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
         if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
+        const previousVisitorSecurity = visitorSecuritySettings(true);
+        const submittedGeoipLicenseKey = typeof body.visitorSecurity?.geoipLicenseKey === "string" ? body.visitorSecurity.geoipLicenseKey.trim() : "";
         const visitorSecurity = {
           fullIpRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.fullIpRetentionDays) || 7), 1), 30),
           statsRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.statsRetentionDays) || 180), 30), 730),
           geoipSourceUrl: String(body.visitorSecurity?.geoipSourceUrl ?? "").trim(),
+          geoipAccountId: String(body.visitorSecurity?.geoipAccountId ?? "").trim(),
+          geoipLicenseKey: body.visitorSecurity?.geoipClearLicenseKey === true ? "" : submittedGeoipLicenseKey || previousVisitorSecurity.geoipLicenseKey || "",
         };
         if (visitorSecurity.geoipSourceUrl && !/^https?:\/\//i.test(visitorSecurity.geoipSourceUrl)) return send(res, 400, { error: "GeoIP source URL must start with http:// or https://" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };

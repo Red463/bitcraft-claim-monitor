@@ -638,6 +638,159 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 .loading, .error { margin: 26px; }
 .panel > .loading, .panel > .error { margin: 0; }
 .error { border-color: rgba(239,100,97,.5); color: #ffb9b6; }
+.admin-loading-panel {
+  min-height: calc(100vh - 84px);
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.admin-loading-panel::before {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(240,198,79,.16), transparent 30%),
+    radial-gradient(circle at 46% 55%, rgba(86,213,255,.10), transparent 36%);
+  filter: blur(18px);
+  opacity: .9;
+  pointer-events: none;
+}
+.admin-session-loader {
+  width: min(430px, calc(100vw - 48px));
+  min-height: 390px;
+  padding: 30px;
+  border: 1px solid rgba(240,198,79,.24);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(22,27,36,.94), rgba(5,7,10,.96)),
+    radial-gradient(circle at top, rgba(240,198,79,.14), transparent 42%);
+  box-shadow: 0 28px 80px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.04);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 22px;
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+.admin-session-loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, transparent 0 32%, rgba(255,255,255,.08) 46%, transparent 60% 100%);
+  transform: translateX(-120%);
+  animation: admin-loader-sheen 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.admin-loader-orb {
+  width: 102px;
+  height: 102px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--gold);
+  background:
+    radial-gradient(circle, rgba(240,198,79,.22), rgba(240,198,79,.05) 48%, rgba(0,0,0,.25) 72%),
+    linear-gradient(180deg, rgba(24,31,43,.98), rgba(10,13,19,.98));
+  border: 1px solid rgba(240,198,79,.30);
+  box-shadow: 0 0 32px rgba(240,198,79,.16), inset 0 0 26px rgba(240,198,79,.08);
+  position: relative;
+}
+.admin-loader-ring {
+  position: absolute;
+  inset: -9px;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  border-top-color: rgba(240,198,79,.92);
+  border-right-color: rgba(86,213,255,.45);
+  animation: admin-loader-spin 1.45s linear infinite;
+}
+.admin-loader-ring.delay {
+  inset: -17px;
+  border-top-color: rgba(99,235,165,.55);
+  border-right-color: rgba(240,198,79,.16);
+  animation-duration: 2.2s;
+  animation-direction: reverse;
+}
+.admin-loader-copy { display: grid; gap: 8px; }
+.admin-loader-copy .eyebrow {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.admin-loader-copy h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(30px, 4vw, 42px);
+  line-height: .95;
+}
+.admin-loader-copy p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 310px;
+  line-height: 1.45;
+}
+.admin-loader-track {
+  width: min(280px, 100%);
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.admin-loader-track span {
+  display: block;
+  width: 46%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--gold), #63eba5, #56d5ff);
+  box-shadow: 0 0 18px rgba(240,198,79,.36);
+  animation: admin-loader-scan 1.45s ease-in-out infinite;
+}
+.admin-loader-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.admin-loader-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(240,198,79,.14);
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  color: #d7deea;
+  font-size: 12px;
+  font-weight: 800;
+}
+@keyframes admin-loader-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes admin-loader-scan {
+  0% { transform: translateX(-110%); }
+  55%, 100% { transform: translateX(230%); }
+}
+@keyframes admin-loader-sheen {
+  0%, 35% { transform: translateX(-120%); }
+  75%, 100% { transform: translateX(120%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-session-loader::after,
+  .admin-loader-ring,
+  .admin-loader-track span {
+    animation: none;
+  }
+  .admin-loader-track span {
+    width: 100%;
+  }
+}
 .api-status-banner {
   margin: 14px 22px 0;
   padding: 10px 12px;

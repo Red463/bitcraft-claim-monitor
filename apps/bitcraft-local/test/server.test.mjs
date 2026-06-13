@@ -51,6 +51,56 @@ async function stop(child) {
   });
 }
 
+function zipStore(entries) {
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of entries) {
+    const nameBuffer = Buffer.from(name);
+    const data = Buffer.from(text);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt32LE(0, 10);
+    local.writeUInt32LE(0, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuffer.length, 26);
+    local.writeUInt16LE(0, 28);
+    chunks.push(local, nameBuffer, data);
+
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0, 8);
+    entry.writeUInt16LE(0, 10);
+    entry.writeUInt32LE(0, 12);
+    entry.writeUInt32LE(0, 16);
+    entry.writeUInt32LE(data.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(nameBuffer.length, 28);
+    entry.writeUInt16LE(0, 30);
+    entry.writeUInt16LE(0, 32);
+    entry.writeUInt32LE(0, 34);
+    entry.writeUInt32LE(0, 38);
+    entry.writeUInt32LE(offset, 42);
+    central.push(entry, nameBuffer);
+    offset += local.length + nameBuffer.length + data.length;
+  }
+  const centralOffset = offset;
+  const centralSize = central.reduce((sum, chunk) => sum + chunk.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(centralOffset, 16);
+  return Buffer.concat([...chunks, ...central, end]);
+}
+
 test("server collection paginates listings and protects production mutations", async (t) => {
   const requestedPages = [];
   const listings = [
@@ -69,6 +119,7 @@ test("server collection paginates listings and protects production mutations", a
   let craftContributionRequests = 0;
   let playerCraftRequests = 0;
   let recipeDetailRequests = 0;
+  let geoipDownloadRequests = 0;
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
   let failClaimRefresh = false;
@@ -77,6 +128,17 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === "/api/cache-test") {
       proxyCacheRequests += 1;
       return setTimeout(() => json(res, { ok: true, request: proxyCacheRequests }), 75);
+    }
+    if (url.pathname === "/geoip/GeoLite2-City-CSV.zip") {
+      geoipDownloadRequests += 1;
+      const expectedAuth = `Basic ${Buffer.from("maxmind-account:maxmind-license").toString("base64")}`;
+      if (req.headers.authorization !== expectedAuth) return json(res, { error: "unauthorized" }, 401);
+      const zip = zipStore([
+        ["GeoLite2-City-CSV_20260613/GeoLite2-City-Locations-en.csv", "geoname_id,locale_code,continent_code,continent_name,country_iso_code,country_name,subdivision_1_iso_code,subdivision_1_name,city_name\n123,en,EU,Europe,GB,United Kingdom,LND,London,London\n"],
+        ["GeoLite2-City-CSV_20260613/GeoLite2-City-Blocks-IPv4.csv", "network,geoname_id,registered_country_geoname_id,represented_country_geoname_id,is_anonymous_proxy,is_satellite_provider,postal_code,latitude,longitude,accuracy_radius\n203.0.113.0/24,123,123,,0,0,,51.5,-0.1,50\n"],
+      ]);
+      res.writeHead(200, { "content-type": "application/zip" });
+      return res.end(zip);
     }
     if (url.pathname === "/api/resources") {
       resourceCatalogRequests += 1;
@@ -356,6 +418,24 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
+  const geoipSettingsResponse = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...initialConfig,
+      visitorSecurity: {
+        ...initialConfig.visitorSecurity,
+        geoipSourceUrl: `http://127.0.0.1:${upstreamPort}/geoip/GeoLite2-City-CSV.zip`,
+        geoipAccountId: "maxmind-account",
+        geoipLicenseKey: "maxmind-license",
+      },
+    }),
+  });
+  assert.equal(geoipSettingsResponse.status, 200);
+  const geoipSettings = await geoipSettingsResponse.json();
+  assert.equal(geoipSettings.visitorSecurity.geoipAccountId, "maxmind-account");
+  assert.equal(geoipSettings.visitorSecurity.geoipLicenseKeyConfigured, true);
+  assert.equal(geoipSettings.visitorSecurity.geoipLicenseKey, undefined);
   const adminJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
@@ -377,6 +457,16 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(recipeJob.scheduleConfig, { frequency: "weekly", dayOfWeek: 2, time: "03:30", dayOfMonth: 1 });
   assert.equal(recipeJob.scheduleLabel, "Weekly on Tuesday at 03:30");
   assert.match(recipeJob.nextRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  const geoipJobRun = await fetch(`${origin}/api/local/admin/jobs/run`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ key: "geoip_database_refresh" }),
+  }).then((response) => response.json());
+  assert.equal(geoipJobRun.result.ok, true);
+  assert.equal(geoipJobRun.result.metadata.entries, 1);
+  assert.equal(geoipDownloadRequests, 1);
+  const geoipMatchedRequest = await fetch(`${origin}/api/local/health`, { headers: { "x-forwarded-for": "203.0.113.8" } });
+  assert.equal(geoipMatchedRequest.status, 200);
   const productionNotificationSettings = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -467,9 +557,11 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
   assert.equal(visitorSecurity.retention.fullIpDays, 7);
-  assert.equal(visitorSecurity.geoip.configured, false);
+  assert.equal(visitorSecurity.geoip.configured, true);
+  assert.equal(visitorSecurity.geoip.entries, 1);
   assert.equal(visitorSecurity.totals.requests > 0, true);
   assert.equal(visitorSecurity.totals.uniqueVisitors > 0, true);
+  assert.equal(visitorSecurity.locations.some((location) => location.country === "United Kingdom" && location.city === "London"), true);
   assert.equal(visitorSecurity.locations.some((location) => location.country === "Unknown"), true);
   assert.equal(visitorSecurity.recent.some((event) => String(event.ipAnonymized ?? "").startsWith("127.0.0.0")), true);
   assert.equal(visitorSecurity.recent.some((event) => event.ipAddress === "127.0.0.1"), true);
