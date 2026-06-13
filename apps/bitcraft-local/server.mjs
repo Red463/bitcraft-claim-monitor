@@ -1,7 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { finished } from "node:stream/promises";
 import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import { promisify } from "node:util";
@@ -1128,19 +1129,29 @@ async function runGeoipRefreshJob({ jobKey } = {}) {
   updateScheduledJobProgress(jobKey, { stage: "reading_download", statusCode: response.status });
   const body = Buffer.from(await response.arrayBuffer());
   updateScheduledJobProgress(jobKey, { stage: "parsing", downloadedBytes: body.length });
-  const entries = parseGeoipDownload(body, response.headers.get("content-type") ?? "");
-  if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
-  updateScheduledJobProgress(jobKey, { stage: "writing", entries: entries.length });
   mkdirSync(geoipDir, { recursive: true });
   const tempPath = `${geoipDataPath}.tmp`;
-  await writeFile(tempPath, JSON.stringify({ updatedAt: new Date().toISOString(), ranges: entries }, null, 2));
-  parseGeoipData(readFileSync(tempPath, "utf8"));
+  const contentType = response.headers.get("content-type") ?? "";
+  const looksZip = body.length >= 4 && body.readUInt32LE(0) === 0x04034b50;
+  let entriesCount = 0;
+  if (looksZip || /zip/i.test(contentType)) {
+    const result = await writeGeoipJsonFromMaxMindCityCsvZip(body, tempPath, (metadata) => updateScheduledJobProgress(jobKey, { downloadedBytes: body.length, ...metadata }));
+    entriesCount = result.entries;
+  } else {
+    const entries = parseGeoipDownload(body, contentType);
+    if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
+    entriesCount = entries.length;
+    updateScheduledJobProgress(jobKey, { stage: "writing", entries: entriesCount });
+    await writeFile(tempPath, JSON.stringify({ updatedAt: new Date().toISOString(), ranges: entries, count: entriesCount }, null, 2));
+    parseGeoipData(readFileSync(tempPath, "utf8"));
+  }
+  if (!entriesCount) throw new Error("GeoIP source did not contain any valid ranges");
   renameSync(tempPath, geoipDataPath);
   geoipCache = { mtimeMs: 0, entries: null, error: null };
   return {
     refreshed: true,
     configured: true,
-    entries: entries.length,
+    entries: entriesCount,
     path: geoipDataPath,
   };
 }
@@ -2181,7 +2192,7 @@ function parseCsvRecords(text) {
   });
 }
 
-function readZipEntries(buffer) {
+function readZipEntries(buffer, shouldExtract = () => true) {
   const bytes = Buffer.from(buffer);
   const endSignature = 0x06054b50;
   let endOffset = -1;
@@ -2206,6 +2217,10 @@ function readZipEntries(buffer) {
     const commentLength = bytes.readUInt16LE(pointer + 32);
     const localOffset = bytes.readUInt32LE(pointer + 42);
     const name = bytes.subarray(pointer + 46, pointer + 46 + nameLength).toString("utf8");
+    if (!shouldExtract(name)) {
+      pointer += 46 + nameLength + extraLength + commentLength;
+      continue;
+    }
     if (bytes.readUInt32LE(localOffset) !== 0x04034b50) throw new Error(`ZIP archive has an invalid local header for ${name}`);
     const localNameLength = bytes.readUInt16LE(localOffset + 26);
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
@@ -2223,7 +2238,7 @@ function readZipEntries(buffer) {
 }
 
 function parseMaxMindCityCsvZip(buffer) {
-  const entries = readZipEntries(buffer);
+  const entries = readZipEntries(buffer, (name) => /GeoLite2-City-(Locations-en|Blocks-IPv4)\.csv$/i.test(name));
   const locationsEntry = [...entries.entries()].find(([name]) => /GeoLite2-City-Locations-en\.csv$/i.test(name));
   const blocksEntry = [...entries.entries()].find(([name]) => /GeoLite2-City-Blocks-IPv4\.csv$/i.test(name));
   if (!locationsEntry || !blocksEntry) throw new Error("GeoIP ZIP must contain GeoLite2-City-Locations-en.csv and GeoLite2-City-Blocks-IPv4.csv");
@@ -2244,11 +2259,117 @@ function parseMaxMindCityCsvZip(buffer) {
   }).filter((entry) => entry.cidr);
 }
 
+function* csvLineIterator(text) {
+  const source = String(text ?? "");
+  let start = 0;
+  for (let index = 0; index <= source.length; index += 1) {
+    const char = source[index];
+    if (index === source.length || char === "\n") {
+      const line = source.slice(start, index).replace(/\r$/, "");
+      start = index + 1;
+      if (line.trim()) yield line;
+    }
+  }
+}
+
+function* csvRecordIterator(text) {
+  const iterator = csvLineIterator(text);
+  const first = iterator.next();
+  if (first.done) return;
+  const headers = parseCsvLine(first.value).map((header) => header.trim());
+  for (const line of iterator) {
+    const values = parseCsvLine(line);
+    yield Object.fromEntries(headers.map((header, index) => [header, String(values[index] ?? "").trim()]));
+  }
+}
+
+function writeStreamChunk(stream, chunk) {
+  return new Promise((resolve, reject) => {
+    if (stream.write(chunk)) return resolve();
+    stream.once("drain", resolve);
+    stream.once("error", reject);
+  });
+}
+
+async function writeGeoipJsonFromMaxMindCityCsvZip(buffer, targetPath, progress = () => {}) {
+  const zipEntries = readZipEntries(buffer, (name) => /GeoLite2-City-(Locations-en|Blocks-IPv4)\.csv$/i.test(name));
+  const locationsEntry = [...zipEntries.entries()].find(([name]) => /GeoLite2-City-Locations-en\.csv$/i.test(name));
+  const blocksEntry = [...zipEntries.entries()].find(([name]) => /GeoLite2-City-Blocks-IPv4\.csv$/i.test(name));
+  if (!locationsEntry || !blocksEntry) throw new Error("GeoIP ZIP must contain GeoLite2-City-Locations-en.csv and GeoLite2-City-Blocks-IPv4.csv");
+  progress({ stage: "indexing_locations" });
+  const locations = new Map();
+  let locationRows = 0;
+  for (const row of csvRecordIterator(locationsEntry[1])) {
+    const key = String(row.geoname_id ?? "");
+    if (key) {
+      locations.set(key, {
+        country: String(row.country_name || row.country_iso_code || "Unknown").trim() || "Unknown",
+        city: String(row.city_name || "").trim(),
+      });
+    }
+    locationRows += 1;
+    if (locationRows % 5000 === 0) {
+      progress({ stage: "indexing_locations", locationRows });
+      await delay(0);
+    }
+  }
+
+  progress({ stage: "writing_ranges", locationRows, rangeRows: 0 });
+  const stream = createWriteStream(targetPath, { encoding: "utf8" });
+  try {
+    await writeStreamChunk(stream, `{"updatedAt":${JSON.stringify(new Date().toISOString())},"ranges":[\n`);
+    let count = 0;
+    let first = true;
+    for (const row of csvRecordIterator(blocksEntry[1])) {
+      const cidr = String(row.network ?? "").trim();
+      if (!cidr) continue;
+      const location = locations.get(String(row.geoname_id ?? "")) || locations.get(String(row.registered_country_geoname_id ?? "")) || {};
+      const entry = {
+        cidr,
+        country: String(location.country ?? "Unknown").trim() || "Unknown",
+        city: String(location.city ?? "").trim(),
+      };
+      await writeStreamChunk(stream, `${first ? "" : ",\n"}${JSON.stringify(entry)}`);
+      first = false;
+      count += 1;
+      if (count % 25000 === 0) {
+        progress({ stage: "writing_ranges", locationRows, rangeRows: count });
+        await delay(0);
+      }
+    }
+    await writeStreamChunk(stream, `\n],"count":${count}}\n`);
+    stream.end();
+    await finished(stream);
+    return { entries: count, locationRows };
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+}
+
 function parseGeoipDownload(body, contentType = "") {
   const buffer = Buffer.from(body);
   const looksZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
   if (looksZip || /zip/i.test(contentType)) return parseMaxMindCityCsvZip(buffer);
   return parseGeoipData(buffer.toString("utf8"));
+}
+
+function geoipFileEntryCount() {
+  if (!existsSync(geoipDataPath)) return 0;
+  const stat = statSync(geoipDataPath);
+  const tailLength = Math.min(stat.size, 4096);
+  if (!tailLength) return 0;
+  const fd = openSync(geoipDataPath, "r");
+  try {
+    const buffer = Buffer.alloc(tailLength);
+    readSync(fd, buffer, 0, tailLength, stat.size - tailLength);
+    const tail = buffer.toString("utf8");
+    const match = tail.match(/"count"\s*:\s*(\d+)/);
+    if (match) return Number(match[1]);
+  } finally {
+    closeSync(fd);
+  }
+  return loadGeoipEntries().length;
 }
 
 function geoipStatus() {
@@ -2257,8 +2378,7 @@ function geoipStatus() {
   }
   try {
     const stat = statSync(geoipDataPath);
-    const entries = loadGeoipEntries();
-    return { configured: true, path: geoipDataPath, entries: entries.length, lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
+    return { configured: true, path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
   } catch (error) {
     return { configured: false, path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
   }

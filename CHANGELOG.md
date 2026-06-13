@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.27-beta.1] - 2026-06-13
+
+### Changed
+
+- Improved MaxMind GeoLite2 City imports so GeoIP refreshes process only the required CSV files and show clearer progress while running.
+
 ## [1.0.26-beta.1] - 2026-06-13
 
 ### Changed

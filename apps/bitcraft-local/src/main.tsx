@@ -5362,6 +5362,8 @@ function AdminPanel({
                         <small>
                           Current step: {String(job.metadata.stage).replace(/_/g, " ")}
                           {job.metadata.downloadedBytes ? ` (${formatNumber(job.metadata.downloadedBytes)} bytes downloaded)` : ""}
+                          {job.metadata.locationRows ? ` (${formatNumber(job.metadata.locationRows)} locations indexed)` : ""}
+                          {job.metadata.rangeRows ? ` (${formatNumber(job.metadata.rangeRows)} ranges written)` : ""}
                           {job.metadata.entries ? ` (${formatNumber(job.metadata.entries)} entries)` : ""}
                         </small>
                       ) : null}
