@@ -19,7 +19,7 @@ import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { summarizePassiveCrafts } from "../utils/crafts";
-import { formatDuration, formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
+import { formatCurrentSession, formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
 import { equippedCount, equipmentPresets, equipmentSlots, playerToolbeltTools, visibleEquipmentSlots } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
 
@@ -126,7 +126,10 @@ export function Members({
             )],
             ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
             ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
-            ["Session", (m) => m.player?.signedIn ? <span className="online-text">Playing {formatDuration(m.player.sessionSeconds)}</span> : <span className="muted-cell">Offline</span>],
+            ["Session", (m) => {
+              const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
+              return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
+            }],
             ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
           ]}
         />

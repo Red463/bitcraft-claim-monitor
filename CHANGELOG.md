@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.16-beta.1] - 2026-06-13
+
+### Added
+
+- Added a sidebar refresh hover panel showing when each server collector last updated.
+
+### Fixed
+
+- Fixed online members showing "Playing 0m" when BitJita reports them online without a usable session timestamp.
+
 ## [1.0.15-beta.1] - 2026-06-13
 
 ### Added

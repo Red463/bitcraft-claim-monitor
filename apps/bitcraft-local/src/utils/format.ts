@@ -63,6 +63,14 @@ export function formatDuration(seconds: unknown): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+export function formatCurrentSession(seconds: unknown): string | null {
+  if (seconds == null || seconds === "") return null;
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total < 0) return null;
+  if (total < 60) return "<1m";
+  return formatDuration(total);
+}
+
 export function formatPlaytime(seconds: unknown): string {
   const total = toNumber(seconds);
   if (!Number.isFinite(total) || total <= 0) return "Unavailable";

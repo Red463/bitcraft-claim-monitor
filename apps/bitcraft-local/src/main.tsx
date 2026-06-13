@@ -85,6 +85,7 @@ import {
 } from "./main-app-data";
 import {
   dateLabel,
+  formatCurrentSession,
   formatCompactNumber,
   formatDaysAndHours,
   formatDuration,
@@ -1115,7 +1116,7 @@ function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, o
                 </span>
                 <span className="dashboard-member-session">
                   <em>Online</em>
-                  <small>{player.sessionSeconds != null ? `Playing ${formatDuration(player.sessionSeconds)}` : "Playtime unavailable"}</small>
+                  <small>{formatCurrentSession(player.sessionSeconds) ? `Playing ${formatCurrentSession(player.sessionSeconds)}` : "Playtime unavailable"}</small>
                 </span>
               </button>
             )) : <div className="dashboard-empty">No members are currently online.</div>}
@@ -2761,7 +2762,7 @@ function Leaderboard({
     <MiniStat key="online" icon={<Users />} label="Online Now" value={formatNumber(onlineRows.filter((row) => row.signedIn).length)} />,
     <MiniStat key="members" icon={<Users />} label="Tracked Members" value={formatNumber(onlineRows.length)} />,
     <MiniStat key="played" icon={<Trophy />} label="Most Played" value={mostPlayedRow?.timePlayedSeconds ? `${mostPlayedRow.name} - ${formatPlaytime(mostPlayedRow.timePlayedSeconds)}` : "Unavailable"} />,
-    <MiniStat key="longest" icon={<Clock />} label="Longest Current Session" value={longestSessionRow?.sessionSeconds ? formatDuration(longestSessionRow.sessionSeconds) : "Unavailable"} />,
+    <MiniStat key="longest" icon={<Clock />} label="Longest Current Session" value={formatCurrentSession(longestSessionRow?.sessionSeconds) ?? "Unavailable"} />,
   ] : [
     <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatNumber(summary.totalProgress)} />,
     <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />,
@@ -2927,7 +2928,10 @@ function Leaderboard({
             <DataTable rows={onlineRows} columns={[
               ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} /></strong>],
               ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
-              ["Current session", (entry) => entry.signedIn && entry.sessionSeconds != null ? `Playing ${formatDuration(entry.sessionSeconds)}` : "-"],
+              ["Current session", (entry) => {
+                const sessionLabel = formatCurrentSession(entry.sessionSeconds);
+                return entry.signedIn && sessionLabel ? `Playing ${sessionLabel}` : "-";
+              }],
               ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds)],
               ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds)],
               ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown"],
@@ -3225,7 +3229,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
         <button onClick={resetMapFilters}>Clear filters</button>
         {roster.map((player) => {
           const id = String(player.entityId);
-          return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
+          return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online${formatCurrentSession(player.sessionSeconds) ? ` - ${formatCurrentSession(player.sessionSeconds)}` : ""}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
       <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
@@ -4307,6 +4311,53 @@ function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnings: str
         </div>
       </details>
     </section>
+  );
+}
+
+function collectorTimeLabel(value: unknown): string {
+  const date = parseDateValue(value);
+  return date ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting";
+}
+
+function RefreshStatus({
+  loading,
+  lastUpdated,
+  collectorStatus,
+  intervalSeconds,
+}: {
+  loading: boolean;
+  lastUpdated: Date | null;
+  collectorStatus: AnyRecord | null | undefined;
+  intervalSeconds: number;
+}) {
+  const collectors = Object.entries((collectorStatus?.collectors ?? {}) as Record<string, AnyRecord>);
+  return (
+    <div className="refresh-status" aria-label={`Display refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
+      <span className={`refresh-dot ${loading ? "refreshing" : ""}`} />
+      <span>
+        <small>{loading ? "Refreshing" : "Last refresh"}</small>
+        <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
+      </span>
+      {collectors.length ? (
+        <div className="refresh-breakdown" role="tooltip">
+          <header>
+            <strong>Collector status</strong>
+            <span>{collectorStatus?.intervalMs ? `Server every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Server schedule"}</span>
+          </header>
+          <div className="refresh-breakdown-list">
+            {collectors.map(([key, collector]) => (
+              <div className="refresh-breakdown-row" key={key}>
+                <span className={`collector-dot ${collector.lastError ? "is-error" : collector.lastSuccessAt ? "is-ok" : ""}`} />
+                <span>
+                  <strong>{collector.label ?? key}</strong>
+                  <small>{collector.lastError ? `Error: ${collector.lastError}` : `Updated ${collectorTimeLabel(collector.lastSuccessAt)}`}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -6256,13 +6307,12 @@ function DashboardApp() {
             );
           })}
         </nav>
-        <div className="refresh-status" title={`Data refreshes automatically every ${appSettings.refreshSeconds} seconds`}>
-          <span className={`refresh-dot ${state.loading && state.data ? "refreshing" : ""}`} />
-          <span>
-            <small>{state.loading && state.data ? "Refreshing" : "Last refresh"}</small>
-            <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
-          </span>
-        </div>
+        <RefreshStatus
+          loading={state.loading && Boolean(state.data)}
+          lastUpdated={lastUpdated}
+          collectorStatus={data.raw?.collectorStatus}
+          intervalSeconds={appSettings.refreshSeconds}
+        />
       </aside>
       <main ref={mainRef}>
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
