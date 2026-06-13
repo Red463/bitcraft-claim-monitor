@@ -84,6 +84,9 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
     case "production":
       add("citizens");
       break;
+    case "leaderboard":
+      add("citizens", "skills");
+      break;
     case "inventory":
       add("inventories");
       break;
@@ -168,7 +171,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           }
         }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsPlayerDetail = activePanel === "members" || activePanel === "map";
+        const readsPlayerDetail = activePanel === "members" || activePanel === "map" || activePanel === "leaderboard";
         const readsProductionDetail = activePanel === "production";
         const readsRegionDetail = activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([

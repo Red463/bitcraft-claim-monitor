@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.13-beta.1] - 2026-06-13
+
+### Fixed
+
+- Fixed the Leaderboard Online/Sessions tab showing members as offline because it was not loading player-detail status data.
+
 ## [1.0.12-beta.1] - 2026-06-13
 
 ### Added

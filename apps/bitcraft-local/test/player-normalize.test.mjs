@@ -16,6 +16,11 @@ test("normalizePlayer preserves BitJita total played and signed-in durations", (
   assert.equal(player.timeSignedInSeconds, 4_147_200);
 });
 
+test("normalizePlayer treats BitJita online aliases as signed in", () => {
+  assert.equal(normalizePlayer({ username: "Mosswick", online: true }).signedIn, true);
+  assert.equal(normalizePlayer({ username: "Oddfawn", isOnline: true }).signedIn, true);
+});
+
 test("formatPlaytime renders long player durations in days and hours", () => {
   assert.equal(formatPlaytime(1_670_400), "19d 8h");
   assert.equal(formatPlaytime(7_260), "2h 1m");

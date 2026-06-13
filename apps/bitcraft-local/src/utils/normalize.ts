@@ -3,6 +3,7 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 export function normalizePlayer(player: AnyRecord): AnyRecord {
   const signInTs = toNumber(player.signInTimestamp);
   const now = Math.floor(Date.now() / 1000);
+  const signedIn = Boolean(player.signedIn ?? player.online ?? player.isOnline ?? (signInTs > 0));
   const timePlayedSeconds = toNumber(
     player.timePlayed ??
     player.totalTimePlayed ??
@@ -23,7 +24,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     ...player,
     entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
-    signedIn: player.signedIn === true,
+    signedIn,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : null,
     timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
     timeSignedInSeconds: timeSignedInSeconds > 0 ? timeSignedInSeconds : null,

@@ -2731,12 +2731,6 @@ function Leaderboard({
         timePlayedSeconds: player.timePlayedSeconds,
         timeSignedInSeconds: player.timeSignedInSeconds,
         lastLoginTimestamp: member.lastLoginTimestamp,
-        permissionSummary: [
-          member.coOwnerPermission ? "Co-owner" : "",
-          member.officerPermission ? "Officer" : "",
-          member.buildPermission ? "Build" : "",
-          member.inventoryPermission ? "Storage" : "",
-        ].filter(Boolean).join(", ") || "Member",
       };
     });
     return rows.sort((a, b) => Number(b.signedIn) - Number(a.signedIn) || toNumber(b.sessionSeconds) - toNumber(a.sessionSeconds) || String(a.name).localeCompare(String(b.name)));
@@ -2933,7 +2927,6 @@ function Leaderboard({
               ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds)],
               ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds)],
               ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown"],
-              ["Permissions", (entry) => entry.permissionSummary],
             ]} />
           )}
         </section>
