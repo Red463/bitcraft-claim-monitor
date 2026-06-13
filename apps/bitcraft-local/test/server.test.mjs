@@ -130,6 +130,7 @@ test("server collection paginates listings and protects production mutations", a
   let playerCraftRequests = 0;
   let recipeDetailRequests = 0;
   let geoipDownloadRequests = 0;
+  let ipapiRequests = 0;
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
   let failClaimRefresh = false;
@@ -149,6 +150,10 @@ test("server collection paginates listings and protects production mutations", a
       ]);
       res.writeHead(200, { "content-type": "application/zip" });
       return res.end(zip);
+    }
+    if (url.pathname === "/ipapi/198.51.100.9/json/") {
+      ipapiRequests += 1;
+      return json(res, { city: "Provider City", country_name: "Providerland" });
     }
     if (url.pathname === "/api/resources") {
       resourceCatalogRequests += 1;
@@ -270,6 +275,7 @@ test("server collection paginates listings and protects production mutations", a
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
     },
@@ -445,6 +451,7 @@ test("server collection paginates listings and protects production mutations", a
       ...initialConfig,
       visitorSecurity: {
         ...initialConfig.visitorSecurity,
+        geoipProvider: "local",
         geoipSourceUrl: `http://127.0.0.1:${upstreamPort}/geoip/GeoLite2-City-CSV.zip`,
         geoipAccountId: "maxmind-account",
         geoipLicenseKey: "maxmind-license",
@@ -496,6 +503,33 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(geoipDownloadRequests, 1);
   const geoipMatchedRequest = await fetch(`${origin}/api/local/health`, { headers: { "x-forwarded-for": "203.0.113.8" } });
   assert.equal(geoipMatchedRequest.status, 200);
+  const ipapiSettingsResponse = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...initialConfig,
+      visitorSecurity: {
+        ...initialConfig.visitorSecurity,
+        geoipProvider: "ipapi",
+        geoipCacheDays: 30,
+      },
+    }),
+  });
+  assert.equal(ipapiSettingsResponse.status, 200);
+  const ipapiMatchedRequest = await fetch(`${origin}/api/local/health`, { headers: { "x-forwarded-for": "198.51.100.9" } });
+  assert.equal(ipapiMatchedRequest.status, 200);
+  const ipapiLocation = await waitForCondition("ipapi provider location cache", async () => {
+    const security = await fetch(`${origin}/api/local/admin/visitor-security?days=30`, {
+      method: "GET",
+      headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    }).then((response) => response.json());
+    return security.locations.some((location) => location.country === "Providerland" && location.city === "Provider City") ? security : null;
+  });
+  assert.equal(ipapiLocation.geoip.provider, "ipapi");
+  assert.equal(ipapiRequests, 1);
+  const ipapiCachedRequest = await fetch(`${origin}/api/local/health`, { headers: { "x-forwarded-for": "198.51.100.9" } });
+  assert.equal(ipapiCachedRequest.status, 200);
+  assert.equal(ipapiRequests, 1);
   const productionNotificationSettings = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

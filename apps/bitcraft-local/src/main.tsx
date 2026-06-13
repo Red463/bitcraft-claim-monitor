@@ -221,7 +221,7 @@ type AppSettings = {
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
-  visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
+  visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipProvider: string; geoipCacheDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
   browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
@@ -609,7 +609,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
   snapshotRetentionDays: 365,
-  visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
+  visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
   browserSnapshotsEnabled: true,
   discord: {
     enabled: false,
@@ -677,6 +677,8 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     visitorSecurity: {
       fullIpRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.fullIpRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.fullIpRetentionDays, 1), 30),
       statsRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.statsRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.statsRetentionDays, 30), 730),
+      geoipProvider: String((config as AnyRecord)?.visitorSecurity?.geoipProvider ?? "ipapi"),
+      geoipCacheDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.geoipCacheDays) || DEFAULT_SETTINGS.visitorSecurity.geoipCacheDays, 1), 90),
       geoipSourceUrl: String((config as AnyRecord)?.visitorSecurity?.geoipSourceUrl ?? ""),
       geoipAccountId: String((config as AnyRecord)?.visitorSecurity?.geoipAccountId ?? ""),
       geoipLicenseKey: String((config as AnyRecord)?.visitorSecurity?.geoipLicenseKey ?? ""),
@@ -5538,7 +5540,7 @@ function AdminPanel({
               <Stat icon={<Activity />} label="Requests" value={formatNumber(visitorSecurityData?.totals?.requests)} />
               <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(visitorSecurityData?.totals?.uniqueVisitors)} />
               <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(visitorSecurityData?.totals?.errors)} />
-              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${formatNumber(visitorSecurityData?.geoip?.entries)} ranges` : "Not configured"} />
+              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} · ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
               <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
             </div>
           </section>
@@ -5666,28 +5668,50 @@ function AdminPanel({
                 <div className="unit-input"><input type="number" min={30} max={730} value={draft.visitorSecurity.statsRetentionDays} onChange={(event) => updateVisitorSecuritySetting({ statsRetentionDays: Number(event.target.value) })} /><em>days</em></div>
                 <small>How long anonymised security/location statistics are kept.</small>
               </label>
+              <label className="field unit-field">
+                <span>GeoIP cache</span>
+                <div className="unit-input"><input type="number" min={1} max={90} value={draft.visitorSecurity.geoipCacheDays} onChange={(event) => updateVisitorSecuritySetting({ geoipCacheDays: Number(event.target.value) })} /><em>days</em></div>
+                <small>How long third-party IP location lookups are cached locally.</small>
+              </label>
             </div>
             <div className="form-card nested-card">
-              <h3><MapPin size={17} /> GeoIP Refresh Source</h3>
-              <p className="legend">Paste the MaxMind GeoLite2 City CSV ZIP URL and store the account credentials separately. The license key is write-only and is not shown again after saving.</p>
+              <h3><MapPin size={17} /> GeoIP Location Source</h3>
+              <p className="legend">Choose how visitor IPs are converted into approximate country/city statistics. ipapi.co is queried server-side only when a cached location is missing.</p>
               <label className="field">
-                <span>GeoIP source URL</span>
-                <input value={draft.visitorSecurity.geoipSourceUrl} onChange={(event) => updateVisitorSecuritySetting({ geoipSourceUrl: event.target.value })} placeholder="https://download.maxmind.com/geoip/databases/GeoLite2-City-CSV/download?suffix=zip" />
+                <span>Provider</span>
+                <select value={draft.visitorSecurity.geoipProvider} onChange={(event) => updateVisitorSecuritySetting({ geoipProvider: event.target.value })}>
+                  <option value="ipapi">ipapi.co cached lookup</option>
+                  <option value="local">Local GeoIP database</option>
+                  <option value="disabled">Disabled</option>
+                </select>
               </label>
-              <div className="form-grid two">
-                <label className="field">
-                  <span>MaxMind account ID</span>
-                  <input value={draft.visitorSecurity.geoipAccountId} onChange={(event) => updateVisitorSecuritySetting({ geoipAccountId: event.target.value })} placeholder="Account ID" />
-                </label>
-                <label className="field">
-                  <span>MaxMind license key</span>
-                  <input type="password" value={draft.visitorSecurity.geoipLicenseKey ?? ""} onChange={(event) => updateVisitorSecuritySetting({ geoipLicenseKey: event.target.value, geoipClearLicenseKey: false })} placeholder={draft.visitorSecurity.geoipLicenseKeyConfigured ? "Configured - enter a new key to replace" : "License key"} />
-                </label>
-              </div>
-              <div className="toolbar-row">
-                <span className={draft.visitorSecurity.geoipLicenseKeyConfigured ? "status-pill ok" : "status-pill"}>{draft.visitorSecurity.geoipLicenseKeyConfigured ? "License key configured" : "No license key saved"}</span>
-                {draft.visitorSecurity.geoipLicenseKeyConfigured ? <button className="toolbar-button" type="button" onClick={() => updateVisitorSecuritySetting({ geoipLicenseKey: "", geoipLicenseKeyConfigured: false, geoipClearLicenseKey: true })}>Clear saved key</button> : null}
-              </div>
+              {draft.visitorSecurity.geoipProvider === "ipapi" ? (
+                <p className="legend">Provider mode avoids large local imports. Locations are approximate, cached for {draft.visitorSecurity.geoipCacheDays} days, and fall back to Unknown if the provider is unavailable.</p>
+              ) : null}
+              {draft.visitorSecurity.geoipProvider === "local" ? (
+                <>
+                  <p className="legend">Local database mode uses a MaxMind GeoLite2 City CSV ZIP. This avoids third-party lookups but can be heavy on small VPS plans.</p>
+                  <label className="field">
+                    <span>GeoIP source URL</span>
+                    <input value={draft.visitorSecurity.geoipSourceUrl} onChange={(event) => updateVisitorSecuritySetting({ geoipSourceUrl: event.target.value })} placeholder="https://download.maxmind.com/geoip/databases/GeoLite2-City-CSV/download?suffix=zip" />
+                  </label>
+                  <div className="form-grid two">
+                    <label className="field">
+                      <span>MaxMind account ID</span>
+                      <input value={draft.visitorSecurity.geoipAccountId} onChange={(event) => updateVisitorSecuritySetting({ geoipAccountId: event.target.value })} placeholder="Account ID" />
+                    </label>
+                    <label className="field">
+                      <span>MaxMind license key</span>
+                      <input type="password" value={draft.visitorSecurity.geoipLicenseKey ?? ""} onChange={(event) => updateVisitorSecuritySetting({ geoipLicenseKey: event.target.value, geoipClearLicenseKey: false })} placeholder={draft.visitorSecurity.geoipLicenseKeyConfigured ? "Configured - enter a new key to replace" : "License key"} />
+                    </label>
+                  </div>
+                  <div className="toolbar-row">
+                    <span className={draft.visitorSecurity.geoipLicenseKeyConfigured ? "status-pill ok" : "status-pill"}>{draft.visitorSecurity.geoipLicenseKeyConfigured ? "License key configured" : "No license key saved"}</span>
+                    {draft.visitorSecurity.geoipLicenseKeyConfigured ? <button className="toolbar-button" type="button" onClick={() => updateVisitorSecuritySetting({ geoipLicenseKey: "", geoipLicenseKeyConfigured: false, geoipClearLicenseKey: true })}>Clear saved key</button> : null}
+                  </div>
+                </>
+              ) : null}
+              {draft.visitorSecurity.geoipProvider === "disabled" ? <p className="legend">Location statistics will show Unknown while request logging and abuse-prevention records continue.</p> : null}
             </div>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>

@@ -33,6 +33,7 @@ const backupDir = path.join(dataDir, "backups");
 const geoipDir = path.join(dataDir, "geoip");
 const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
 const maxGeoipJsonFallbackBytes = 25 * 1024 * 1024;
+const ipapiBaseUrl = String(process.env.IPAPI_BASE_URL ?? "https://ipapi.co").replace(/\/+$/, "");
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(brandingDir, { recursive: true });
 mkdirSync(backupDir, { recursive: true });
@@ -435,6 +436,16 @@ db.exec(`
     updated_at TEXT NOT NULL,
     PRIMARY KEY (ip_start, ip_end)
   );
+  CREATE TABLE IF NOT EXISTS visitor_geoip_cache (
+    ip_hash TEXT PRIMARY KEY,
+    ip_anonymized TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    country TEXT NOT NULL,
+    city TEXT,
+    looked_up_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    error TEXT
+  );
   CREATE TABLE IF NOT EXISTS discord_delivery_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
@@ -522,6 +533,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_visitor_security_time ON visitor_security_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_visitor_security_location ON visitor_security_events (country, city, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_geoip_ranges_lookup ON geoip_ranges (ip_start, ip_end);
+  CREATE INDEX IF NOT EXISTS idx_visitor_geoip_cache_expires ON visitor_geoip_cache (expires_at);
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
@@ -594,7 +606,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
@@ -836,6 +848,27 @@ const statements = {
   lookupGeoipRange: db.prepare("SELECT country, city FROM geoip_ranges WHERE ip_start <= ? AND ip_end >= ? ORDER BY ip_start DESC LIMIT 1"),
   geoipRangeCount: db.prepare("SELECT COUNT(*) AS count FROM geoip_ranges"),
   geoipRangeLastUpdated: db.prepare("SELECT MAX(updated_at) AS updated_at FROM geoip_ranges"),
+  getVisitorGeoipCache: db.prepare("SELECT * FROM visitor_geoip_cache WHERE ip_hash = ?"),
+  upsertVisitorGeoipCache: db.prepare(`
+    INSERT INTO visitor_geoip_cache (ip_hash, ip_anonymized, provider, country, city, looked_up_at, expires_at, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(ip_hash) DO UPDATE SET
+      ip_anonymized = excluded.ip_anonymized,
+      provider = excluded.provider,
+      country = excluded.country,
+      city = excluded.city,
+      looked_up_at = excluded.looked_up_at,
+      expires_at = excluded.expires_at,
+      error = excluded.error
+  `),
+  pruneVisitorGeoipCache: db.prepare("DELETE FROM visitor_geoip_cache WHERE expires_at < ?"),
+  visitorGeoipCacheCount: db.prepare("SELECT COUNT(*) AS count FROM visitor_geoip_cache"),
+  visitorGeoipCacheLastLookup: db.prepare("SELECT MAX(looked_up_at) AS looked_up_at FROM visitor_geoip_cache"),
+  updateVisitorSecurityLocationByIpHash: db.prepare(`
+    UPDATE visitor_security_events
+    SET country = ?, city = ?
+    WHERE ip_hash = ? AND COALESCE(country, 'Unknown') = 'Unknown'
+  `),
   insertDiscordDelivery: db.prepare(`
     INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1120,6 +1153,24 @@ function updateScheduledJobProgress(jobKey, metadata) {
 
 async function runGeoipRefreshJob({ jobKey } = {}) {
   const settings = visitorSecuritySettings(true);
+  if (settings.geoipProvider === "ipapi") {
+    updateScheduledJobProgress(jobKey, { stage: "provider_mode", provider: "ipapi", cacheEntries: toNumber(statements.visitorGeoipCacheCount.get()?.count) });
+    return {
+      refreshed: false,
+      configured: true,
+      provider: "ipapi",
+      message: "ipapi provider mode uses on-demand cached lookups, so no local GeoIP database refresh is required.",
+      cacheEntries: toNumber(statements.visitorGeoipCacheCount.get()?.count),
+    };
+  }
+  if (settings.geoipProvider === "disabled") {
+    return {
+      refreshed: false,
+      configured: false,
+      provider: "disabled",
+      message: "GeoIP lookup is disabled.",
+    };
+  }
   if (!settings.geoipSourceUrl) {
     return {
       refreshed: false,
@@ -1186,7 +1237,7 @@ const scheduledJobRegistry = {
   },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
-    description: "Refreshes the local visitor IP-to-location lookup file without sending visitor IPs to a third-party service.",
+    description: "Refreshes the local visitor IP-to-location lookup file when local GeoIP mode is used. Provider mode resolves locations on demand with cache.",
     schedule: "weekly@1@00:00",
     enabled: false,
     run: runGeoipRefreshJob,
@@ -2116,9 +2167,12 @@ function ipHash(value) {
 function visitorSecuritySettings(includeSecrets = false) {
   const saved = safeJson(statements.getSetting.get("visitor_security_json")?.value, {});
   const licenseKey = String(saved.geoipLicenseKey ?? "").trim();
+  const provider = ["ipapi", "local", "disabled"].includes(String(saved.geoipProvider ?? "ipapi")) ? String(saved.geoipProvider ?? "ipapi") : "ipapi";
   const settings = {
     fullIpRetentionDays: Math.min(Math.max(toNumber(saved.fullIpRetentionDays) || 7, 1), 30),
     statsRetentionDays: Math.min(Math.max(toNumber(saved.statsRetentionDays) || 180, 30), 730),
+    geoipProvider: provider,
+    geoipCacheDays: Math.min(Math.max(Math.floor(toNumber(saved.geoipCacheDays) || 30), 1), 90),
     geoipSourceUrl: String(saved.geoipSourceUrl ?? "").trim(),
     geoipAccountId: String(saved.geoipAccountId ?? "").trim(),
     geoipLicenseKeyConfigured: Boolean(licenseKey),
@@ -2170,6 +2224,65 @@ function ipv4CidrRange(cidr) {
 }
 
 let geoipCache = { mtimeMs: 0, entries: null, error: null };
+const pendingProviderGeoipLookups = new Set();
+
+function isLocalOrPrivateIpAddress(ip) {
+  const normalized = normalizeIpAddress(ip);
+  if (!normalized) return true;
+  if (normalized === "127.0.0.1" || normalized === "0.0.0.0") return true;
+  const ipNum = ipv4ToNumber(normalized);
+  if (ipNum != null) {
+    return ipv4CidrMatch(normalized, "10.0.0.0/8")
+      || ipv4CidrMatch(normalized, "172.16.0.0/12")
+      || ipv4CidrMatch(normalized, "192.168.0.0/16")
+      || ipv4CidrMatch(normalized, "169.254.0.0/16");
+  }
+  const lower = normalized.toLowerCase();
+  return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80:");
+}
+
+function cacheProviderGeoipResult(ip, provider, country, city, error = null, ttlDays = 30) {
+  const nowIso = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + Math.max(ttlDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+  const key = ipHash(ip);
+  statements.upsertVisitorGeoipCache.run(
+    key,
+    anonymizeIpAddress(ip),
+    provider,
+    country || "Unknown",
+    city || "",
+    nowIso,
+    expiresAt,
+    error,
+  );
+  if (!error && country && country !== "Unknown") {
+    statements.updateVisitorSecurityLocationByIpHash.run(country, city || "", key);
+  }
+}
+
+async function refreshProviderGeoip(ip, settings) {
+  const normalized = normalizeIpAddress(ip);
+  const key = ipHash(normalized);
+  if (!normalized || isLocalOrPrivateIpAddress(normalized) || pendingProviderGeoipLookups.has(key)) return;
+  pendingProviderGeoipLookups.add(key);
+  try {
+    const response = await fetch(`${ipapiBaseUrl}/${encodeURIComponent(normalized)}/json/`, {
+      headers: { "user-agent": appIdentifier },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.error) throw new Error(String(payload.reason ?? payload.error));
+    const country = String(payload.country_name || payload.country || "Unknown").trim() || "Unknown";
+    const city = String(payload.city || "").trim();
+    cacheProviderGeoipResult(normalized, "ipapi", country, city, null, settings.geoipCacheDays);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    cacheProviderGeoipResult(normalized, "ipapi", "Unknown", "", message, 1);
+  } finally {
+    pendingProviderGeoipLookups.delete(key);
+  }
+}
 
 function parseGeoipData(text) {
   const trimmed = String(text ?? "").trim();
@@ -2423,10 +2536,26 @@ function geoipFileEntryCount() {
 }
 
 function geoipStatus() {
+  const settings = visitorSecuritySettings();
+  if (settings.geoipProvider === "ipapi") {
+    return {
+      configured: true,
+      provider: "ipapi",
+      storage: "provider-cache",
+      path: null,
+      entries: toNumber(statements.visitorGeoipCacheCount.get()?.count),
+      lastUpdatedAt: statements.visitorGeoipCacheLastLookup.get()?.looked_up_at ?? null,
+      error: null,
+    };
+  }
+  if (settings.geoipProvider === "disabled") {
+    return { configured: false, provider: "disabled", storage: "disabled", path: null, entries: 0, lastUpdatedAt: null, error: null };
+  }
   const sqliteEntries = toNumber(statements.geoipRangeCount.get()?.count);
   if (sqliteEntries > 0) {
     return {
       configured: true,
+      provider: "local",
       storage: "sqlite",
       path: databasePath,
       entries: sqliteEntries,
@@ -2435,7 +2564,7 @@ function geoipStatus() {
     };
   }
   if (!existsSync(geoipDataPath)) {
-    return { configured: false, storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: null };
+    return { configured: false, provider: "local", storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: null };
   }
   try {
     const stat = statSync(geoipDataPath);
@@ -2449,9 +2578,9 @@ function geoipStatus() {
         error: `GeoIP JSON fallback is too large to load safely (${Math.round(stat.size / 1024 / 1024)} MB). Run the GeoIP refresh again to import it into SQLite.`,
       };
     }
-    return { configured: true, storage: "json", path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
+    return { configured: true, provider: "local", storage: "json", path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
   } catch (error) {
-    return { configured: false, storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
+    return { configured: false, provider: "local", storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -2479,6 +2608,17 @@ function loadGeoipEntries() {
 
 function lookupGeoip(ipAddress) {
   const ip = normalizeIpAddress(ipAddress);
+  const settings = visitorSecuritySettings();
+  if (settings.geoipProvider === "disabled") return { country: "Unknown", city: "" };
+  if (settings.geoipProvider === "ipapi") {
+    if (isLocalOrPrivateIpAddress(ip)) return { country: "Unknown", city: "" };
+    const cached = statements.getVisitorGeoipCache.get(ipHash(ip));
+    if (cached && new Date(cached.expires_at).getTime() > Date.now()) {
+      return { country: cached.country || "Unknown", city: cached.city || "" };
+    }
+    void refreshProviderGeoip(ip, settings).catch(() => {});
+    return { country: "Unknown", city: "" };
+  }
   const ipNum = ipv4ToNumber(ip);
   if (ipNum != null) {
     const row = statements.lookupGeoipRange.get(ipNum, ipNum);
@@ -2499,6 +2639,7 @@ function pruneVisitorSecurityEvents() {
   const statsBefore = new Date(nowMs - settings.statsRetentionDays * 24 * 60 * 60 * 1000).toISOString();
   db.prepare("UPDATE visitor_security_events SET ip_address = NULL WHERE occurred_at < ? AND ip_address IS NOT NULL").run(fullIpBefore);
   db.prepare("DELETE FROM visitor_security_events WHERE occurred_at < ?").run(statsBefore);
+  statements.pruneVisitorGeoipCache.run(new Date(nowMs).toISOString());
   lastVisitorSecurityPruneAt = nowMs;
 }
 
@@ -8166,6 +8307,8 @@ const server = createServer(async (req, res) => {
         const visitorSecurity = {
           fullIpRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.fullIpRetentionDays) || 7), 1), 30),
           statsRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.statsRetentionDays) || 180), 30), 730),
+          geoipProvider: ["ipapi", "local", "disabled"].includes(String(body.visitorSecurity?.geoipProvider ?? "ipapi")) ? String(body.visitorSecurity?.geoipProvider ?? "ipapi") : "ipapi",
+          geoipCacheDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.geoipCacheDays) || 30), 1), 90),
           geoipSourceUrl: String(body.visitorSecurity?.geoipSourceUrl ?? "").trim(),
           geoipAccountId: String(body.visitorSecurity?.geoipAccountId ?? "").trim(),
           geoipLicenseKey: body.visitorSecurity?.geoipClearLicenseKey === true ? "" : submittedGeoipLicenseKey || previousVisitorSecurity.geoipLicenseKey || "",
@@ -8205,7 +8348,7 @@ const server = createServer(async (req, res) => {
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
         refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipConfigured: Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());

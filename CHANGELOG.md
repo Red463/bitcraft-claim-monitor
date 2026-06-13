@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.30-beta.1] - 2026-06-13
+
+### Added
+
+- Added ipapi.co as a cached server-side GeoIP provider so visitor location statistics no longer require large local GeoIP imports.
+- Added Admin controls for choosing ipapi.co, local GeoIP database mode or disabled GeoIP lookup, plus configurable provider cache retention.
+
+### Changed
+
+- Changed the GeoIP refresh job to skip local downloads when ipapi.co provider mode is active.
+
 ## [1.0.29-beta.1] - 2026-06-13
 
 ### Fixed
