@@ -110,9 +110,13 @@ function recipeInputs(recipe: AnyRecord): AnyRecord[] {
   return Array.isArray(recipe.consumedItemStacks) ? recipe.consumedItemStacks : [];
 }
 
-function recipeSortScore(recipe: AnyRecord) {
+export function isUnpackRecipe(recipe: AnyRecord) {
   const name = String(recipe.name ?? "").toLowerCase();
-  const packagePenalty = /unpack|package/.test(name) ? 100 : 0;
+  return /unpack|package/.test(name);
+}
+
+function recipeSortScore(recipe: AnyRecord) {
+  const packagePenalty = isUnpackRecipe(recipe) ? 10000 : 0;
   const passivePenalty = recipe.isPassive ? 10 : 0;
   return packagePenalty + passivePenalty + recipeInputs(recipe).length;
 }

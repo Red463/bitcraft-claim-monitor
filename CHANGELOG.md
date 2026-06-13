@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.11-beta.1] - 2026-06-13
+
+### Changed
+
+- Improved Craft Calculator recipe route selection with clearer route cards and route-type labels.
+- Changed Craft Calculator defaults to prefer normal processing recipes over unpack/package routes when multiple recipe routes are available.
+
 ## [1.0.10-beta.1] - 2026-06-13
 
 ### Changed

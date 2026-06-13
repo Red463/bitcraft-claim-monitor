@@ -6,7 +6,7 @@ import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { MiniStat } from "../components/main/Stats";
 import { formatNumber } from "../utils/format";
-import { itemTypeFromKind, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
+import { itemTypeFromKind, isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
@@ -57,7 +57,7 @@ async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Pro
 }
 
 function isPackageRecipe(recipe: AnyRecord) {
-  return /package|unpack/i.test(String(recipe.name ?? ""));
+  return isUnpackRecipe(recipe);
 }
 
 function recipeHasProductionRoute(detail: RecipeDetail, target: RecipeTarget) {
@@ -168,6 +168,26 @@ function MaterialRow({ material }: { material: RecipeMaterial }) {
       <b>{formatNumber(material.quantity)}</b>
     </div>
   );
+}
+
+function recipeRouteLabel(recipe: AnyRecord, target: RecipeTarget) {
+  const station = recipe.buildingName ? ` - ${recipe.buildingName}` : "";
+  const output = Array.isArray(recipe.craftedItemStacks) ? recipe.craftedItemStacks.find((stack: AnyRecord) => String(stack.item_id ?? stack.itemId ?? stack.id) === target.id) : null;
+  const outputQty = Number(output?.quantity ?? recipe.outputQuantity ?? 1) || 1;
+  return `${recipe.name ?? target.name}${station} (${formatNumber(outputQty)} output)`;
+}
+
+function recipeRouteMeta(recipe: AnyRecord) {
+  const routeType = isUnpackRecipe(recipe) ? "package" : recipe.isPassive ? "passive" : "processing";
+  return {
+    routeType,
+    label: routeType === "package" ? "Unpack route" : routeType === "passive" ? "Passive route" : "Preferred route",
+    help: routeType === "package"
+      ? "Uses a packed output item. The calculator will not auto-pick this while a normal processing route exists."
+      : routeType === "passive"
+        ? "Uses a passive recipe. Active processing routes are preferred where available."
+        : "Uses a station recipe that processes normal materials.",
+  };
 }
 
 export function CraftCalculatorPage() {
@@ -301,27 +321,33 @@ export function CraftCalculatorPage() {
             <span className="production-command-title"><Workflow size={15} /> Recipe routes</span>
             <span>Choose which BitJita recipe to use when an item has multiple valid routes.</span>
           </div>
-          <div className="craftcalc-recipe-grid">
-            {recipeChoices.map(({ key, target, recipes }) => (
-              <label className="research-filter-field" key={key}>
-                <span>{target.name}</span>
-                <select
-                  value={recipeSelections[key] ?? recipeId(recipes[0])}
-                  onChange={(event) => setRecipeSelections((current) => ({ ...current, [key]: event.target.value }))}
-                >
-                  {recipes.map((recipe, index) => {
-                    const station = recipe.buildingName ? ` - ${recipe.buildingName}` : "";
-                    const output = Array.isArray(recipe.craftedItemStacks) ? recipe.craftedItemStacks.find((stack: AnyRecord) => String(stack.item_id ?? stack.itemId ?? stack.id) === target.id) : null;
-                    const outputQty = Number(output?.quantity ?? recipe.outputQuantity ?? 1) || 1;
-                    return (
-                      <option key={recipeId(recipe) || index} value={recipeId(recipe)}>
-                        {recipe.name ?? target.name}{station} ({formatNumber(outputQty)} output)
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-            ))}
+          <div className="craftcalc-route-list">
+            {recipeChoices.map(({ key, target, recipes }) => {
+              const selectedId = recipeSelections[key] ?? recipeId(recipes[0]);
+              const selectedRecipe = recipes.find((recipe) => recipeId(recipe) === selectedId) ?? recipes[0];
+              const meta = recipeRouteMeta(selectedRecipe);
+              return (
+                <label className="craftcalc-route-card" key={key}>
+                  <span className="craftcalc-route-heading">
+                    <strong>{target.name}</strong>
+                    <em className={`craftcalc-route-pill ${meta.routeType}`}>{meta.label}</em>
+                  </span>
+                  <select
+                    value={selectedId}
+                    onChange={(event) => setRecipeSelections((current) => ({ ...current, [key]: event.target.value }))}
+                  >
+                    {recipes.map((recipe, index) => {
+                      return (
+                        <option key={recipeId(recipe) || index} value={recipeId(recipe)}>
+                          {recipeRouteLabel(recipe, target)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <small>{meta.help}</small>
+                </label>
+              );
+            })}
           </div>
         </section>
       ) : null}
