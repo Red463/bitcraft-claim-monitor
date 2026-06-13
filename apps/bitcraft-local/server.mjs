@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { promisify } from "node:util";
@@ -29,9 +29,12 @@ const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
+const geoipDir = path.join(dataDir, "geoip");
+const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(brandingDir, { recursive: true });
 mkdirSync(backupDir, { recursive: true });
+mkdirSync(geoipDir, { recursive: true });
 
 const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
 const db = new DatabaseSync(databasePath);
@@ -407,6 +410,21 @@ db.exec(`
     duration_seconds INTEGER,
     occurred_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS visitor_security_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    method TEXT NOT NULL,
+    route_group TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    status_class TEXT NOT NULL,
+    ip_address TEXT,
+    ip_anonymized TEXT NOT NULL,
+    ip_hash TEXT NOT NULL,
+    visitor_key TEXT NOT NULL,
+    user_agent_hash TEXT,
+    country TEXT,
+    city TEXT
+  );
   CREATE TABLE IF NOT EXISTS discord_delivery_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
@@ -491,6 +509,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_visitor_security_time ON visitor_security_events (occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_visitor_security_location ON visitor_security_events (country, city, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
@@ -563,6 +583,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "" }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
@@ -790,6 +811,12 @@ const statements = {
   insertAnalyticsEvent: db.prepare(`
     INSERT INTO analytics_events (visitor_key, session_key, event_name, page, properties_json, duration_seconds, occurred_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  insertVisitorSecurityEvent: db.prepare(`
+    INSERT INTO visitor_security_events (
+      occurred_at, method, route_group, status_code, status_class, ip_address,
+      ip_anonymized, ip_hash, visitor_key, user_agent_hash, country, city
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   insertDiscordDelivery: db.prepare(`
     INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
@@ -1065,6 +1092,34 @@ async function runRecipeCatalogRefreshJob() {
   };
 }
 
+async function runGeoipRefreshJob() {
+  const settings = visitorSecuritySettings();
+  if (!settings.geoipSourceUrl) {
+    return {
+      refreshed: false,
+      configured: false,
+      message: "No GeoIP source URL is configured. Add a local JSON/CSV GeoIP update URL in Admin settings to enable automatic refreshes.",
+    };
+  }
+  const response = await fetch(settings.geoipSourceUrl, { headers: { "user-agent": appIdentifier } });
+  if (!response.ok) throw new Error(`GeoIP download failed with HTTP ${response.status}`);
+  const body = await response.text();
+  const entries = parseGeoipData(body);
+  if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
+  mkdirSync(geoipDir, { recursive: true });
+  const tempPath = `${geoipDataPath}.tmp`;
+  await writeFile(tempPath, JSON.stringify({ updatedAt: new Date().toISOString(), ranges: entries }, null, 2));
+  parseGeoipData(readFileSync(tempPath, "utf8"));
+  renameSync(tempPath, geoipDataPath);
+  geoipCache = { mtimeMs: 0, entries: null, error: null };
+  return {
+    refreshed: true,
+    configured: true,
+    entries: entries.length,
+    path: geoipDataPath,
+  };
+}
+
 const scheduledJobRegistry = {
   recipe_catalog_refresh: {
     label: "Recipe catalog refresh",
@@ -1072,6 +1127,13 @@ const scheduledJobRegistry = {
     schedule: "daily_midnight",
     enabled: true,
     run: runRecipeCatalogRefreshJob,
+  },
+  geoip_database_refresh: {
+    label: "GeoIP database refresh",
+    description: "Refreshes the local visitor IP-to-location lookup file without sending visitor IPs to a third-party service.",
+    schedule: "weekly@1@00:00",
+    enabled: false,
+    run: runGeoipRefreshJob,
   },
 };
 
@@ -1777,6 +1839,7 @@ function getSettings() {
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
+    visitorSecurity: visitorSecuritySettings(),
     browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
   };
@@ -1952,6 +2015,208 @@ function requestAddress(req) {
   return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
 }
 
+function normalizeIpAddress(value) {
+  let ip = String(value ?? "").trim();
+  if (!ip) return "";
+  if (ip.startsWith("::ffff:")) ip = ip.slice("::ffff:".length);
+  if (ip === "::1") return "127.0.0.1";
+  return ip;
+}
+
+function anonymizeIpAddress(value) {
+  const ip = normalizeIpAddress(value);
+  const parts = ip.split(".");
+  if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
+    return `${parts[0]}.${parts[1]}.${parts[2]}.0`;
+  }
+  if (ip.includes(":")) {
+    return ip.split(":").slice(0, 4).join(":") + "::";
+  }
+  return "unknown";
+}
+
+function ipHash(value) {
+  return createHash("sha256").update(`${appIdentifier}|${normalizeIpAddress(value)}`).digest("hex");
+}
+
+function visitorSecuritySettings() {
+  const saved = safeJson(statements.getSetting.get("visitor_security_json")?.value, {});
+  return {
+    fullIpRetentionDays: Math.min(Math.max(toNumber(saved.fullIpRetentionDays) || 7, 1), 30),
+    statsRetentionDays: Math.min(Math.max(toNumber(saved.statsRetentionDays) || 180, 30), 730),
+    geoipSourceUrl: String(saved.geoipSourceUrl ?? "").trim(),
+  };
+}
+
+function routeGroup(pathname) {
+  if (pathname.startsWith("/api/local/admin")) return "admin";
+  if (pathname.startsWith("/api/local/auth") || pathname.startsWith("/api/local/user")) return "auth";
+  if (pathname.startsWith("/api/discord")) return "discord";
+  if (pathname.startsWith("/api/bitjita")) return "bitjita-proxy";
+  if (pathname.startsWith("/api/local")) return "local-api";
+  if (pathname.startsWith("/assets/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
+  return "app";
+}
+
+function shouldLogVisitor(pathname) {
+  return routeGroup(pathname) !== "static";
+}
+
+function ipv4ToNumber(ip) {
+  const parts = String(ip).split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+  return (((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3]) >>> 0;
+}
+
+function ipv4CidrMatch(ip, cidr) {
+  const [base, bitsText = "32"] = String(cidr).split("/");
+  const bits = Number(bitsText);
+  const ipNum = ipv4ToNumber(ip);
+  const baseNum = ipv4ToNumber(base);
+  if (ipNum == null || baseNum == null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (ipNum & mask) === (baseNum & mask);
+}
+
+let geoipCache = { mtimeMs: 0, entries: null, error: null };
+
+function parseGeoipData(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed.ranges) ? parsed.ranges : [];
+    return entries.map((entry) => ({
+      cidr: String(entry.cidr ?? entry.range ?? "").trim(),
+      country: String(entry.country ?? entry.countryName ?? "Unknown").trim() || "Unknown",
+      city: String(entry.city ?? entry.cityName ?? "").trim(),
+    })).filter((entry) => entry.cidr);
+  } catch {
+    return trimmed.split(/\r?\n/).slice(1).map((line) => {
+      const [cidr, country, city] = line.split(",").map((part) => part.trim());
+      return { cidr, country: country || "Unknown", city: city || "" };
+    }).filter((entry) => entry.cidr);
+  }
+}
+
+function geoipStatus() {
+  if (!existsSync(geoipDataPath)) {
+    return { configured: false, path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: null };
+  }
+  try {
+    const stat = statSync(geoipDataPath);
+    const entries = loadGeoipEntries();
+    return { configured: true, path: geoipDataPath, entries: entries.length, lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
+  } catch (error) {
+    return { configured: false, path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function loadGeoipEntries() {
+  if (!existsSync(geoipDataPath)) return [];
+  const stat = statSync(geoipDataPath);
+  if (geoipCache.entries && geoipCache.mtimeMs === stat.mtimeMs) return geoipCache.entries;
+  try {
+    const entries = parseGeoipData(readFileSync(geoipDataPath, "utf8"));
+    geoipCache = { mtimeMs: stat.mtimeMs, entries, error: null };
+    return entries;
+  } catch (error) {
+    geoipCache = { mtimeMs: stat.mtimeMs, entries: [], error: error instanceof Error ? error.message : String(error) };
+    return [];
+  }
+}
+
+function lookupGeoip(ipAddress) {
+  const ip = normalizeIpAddress(ipAddress);
+  for (const entry of loadGeoipEntries()) {
+    if (ipv4CidrMatch(ip, entry.cidr)) return { country: entry.country || "Unknown", city: entry.city || "" };
+  }
+  return { country: "Unknown", city: "" };
+}
+
+let lastVisitorSecurityPruneAt = 0;
+
+function pruneVisitorSecurityEvents() {
+  const settings = visitorSecuritySettings();
+  const nowMs = Date.now();
+  const fullIpBefore = new Date(nowMs - settings.fullIpRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const statsBefore = new Date(nowMs - settings.statsRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("UPDATE visitor_security_events SET ip_address = NULL WHERE occurred_at < ? AND ip_address IS NOT NULL").run(fullIpBefore);
+  db.prepare("DELETE FROM visitor_security_events WHERE occurred_at < ?").run(statsBefore);
+  lastVisitorSecurityPruneAt = nowMs;
+}
+
+function recordVisitorSecurityEvent(req, pathname, statusCode) {
+  if (!shouldLogVisitor(pathname)) return;
+  const nowIso = new Date().toISOString();
+  if (Date.now() - lastVisitorSecurityPruneAt > 60 * 60 * 1000) pruneVisitorSecurityEvents();
+  const ip = normalizeIpAddress(requestAddress(req));
+  const anonymized = anonymizeIpAddress(ip);
+  const userAgent = String(req.headers["user-agent"] ?? "").slice(0, 500);
+  const userAgentHash = userAgent ? createHash("sha256").update(userAgent).digest("hex") : null;
+  const visitorKey = createHash("sha256").update(`${anonymized}|${userAgentHash ?? ""}`).digest("hex");
+  const location = lookupGeoip(ip);
+  statements.insertVisitorSecurityEvent.run(
+    nowIso,
+    String(req.method ?? "GET"),
+    routeGroup(pathname),
+    toNumber(statusCode) || 0,
+    `${Math.floor((toNumber(statusCode) || 0) / 100)}xx`,
+    ip || null,
+    anonymized,
+    ipHash(ip),
+    visitorKey,
+    userAgentHash,
+    location.country,
+    location.city,
+  );
+}
+
+function visitorSecurityDashboard(days = 30) {
+  const selectedDays = [1, 7, 30, 90].includes(Number(days)) ? Number(days) : 30;
+  const since = new Date(Date.now() - selectedDays * 24 * 60 * 60 * 1000).toISOString();
+  const totals = db.prepare(`
+    SELECT COUNT(*) AS requests,
+      COUNT(DISTINCT visitor_key) AS uniqueVisitors,
+      COUNT(CASE WHEN status_code >= 400 THEN 1 END) AS errors
+    FROM visitor_security_events WHERE occurred_at >= ?
+  `).get(since);
+  const locations = db.prepare(`
+    SELECT COALESCE(country, 'Unknown') AS country, COALESCE(city, '') AS city,
+      COUNT(*) AS requests, COUNT(DISTINCT visitor_key) AS visitors
+    FROM visitor_security_events
+    WHERE occurred_at >= ?
+    GROUP BY COALESCE(country, 'Unknown'), COALESCE(city, '')
+    ORDER BY requests DESC, visitors DESC
+    LIMIT 30
+  `).all(since);
+  const routes = db.prepare(`
+    SELECT route_group AS routeGroup, COUNT(*) AS requests, COUNT(CASE WHEN status_code >= 400 THEN 1 END) AS errors
+    FROM visitor_security_events
+    WHERE occurred_at >= ?
+    GROUP BY route_group
+    ORDER BY requests DESC
+    LIMIT 20
+  `).all(since);
+  const recent = db.prepare(`
+    SELECT id, occurred_at AS occurredAt, method, route_group AS routeGroup, status_code AS statusCode,
+      ip_address AS ipAddress, ip_anonymized AS ipAnonymized, country, city
+    FROM visitor_security_events
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 50
+  `).all();
+  const retentionSettings = visitorSecuritySettings();
+  return {
+    days: selectedDays,
+    retention: { ...retentionSettings, fullIpDays: retentionSettings.fullIpRetentionDays },
+    geoip: geoipStatus(),
+    totals,
+    locations,
+    routes,
+    recent,
+  };
+}
+
 function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
   const now = Date.now();
   const key = `${name}:${requestAddress(req) || "unknown"}`;
@@ -2072,6 +2337,7 @@ function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/user-accounts/approval") return "accounts.manage";
   if (pathname === "/api/local/admin/audit") return "audit.view";
   if (pathname === "/api/local/admin/analytics") return method === "DELETE" ? "analytics.manage" : "analytics.view";
+  if (pathname === "/api/local/admin/visitor-security") return "analytics.view";
   if (pathname === "/api/local/admin/tables" || pathname === "/api/local/admin/table") return "data.view";
   if (pathname === "/api/local/admin/export") return "data.export";
   if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup" || pathname === "/api/local/admin/maintenance/prune") return "data.manage";
@@ -4984,20 +5250,33 @@ function tableBackedClaimData(claimId, rowsByDomain = {}) {
   }
   const citizens = [...professionGroups.values()];
 
-  const production = db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1 ORDER BY last_seen DESC").all(id).map((row) => ({
-    ...rowData(row),
-    entityId: row.craft_entity_id,
-    id: row.craft_entity_id,
-    label: row.label ?? rowData(row).label,
-    item: { ...(rowData(row).item ?? {}), name: row.label ?? rowData(row).item?.name, tier: row.tier ?? rowData(row).item?.tier },
-    buildingName: row.building_name ?? rowData(row).buildingName,
-    crafterName: row.crafter_name ?? rowData(row).crafterName,
-    skillName: row.profession ?? rowData(row).skillName,
-    tier: row.tier ?? rowData(row).tier,
-    totalXp: row.total_xp ?? rowData(row).totalXp,
-    progressPct: row.progress ?? rowData(row).progressPct,
-    isPublic: Boolean(row.is_public),
-  }));
+  const productionPayload = payload("crafts", {});
+  const production = db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1 ORDER BY last_seen DESC").all(id).map((row) => {
+    const raw = rowData(row);
+    const rawItem = raw.item ?? raw.output ?? raw.craftedItem?.[0] ?? {};
+    const itemName = rawItem.name ?? raw.outputItemName ?? raw.itemName ?? raw.recipeName ?? raw.name ?? row.label;
+    const normalized = normalizeProductionJob({ ...raw, itemName, recipeName: raw.recipeName ?? itemName }, productionPayload);
+    const label = itemName ?? normalized.label ?? row.label ?? raw.label;
+    return {
+      ...raw,
+      entityId: row.craft_entity_id,
+      id: row.craft_entity_id,
+      label,
+      item: {
+        ...rawItem,
+        ...(raw.item ?? {}),
+        name: rawItem.name ?? raw.outputItemName ?? raw.itemName ?? label,
+        tier: rawItem.tier ?? raw.item?.tier ?? row.tier ?? raw.tier,
+      },
+      buildingName: row.building_name ?? raw.buildingName,
+      crafterName: row.crafter_name ?? raw.crafterName,
+      skillName: row.profession ?? raw.skillName,
+      tier: row.tier ?? raw.tier,
+      totalXp: row.total_xp ?? raw.totalXp,
+      progressPct: row.progress ?? raw.progressPct,
+      isPublic: Boolean(row.is_public),
+    };
+  });
 
   const containerRows = db.prepare("SELECT * FROM inventory_container_current WHERE claim_id = ? AND active = 1 ORDER BY container_name").all(id);
   const itemRowsByContainer = new Map();
@@ -5128,7 +5407,7 @@ function tableBackedClaimData(claimId, rowsByDomain = {}) {
     claim: { ...payload("claim", {}), claim },
     members: { members },
     citizens: { citizens },
-    crafts: { craftResults: production },
+    crafts: { ...productionPayload, craftResults: production },
     players,
     inventories: {
       ...payload("inventories", {}),
@@ -7085,6 +7364,15 @@ async function proxyBitjita(req, url, res) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    if (shouldLogVisitor(url.pathname)) {
+      res.once("finish", () => {
+        try {
+          recordVisitorSecurityEvent(req, url.pathname, res.statusCode);
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Visitor security logging failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+    }
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: collectorStatusPayload() });
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
@@ -7498,6 +7786,12 @@ const server = createServer(async (req, res) => {
           : [];
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
         if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
+        const visitorSecurity = {
+          fullIpRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.fullIpRetentionDays) || 7), 1), 30),
+          statsRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.statsRetentionDays) || 180), 30), 730),
+          geoipSourceUrl: String(body.visitorSecurity?.geoipSourceUrl ?? "").trim(),
+        };
+        if (visitorSecurity.geoipSourceUrl && !/^https?:\/\//i.test(visitorSecurity.geoipSourceUrl)) return send(res, 400, { error: "GeoIP source URL must start with http:// or https://" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
         const toastSettings = {
           marketListings: body.toastSettings?.marketListings !== false,
@@ -7523,6 +7817,7 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
         statements.upsertSetting.run("excluded_member_ids_json", JSON.stringify(excludedMemberIds), updatedAt);
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
+        statements.upsertSetting.run("visitor_security_json", JSON.stringify(visitorSecurity), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
         statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
@@ -7531,7 +7826,7 @@ const server = createServer(async (req, res) => {
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
         refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipConfigured: Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
@@ -7670,6 +7965,9 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/analytics") {
         return send(res, 200, analyticsDashboard(url.searchParams.get("days")));
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/visitor-security") {
+        return send(res, 200, visitorSecurityDashboard(url.searchParams.get("days")));
       }
       if (req.method === "DELETE" && url.pathname === "/api/local/admin/analytics") {
         const removed = db.prepare("DELETE FROM analytics_events").run().changes;

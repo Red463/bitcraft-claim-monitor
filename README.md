@@ -252,6 +252,8 @@ When accepted, first-party cookies store the user's consent and a random browser
 
 The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, item IDs, item names, region query values, or database contents in analytics events. Visitors may withdraw permission at any time through **Privacy & Analytics**, which removes the analytics browser identifier.
 
+Separately from optional analytics cookies, the server records short-term request security logs for abuse prevention and operational diagnostics. These records include the request time, route group, status class, user-agent hash, anonymised IP prefix, hashed IP, and the full IP address for a limited retention window. Full IP retention defaults to 7 days, and older records keep only anonymised/hash data. If a local GeoIP database source is configured, the server can also attach approximate country/city statistics without sending visitor IPs to a third-party lookup service.
+
 The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics. This is separate from browser analytics consent and is required for the bot features to operate.
 
 ## Data Sources And Persistence
@@ -288,6 +290,7 @@ It records:
 | `market_trades` | Imported, deduplicated completed sell trades for settlement members |
 | `activity_events` | Settlement activity history |
 | `analytics_events` | Consented first-party aggregate usage analytics |
+| `visitor_security_events` | Short-term request security logs and anonymised visitor location statistics |
 | `admin_users` | Local admin credentials |
 | `admin_sessions` | Authenticated sessions |
 | `app_settings` | Settlement, Sync, display, branding and collection configuration |

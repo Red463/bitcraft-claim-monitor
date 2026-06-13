@@ -462,6 +462,17 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(analyticsDashboard.totals.pageViews, 1);
   assert.equal(analyticsDashboard.totals.interactions, 1);
   assert.equal(analyticsDashboard.totals.durationSeconds, 90);
+  const visitorSecurity = await fetch(`${origin}/api/local/admin/visitor-security?days=30`, {
+    method: "GET",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(visitorSecurity.retention.fullIpDays, 7);
+  assert.equal(visitorSecurity.geoip.configured, false);
+  assert.equal(visitorSecurity.totals.requests > 0, true);
+  assert.equal(visitorSecurity.totals.uniqueVisitors > 0, true);
+  assert.equal(visitorSecurity.locations.some((location) => location.country === "Unknown"), true);
+  assert.equal(visitorSecurity.recent.some((event) => String(event.ipAnonymized ?? "").startsWith("127.0.0.0")), true);
+  assert.equal(visitorSecurity.recent.some((event) => event.ipAddress === "127.0.0.1"), true);
   const createViewer = await fetch(`${origin}/api/local/admin/users`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

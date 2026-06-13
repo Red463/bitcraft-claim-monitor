@@ -221,6 +221,7 @@ type AppSettings = {
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
+  visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipSourceUrl: string };
   browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
@@ -608,6 +609,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   toastSettings: { marketListings: true, marketSales: true, production: true },
   branding: {},
   snapshotRetentionDays: 365,
+  visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipSourceUrl: "" },
   browserSnapshotsEnabled: true,
   discord: {
     enabled: false,
@@ -672,6 +674,11 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
     theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
     toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
     branding: (config as AnyRecord)?.branding ?? {},
+    visitorSecurity: {
+      fullIpRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.fullIpRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.fullIpRetentionDays, 1), 30),
+      statsRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.statsRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.statsRetentionDays, 30), 730),
+      geoipSourceUrl: String((config as AnyRecord)?.visitorSecurity?.geoipSourceUrl ?? ""),
+    },
     discord: {
       ...DEFAULT_SETTINGS.discord,
       ...((config as AnyRecord)?.discord ?? {}),
@@ -4456,6 +4463,7 @@ function AdminPanel({
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
+  const [visitorSecurityData, setVisitorSecurityData] = React.useState<AnyRecord | null>(null);
   const [discordDiscovery, setDiscordDiscovery] = React.useState<AnyRecord | null>(null);
   const [discordToolResults, setDiscordToolResults] = React.useState<Record<string, AnyRecord | null>>({});
   const [expandedRoleOption, setExpandedRoleOption] = React.useState<string | null>(null);
@@ -4552,6 +4560,7 @@ function AdminPanel({
 
   async function refreshAnalytics() {
     setAnalyticsData(await api(`/admin/analytics?days=${encodeURIComponent(analyticsDays)}`));
+    setVisitorSecurityData(await api(`/admin/visitor-security?days=${encodeURIComponent(analyticsDays)}`));
   }
 
   async function refreshDiscordDiscovery() {
@@ -4630,6 +4639,13 @@ function AdminPanel({
         ...current.collectorSettings,
         [key]: { ...current.collectorSettings[key], ...patch },
       },
+    }));
+  }
+
+  function updateVisitorSecuritySetting(patch: Partial<AppSettings["visitorSecurity"]>) {
+    setDraft((current) => ({
+      ...current,
+      visitorSecurity: { ...current.visitorSecurity, ...patch },
     }));
   }
 
@@ -5470,6 +5486,51 @@ function AdminPanel({
               ]} />
             </section>
           </div>
+          <section className="form-card">
+            <div className="split-header">
+              <div>
+                <h3><Shield size={17} /> Visitor Security & Location</h3>
+                <p className="legend">Server-side request logging for security and abuse prevention. This runs independently of optional analytics cookies. Full IPs are retained for {visitorSecurityData?.retention?.fullIpDays ?? 7} days, then anonymised stats remain.</p>
+              </div>
+            </div>
+            <div className="metric-grid analytics-metrics">
+              <Stat icon={<Activity />} label="Requests" value={formatNumber(visitorSecurityData?.totals?.requests)} />
+              <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(visitorSecurityData?.totals?.uniqueVisitors)} />
+              <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(visitorSecurityData?.totals?.errors)} />
+              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${formatNumber(visitorSecurityData?.geoip?.entries)} ranges` : "Not configured"} />
+              <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
+            </div>
+          </section>
+          <div className="admin-grid">
+            <section className="form-card">
+              <h3><Globe2 size={17} /> Location Summary</h3>
+              <DataTable rows={visitorSecurityData?.locations ?? []} columns={[
+                ["Country", (row) => row.country || "Unknown"],
+                ["City", (row) => row.city || "-"],
+                ["Requests", (row) => formatNumber(row.requests)],
+                ["Visitors", (row) => formatNumber(row.visitors)],
+              ]} />
+            </section>
+            <section className="form-card">
+              <h3><Server size={17} /> Route Groups</h3>
+              <DataTable rows={visitorSecurityData?.routes ?? []} columns={[
+                ["Group", (row) => row.routeGroup],
+                ["Requests", (row) => formatNumber(row.requests)],
+                ["Errors", (row) => formatNumber(row.errors)],
+              ]} />
+            </section>
+          </div>
+          <section className="form-card">
+            <h3><Database size={17} /> Recent Security Events</h3>
+            <DataTable rows={visitorSecurityData?.recent ?? []} columns={[
+              ["Time", (row) => dateLabel(row.occurredAt)],
+              ["Method", (row) => row.method],
+              ["Group", (row) => row.routeGroup],
+              ["Status", (row) => row.statusCode],
+              ["IP", (row) => row.ipAddress ?? row.ipAnonymized ?? "-"],
+              ["Location", (row) => [row.city, row.country].filter(Boolean).join(", ") || "Unknown"],
+            ]} />
+          </section>
         </div>
       ) : null}
 
@@ -5554,7 +5615,18 @@ function AdminPanel({
                 <div className="unit-input"><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /><em>days</em></div>
                 <small>How long daily snapshot records are kept.</small>
               </label>
+              <label className="field unit-field">
+                <span>Full IP retention</span>
+                <div className="unit-input"><input type="number" min={1} max={30} value={draft.visitorSecurity.fullIpRetentionDays} onChange={(event) => updateVisitorSecuritySetting({ fullIpRetentionDays: Number(event.target.value) })} /><em>days</em></div>
+                <small>Full visitor IPs are cleared after this window; anonymised stats remain.</small>
+              </label>
+              <label className="field unit-field">
+                <span>Visitor stats retention</span>
+                <div className="unit-input"><input type="number" min={30} max={730} value={draft.visitorSecurity.statsRetentionDays} onChange={(event) => updateVisitorSecuritySetting({ statsRetentionDays: Number(event.target.value) })} /><em>days</em></div>
+                <small>How long anonymised security/location statistics are kept.</small>
+              </label>
             </div>
+            <label className="field"><span>GeoIP source URL</span><input value={draft.visitorSecurity.geoipSourceUrl} onChange={(event) => updateVisitorSecuritySetting({ geoipSourceUrl: event.target.value })} placeholder="Optional JSON/CSV URL for scheduled local GeoIP refresh" /></label>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
           <section className="form-card">

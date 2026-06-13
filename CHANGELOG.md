@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.21-beta.1] - 2026-06-13
+
+### Added
+
+- Added server-side visitor security logging with short-term full IP retention, anonymised IP/hash storage and Admin reporting.
+- Added optional local GeoIP lookup support and a scheduled GeoIP database refresh job for approximate visitor location statistics.
+
+### Changed
+
+- Documented visitor security logging separately from optional analytics cookies.
+
 ## [1.0.20-beta.1] - 2026-06-13
 
 ### Changed
