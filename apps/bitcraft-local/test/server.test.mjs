@@ -727,3 +727,46 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(rateLimited?.status, 429);
   assert.ok(Number(rateLimited.headers.get("retry-after")) > 0);
 });
+
+test("background polling failures keep the server online", async (t) => {
+  const upstream = createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === `/api/claims/${claimId}`) return json(res, { error: "upstream unavailable" }, 500);
+    return json(res, { claims: [], members: [], citizens: [], buildings: [], projects: [], research: [], listings: [] });
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => new Promise((resolve) => upstream.close(resolve)));
+
+  const appPort = await availablePort();
+  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      BITCRAFT_TEST: "true",
+      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+      ENABLE_SERVER_POLLING: "true",
+      ENABLE_SCHEDULED_JOBS: "false",
+      ADMIN_SETUP_KEY: "test-setup-key",
+      APP_HOST: "127.0.0.1",
+      APP_PORT: String(appPort),
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+    },
+    stdio: "ignore",
+  });
+  t.after(async () => {
+    await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const origin = `http://127.0.0.1:${appPort}`;
+  await waitForHealth(origin, child);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(child.exitCode, null);
+  const health = await fetch(`${origin}/api/local/health`).then((response) => response.json());
+  assert.equal(health.ok, true);
+  assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
+});

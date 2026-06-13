@@ -1106,7 +1106,13 @@ async function runGeoipRefreshJob() {
   if (settings.geoipAccountId && settings.geoipLicenseKey) {
     headers.authorization = `Basic ${Buffer.from(`${settings.geoipAccountId}:${settings.geoipLicenseKey}`).toString("base64")}`;
   }
-  const response = await fetch(settings.geoipSourceUrl, { headers });
+  let response;
+  try {
+    response = await fetch(settings.geoipSourceUrl, { headers, signal: AbortSignal.timeout(120000) });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`GeoIP download failed before a response was received: ${reason}`);
+  }
   if (!response.ok) throw new Error(`GeoIP download failed with HTTP ${response.status}`);
   const body = Buffer.from(await response.arrayBuffer());
   const entries = parseGeoipDownload(body, response.headers.get("content-type") ?? "");
@@ -8226,8 +8232,16 @@ function scheduleServerPolling(delayMs = 0) {
     setCollectorStatus(key, { nextRunAt: pollStatus.nextRunAt });
   }
   serverPollTimer = setTimeout(async () => {
-    await collectServerSnapshot();
-    scheduleServerPolling(serverRefreshIntervalMs());
+    try {
+      await collectServerSnapshot();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pollStatus.lastAttemptAt = new Date().toISOString();
+      pollStatus.lastError = message;
+      if (!isTestRuntime) console.warn(`Server snapshot polling failed: ${message}`);
+    } finally {
+      scheduleServerPolling(serverRefreshIntervalMs());
+    }
   }, delayMs);
 }
 
