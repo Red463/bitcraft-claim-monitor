@@ -4856,6 +4856,20 @@ function AdminPanel({
 
   const tableRows: AnyRecord[] = tableResult.rows ?? [];
   const tableColumns = (tableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
+  const selectedTableInfo = tables.find((table) => table.name === selectedTable);
+  const tableRangeStart = tableResult.total ? tableOffset + 1 : 0;
+  const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(tableResult.total));
+  const endpointChecks = [...diagnostics].sort((a, b) => {
+    if (Boolean(a.ok) !== Boolean(b.ok)) return a.ok ? 1 : -1;
+    return toNumber(b.durationMs) - toNumber(a.durationMs);
+  });
+  const endpointFailures = endpointChecks.filter((check) => !check.ok);
+  const endpointSuccesses = endpointChecks.filter((check) => check.ok);
+  const slowestEndpoint = endpointSuccesses[0];
+  const fastestEndpoint = endpointSuccesses.reduce<AnyRecord | null>((fastest, check) => {
+    if (!fastest || toNumber(check.durationMs) < toNumber(fastest.durationMs)) return check;
+    return fastest;
+  }, null);
   const discordChannelLabel = (key: string) => {
     if (key === "notifications") return "Default notifications";
     if (key === "modNotes") return "Mod notes";
@@ -5378,8 +5392,32 @@ function AdminPanel({
             </div>
           </section>
           <section className="form-card">
-            <div className="split-header"><h3><Activity size={17} /> BitJita Endpoint Check</h3><button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button></div>
-            {diagnostics.length ? <div className="diagnostics">{[...diagnostics].sort((a, b) => toNumber(b.durationMs) - toNumber(a.durationMs)).map((check) => <div key={check.label} className={check.ok ? "ok" : "fail"}><strong>{check.label}</strong><span>{check.ok ? `${check.durationMs} ms` : check.error}</span></div>)}</div> : <p className="legend">Run checks to time public data sources, including each settlement storage container used for Activity history.</p>}
+            <div className="split-header">
+              <div>
+                <h3><Activity size={17} /> BitJita Endpoint Check</h3>
+                <p className="legend">Runs live timing checks for public data sources and settlement storage containers.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button>
+            </div>
+            {diagnostics.length ? (
+              <div className="endpoint-check-panel">
+                <div className="endpoint-summary-grid">
+                  <Info label="Checks run" value={formatNumber(endpointChecks.length)} />
+                  <Info label="Failures" value={formatNumber(endpointFailures.length)} />
+                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} · ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} · ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
+                </div>
+                <DataTable
+                  rows={endpointChecks}
+                  columns={[
+                    ["Endpoint", (check) => <span className="endpoint-name">{check.label}</span>],
+                    ["Status", (check) => <span className={`endpoint-status ${check.ok ? "ok" : "fail"}`}>{check.ok ? "Healthy" : "Failed"}</span>],
+                    ["Duration", (check) => check.ok ? `${formatNumber(check.durationMs)} ms` : "-"],
+                    ["Detail", (check) => check.ok ? "Request completed successfully" : String(check.error ?? "Request failed")],
+                  ]}
+                />
+              </div>
+            ) : <p className="legend">Run checks to time public data sources, including each settlement storage container used for Activity history.</p>}
           </section>
         </div>
       ) : null}
@@ -5487,9 +5525,23 @@ function AdminPanel({
             <label className="field"><span>Default opening page</span><select value={draft.defaultPage} onChange={(event) => updateDraft("defaultPage", event.target.value as ActivePanel)}>{NAV.filter(([id]) => id !== "admin").map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
             <label className="field"><span>Public Crafts default region ID</span><input value={draft.defaultRegion} onChange={(event) => updateDraft("defaultRegion", event.target.value)} placeholder="Use settlement region" /></label>
             <label className="field"><span>Additional active region IDs</span><input value={draft.additionalActiveRegions} onChange={(event) => updateDraft("additionalActiveRegions", event.target.value)} placeholder="Optional, e.g. 22,24" /></label>
-            <label className="field"><span>Display refresh interval (seconds)</span><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /></label>
-            <label className="field"><span>Server collection interval (seconds)</span><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /></label>
-            <label className="field"><span>Snapshot retention (days)</span><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /></label>
+            <div className="configuration-timing-grid">
+              <label className="field unit-field">
+                <span>Display refresh interval</span>
+                <div className="unit-input"><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
+                <small>How often browser tabs ask the local server for the latest stored data.</small>
+              </label>
+              <label className="field unit-field">
+                <span>Server collection interval</span>
+                <div className="unit-input"><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
+                <small>Fallback interval for server-owned BitJita collection.</small>
+              </label>
+              <label className="field unit-field">
+                <span>Snapshot retention</span>
+                <div className="unit-input"><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /><em>days</em></div>
+                <small>How long daily snapshot records are kept.</small>
+              </label>
+            </div>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
           <section className="form-card">
@@ -5502,13 +5554,13 @@ function AdminPanel({
             <div className="collector-settings-list">
               {Object.entries(draft.collectorSettings).map(([key, collector]) => (
                 <div className="collector-setting-row" key={key}>
-                  <label className="toggle-line">
+                  <label className="toggle-line collector-toggle">
                     <input type="checkbox" checked={collector.enabled !== false} onChange={(event) => updateCollectorSetting(key, { enabled: event.target.checked })} />
-                    <span>{collector.label ?? key}</span>
+                    <span><strong>{collector.label ?? key}</strong><small>{collector.enabled === false ? "Collector disabled" : "Collector enabled"}</small></span>
                   </label>
-                  <label className="field compact-field">
-                    <span>Every</span>
-                    <input type="number" min={15} max={3600} value={collector.intervalSeconds} onChange={(event) => updateCollectorSetting(key, { intervalSeconds: Number(event.target.value) })} />
+                  <label className="field compact-field collector-interval-field">
+                    <span>Interval</span>
+                    <div className="unit-input"><input type="number" min={15} max={3600} value={collector.intervalSeconds} onChange={(event) => updateCollectorSetting(key, { intervalSeconds: Number(event.target.value) })} /><em>sec</em></div>
                   </label>
                 </div>
               ))}
@@ -5857,9 +5909,30 @@ function AdminPanel({
 
       {tab === "database" ? (
         <section className="form-card database-browser">
-          <div className="split-header"><h3><Database size={17} /> Database Browser</h3><select className="select-control" value={selectedTable} onChange={(event) => { setSelectedTable(event.target.value); setTableOffset(0); }}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select></div>
-          <div className="database-toolbar"><SearchBox value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Filter table records" /><a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> CSV</a><a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> JSON</a></div>
-          {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); return value.length > 90 ? `${value.slice(0, 90)}...` : value; }])} /> : <p className="legend">No records returned.</p>}
+          <div className="database-browser-header">
+            <div>
+              <h3><Database size={17} /> Database Browser</h3>
+              <p className="legend">Inspect current SQLite tables, search records, and export filtered data for debugging.</p>
+            </div>
+            <label className="field database-table-select">
+              <span>Table</span>
+              <select className="select-control" value={selectedTable} onChange={(event) => { setSelectedTable(event.target.value); setTableOffset(0); }}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select>
+            </label>
+          </div>
+          <div className="database-inspector-stats">
+            <Info label="Selected table" value={selectedTable || "-"} />
+            <Info label="Total rows" value={formatNumber(selectedTableInfo?.rows ?? tableResult.total)} />
+            <Info label="Visible columns" value={formatNumber(tableColumns.length)} />
+            <Info label="Showing" value={`${formatNumber(tableRangeStart)}-${formatNumber(tableRangeEnd)}`} />
+          </div>
+          <div className="database-toolbar">
+            <SearchBox value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Search across visible table records" />
+            <div className="database-export-actions">
+              <a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export CSV</a>
+              <a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export JSON</a>
+            </div>
+          </div>
+          {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
           <div className="pager"><span>{formatNumber(tableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= tableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
         </section>
       ) : null}

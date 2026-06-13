@@ -130,9 +130,9 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
   React.useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      setState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         if (SERVER_HELD_PANELS.has(activePanel)) {
+          setState((prev) => ({ ...prev, loading: true, error: null }));
           const response = await fetch(`${LOCAL_API}/pages/${encodeURIComponent(activePanel)}?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh local app data (HTTP ${response.status}). The server will keep showing the latest successful BitJita data when available.`);
           const raw = await response.json();
@@ -157,6 +157,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
           return;
         }
+        setState((prev) => ({ ...prev, loading: true, error: null }));
         if (activePanel === "dashboard") {
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);

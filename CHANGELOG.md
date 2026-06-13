@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.18-beta.1] - 2026-06-13
+
+### Changed
+
+- Improved the Admin database browser with table stats, clearer search, and export actions.
+- Improved Admin configuration timing controls so interval units are explicit.
+- Improved BitJita endpoint check results with summary stats and a readable sortable table.
+
+### Fixed
+
+- Fixed sidebar last-refresh spacing so the label and timestamp no longer overlap.
+- Fixed Admin being interrupted by the full administrator-session loading screen during normal display refreshes.
+
 ## [1.0.17-beta.1] - 2026-06-13
 
 ### Added
