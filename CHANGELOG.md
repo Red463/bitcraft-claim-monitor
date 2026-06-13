@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.28-beta.1] - 2026-06-13
+
+### Fixed
+
+- Fixed MaxMind GeoLite2 City imports exhausting Node memory by storing imported IP ranges in SQLite instead of a large JSON lookup file.
+
 ## [1.0.27-beta.1] - 2026-06-13
 
 ### Changed

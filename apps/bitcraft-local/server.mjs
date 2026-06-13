@@ -1,8 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { finished } from "node:stream/promises";
 import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import { promisify } from "node:util";
@@ -427,6 +426,14 @@ db.exec(`
     country TEXT,
     city TEXT
   );
+  CREATE TABLE IF NOT EXISTS geoip_ranges (
+    ip_start INTEGER NOT NULL,
+    ip_end INTEGER NOT NULL,
+    country TEXT NOT NULL,
+    city TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ip_start, ip_end)
+  );
   CREATE TABLE IF NOT EXISTS discord_delivery_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
@@ -513,6 +520,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_visitor_security_time ON visitor_security_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_visitor_security_location ON visitor_security_events (country, city, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_geoip_ranges_lookup ON geoip_ranges (ip_start, ip_end);
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
@@ -822,6 +830,11 @@ const statements = {
       ip_anonymized, ip_hash, visitor_key, user_agent_hash, country, city
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
+  clearGeoipRanges: db.prepare("DELETE FROM geoip_ranges"),
+  insertGeoipRange: db.prepare("INSERT INTO geoip_ranges (ip_start, ip_end, country, city, updated_at) VALUES (?, ?, ?, ?, ?)"),
+  lookupGeoipRange: db.prepare("SELECT country, city FROM geoip_ranges WHERE ip_start <= ? AND ip_end >= ? ORDER BY ip_start DESC LIMIT 1"),
+  geoipRangeCount: db.prepare("SELECT COUNT(*) AS count FROM geoip_ranges"),
+  geoipRangeLastUpdated: db.prepare("SELECT MAX(updated_at) AS updated_at FROM geoip_ranges"),
   insertDiscordDelivery: db.prepare(`
     INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1129,30 +1142,33 @@ async function runGeoipRefreshJob({ jobKey } = {}) {
   updateScheduledJobProgress(jobKey, { stage: "reading_download", statusCode: response.status });
   const body = Buffer.from(await response.arrayBuffer());
   updateScheduledJobProgress(jobKey, { stage: "parsing", downloadedBytes: body.length });
-  mkdirSync(geoipDir, { recursive: true });
-  const tempPath = `${geoipDataPath}.tmp`;
   const contentType = response.headers.get("content-type") ?? "";
   const looksZip = body.length >= 4 && body.readUInt32LE(0) === 0x04034b50;
   let entriesCount = 0;
+  let storage = "sqlite";
   if (looksZip || /zip/i.test(contentType)) {
-    const result = await writeGeoipJsonFromMaxMindCityCsvZip(body, tempPath, (metadata) => updateScheduledJobProgress(jobKey, { downloadedBytes: body.length, ...metadata }));
+    const result = await importMaxMindCityCsvZipToSqlite(body, (metadata) => updateScheduledJobProgress(jobKey, { downloadedBytes: body.length, storage, ...metadata }));
     entriesCount = result.entries;
   } else {
+    mkdirSync(geoipDir, { recursive: true });
+    const tempPath = `${geoipDataPath}.tmp`;
+    storage = "json";
     const entries = parseGeoipDownload(body, contentType);
     if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
     entriesCount = entries.length;
     updateScheduledJobProgress(jobKey, { stage: "writing", entries: entriesCount });
     await writeFile(tempPath, JSON.stringify({ updatedAt: new Date().toISOString(), ranges: entries, count: entriesCount }, null, 2));
     parseGeoipData(readFileSync(tempPath, "utf8"));
+    renameSync(tempPath, geoipDataPath);
   }
   if (!entriesCount) throw new Error("GeoIP source did not contain any valid ranges");
-  renameSync(tempPath, geoipDataPath);
   geoipCache = { mtimeMs: 0, entries: null, error: null };
   return {
     refreshed: true,
     configured: true,
     entries: entriesCount,
-    path: geoipDataPath,
+    storage,
+    path: storage === "sqlite" ? databasePath : geoipDataPath,
   };
 }
 
@@ -2137,6 +2153,18 @@ function ipv4CidrMatch(ip, cidr) {
   return (ipNum & mask) === (baseNum & mask);
 }
 
+function ipv4CidrRange(cidr) {
+  const [base, bitsText = "32"] = String(cidr).split("/");
+  const bits = Number(bitsText);
+  const baseNum = ipv4ToNumber(base);
+  if (baseNum == null || !Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  const start = (baseNum & mask) >>> 0;
+  const size = 2 ** (32 - bits);
+  const end = (start + size - 1) >>> 0;
+  return { start, end };
+}
+
 let geoipCache = { mtimeMs: 0, entries: null, error: null };
 
 function parseGeoipData(text) {
@@ -2283,15 +2311,7 @@ function* csvRecordIterator(text) {
   }
 }
 
-function writeStreamChunk(stream, chunk) {
-  return new Promise((resolve, reject) => {
-    if (stream.write(chunk)) return resolve();
-    stream.once("drain", resolve);
-    stream.once("error", reject);
-  });
-}
-
-async function writeGeoipJsonFromMaxMindCityCsvZip(buffer, targetPath, progress = () => {}) {
+async function importMaxMindCityCsvZipToSqlite(buffer, progress = () => {}) {
   const zipEntries = readZipEntries(buffer, (name) => /GeoLite2-City-(Locations-en|Blocks-IPv4)\.csv$/i.test(name));
   const locationsEntry = [...zipEntries.entries()].find(([name]) => /GeoLite2-City-Locations-en\.csv$/i.test(name));
   const blocksEntry = [...zipEntries.entries()].find(([name]) => /GeoLite2-City-Blocks-IPv4\.csv$/i.test(name));
@@ -2315,34 +2335,52 @@ async function writeGeoipJsonFromMaxMindCityCsvZip(buffer, targetPath, progress 
   }
 
   progress({ stage: "writing_ranges", locationRows, rangeRows: 0 });
-  const stream = createWriteStream(targetPath, { encoding: "utf8" });
+  const updatedAt = new Date().toISOString();
+  db.exec(`
+    DROP TABLE IF EXISTS geoip_ranges_import;
+    CREATE TABLE geoip_ranges_import (
+      ip_start INTEGER NOT NULL,
+      ip_end INTEGER NOT NULL,
+      country TEXT NOT NULL,
+      city TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (ip_start, ip_end)
+    );
+  `);
+  const insertImportRange = db.prepare("INSERT OR IGNORE INTO geoip_ranges_import (ip_start, ip_end, country, city, updated_at) VALUES (?, ?, ?, ?, ?)");
   try {
-    await writeStreamChunk(stream, `{"updatedAt":${JSON.stringify(new Date().toISOString())},"ranges":[\n`);
     let count = 0;
-    let first = true;
+    db.exec("BEGIN");
     for (const row of csvRecordIterator(blocksEntry[1])) {
       const cidr = String(row.network ?? "").trim();
       if (!cidr) continue;
+      const range = ipv4CidrRange(cidr);
+      if (!range) continue;
       const location = locations.get(String(row.geoname_id ?? "")) || locations.get(String(row.registered_country_geoname_id ?? "")) || {};
-      const entry = {
-        cidr,
-        country: String(location.country ?? "Unknown").trim() || "Unknown",
-        city: String(location.city ?? "").trim(),
-      };
-      await writeStreamChunk(stream, `${first ? "" : ",\n"}${JSON.stringify(entry)}`);
-      first = false;
+      insertImportRange.run(range.start, range.end, String(location.country ?? "Unknown").trim() || "Unknown", String(location.city ?? "").trim(), updatedAt);
       count += 1;
       if (count % 25000 === 0) {
+        db.exec("COMMIT");
         progress({ stage: "writing_ranges", locationRows, rangeRows: count });
+        db.exec("BEGIN");
         await delay(0);
       }
     }
-    await writeStreamChunk(stream, `\n],"count":${count}}\n`);
-    stream.end();
-    await finished(stream);
+    db.exec("COMMIT");
+    db.exec(`
+      DELETE FROM geoip_ranges;
+      INSERT INTO geoip_ranges (ip_start, ip_end, country, city, updated_at)
+      SELECT ip_start, ip_end, country, city, updated_at FROM geoip_ranges_import;
+      DROP TABLE geoip_ranges_import;
+    `);
     return { entries: count, locationRows };
   } catch (error) {
-    stream.destroy();
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    try {
+      db.exec("DROP TABLE IF EXISTS geoip_ranges_import");
+    } catch {}
     throw error;
   }
 }
@@ -2373,14 +2411,25 @@ function geoipFileEntryCount() {
 }
 
 function geoipStatus() {
+  const sqliteEntries = toNumber(statements.geoipRangeCount.get()?.count);
+  if (sqliteEntries > 0) {
+    return {
+      configured: true,
+      storage: "sqlite",
+      path: databasePath,
+      entries: sqliteEntries,
+      lastUpdatedAt: statements.geoipRangeLastUpdated.get()?.updated_at ?? null,
+      error: geoipCache.error,
+    };
+  }
   if (!existsSync(geoipDataPath)) {
-    return { configured: false, path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: null };
+    return { configured: false, storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: null };
   }
   try {
     const stat = statSync(geoipDataPath);
-    return { configured: true, path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
+    return { configured: true, storage: "json", path: geoipDataPath, entries: geoipFileEntryCount(), lastUpdatedAt: new Date(stat.mtimeMs).toISOString(), error: geoipCache.error };
   } catch (error) {
-    return { configured: false, path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
+    return { configured: false, storage: "none", path: geoipDataPath, entries: 0, lastUpdatedAt: null, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -2400,6 +2449,11 @@ function loadGeoipEntries() {
 
 function lookupGeoip(ipAddress) {
   const ip = normalizeIpAddress(ipAddress);
+  const ipNum = ipv4ToNumber(ip);
+  if (ipNum != null) {
+    const row = statements.lookupGeoipRange.get(ipNum, ipNum);
+    if (row) return { country: row.country || "Unknown", city: row.city || "" };
+  }
   for (const entry of loadGeoipEntries()) {
     if (ipv4CidrMatch(ip, entry.cidr)) return { country: entry.country || "Unknown", city: entry.city || "" };
   }
