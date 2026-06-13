@@ -4765,6 +4765,152 @@ function activitySearch(claimId, query, limit = 500) {
   return { events, total, query: search, searchedAllHistory: true };
 }
 
+function normalizedMemberName(value) {
+  const name = String(value ?? "").trim();
+  if (!name || name === "-" || /^unknown/i.test(name)) return "";
+  return name;
+}
+
+function activityMemberName(row) {
+  const metadata = safeJson(row.metadata_json, {});
+  return normalizedMemberName(
+    metadata.memberName ??
+    metadata.member ??
+    metadata.owner ??
+    metadata.ownerUsername ??
+    metadata.sellerUsername ??
+    metadata.contributorName ??
+    metadata.contributorUsername ??
+    metadata.crafterName ??
+    metadata.actorName ??
+    metadata.playerName ??
+    metadata.username ??
+    metadata.userName ??
+    metadata.subjectName
+  );
+}
+
+function activityCategory(eventType) {
+  const type = String(eventType ?? "").toLowerCase();
+  if (type.includes("market") || type.includes("sale") || type.includes("listing")) return "marketEvents";
+  if (type.includes("storage") || type.includes("deposit") || type.includes("withdraw")) return "storageEvents";
+  if (type.includes("production") || type.includes("craft")) return "productionEvents";
+  if (type.includes("construction")) return "constructionEvents";
+  return "otherEvents";
+}
+
+function activityLeaderboard(claimId) {
+  const rows = db.prepare(`
+    SELECT *
+    FROM activity_events
+    WHERE claim_id = ?
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 5000
+  `).all(claimId);
+  const members = new Map();
+  let ignoredRows = 0;
+  for (const row of rows) {
+    const name = activityMemberName(row);
+    if (!name) {
+      ignoredRows += 1;
+      continue;
+    }
+    const key = name.toLowerCase();
+    const current = members.get(key) ?? {
+      name,
+      totalEvents: 0,
+      marketEvents: 0,
+      storageEvents: 0,
+      productionEvents: 0,
+      constructionEvents: 0,
+      otherEvents: 0,
+      lastActivityAt: null,
+      lastSummary: "",
+    };
+    current.totalEvents += 1;
+    const category = activityCategory(row.event_type);
+    current[category] = toNumber(current[category]) + 1;
+    const occurredAt = row.occurred_at ?? "";
+    if (!current.lastActivityAt || String(occurredAt) > current.lastActivityAt) {
+      current.lastActivityAt = occurredAt;
+      current.lastSummary = row.summary ?? "";
+    }
+    members.set(key, current);
+  }
+  const memberList = Array.from(members.values()).sort((a, b) => b.totalEvents - a.totalEvents || String(a.name).localeCompare(String(b.name)));
+  return {
+    summary: {
+      memberCount: memberList.length,
+      totalEvents: memberList.reduce((sum, row) => sum + toNumber(row.totalEvents), 0),
+      ignoredRows,
+      lastActivityAt: rows[0]?.occurred_at ?? null,
+    },
+    members: memberList,
+  };
+}
+
+function marketLeaderboard(claimId) {
+  const activeListings = db.prepare(`
+    SELECT owner, owner_entity_id, quantity, price, total_value, last_seen
+    FROM market_listings
+    WHERE claim_id = ? AND status = 'active'
+  `).all(claimId);
+  const trades = db.prepare(`
+    SELECT seller_username, seller_entity_id, quantity, total_price, occurred_at
+    FROM market_trades
+    WHERE claim_id = ?
+    ORDER BY occurred_at DESC, trade_id DESC
+  `).all(claimId);
+  const members = new Map();
+  const getMember = (name, id = "") => {
+    const memberName = normalizedMemberName(name);
+    if (!memberName) return null;
+    const key = String(id || memberName).toLowerCase();
+    const current = members.get(key) ?? {
+      memberId: id || null,
+      name: memberName,
+      activeListings: 0,
+      activeListingValue: 0,
+      confirmedSales: 0,
+      confirmedSaleValue: 0,
+      unitsSold: 0,
+      lastSaleAt: null,
+    };
+    if (!current.memberId && id) current.memberId = id;
+    members.set(key, current);
+    return current;
+  };
+  for (const listing of activeListings) {
+    const member = getMember(listing.owner, listing.owner_entity_id);
+    if (!member) continue;
+    member.activeListings += 1;
+    member.activeListingValue += toNumber(listing.total_value) || toNumber(listing.quantity) * toNumber(listing.price);
+  }
+  for (const trade of trades) {
+    const member = getMember(trade.seller_username, trade.seller_entity_id);
+    if (!member) continue;
+    member.confirmedSales += 1;
+    member.confirmedSaleValue += toNumber(trade.total_price);
+    member.unitsSold += toNumber(trade.quantity);
+    const occurredAt = trade.occurred_at ?? "";
+    if (!member.lastSaleAt || String(occurredAt) > member.lastSaleAt) member.lastSaleAt = occurredAt;
+  }
+  const memberList = Array.from(members.values())
+    .sort((a, b) => b.confirmedSaleValue - a.confirmedSaleValue || b.activeListingValue - a.activeListingValue || String(a.name).localeCompare(String(b.name)));
+  return {
+    summary: {
+      memberCount: memberList.length,
+      activeListings: activeListings.length,
+      activeListingValue: memberList.reduce((sum, row) => sum + toNumber(row.activeListingValue), 0),
+      confirmedSales: trades.length,
+      confirmedSaleValue: memberList.reduce((sum, row) => sum + toNumber(row.confirmedSaleValue), 0),
+      unitsSold: memberList.reduce((sum, row) => sum + toNumber(row.unitsSold), 0),
+      lastSaleAt: trades[0]?.occurred_at ?? null,
+    },
+    members: memberList,
+  };
+}
+
 function contributionLeaderboard(claimId) {
   const rows = db.prepare(`
     SELECT *
@@ -4836,7 +4982,7 @@ function contributionLeaderboard(claimId) {
       topContributorProgress: entry.topContributorProgress,
     }))
     .sort((a, b) => b.totalProgress - a.totalProgress);
-  return {
+  const contribution = {
     summary: {
       contributorCount: contributorList.length,
       professionCount: professionList.length,
@@ -4860,6 +5006,12 @@ function contributionLeaderboard(claimId) {
       firstContributedAt: row.first_contributed_at,
       lastContributedAt: row.last_contributed_at,
     })),
+  };
+  return {
+    ...contribution,
+    contribution,
+    market: marketLeaderboard(claimId),
+    activity: activityLeaderboard(claimId),
   };
 }
 

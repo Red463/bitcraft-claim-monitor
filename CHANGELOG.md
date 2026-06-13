@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.12-beta.1] - 2026-06-13
+
+### Added
+
+- Added Leaderboard tabs for Contribution, Professions, Activity, Market, and Online/Sessions settlement comparisons.
+- Added BitJita total played and total signed-in values to the Leaderboard Online/Sessions tab when player detail data provides them.
+
 ## [1.0.11-beta.1] - 2026-06-13
 
 ### Changed

@@ -550,6 +550,17 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(contributionLeaderboard.summary.totalProgress, 78);
   assert.equal(contributionLeaderboard.contributors[0].name, "Tester");
   assert.equal(contributionLeaderboard.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.contribution.summary.contributorCount, 1);
+  assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.market.summary.activeListings, 2);
+  assert.equal(contributionLeaderboard.market.summary.confirmedSales, 3);
+  assert.equal(contributionLeaderboard.market.summary.confirmedSaleValue, 62);
+  assert.equal(contributionLeaderboard.market.members[0].name, "Tester");
+  assert.equal(contributionLeaderboard.market.members[0].activeListings, 2);
+  assert.equal(contributionLeaderboard.market.members[0].confirmedSales, 3);
+  assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.storageEvents === 1), true);
+  assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.totalEvents > 0), true);
+  assert.equal(contributionLeaderboard.activity.summary.ignoredRows > 0, true);
 
   const browserSnapshot = await fetch(`${origin}/api/local/snapshot`, {
     method: "POST",

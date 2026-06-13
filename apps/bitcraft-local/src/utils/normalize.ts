@@ -1,14 +1,32 @@
-import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 
 export function normalizePlayer(player: AnyRecord): AnyRecord {
   const signInTs = toNumber(player.signInTimestamp);
   const now = Math.floor(Date.now() / 1000);
+  const timePlayedSeconds = toNumber(
+    player.timePlayed ??
+    player.totalTimePlayed ??
+    player.totalPlayed ??
+    player.totalPlayedSeconds ??
+    player.time_played ??
+    player.total_time_played,
+  );
+  const timeSignedInSeconds = toNumber(
+    player.timeSignedIn ??
+    player.totalTimeSignedIn ??
+    player.totalSignedIn ??
+    player.totalSignedInSeconds ??
+    player.time_signed_in ??
+    player.total_time_signed_in,
+  );
   return {
     ...player,
     entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
     signedIn: player.signedIn === true,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : null,
+    timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
+    timeSignedInSeconds: timeSignedInSeconds > 0 ? timeSignedInSeconds : null,
   };
 }
 

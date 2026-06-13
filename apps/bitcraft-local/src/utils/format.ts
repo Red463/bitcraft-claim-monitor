@@ -1,4 +1,4 @@
-import { parseDateValue, toNumber } from "../main-app-data";
+import { parseDateValue, toNumber } from "../main-app-data.ts";
 
 const EQUIPMENT_SLOT_LABELS: Record<string, string> = {
   head_clothing: "Head",
@@ -61,6 +61,17 @@ export function formatDuration(seconds: unknown): string {
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+export function formatPlaytime(seconds: unknown): string {
+  const total = toNumber(seconds);
+  if (!Number.isFinite(total) || total <= 0) return "Unavailable";
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 export function formatEquipmentSlot(value: unknown): string {

@@ -257,6 +257,39 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+.leaderboard-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -4px;
+}
+.leaderboard-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.12), transparent 42%),
+    linear-gradient(180deg, rgba(9,14,21,.96), rgba(5,8,12,.98));
+  color: #aab5c4;
+  padding: 0 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+.leaderboard-tabs button:hover,
+.leaderboard-tabs button:focus-visible {
+  border-color: rgba(240,198,79,.34);
+  color: #f7f8fb;
+}
+.leaderboard-tabs button.active {
+  border-color: rgba(240,198,79,.55);
+  background: linear-gradient(180deg, rgba(240,198,79,.15), rgba(240,198,79,.055));
+  color: #f0c64f;
+}
 .leaderboard-page .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
@@ -303,6 +336,20 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
 }
 .leaderboard-page .leaderboard-card .dashboard-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.leaderboard-context {
+  padding: 14px 18px;
+}
+.leaderboard-context p {
+  margin: 8px 0 0;
+  color: #aab5c4;
+  font-size: 13px;
+}
+.leaderboard-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .leaderboard-filter { min-width: 210px; margin-left: auto; }
 .leaderboard-filter span {
   color: #aab5c4;
