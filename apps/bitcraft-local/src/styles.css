@@ -4756,6 +4756,16 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   color: #fff;
   overflow-wrap: anywhere;
 }
+.collector-settings-list { display: grid; gap: 10px; }
+.collector-setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 10px;
+  align-items: end;
+}
+.collector-setting-row .toggle-line { min-height: 39px; }
+.collector-setting-row .compact-field { gap: 5px; }
+.collector-setting-row .compact-field input { text-align: center; }
 .admin-page .status-detail .info-row {
   min-height: 76px;
   display: grid;

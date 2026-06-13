@@ -1,9 +1,16 @@
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 
 export function normalizePlayer(player: AnyRecord): AnyRecord {
-  const signInTs = toNumber(player.signInTimestamp);
+  const signInTs = toNumber(
+    player.signInTimestamp ??
+    player.sign_in_timestamp ??
+    player.signedInTimestamp ??
+    player.sessionStartTimestamp ??
+    player.session_start_timestamp,
+  );
   const now = Math.floor(Date.now() / 1000);
   const signedIn = Boolean(player.signedIn ?? player.online ?? player.isOnline ?? (signInTs > 0));
+  const existingSessionSeconds = toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds);
   const timePlayedSeconds = toNumber(
     player.timePlayed ??
     player.totalTimePlayed ??
@@ -25,7 +32,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
     signedIn,
-    sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : null,
+    sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : existingSessionSeconds > 0 ? existingSessionSeconds : null,
     timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
     timeSignedInSeconds: timeSignedInSeconds > 0 ? timeSignedInSeconds : null,
   };
@@ -42,7 +49,7 @@ export function normalizeData(raw: AnyRecord | null) {
   const recruitment = unwrap<AnyRecord[]>(raw?.recruitment, "recruitment", []);
   const market = unwrap<AnyRecord[]>(raw?.market, "listings", []);
   const crafts = unwrap<AnyRecord[]>(raw?.crafts, "craftResults", []);
-  const players = unwrap<AnyRecord[]>(raw?.players, "players", []);
+  const players = unwrap<AnyRecord[]>(raw?.players, "players", []).map(normalizePlayer);
   const region = unwrap<AnyRecord[]>(raw?.region, "claims", []);
   const layout = raw?.layout ?? {};
   const skills = raw?.skills ?? {};

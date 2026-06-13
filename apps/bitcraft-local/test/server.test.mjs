@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const claimId = "1369094286777412590";
@@ -328,6 +329,15 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(appDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
   assert.equal(appDataOne.serverFreshness.counts.crafts, 2);
   assert.equal(appDataOne.collectorStatus.enabled, false);
+  const pageDataOne = await fetch(`${origin}/api/local/pages/production?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(pageDataOne.claim.claim.supplies, 500);
+  assert.equal(pageDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
+  assert.equal(pageDataOne.collectorStatus.collectors.production.label, "Production");
+  const appDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
+  assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
+  appDb.close();
   failClaimRefresh = true;
   const failedCollect = await fetch(`${origin}/api/local/admin/collect-now`, {
     method: "POST",
@@ -338,6 +348,9 @@ test("server collection paginates listings and protects production mutations", a
   const appDataAfterFailure = await fetch(`${origin}/api/local/app-data?claimId=${claimId}&page=production`).then((response) => response.json());
   assert.equal(appDataAfterFailure.claim.claim.supplies, 500);
   assert.match(appDataAfterFailure.serverFreshness.lastError, /HTTP 429/);
+  const pageDataAfterFailure = await fetch(`${origin}/api/local/pages/production?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(pageDataAfterFailure.claim.claim.supplies, 500);
+  assert.match(pageDataAfterFailure.serverFreshness.lastError, /HTTP 429/);
   failClaimRefresh = false;
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);

@@ -214,6 +214,7 @@ type AppSettings = {
   theme: typeof DEFAULT_THEME;
   refreshSeconds: number;
   serverRefreshSeconds: number;
+  collectorSettings: Record<string, { label: string; enabled: boolean; intervalSeconds: number }>;
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;
@@ -576,6 +577,22 @@ function normalizeDiscordPresence(value: AnyRecord = {}): DiscordPresence {
 }
 
 const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
+const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
+  claim: { label: "Claim", enabled: true, intervalSeconds: 30 },
+  members: { label: "Members", enabled: true, intervalSeconds: 30 },
+  players: { label: "Player details", enabled: true, intervalSeconds: 60 },
+  professions: { label: "Professions", enabled: true, intervalSeconds: 30 },
+  production: { label: "Production", enabled: true, intervalSeconds: 30 },
+  inventory: { label: "Inventory and storage", enabled: true, intervalSeconds: 60 },
+  construction: { label: "Construction", enabled: true, intervalSeconds: 60 },
+  research: { label: "Research", enabled: true, intervalSeconds: 600 },
+  market: { label: "Market", enabled: true, intervalSeconds: 60 },
+  region: { label: "Region", enabled: true, intervalSeconds: 300 },
+  mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
+  snapshotHistory: { label: "Snapshot and history", enabled: true, intervalSeconds: 60 },
+  storageActivity: { label: "Storage activity", enabled: true, intervalSeconds: 60 },
+  marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },
+};
 
 const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
@@ -584,6 +601,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
   serverRefreshSeconds: 30,
+  collectorSettings: DEFAULT_COLLECTOR_SETTINGS,
   defaultPage: "dashboard",
   defaultRegion: "",
   additionalActiveRegions: "",
@@ -632,11 +650,22 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
   const defaultPage = configuredDefaultPage === "buildings" || !NAV.some(([id]) => id === configuredDefaultPage && id !== "admin")
     ? DEFAULT_SETTINGS.defaultPage
     : configuredDefaultPage as ActivePanel;
+  const savedCollectorSettings = (config as AnyRecord)?.collectorSettings && typeof (config as AnyRecord).collectorSettings === "object" && !Array.isArray((config as AnyRecord).collectorSettings)
+    ? (config as AnyRecord).collectorSettings as Record<string, AnyRecord>
+    : {};
   return {
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
     refreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.refreshSeconds, 15), 300),
     serverRefreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.serverRefreshSeconds ?? (config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.serverRefreshSeconds, 15), 300),
+    collectorSettings: Object.fromEntries(Object.entries(DEFAULT_COLLECTOR_SETTINGS).map(([key, defaults]) => {
+      const saved = savedCollectorSettings[key] ?? {};
+      return [key, {
+        label: String(saved.label ?? defaults.label),
+        enabled: saved.enabled !== false,
+        intervalSeconds: Math.min(Math.max(toNumber(saved.intervalSeconds) || defaults.intervalSeconds, 15), 3600),
+      }];
+    })),
     defaultPage,
     excludedMemberIds,
     additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
@@ -4582,6 +4611,16 @@ function AdminPanel({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function updateCollectorSetting(key: string, patch: Partial<AppSettings["collectorSettings"][string]>) {
+    setDraft((current) => ({
+      ...current,
+      collectorSettings: {
+        ...current.collectorSettings,
+        [key]: { ...current.collectorSettings[key], ...patch },
+      },
+    }));
+  }
+
   function setMemberTracking(member: AnyRecord, tracked: boolean) {
     const id = memberTrackingId(member);
     if (!id) return;
@@ -5452,6 +5491,28 @@ function AdminPanel({
             <label className="field"><span>Server collection interval (seconds)</span><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /></label>
             <label className="field"><span>Snapshot retention (days)</span><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /></label>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
+          </section>
+          <section className="form-card">
+            <div className="split-header">
+              <div>
+                <h3><RefreshCw size={17} /> Domain Collectors</h3>
+                <p className="legend">The server collects BitJita data once per domain, then browser tabs read the latest local data.</p>
+              </div>
+            </div>
+            <div className="collector-settings-list">
+              {Object.entries(draft.collectorSettings).map(([key, collector]) => (
+                <div className="collector-setting-row" key={key}>
+                  <label className="toggle-line">
+                    <input type="checkbox" checked={collector.enabled !== false} onChange={(event) => updateCollectorSetting(key, { enabled: event.target.checked })} />
+                    <span>{collector.label ?? key}</span>
+                  </label>
+                  <label className="field compact-field">
+                    <span>Every</span>
+                    <input type="number" min={15} max={3600} value={collector.intervalSeconds} onChange={(event) => updateCollectorSetting(key, { intervalSeconds: Number(event.target.value) })} />
+                  </label>
+                </div>
+              ))}
+            </div>
           </section>
           <div className="admin-section">
             <section className="form-card member-tracking-card">

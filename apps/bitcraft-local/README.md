@@ -18,9 +18,9 @@ The dev command starts two local services:
 
 The Vite dev server proxies `/api/bitjita/*` to `https://bitjita.com/api/*` and `/api/local/*` to the local SQLite API.
 
-Persistent history is stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`. Keep the dev server running while testing so market listing snapshots and activity events continue to be recorded every refresh cycle.
+Persistent current state and history are stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`. The server stores latest successful domain data in dedicated local tables for claim, members, players, professions, production, inventory, construction, research, market and region data. Browser pages read those local page-ready endpoints instead of polling BitJita directly during normal refreshes.
 
-In production, the Node server records snapshots itself every 30 seconds, so market and activity history continues collecting without a browser left open.
+In production, the Node server runs the collectors itself, so market, activity, production, contribution and current-state data continues collecting without a browser left open. Collector intervals and enabled states are configurable from Admin.
 
 The Admin page is protected by a local server-side session. On first run, open Admin and create the initial password. The password is stored as a salted scrypt hash in SQLite, and the browser receives an HttpOnly session cookie. Administrator mutations additionally require a same-origin session token.
 

@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.17-beta.1] - 2026-06-13
+
+### Added
+
+- Added SQLite-backed domain current tables for claim, members, players, professions, production, inventory, construction, research and region data.
+- Added page-ready local endpoints under `/api/local/pages/:page` so normal app pages read the latest server-collected data locally.
+- Added configurable per-domain collector settings in Admin, including enabled state and collection interval.
+- Added domain change event storage for meaningful server-detected changes such as member and production state changes.
+
+### Changed
+
+- Changed automatic page refreshes to read server-held SQLite domain data instead of rebuilding pages from a single cached settlement-state blob.
+- Changed server collection to refresh due domains independently and reuse recent local domain data for domains that are not due yet.
+- Updated project documentation to describe the server-owned domain-table refresh architecture.
+
+### Removed
+
+- Removed the legacy `current_claim_state` all-in-one cache table and its fallback usage.
+
 ## [1.0.16-beta.1] - 2026-06-13
 
 ### Added

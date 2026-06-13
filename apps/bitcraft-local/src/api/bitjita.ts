@@ -133,7 +133,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
       setState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         if (SERVER_HELD_PANELS.has(activePanel)) {
-          const response = await fetch(`${LOCAL_API}/app-data?claimId=${encodeURIComponent(claimId)}&page=${encodeURIComponent(activePanel)}`, { signal: controller.signal });
+          const response = await fetch(`${LOCAL_API}/pages/${encodeURIComponent(activePanel)}?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh local app data (HTTP ${response.status}). The server will keep showing the latest successful BitJita data when available.`);
           const raw = await response.json();
           React.startTransition(() => setState({ loading: false, error: null, data: raw }));
