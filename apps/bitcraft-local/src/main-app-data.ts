@@ -111,6 +111,12 @@ export function buildConstructionProjects(construction: AnyRecord, inventories: 
   const cargoLookup = constructionCatalog(construction, "cargos");
   const storedTotals = inventoryStoredTotals(inventories);
   return (construction?.projects ?? []).map((project: AnyRecord) => {
+    if (Array.isArray(project.materials)) {
+      return {
+        ...project,
+        name: project.name ?? project.recipeName ?? project.buildingName ?? project.structureName ?? project.entityId,
+      };
+    }
     const contributions = new Map<string, number>();
     addConstructionContributions(contributions, project.items ?? [], "item");
     addConstructionContributions(contributions, project.cargos ?? [], "cargo");

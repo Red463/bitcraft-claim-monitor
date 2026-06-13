@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.20-beta.1] - 2026-06-13
+
+### Changed
+
+- Changed normal page data loading to prefer dedicated SQLite current tables instead of the raw domain payload cache.
+- Improved current-table population for members, player details, inventory, construction, production, research, region and market data.
+
+### Fixed
+
+- Fixed member permission columns in the database browser showing zeroes when BitJita reports permissions using non-boolean field shapes.
+- Fixed construction current data so material requirements, added materials and storage coverage follow the same logic as the construction page.
+
 ## [1.0.19-beta.1] - 2026-06-13
 
 ### Changed

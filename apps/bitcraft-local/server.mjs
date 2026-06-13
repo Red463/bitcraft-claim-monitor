@@ -6,6 +6,7 @@ import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSaf
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(root, "dist");
@@ -4905,6 +4906,259 @@ function readDomainPayloadMap(claimId) {
   }]));
 }
 
+function rowData(row) {
+  return safeJson(row?.data_json, {});
+}
+
+function tableBackedClaimData(claimId, rowsByDomain = {}) {
+  const id = String(claimId ?? "");
+  const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
+  const claimRow = db.prepare("SELECT * FROM claim_current WHERE claim_id = ?").get(id);
+  if (!claimRow) return null;
+
+  const claim = {
+    ...rowData(claimRow),
+    entityId: rowData(claimRow).entityId ?? rowData(claimRow).id ?? id,
+    id,
+    claimId: id,
+    name: claimRow.name ?? rowData(claimRow).name ?? rowData(claimRow).claimName,
+    claimName: claimRow.name ?? rowData(claimRow).claimName ?? rowData(claimRow).name,
+    regionId: claimRow.region_id ?? rowData(claimRow).regionId,
+    regionName: claimRow.region_name ?? rowData(claimRow).regionName,
+    ownerUsername: claimRow.owner_name ?? rowData(claimRow).ownerUsername ?? rowData(claimRow).ownerName,
+    supplies: claimRow.supplies ?? rowData(claimRow).supplies,
+    treasury: claimRow.treasury ?? rowData(claimRow).treasury,
+    tier: claimRow.tier ?? rowData(claimRow).tier,
+  };
+
+  const memberRows = db.prepare("SELECT * FROM member_current WHERE claim_id = ? AND active = 1 ORDER BY username").all(id);
+  const members = memberRows.map((row) => ({
+    ...rowData(row),
+    playerEntityId: row.player_entity_id ?? rowData(row).playerEntityId ?? row.member_key,
+    entityId: row.player_entity_id ?? rowData(row).entityId ?? row.member_key,
+    username: row.username ?? rowData(row).username ?? rowData(row).userName,
+    userName: row.username ?? rowData(row).userName ?? rowData(row).username,
+    coOwnerPermission: Boolean(row.co_owner_permission),
+    officerPermission: Boolean(row.officer_permission),
+    buildPermission: Boolean(row.build_permission),
+    inventoryPermission: Boolean(row.inventory_permission),
+  }));
+
+  const players = db.prepare("SELECT * FROM player_current WHERE claim_id = ? AND active = 1 ORDER BY username").all(id).map((row) => ({
+    ...rowData(row),
+    entityId: row.player_entity_id,
+    playerEntityId: row.player_entity_id,
+    username: row.username ?? rowData(row).username ?? rowData(row).userName,
+    userName: row.username ?? rowData(row).userName ?? rowData(row).username,
+    signedIn: Boolean(row.signed_in),
+    online: Boolean(row.signed_in),
+    signInTimestamp: row.sign_in_timestamp,
+    sessionSeconds: row.session_seconds,
+    timePlayedSeconds: row.time_played_seconds,
+    totalPlayedSeconds: row.time_played_seconds,
+    timeSignedInSeconds: row.time_signed_in_seconds,
+    totalSignedInSeconds: row.time_signed_in_seconds,
+  }));
+
+  const professionGroups = new Map();
+  for (const row of db.prepare("SELECT * FROM profession_current WHERE claim_id = ?").all(id)) {
+    const key = String(row.player_entity_id ?? row.username ?? "");
+    if (!key) continue;
+    const current = professionGroups.get(key) ?? {
+      playerEntityId: row.player_entity_id,
+      entityId: row.player_entity_id,
+      username: row.username,
+      userName: row.username,
+      skills: {},
+      totalLevel: 0,
+      totalSkillLevel: 0,
+      totalXP: 0,
+      totalXp: 0,
+    };
+    current.skills[String(row.profession_id)] = row.level;
+    current.totalLevel += toNumber(row.level);
+    current.totalSkillLevel = current.totalLevel;
+    current.totalXP += toNumber(row.xp);
+    current.totalXp = current.totalXP;
+    professionGroups.set(key, current);
+  }
+  const citizens = [...professionGroups.values()];
+
+  const production = db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1 ORDER BY last_seen DESC").all(id).map((row) => ({
+    ...rowData(row),
+    entityId: row.craft_entity_id,
+    id: row.craft_entity_id,
+    label: row.label ?? rowData(row).label,
+    item: { ...(rowData(row).item ?? {}), name: row.label ?? rowData(row).item?.name, tier: row.tier ?? rowData(row).item?.tier },
+    buildingName: row.building_name ?? rowData(row).buildingName,
+    crafterName: row.crafter_name ?? rowData(row).crafterName,
+    skillName: row.profession ?? rowData(row).skillName,
+    tier: row.tier ?? rowData(row).tier,
+    totalXp: row.total_xp ?? rowData(row).totalXp,
+    progressPct: row.progress ?? rowData(row).progressPct,
+    isPublic: Boolean(row.is_public),
+  }));
+
+  const containerRows = db.prepare("SELECT * FROM inventory_container_current WHERE claim_id = ? AND active = 1 ORDER BY container_name").all(id);
+  const itemRowsByContainer = new Map();
+  for (const row of db.prepare("SELECT * FROM inventory_item_current WHERE claim_id = ?").all(id)) {
+    const list = itemRowsByContainer.get(row.container_key) ?? [];
+    list.push(row);
+    itemRowsByContainer.set(row.container_key, list);
+  }
+  const rawInventoryPayload = payload("inventories", {});
+  const inventoryItems = new Map((rawInventoryPayload.items ?? []).map((entry) => [String(entry.id), entry]));
+  const inventoryCargos = new Map((rawInventoryPayload.cargos ?? []).map((entry) => [String(entry.id), entry]));
+  const buildings = containerRows.map((container) => {
+    const slots = (itemRowsByContainer.get(container.container_key) ?? []).map((row, index) => {
+      const raw = rowData(row);
+      const itemType = row.item_type === "cargo" || row.item_type === 1 || row.item_type === "1" ? "cargo" : "item";
+      const catalogEntry = {
+        ...((itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id)) ?? {}),
+        ...raw,
+        id: row.item_id,
+        name: row.item_name ?? raw.name ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.name,
+        tier: row.tier ?? raw.tier ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.tier,
+        rarityStr: row.rarity ?? raw.rarityStr ?? raw.rarity ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.rarityStr,
+        iconAssetName: raw.iconAssetName ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.iconAssetName,
+        tag: raw.tag ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.tag,
+      };
+      if (row.item_id != null) (itemType === "cargo" ? inventoryCargos : inventoryItems).set(String(row.item_id), catalogEntry);
+      return {
+        slot: index,
+        contents: {
+          ...raw,
+          item_id: row.item_id,
+          itemId: row.item_id,
+          item_type: itemType,
+          itemType,
+          quantity: row.quantity,
+        },
+      };
+    });
+    return {
+      ...rowData(container),
+      entityId: container.container_key,
+      buildingEntityId: container.building_id,
+      buildingName: container.building_name ?? rowData(container).buildingName,
+      buildingNickname: container.container_name ?? rowData(container).buildingNickname ?? rowData(container).name,
+      inventory: slots,
+    };
+  });
+
+  const materialRowsByProject = new Map();
+  for (const row of db.prepare("SELECT * FROM construction_material_current WHERE claim_id = ?").all(id)) {
+    const list = materialRowsByProject.get(row.project_key) ?? [];
+    list.push({
+      ...rowData(row),
+      name: row.item_name ?? rowData(row).name,
+      required: row.required_quantity,
+      contributed: row.added_quantity,
+      type: rowData(row).type ?? (rowData(row).itemType === "cargo" ? "cargo" : "item"),
+      itemId: rowData(row).itemId ?? rowData(row).item_id ?? row.material_key,
+      stored: rowData(row).stored ?? 0,
+    });
+    materialRowsByProject.set(row.project_key, list);
+  }
+  const constructionProjects = db.prepare("SELECT * FROM construction_project_current WHERE claim_id = ? AND active = 1 ORDER BY structure_name").all(id).map((row) => ({
+    ...rowData(row),
+    entityId: row.project_key,
+    id: row.project_key,
+    name: row.structure_name ?? rowData(row).name,
+    structureName: row.structure_name ?? rowData(row).structureName,
+    buildingName: row.structure_name ?? rowData(row).buildingName,
+    progress: row.progress ?? rowData(row).progress,
+    materials: materialRowsByProject.get(row.project_key) ?? [],
+  }));
+
+  const researchRows = db.prepare("SELECT * FROM research_current WHERE claim_id = ? ORDER BY name").all(id).map((row) => ({
+    ...rowData(row),
+    id: row.research_key,
+    name: row.name ?? rowData(row).name,
+    status: row.status ?? rowData(row).status,
+    unlocked: row.status === "unlocked" || rowData(row).unlocked === true,
+  }));
+
+  const regionClaims = db.prepare("SELECT * FROM region_claim_current WHERE claim_id = ? ORDER BY name").all(id).map((row) => ({
+    ...rowData(row),
+    entityId: row.region_claim_id,
+    id: row.region_claim_id,
+    claimId: row.region_claim_id,
+    regionId: row.region_id,
+    name: row.name ?? rowData(row).name,
+    claimName: row.name ?? rowData(row).claimName,
+    supplies: row.supplies ?? rowData(row).supplies,
+    treasury: row.treasury ?? rowData(row).treasury,
+    ownerUsername: row.owner_name ?? rowData(row).ownerUsername ?? rowData(row).ownerName,
+  }));
+  const regionStatuses = db.prepare("SELECT * FROM region_status_current WHERE active = 1 ORDER BY CAST(region_id AS INTEGER)").all().map((row) => ({
+    ...rowData(row),
+    regionId: row.region_id,
+    id: row.region_id,
+    name: row.region_name ?? rowData(row).name,
+    regionName: row.region_name ?? rowData(row).regionName,
+    signedInPlayers: row.signed_in_players ?? rowData(row).signedInPlayers,
+    playersInQueue: row.players_in_queue ?? rowData(row).playersInQueue,
+  }));
+
+  const market = statements.activeListings.all(id).map((row) => ({
+    ...safeJson(row.raw_json, {}),
+    entityId: row.listing_key,
+    itemName: row.item_name,
+    name: row.item_name,
+    side: row.side,
+    owner: row.owner,
+    ownerUsername: row.owner,
+    ownerEntityId: row.owner_entity_id,
+    itemId: row.item_id,
+    itemType: row.item_type,
+    quantity: row.quantity,
+    price: row.price,
+    totalPrice: row.total_value,
+    totalValue: row.total_value,
+    tier: row.tier,
+    rarity: row.rarity,
+    firstSeen: row.first_seen,
+    lastSeen: row.last_seen,
+  }));
+
+  const fallbackData = domainRowsToAppData(id, rowsByDomain);
+  return {
+    ...fallbackData,
+    claim: { ...payload("claim", {}), claim },
+    members: { members },
+    citizens: { citizens },
+    crafts: { craftResults: production },
+    players,
+    inventories: {
+      ...payload("inventories", {}),
+      buildings,
+      items: [...inventoryItems.values()],
+      cargos: [...inventoryCargos.values()],
+    },
+    construction: {
+      ...payload("construction", {}),
+      projects: constructionProjects,
+    },
+    research: {
+      technologies: researchRows,
+      research: researchRows,
+    },
+    market: {
+      ...payload("market", {}),
+      listings: market,
+    },
+    region: {
+      ...payload("region", {}),
+      claims: regionClaims,
+    },
+    regionStatus: {
+      ...payload("regionStatus", {}),
+      regions: regionStatuses,
+    },
+  };
+}
+
 function domainRowsToAppData(claimId, rowsByDomain) {
   const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
   const partialErrors = Object.values(rowsByDomain)
@@ -4977,6 +5231,21 @@ function itemQuantityFromRow(row) {
   return toNumber(row?.quantity ?? row?.amount ?? row?.count ?? row?.stackSize);
 }
 
+function inventoryStoredTotalsFromPayload(inventories) {
+  const totals = new Map();
+  for (const building of unwrap(inventories, "buildings", [])) {
+    for (const slot of building.inventory ?? []) {
+      const contents = slot.contents ?? {};
+      const type = contents.item_type === "cargo" || contents.itemType === "cargo" || contents.itemType === 1 ? "cargo" : "item";
+      const itemId = contents.item_id ?? contents.itemId;
+      if (itemId == null) continue;
+      const key = `${type}:${itemId}`;
+      totals.set(key, (totals.get(key) ?? 0) + toNumber(contents.quantity));
+    }
+  }
+  return totals;
+}
+
 function persistCurrentRows(claimId, data, collectedAt) {
   const claim = data.claim?.claim ?? data.claim ?? {};
   const claimIdText = String(claimId ?? "");
@@ -5030,23 +5299,23 @@ function persistCurrentRows(claimId, data, collectedAt) {
       const key = String(member.playerEntityId ?? member.player_entity_id ?? member.entityId ?? member.id ?? member.username ?? member.userName ?? "").trim();
       if (!key) continue;
       activeMemberKeys.add(key);
-      const permissions = member.permissions ?? member;
+      const permissions = parseMemberPermissions(member);
       upsertMember.run(
         claimIdText,
         key,
         String(member.playerEntityId ?? member.player_entity_id ?? member.entityId ?? member.id ?? ""),
         member.username ?? member.userName ?? member.name ?? null,
-        permissions.coOwnerPermission === true || permissions.co_owner_permission === true ? 1 : 0,
-        permissions.officerPermission === true || permissions.officer_permission === true ? 1 : 0,
-        permissions.buildPermission === true || permissions.build_permission === true ? 1 : 0,
-        permissions.inventoryPermission === true || permissions.inventory_permission === true || permissions.storagePermission === true ? 1 : 0,
+        permissions.coOwnerPermission ? 1 : 0,
+        permissions.officerPermission ? 1 : 0,
+        permissions.buildPermission ? 1 : 0,
+        permissions.inventoryPermission ? 1 : 0,
         JSON.stringify(member),
         collectedAt,
       );
       const previous = previousMembers.get(key);
       if (!previous) insertDomainChange(claimIdText, "members", "member_joined", key, `${member.username ?? member.userName ?? "A member"} joined the tracked settlement`, collectedAt, { member });
       else {
-        const nextFlags = [permissions.coOwnerPermission, permissions.officerPermission, permissions.buildPermission, permissions.inventoryPermission ?? permissions.storagePermission].map(Boolean).join("|");
+        const nextFlags = [permissions.coOwnerPermission, permissions.officerPermission, permissions.buildPermission, permissions.inventoryPermission].map(Boolean).join("|");
         const previousFlags = [previous.co_owner_permission, previous.officer_permission, previous.build_permission, previous.inventory_permission].map(Boolean).join("|");
         if (nextFlags !== previousFlags) insertDomainChange(claimIdText, "members", "member_permissions_changed", key, `${member.username ?? member.userName ?? "A member"} permission flags changed`, collectedAt, { before: previousFlags, after: nextFlags });
       }
@@ -5077,11 +5346,11 @@ function persistCurrentRows(claimId, data, collectedAt) {
         claimIdText,
         key,
         player.username ?? player.userName ?? player.name ?? null,
-        player.signedIn === true || player.online === true ? 1 : 0,
+        player.signedIn === true || player.online === true || player.isOnline === true ? 1 : 0,
         toNumber(player.signInTimestamp ?? player.sign_in_timestamp ?? player.signedInTimestamp ?? player.sessionStartTimestamp ?? player.session_start_timestamp),
-        toNumber(player.sessionSeconds),
-        toNumber(player.timePlayedSeconds ?? player.totalPlayedSeconds),
-        toNumber(player.timeSignedInSeconds ?? player.totalSignedInSeconds),
+        toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds),
+        toNumber(player.timePlayed ?? player.totalTimePlayed ?? player.totalPlayed ?? player.timePlayedSeconds ?? player.totalPlayedSeconds ?? player.time_played ?? player.total_time_played),
+        toNumber(player.timeSignedIn ?? player.totalTimeSignedIn ?? player.totalSignedIn ?? player.timeSignedInSeconds ?? player.totalSignedInSeconds ?? player.time_signed_in ?? player.total_time_signed_in),
         JSON.stringify(player),
         collectedAt,
       );
@@ -5155,16 +5424,19 @@ function persistCurrentRows(claimId, data, collectedAt) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const building of inventories) {
-      const containers = building.containers ?? building.inventories ?? building.storage ?? (Array.isArray(building.items) ? [building] : []);
+      const containers = building.containers ?? building.inventories ?? building.storage ?? (building.entityId || building.id || Array.isArray(building.inventory) || Array.isArray(building.items) ? [building] : []);
       for (const container of Array.isArray(containers) ? containers : []) {
         const containerKey = String(container.entityId ?? container.id ?? container.containerId ?? building.entityId ?? building.id ?? `${building.name ?? "container"}:${containers.indexOf(container)}`).trim();
         if (!containerKey) continue;
-        upsertContainer.run(claimIdText, containerKey, container.name ?? container.nickname ?? building.name ?? building.buildingName ?? null, building.entityId ?? building.id ?? null, building.name ?? building.buildingName ?? null, JSON.stringify(container), collectedAt);
+        upsertContainer.run(claimIdText, containerKey, container.buildingNickname ?? container.nickname ?? container.name ?? building.buildingNickname ?? building.nickname ?? building.name ?? building.buildingName ?? null, building.entityId ?? building.id ?? null, building.name ?? building.buildingName ?? null, JSON.stringify(container), collectedAt);
         const items = container.items ?? container.inventory ?? container.contents ?? container.cargos ?? [];
         for (const item of Array.isArray(items) ? items : []) {
+          const row = item.contents ?? item;
           const itemId = itemIdFromRow(item);
-          const itemKey = String(item.key ?? item.entityId ?? item.id ?? `${itemId || itemNameFromRow(item)}:${item.itemType ?? item.item_type ?? ""}`).trim();
-          insertInventoryItem.run(claimIdText, containerKey, itemKey, itemId || null, item.itemType ?? item.item_type ?? null, itemNameFromRow(item), itemQuantityFromRow(item), item.tier ?? item.itemTier ?? null, item.rarity ?? item.itemRarityStr ?? null, JSON.stringify(item), collectedAt);
+          const rowItemId = itemId || itemIdFromRow(row);
+          const rowType = row.itemType ?? row.item_type ?? item.itemType ?? item.item_type ?? null;
+          const itemKey = String(item.key ?? item.entityId ?? item.id ?? `${rowItemId || itemNameFromRow(row)}:${rowType ?? ""}`).trim();
+          insertInventoryItem.run(claimIdText, containerKey, itemKey, rowItemId || null, rowType, itemNameFromRow(row), itemQuantityFromRow(row), row.tier ?? row.itemTier ?? item.tier ?? item.itemTier ?? null, row.rarity ?? row.itemRarityStr ?? item.rarity ?? item.itemRarityStr ?? null, JSON.stringify(row), collectedAt);
         }
       }
     }
@@ -5185,14 +5457,44 @@ function persistCurrentRows(claimId, data, collectedAt) {
       INSERT OR REPLACE INTO construction_material_current (claim_id, project_key, material_key, item_name, required_quantity, added_quantity, data_json, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    const storedTotals = inventoryStoredTotalsFromPayload(data.inventories);
+    const constructionItemLookup = new Map((data.construction?.items ?? []).map((entry) => [String(entry.id), entry]));
+    const constructionCargoLookup = new Map((data.construction?.cargos ?? []).map((entry) => [String(entry.id), entry]));
     for (const project of constructionProjects) {
       const projectKey = String(project.entityId ?? project.id ?? project.projectId ?? project.buildingEntityId ?? project.name ?? "").trim();
       if (!projectKey) continue;
       upsertProject.run(claimIdText, projectKey, project.structureName ?? project.buildingName ?? project.name ?? null, toNumber(project.progress ?? project.progressPct), JSON.stringify(project), collectedAt);
-      const materials = project.materials ?? project.requiredMaterials ?? project.inputs ?? project.items ?? [];
-      for (const material of Array.isArray(materials) ? materials : []) {
-        const materialKey = String(material.key ?? material.itemId ?? material.item_id ?? material.name ?? itemNameFromRow(material)).trim();
-        insertMaterial.run(claimIdText, projectKey, materialKey, itemNameFromRow(material), toNumber(material.requiredQuantity ?? material.required ?? material.quantity), toNumber(material.addedQuantity ?? material.added ?? material.provided ?? material.currentQuantity), JSON.stringify(material), collectedAt);
+      const contributed = new Map();
+      for (const [type, rows] of [["item", project.items ?? []], ["cargo", project.cargos ?? []]]) {
+        for (const material of Array.isArray(rows) ? rows : []) {
+          const itemId = material.item_id ?? material.itemId ?? material.id;
+          if (itemId == null) continue;
+          const key = `${type}:${itemId}`;
+          contributed.set(key, (contributed.get(key) ?? 0) + toNumber(material.quantity ?? material.amount));
+        }
+      }
+      const materialGroups = [
+        ["item", project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [], constructionItemLookup],
+        ["cargo", project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [], constructionCargoLookup],
+      ];
+      for (const [type, rows, lookup] of materialGroups) {
+        for (const material of Array.isArray(rows) ? rows : []) {
+          const itemId = material.item_id ?? material.itemId ?? material.id;
+          if (itemId == null) continue;
+          const lookupEntry = lookup.get(String(itemId)) ?? {};
+          const key = `${type}:${itemId}`;
+          const enriched = {
+            ...material,
+            type,
+            itemId,
+            name: lookupEntry.name ?? itemNameFromRow(material),
+            tier: lookupEntry.tier ?? material.tier,
+            rarity: lookupEntry.rarityStr ?? lookupEntry.rarity ?? material.rarityStr ?? material.rarity,
+            iconAssetName: lookupEntry.iconAssetName ?? material.iconAssetName,
+            stored: storedTotals.get(key) ?? 0,
+          };
+          insertMaterial.run(claimIdText, projectKey, key, enriched.name, toNumber(material.requiredQuantity ?? material.required ?? material.quantity ?? material.amount), contributed.get(key) ?? 0, JSON.stringify(enriched), collectedAt);
+        }
       }
     }
 
@@ -5350,6 +5652,8 @@ async function buildCurrentClaimData(claimId, options = {}) {
 
 function readCurrentClaimState(claimId) {
   const rowsByDomain = readDomainPayloadMap(claimId);
+  const tableBacked = tableBackedClaimData(claimId, rowsByDomain);
+  if (tableBacked) return tableBacked;
   if (!Object.keys(rowsByDomain).length) return null;
   return domainRowsToAppData(claimId, rowsByDomain);
 }
@@ -5432,7 +5736,8 @@ async function collectServerSnapshot(force = false) {
   try {
     const { claimId } = getSettings();
     await processDiscordTempBans().catch((error) => console.warn(`Discord temporary ban processing failed: ${error instanceof Error ? error.message : String(error)}`));
-    const currentData = await refreshCurrentClaimState(claimId, { force });
+    await refreshCurrentClaimState(claimId, { force });
+    const currentData = domainRowsToAppData(claimId, readDomainPayloadMap(claimId));
     const claim = currentData.claim?.claim ?? currentData.claim;
     const members = unwrap(currentData.members, "members", []);
     const buildings = unwrap(currentData.buildings, "buildings", []);
