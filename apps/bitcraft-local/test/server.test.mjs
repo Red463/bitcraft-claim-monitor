@@ -400,6 +400,16 @@ test("server collection paginates listings and protects production mutations", a
   assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
   appDb.close();
+  const writableAppDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"));
+  writableAppDb.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, updated_at = ? WHERE job_key = ?")
+    .run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "geoip_database_refresh");
+  writableAppDb.close();
+  const recoveredJobs = await fetch(`${origin}/api/local/admin/jobs`, {
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  const recoveredGeoipJob = recoveredJobs.jobs.find((job) => job.key === "geoip_database_refresh");
+  assert.equal(recoveredGeoipJob.running, false);
+  assert.match(recoveredGeoipJob.lastError, /Recovered abandoned run/);
   failClaimRefresh = true;
   const failedCollect = await fetch(`${origin}/api/local/admin/collect-now`, {
     method: "POST",

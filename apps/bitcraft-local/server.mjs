@@ -740,6 +740,7 @@ const statements = {
   markScheduledJobRunning: db.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, last_error = NULL, updated_at = ? WHERE job_key = ?"),
   markScheduledJobSuccess: db.prepare("UPDATE scheduled_jobs SET running = 0, last_success_at = ?, last_error = NULL, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
+  resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
   getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
   listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
   recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),
@@ -1159,6 +1160,22 @@ function seedScheduledJobs() {
   }
 }
 
+const scheduledJobStaleAfterMs = 15 * 60 * 1000;
+
+function recoverStaleScheduledJobs() {
+  const cutoff = new Date(Date.now() - scheduledJobStaleAfterMs).toISOString();
+  const updatedAt = new Date().toISOString();
+  const nextRunAt = new Date().toISOString();
+  const result = statements.resetStaleScheduledJobs.run(
+    `Recovered abandoned run after server restart or timeout. The previous run was still marked running for more than ${Math.round(scheduledJobStaleAfterMs / 60000)} minutes.`,
+    nextRunAt,
+    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes: Math.round(scheduledJobStaleAfterMs / 60000) }),
+    updatedAt,
+    cutoff,
+  );
+  return result.changes;
+}
+
 function scheduledJobRow(row) {
   return {
     key: row.job_key,
@@ -1179,6 +1196,7 @@ function scheduledJobRow(row) {
 }
 
 function scheduledJobsStatus() {
+  recoverStaleScheduledJobs();
   const recipeCatalogCount = toNumber(statements.recipeCatalogCount.get()?.count);
   return {
     enabled: scheduledJobsEnabled,
@@ -1189,6 +1207,7 @@ function scheduledJobsStatus() {
 }
 
 async function runScheduledJob(jobKey, { manual = false } = {}) {
+  recoverStaleScheduledJobs();
   const registryEntry = scheduledJobRegistry[jobKey];
   if (!registryEntry) {
     const error = new Error("Unknown scheduled job");

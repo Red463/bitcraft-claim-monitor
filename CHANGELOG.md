@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.25-beta.1] - 2026-06-13
+
+### Fixed
+
+- Fixed scheduled jobs staying stuck as running after a server crash or timeout.
+
 ## [1.0.24-beta.1] - 2026-06-13
 
 ### Fixed
