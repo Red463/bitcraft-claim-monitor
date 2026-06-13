@@ -179,7 +179,7 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === `/api/claims/${claimId}/construction`) return json(res, { projects: [] });
     if (url.pathname === `/api/claims/${claimId}/research`) {
       if (failResearchRefresh) return json(res, { error: "research unavailable" }, 500);
-      return json(res, { research: [{ entityId: "research-1", name: "Claim Upgrades", tier: 1, unlocked: true }] });
+      return json(res, { technologies: [{ entityId: "research-1", name: "Claim Upgrades", tier: 1, unlocked: true }] });
     }
     if (url.pathname === "/api/players/player-1") {
       playerDetailRequests += 1;

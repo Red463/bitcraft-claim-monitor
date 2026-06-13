@@ -6047,7 +6047,7 @@ function persistCurrentRows(claimId, data, collectedAt) {
   const production = unwrap(data.crafts, "craftResults", []);
   const inventories = unwrap(data.inventories, "buildings", []);
   const constructionProjects = unwrap(data.construction, "projects", unwrap(data.construction, "buildings", []));
-  const researchRows = unwrap(data.research, "research", unwrap(data.research, "entries", []));
+  const researchRows = unwrap(data.research, "technologies", unwrap(data.research, "research", unwrap(data.research, "entries", [])));
   const regionClaims = unwrap(data.region, "claims", []);
   const regionStatuses = unwrap(data.regionStatus, "regions", []);
 
