@@ -147,6 +147,17 @@ db.exec(`
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS current_claim_state (
+    claim_id TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    last_attempt_at TEXT NOT NULL,
+    last_success_at TEXT NOT NULL,
+    last_error TEXT,
+    partial_errors_json TEXT NOT NULL DEFAULT '[]',
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -378,6 +389,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("excluded_member_ids_json", JSON.stringify([]), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("refresh_seconds", "30", now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("server_refresh_seconds", String(Math.round(snapshotIntervalMs / 1000)), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "dashboard", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_region", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
@@ -498,6 +510,21 @@ const statements = {
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
+  currentClaimState: db.prepare("SELECT * FROM current_claim_state WHERE claim_id = ?"),
+  upsertCurrentClaimState: db.prepare(`
+    INSERT INTO current_claim_state (claim_id, data_json, collected_at, last_attempt_at, last_success_at, last_error, partial_errors_json, counts_json, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(claim_id) DO UPDATE SET
+      data_json = excluded.data_json,
+      collected_at = excluded.collected_at,
+      last_attempt_at = excluded.last_attempt_at,
+      last_success_at = excluded.last_success_at,
+      last_error = excluded.last_error,
+      partial_errors_json = excluded.partial_errors_json,
+      counts_json = excluded.counts_json,
+      updated_at = excluded.updated_at
+  `),
+  updateCurrentClaimStateError: db.prepare("UPDATE current_claim_state SET last_attempt_at = ?, last_error = ?, updated_at = ? WHERE claim_id = ?"),
   getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
   upsertSecret: db.prepare(`
     INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)
@@ -1523,6 +1550,7 @@ function getSettings() {
     excludedMemberIds: Array.isArray(excludedMemberIds) ? [...new Set(excludedMemberIds.map((value) => String(value ?? "").trim()).filter(Boolean))] : [],
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
+    serverRefreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300),
     defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
@@ -1536,17 +1564,54 @@ function getSettings() {
 
 const pollStatus = {
   enabled: serverPollingEnabled,
-  intervalMs: snapshotIntervalMs,
+  intervalMs: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300) * 1000,
   running: false,
+  nextRunAt: null,
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
+  collectors: {
+    currentState: { label: "Current settlement state", enabled: serverPollingEnabled, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null },
+    snapshotHistory: { label: "Snapshot and history", enabled: serverPollingEnabled, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null },
+    storageActivity: { label: "Storage activity", enabled: serverPollingEnabled, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null },
+    marketTrades: { label: "Member market trades", enabled: serverPollingEnabled, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null },
+  },
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
   storageLastError: null,
   storageRequests: 0,
   storageInserted: 0,
 };
+
+function serverRefreshIntervalMs() {
+  const seconds = Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300);
+  return seconds * 1000;
+}
+
+function setCollectorStatus(key, patch = {}) {
+  const current = pollStatus.collectors[key] ?? { label: key, enabled: serverPollingEnabled };
+  pollStatus.collectors[key] = { ...current, ...patch };
+}
+
+function collectorAttempt(key) {
+  setCollectorStatus(key, { lastAttemptAt: new Date().toISOString(), lastError: null });
+  return Date.now();
+}
+
+function collectorSuccess(key, startedAt) {
+  setCollectorStatus(key, {
+    lastSuccessAt: new Date().toISOString(),
+    lastError: null,
+    durationMs: Math.max(Date.now() - startedAt, 0),
+  });
+}
+
+function collectorFailure(key, startedAt, error) {
+  setCollectorStatus(key, {
+    lastError: error instanceof Error ? error.message : String(error),
+    durationMs: Math.max(Date.now() - startedAt, 0),
+  });
+}
 
 function validSyncUrl(value) {
   try {
@@ -1771,7 +1836,7 @@ function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/me") return "status.view";
   if (pathname === "/api/local/admin/status") return "status.view";
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
-  if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/diagnostics") return "data.manage";
+  if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
   if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
   if (pathname === "/api/local/admin/branding") return "settings.manage";
   if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
@@ -4475,7 +4540,7 @@ async function settlementProductionCrafts(body) {
     .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
   const cacheKey = productionCraftCacheKey(claimId, uniqueMembers);
   const cached = productionCraftsCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (!body?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
   const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] }));
   const publicCrafts = unwrap(publicPayload, "craftResults", []);
@@ -4580,6 +4645,130 @@ async function dashboardData(claimId) {
   };
 }
 
+async function craftContributionMap(crafts) {
+  const entries = await mapWithConcurrency(crafts.filter((craft) => craft?.entityId), 4, async (craft) => {
+    try {
+      return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId)];
+    } catch {
+      return [String(craft.entityId), []];
+    }
+  });
+  return Object.fromEntries(entries);
+}
+
+function currentStateCounts(data) {
+  return {
+    members: unwrap(data.members, "members", []).length,
+    citizens: unwrap(data.citizens, "citizens", []).length,
+    crafts: unwrap(data.crafts, "craftResults", []).length,
+    marketListings: unwrap(data.market, "listings", []).length,
+    players: Array.isArray(data.players) ? data.players.length : 0,
+  };
+}
+
+async function buildCurrentClaimData(claimId) {
+  const id = String(claimId ?? "").trim();
+  const data = await dashboardData(id);
+  const members = unwrap(data.members, "members", []);
+  const [productionPayload, inventoriesPayload, recruitmentPayload, layoutPayload, skillsPayload] = await Promise.all([
+    settlementProductionCrafts({ claimId: id, members, forceRefresh: true }).catch((error) => {
+      const directCrafts = data.crafts ?? { craftResults: [] };
+      directCrafts.partialError = error instanceof Error ? error.message : String(error);
+      return directCrafts;
+    }),
+    fetchBitjita(`/claims/${id}/inventories`).catch(() => ({ buildings: [] })),
+    fetchBitjita(`/claims/${id}/recruitment`).catch(() => ({ applications: [] })),
+    fetchBitjita(`/claims/${id}/layout`).catch(() => ({ layout: [] })),
+    fetchBitjita("/skills").catch(() => ({ skills: [] })),
+  ]);
+  const productionCrafts = unwrap(productionPayload, "craftResults", []);
+  return {
+    ...data,
+    crafts: productionPayload,
+    contributions: await craftContributionMap(productionCrafts),
+    inventories: inventoriesPayload,
+    recruitment: recruitmentPayload,
+    layout: layoutPayload,
+    skills: skillsPayload,
+  };
+}
+
+function readCurrentClaimState(claimId) {
+  const row = statements.currentClaimState.get(String(claimId ?? ""));
+  if (!row) return null;
+  const data = safeJson(row.data_json, {});
+  const partialErrors = safeJson(row.partial_errors_json, []);
+  const mergedPartialErrors = [...new Set([...(Array.isArray(data.partialErrors) ? data.partialErrors : []), ...(Array.isArray(partialErrors) ? partialErrors : [])].map((error) => String(error)))];
+  const counts = safeJson(row.counts_json, {});
+  const lastSuccessAt = row.last_success_at ?? row.collected_at;
+  const dataAgeSeconds = lastSuccessAt ? Math.max(Math.round((Date.now() - new Date(lastSuccessAt).getTime()) / 1000), 0) : null;
+  return {
+    ...data,
+    partialErrors: mergedPartialErrors,
+    serverFreshness: {
+      claimId: row.claim_id,
+      collectedAt: row.collected_at,
+      lastAttemptAt: row.last_attempt_at,
+      lastSuccessAt,
+      lastError: row.last_error,
+      dataAgeSeconds,
+      stale: dataAgeSeconds != null ? dataAgeSeconds > serverRefreshIntervalMs() / 1000 * 2 : true,
+      counts,
+    },
+    collectorStatus: collectorStatusPayload(),
+  };
+}
+
+async function refreshCurrentClaimState(claimId, options = {}) {
+  const id = String(claimId ?? "").trim();
+  const startedAt = collectorAttempt("currentState");
+  const attemptedAt = new Date().toISOString();
+  try {
+    const data = await buildCurrentClaimData(id);
+    const collectedAt = new Date().toISOString();
+    const partialErrors = Array.isArray(data.partialErrors) ? data.partialErrors : [];
+    const counts = currentStateCounts(data);
+    statements.upsertCurrentClaimState.run(id, JSON.stringify(data), collectedAt, attemptedAt, collectedAt, null, JSON.stringify(partialErrors), JSON.stringify(counts), collectedAt);
+    collectorSuccess("currentState", startedAt);
+    return readCurrentClaimState(id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    statements.updateCurrentClaimStateError.run(attemptedAt, message, attemptedAt, id);
+    collectorFailure("currentState", startedAt, error);
+    const cached = options.allowStaleOnError ? readCurrentClaimState(id) : null;
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+async function currentClaimAppData(claimId) {
+  const id = String(claimId ?? "").trim();
+  if (!/^\d{8,}$/.test(id)) {
+    const error = new Error("Choose a valid BitCraft settlement ID");
+    error.statusCode = 400;
+    throw error;
+  }
+  const cached = readCurrentClaimState(id);
+  if (cached) return cached;
+  return refreshCurrentClaimState(id, { allowStaleOnError: true });
+}
+
+function collectorStatusPayload() {
+  const intervalMs = serverRefreshIntervalMs();
+  pollStatus.intervalMs = intervalMs;
+  const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
+  return {
+    enabled: serverPollingEnabled,
+    intervalMs,
+    running: pollStatus.running,
+    nextRunAt,
+    lastAttemptAt: pollStatus.lastAttemptAt,
+    lastSuccessAt: pollStatus.lastSuccessAt,
+    lastError: pollStatus.lastError,
+    collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => [key, { ...value, nextRunAt: value.nextRunAt ?? nextRunAt }])),
+  };
+}
+
 let snapshotQueue = Promise.resolve();
 
 function enqueueSnapshot(payload) {
@@ -4591,38 +4780,39 @@ function enqueueSnapshot(payload) {
 async function collectServerSnapshot(force = false) {
   if ((!serverPollingEnabled && !force) || pollStatus.running) return;
   pollStatus.running = true;
+  pollStatus.intervalMs = serverRefreshIntervalMs();
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
     await processDiscordTempBans().catch((error) => console.warn(`Discord temporary ban processing failed: ${error instanceof Error ? error.message : String(error)}`));
-    const [claimPayload, membersPayload, buildingsPayload, inventoriesPayload, market, craftsPayload] = await Promise.all([
-      fetchBitjita(`/claims/${claimId}`),
-      fetchBitjita(`/claims/${claimId}/members`),
-      fetchBitjita(`/claims/${claimId}/buildings`),
-      fetchBitjita(`/claims/${claimId}/inventories`),
-      fetchAllClaimListings(claimId),
-      fetchBitjita(`/crafts?claimEntityId=${claimId}&completed=false`).catch(() => ({ craftResults: [] })),
-    ]);
-    const claim = claimPayload.claim ?? claimPayload;
-    const members = unwrap(membersPayload, "members", []);
-    const buildings = unwrap(buildingsPayload, "buildings", []);
+    const currentData = await refreshCurrentClaimState(claimId);
+    const claim = currentData.claim?.claim ?? currentData.claim;
+    const members = unwrap(currentData.members, "members", []);
+    const buildings = unwrap(currentData.buildings, "buildings", []);
     await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
+    const snapshotStartedAt = collectorAttempt("snapshotHistory");
     await enqueueSnapshot({
       claimId,
       claim,
       membersCount: members.length,
       buildingsCount: buildings.length,
-      market,
-      crafts: craftsPayload,
+      market: currentData.market ?? { listings: [] },
+      crafts: currentData.crafts ?? { craftResults: [] },
       source: "server_poll",
     });
+    collectorSuccess("snapshotHistory", snapshotStartedAt);
+    const storageStartedAt = collectorAttempt("storageActivity");
     pollStatus.storageLastAttemptAt = new Date().toISOString();
-    const storageResult = await collectStorageActivity(claimId, inventoriesPayload);
+    const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] });
     pollStatus.storageRequests = storageResult.requested;
     pollStatus.storageInserted = storageResult.inserted;
     pollStatus.storageLastError = storageResult.failures.length ? storageResult.failures.join("; ") : null;
     pollStatus.storageLastSuccessAt = new Date().toISOString();
+    if (storageResult.failures.length) collectorFailure("storageActivity", storageStartedAt, new Error(storageResult.failures.join("; ")));
+    else collectorSuccess("storageActivity", storageStartedAt);
+    const marketStartedAt = collectorAttempt("marketTrades");
     await importMemberSellTrades(claimId, members);
+    collectorSuccess("marketTrades", marketStartedAt);
     pollStatus.lastSuccessAt = new Date().toISOString();
     pollStatus.lastError = null;
   } catch (error) {
@@ -5086,7 +5276,7 @@ function databaseStatus() {
     storageLabel: isProduction ? "Production persistent storage" : "Local development storage",
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
-    polling: pollStatus,
+    polling: collectorStatusPayload(),
     discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, gateway: { ...discordGatewayStatus } },
     settings: getSettings(),
   };
@@ -5944,11 +6134,19 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: pollStatus });
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: collectorStatusPayload() });
+    if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
       return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/app-data") {
+      try {
+        return send(res, 200, await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId));
+      } catch (error) {
+        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load local app data", collectorStatus: collectorStatusPayload() });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
       try {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
@@ -6132,10 +6330,10 @@ const server = createServer(async (req, res) => {
           return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Scheduled job failed", ...scheduledJobsStatus() });
         }
       }
-      if (req.method === "POST" && url.pathname === "/api/local/admin/poll") {
+      if (req.method === "POST" && (url.pathname === "/api/local/admin/poll" || url.pathname === "/api/local/admin/collect-now")) {
         await collectServerSnapshot(true);
-        audit(user, "data.poll");
-        return send(res, 200, databaseStatus());
+        audit(user, url.pathname.endsWith("/collect-now") ? "data.collect_now" : "data.poll");
+        return send(res, 200, { ...databaseStatus(), collectorStatus: collectorStatusPayload() });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/diagnostics") {
         const checks = await apiDiagnostics();
@@ -6324,7 +6522,9 @@ const server = createServer(async (req, res) => {
         if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
         if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
-        if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Refresh interval must be between 15 and 300 seconds" });
+        if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
+        const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
+        if (!Number.isInteger(serverRefreshSeconds) || serverRefreshSeconds < 15 || serverRefreshSeconds > 300) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
         const defaultPage = String(body.defaultPage ?? "dashboard");
         if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
@@ -6354,6 +6554,7 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("bitcraft_sync_url", nextSyncUrl, updatedAt);
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
         statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
+        statements.upsertSetting.run("server_refresh_seconds", String(serverRefreshSeconds), updatedAt);
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
@@ -6364,7 +6565,9 @@ const server = createServer(async (req, res) => {
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         activeRegionsCache = null;
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
+        pollStatus.intervalMs = serverRefreshSeconds * 1000;
+        scheduleServerPolling(serverRefreshSeconds * 1000);
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
@@ -6615,6 +6818,23 @@ const server = createServer(async (req, res) => {
 
 const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430);
 const host = process.env.APP_HOST ?? "127.0.0.1";
+let serverPollTimer = null;
+
+function scheduleServerPolling(delayMs = 0) {
+  if (!serverPollingEnabled) return;
+  if (serverPollTimer) clearTimeout(serverPollTimer);
+  const intervalMs = serverRefreshIntervalMs();
+  pollStatus.intervalMs = intervalMs;
+  pollStatus.nextRunAt = new Date(Date.now() + delayMs).toISOString();
+  for (const key of Object.keys(pollStatus.collectors)) {
+    setCollectorStatus(key, { nextRunAt: pollStatus.nextRunAt });
+  }
+  serverPollTimer = setTimeout(async () => {
+    await collectServerSnapshot();
+    scheduleServerPolling(serverRefreshIntervalMs());
+  }, delayMs);
+}
+
 server.listen(port, host, () => {
   console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
   startDiscordGateway();
@@ -6622,9 +6842,8 @@ server.listen(port, host, () => {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);
   if (serverPollingEnabled) {
-    console.log(`Server snapshot polling enabled every ${snapshotIntervalMs / 1000} seconds`);
-    collectServerSnapshot();
-    setInterval(collectServerSnapshot, snapshotIntervalMs);
+    console.log(`Server snapshot polling enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
+    scheduleServerPolling(0);
   }
   if (scheduledJobsEnabled && !isTestRuntime) {
     console.log("Scheduled jobs enabled; checking every 60 seconds");

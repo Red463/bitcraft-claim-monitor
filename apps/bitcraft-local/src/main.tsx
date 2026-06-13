@@ -212,6 +212,7 @@ type AppSettings = {
   excludedMemberIds: string[];
   theme: typeof DEFAULT_THEME;
   refreshSeconds: number;
+  serverRefreshSeconds: number;
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;
@@ -581,6 +582,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   excludedMemberIds: [],
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
+  serverRefreshSeconds: 30,
   defaultPage: "dashboard",
   defaultRegion: "",
   additionalActiveRegions: "",
@@ -632,6 +634,8 @@ function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | 
   return {
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
+    refreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.refreshSeconds, 15), 300),
+    serverRefreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.serverRefreshSeconds ?? (config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.serverRefreshSeconds, 15), 300),
     defaultPage,
     excludedMemberIds,
     additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
@@ -4276,11 +4280,13 @@ function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnings: str
   const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: uniqueWarnings }, null, 2);
   return (
     <section className="api-status-banner" role="status" aria-live="polite">
-      <span className="api-status-icon"><AlertTriangle size={18} /></span>
-      <div className="api-status-copy">
-        <strong>BitJita data refresh issue</strong>
-        <span>Showing the latest successful data. Some production details may be stale until the API recovers.</span>
-        <small>{lastUpdated ? `Last successful refresh ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
+      <div className="api-status-main">
+        <span className="api-status-icon"><AlertTriangle size={16} /></span>
+        <div className="api-status-copy">
+          <strong>BitJita refresh issue</strong>
+          <span>Showing latest saved data. Some live details may be stale.</span>
+        </div>
+        <small className="api-status-meta">{lastUpdated ? `Last successful refresh: ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
       </div>
       <details className="api-status-details">
         <summary>Details</summary>
@@ -5131,11 +5137,19 @@ function AdminPanel({
             <div className="status-detail">
               <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
-              <Info label="Storage activity sync" value={status?.polling?.storageLastSuccessAt ? `${dateLabel(status.polling.storageLastSuccessAt)} - ${formatNumber(status.polling.storageInserted)} new events from ${formatNumber(status.polling.storageRequests)} containers` : "Not collected yet"} />
-              <Info label="Storage sync error" value={status?.polling?.storageLastError ?? "None"} />
+              <Info label="Next scheduled collection" value={dateLabel(status?.polling?.nextRunAt)} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
               <Info label="Discord delivery" value={discordDeliveryLabel} />
               <Info label="Storage" value={status?.storageLabel ?? "-"} />
+            </div>
+            <div className="status-detail collector-status-grid">
+              {Object.entries(status?.polling?.collectors ?? {}).map(([key, collector]: [string, AnyRecord]) => (
+                <Info
+                  key={key}
+                  label={collector.label ?? key}
+                  value={`${collector.lastSuccessAt ? `OK ${dateLabel(collector.lastSuccessAt)}` : "Not collected yet"}${collector.lastError ? ` - ${collector.lastError}` : ""}`}
+                />
+              ))}
             </div>
           </section>
           <section className="form-card scheduled-jobs-card">
@@ -5383,7 +5397,8 @@ function AdminPanel({
             <label className="field"><span>Default opening page</span><select value={draft.defaultPage} onChange={(event) => updateDraft("defaultPage", event.target.value as ActivePanel)}>{NAV.filter(([id]) => id !== "admin").map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
             <label className="field"><span>Public Crafts default region ID</span><input value={draft.defaultRegion} onChange={(event) => updateDraft("defaultRegion", event.target.value)} placeholder="Use settlement region" /></label>
             <label className="field"><span>Additional active region IDs</span><input value={draft.additionalActiveRegions} onChange={(event) => updateDraft("additionalActiveRegions", event.target.value)} placeholder="Optional, e.g. 22,24" /></label>
-            <label className="field"><span>Browser refresh interval (seconds)</span><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /></label>
+            <label className="field"><span>Display refresh interval (seconds)</span><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /></label>
+            <label className="field"><span>Server collection interval (seconds)</span><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /></label>
             <label className="field"><span>Snapshot retention (days)</span><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /></label>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
@@ -6061,7 +6076,9 @@ function DashboardApp() {
     link.type = favicon?.contentType ?? "image/svg+xml";
   }, [appSettings.branding.favicon]);
   React.useEffect(() => {
-    if (state.data) setLastUpdated(new Date());
+    if (!state.data) return;
+    const serverTime = state.data.serverFreshness?.lastSuccessAt ?? state.data.serverFreshness?.collectedAt;
+    setLastUpdated(serverTime ? new Date(serverTime) : new Date());
   }, [state.data]);
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
@@ -6159,11 +6176,13 @@ function DashboardApp() {
   const activePanel = panels[active] ?? panels.dashboard;
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
+    const serverError = data.raw?.serverFreshness?.lastError ? `Server BitJita collection failed: ${data.raw.serverFreshness.lastError}` : null;
     return [
       ...(state.error ? [`Main BitJita refresh failed: ${state.error}`] : []),
+      ...(serverError ? [serverError] : []),
       ...partialErrors,
     ];
-  }, [data.raw?.partialErrors, state.error]);
+  }, [data.raw?.partialErrors, data.raw?.serverFreshness?.lastError, state.error]);
   const apiDiagnostics = React.useMemo<ApiStatusDiagnostics>(() => ({
     appVersion: APP_VERSION,
     page: active,

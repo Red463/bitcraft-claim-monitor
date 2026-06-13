@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.15-beta.1] - 2026-06-13
+
+### Added
+
+- Added server-owned settlement refresh caching so browsers read the latest server-held BitJita data instead of each tab refreshing BitJita independently.
+- Added collector status metadata and Admin controls for separate display refresh and server collection intervals.
+
+### Changed
+
+- Improved the BitJita refresh issue banner so it stays compact and preserves page spacing.
+- Changed main app pages to use local server-held app data for automatic refreshes, reducing browser-driven BitJita request fan-out.
+- Changed server collection to preserve the latest successful settlement data when BitJita refreshes fail.
+
+### Fixed
+
+- Fixed server collection using short-lived production cache during manual polls, so changed craft data is not masked by cached production responses.
+
 ## [1.0.14-beta.1] - 2026-06-13
 
 ### Added

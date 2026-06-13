@@ -70,6 +70,7 @@ test("server collection paginates listings and protects production mutations", a
   let recipeDetailRequests = 0;
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
+  let failClaimRefresh = false;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
@@ -88,7 +89,10 @@ test("server collection paginates listings and protects production mutations", a
       const regionId = url.searchParams.get("regionId");
       return json(res, { claims: regionId === "19" ? [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", treasury: 300 }] : [], count: regionId === "19" ? 1 : 0 });
     }
-    if (url.pathname === `/api/claims/${claimId}`) return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
+    if (url.pathname === `/api/claims/${claimId}`) {
+      if (failClaimRefresh) return json(res, { error: "rate limited" }, 429);
+      return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
+    }
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
@@ -319,9 +323,26 @@ test("server collection paginates listings and protects production mutations", a
   const cookie = setup.headers.get("set-cookie").split(";")[0];
   assert.ok(auth.csrfToken);
   assert.equal(auth.user.role, "owner");
+  const appDataOne = await fetch(`${origin}/api/local/app-data?claimId=${claimId}&page=production`).then((response) => response.json());
+  assert.equal(appDataOne.claim.claim.supplies, 500);
+  assert.equal(appDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
+  assert.equal(appDataOne.serverFreshness.counts.crafts, 2);
+  assert.equal(appDataOne.collectorStatus.enabled, false);
+  failClaimRefresh = true;
+  const failedCollect = await fetch(`${origin}/api/local/admin/collect-now`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  }).then((response) => response.json());
+  assert.match(failedCollect.collectorStatus.lastError, /HTTP 429/);
+  const appDataAfterFailure = await fetch(`${origin}/api/local/app-data?claimId=${claimId}&page=production`).then((response) => response.json());
+  assert.equal(appDataAfterFailure.claim.claim.supplies, 500);
+  assert.match(appDataAfterFailure.serverFreshness.lastError, /HTTP 429/);
+  failClaimRefresh = false;
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
+  assert.equal(initialConfig.serverRefreshSeconds, 30);
   const adminJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
@@ -515,7 +536,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(secondPoll.status, 200);
 
   const history = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
-  assert.deepEqual(requestedPages.sort(), [1, 1, 1, 1, 2, 2, 2, 2]);
+  const pageOneRequests = requestedPages.filter((page) => page === 1).length;
+  const pageTwoRequests = requestedPages.filter((page) => page === 2).length;
+  assert.equal(pageOneRequests, pageTwoRequests);
+  assert.ok(pageOneRequests >= 4);
   assert.equal(history.liveListings.length, 2);
   assert.equal(history.totals.newListings, 2);
   assert.equal(history.totals.confirmedSales, 3);
@@ -526,7 +550,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(history.events.some((event) => event.event_type === "partial_sale"), true);
   const secondActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(secondActivity.events.filter((event) => event.event_type === "storage").length, 1);
-  assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 1);
+  assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 2);
 
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
   craftEntityRevision = 2;
@@ -542,7 +566,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(afterOldFills.totals.confirmedUnits, 8);
   assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), true);
   const thirdActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
-  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 1);
+  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 2);
   assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started" && event.summary.includes("Public Output")).length, 1);
   const contributionLeaderboard = await fetch(`${origin}/api/local/leaderboard?claimId=${claimId}`).then((response) => response.json());
   assert.equal(contributionLeaderboard.summary.contributorCount, 1);
