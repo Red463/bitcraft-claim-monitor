@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.10-beta.1] - 2026-06-13
+
+### Changed
+
+- Moved Map URL diagnostics out of the public Map page into a new Admin Diagnostics tab for future troubleshooting tools.
+- Changed the Dashboard online member card fallback from "Session active" to a clearer playtime unavailable label.
+- Removed the Craft Calculator calculation notes panel to reduce clutter when multiple recipe options exist.
+
 ## [1.0.9-beta.1] - 2026-06-12
 
 ### Changed

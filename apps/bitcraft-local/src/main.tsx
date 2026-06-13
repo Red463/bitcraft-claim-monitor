@@ -1110,7 +1110,7 @@ function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, o
                 </span>
                 <span className="dashboard-member-session">
                   <em>Online</em>
-                  <small>{player.sessionSeconds != null ? `Playing ${formatDuration(player.sessionSeconds)}` : "Session active"}</small>
+                  <small>{player.sessionSeconds != null ? `Playing ${formatDuration(player.sessionSeconds)}` : "Playtime unavailable"}</small>
                 </span>
               </button>
             )) : <div className="dashboard-empty">No members are currently online.</div>}
@@ -2809,7 +2809,7 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
   const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
-  const [mapUrlLog, setMapUrlLog] = React.useState<AnyRecord[]>([]);
+  const [, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
   const memberRoster = React.useMemo(() => {
     const detailById = new Map(data.players
       .map((player) => [String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""), player] as const)
@@ -2990,27 +2990,6 @@ function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof norma
           return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online - ${formatDuration(player.sessionSeconds)}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
         })}
       </div>
-      <details className="map-url-diagnostics">
-        <summary><Activity size={14} /> Map URL diagnostics</summary>
-        <div className="map-url-diagnostic-grid">
-          <Info label="Roster source" value={rosterSource} />
-          <Info label="Settlement members" value={formatNumber(data.members.length)} />
-          <Info label="Roster players" value={formatNumber(roster.length)} />
-          <Info label="Detail failures" value={formatNumber(playerDetailDiagnostics.failed ?? degradedPlayerCount)} />
-          <Info label="Tracked players" value={formatNumber(current.size)} />
-          <Info label="Mode" value={selectedIds === null ? "Auto online" : "Manual"} />
-        </div>
-        <code>{JSON.stringify(mapUrlLog[0] ?? { url: currentFrameUrl }, null, 2)}</code>
-        <div className="map-url-log-list">
-          {mapUrlLog.map((entry) => (
-            <article key={`${entry.at}-${entry.url}`}>
-              <time>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
-              <span>{entry.rosterSource} roster, {entry.selectedPlayerIds.length} players, R {entry.regionIdParam || "-"}</span>
-              <small>{entry.playerIdParam || "no playerId"}</small>
-            </article>
-          ))}
-        </div>
-      </details>
       <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
         <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
           <div className="map-resource-heading">
@@ -4107,7 +4086,7 @@ function ApiErrorState({ message }: { message: string }) {
   );
 }
 
-type AdminTab = "status" | "analytics" | "configuration" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
+type AdminTab = "status" | "analytics" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
@@ -4141,6 +4120,7 @@ function AdminPanel({
   const [expandedScheduledJobKey, setExpandedScheduledJobKey] = React.useState<string | null>(null);
   const [scheduledJobDrafts, setScheduledJobDrafts] = React.useState<Record<string, AnyRecord>>({});
   const [diagnostics, setDiagnostics] = React.useState<AnyRecord[]>([]);
+  const [mapUrlLog, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
   const [tables, setTables] = React.useState<AnyRecord[]>([]);
   const [selectedTable, setSelectedTable] = usePersistedState("admin.database.selectedTable", "");
   const [tableResult, setTableResult] = React.useState<AnyRecord>({ rows: [], columns: [], total: 0, offset: 0, limit: 50 });
@@ -4504,7 +4484,7 @@ function AdminPanel({
   }
 
   const tabs = React.useMemo<Array<[AdminTab, string]>>(
-    () => botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]],
+    () => botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["diagnostics", "Diagnostics"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]],
     [botOnly],
   );
   React.useEffect(() => {
@@ -5101,6 +5081,62 @@ function AdminPanel({
               ]} />
             </section>
           </div>
+        </div>
+      ) : null}
+
+      {tab === "diagnostics" ? (
+        <div className="admin-section diagnostics-admin">
+          <section className="form-card">
+            <div className="split-header">
+              <div>
+                <h3><Activity size={17} /> Diagnostics</h3>
+                <p className="legend">Troubleshooting tools for local browser state, API refresh behaviour and generated external URLs.</p>
+              </div>
+            </div>
+            <div className="status-detail">
+              <Info label="Map URL log entries" value={formatNumber(mapUrlLog.length)} />
+              <Info label="Latest map log" value={mapUrlLog[0]?.at ? dateLabel(mapUrlLog[0].at) : "Not recorded"} />
+              <Info label="Latest tracked players" value={formatNumber(mapUrlLog[0]?.selectedPlayerIds?.length)} />
+              <Info label="Latest detail failures" value={formatNumber(mapUrlLog[0]?.playerDetailFailed)} />
+            </div>
+          </section>
+          <section className="form-card map-url-diagnostics">
+            <div className="split-header">
+              <div>
+                <h3><MapIcon size={17} /> Map URL Diagnostics</h3>
+                <p className="legend">Records the generated BitCraft map URL whenever the Map page changes tracked players, resources, regions or focus. Use this to diagnose player tracking flicker.</p>
+              </div>
+              <button className="toolbar-button" disabled={!mapUrlLog.length} onClick={() => setMapUrlLog([])}><X size={14} /> Clear Log</button>
+            </div>
+            {mapUrlLog.length ? (
+              <>
+                <div className="map-url-diagnostic-grid">
+                  <Info label="Roster source" value={String(mapUrlLog[0].rosterSource ?? "-")} />
+                  <Info label="Settlement members" value={formatNumber(mapUrlLog[0].memberCount)} />
+                  <Info label="Roster players" value={formatNumber(mapUrlLog[0].rosterCount)} />
+                  <Info label="Detail failures" value={formatNumber(mapUrlLog[0].playerDetailFailed)} />
+                  <Info label="Tracked players" value={formatNumber(mapUrlLog[0].selectedPlayerIds?.length)} />
+                  <Info label="Mode" value={mapUrlLog[0].selectedMode === "auto-online" ? "Auto online" : "Manual"} />
+                </div>
+                <code>{JSON.stringify(mapUrlLog[0], null, 2)}</code>
+                <div className="map-url-log-list">
+                  {mapUrlLog.map((entry) => (
+                    <article key={`${entry.at}-${entry.url}`}>
+                      <time>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+                      <span>{entry.rosterSource ?? "unknown"} roster, {formatNumber(entry.selectedPlayerIds?.length)} players, R {entry.regionIdParam || "-"}</span>
+                      <small>{entry.playerIdParam || "no playerId"}</small>
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="empty-state">
+                <MapIcon size={32} />
+                <strong>No map diagnostics yet</strong>
+                <span>Open the Map page and change tracked players, resources or regions to record generated URL entries here.</span>
+              </div>
+            )}
+          </section>
         </div>
       ) : null}
 

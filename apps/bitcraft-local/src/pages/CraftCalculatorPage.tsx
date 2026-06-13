@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, Calculator, CheckCircle2, ClipboardList, Factory, Package, Search, Workflow } from "lucide-react";
+import { Calculator, CheckCircle2, ClipboardList, Factory, Package, Search, Workflow } from "lucide-react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { RarityBadge, TierBadge } from "../components/main/Badges";
@@ -338,12 +338,6 @@ export function CraftCalculatorPage() {
             <MiniStat icon={<ClipboardList />} label="Source Materials" value={formatNumber(state.plan.rawMaterials.length)} />
             <MiniStat icon={<Factory />} label="Crafting Steps" value={formatNumber(state.plan.steps.length)} />
           </div>
-          {state.plan.warnings.length ? (
-            <section className="craftcalc-warning">
-              <h3><AlertTriangle size={16} /> Calculation notes</h3>
-              {state.plan.warnings.slice(0, 5).map((warning) => <p key={warning}>{warning}</p>)}
-            </section>
-          ) : null}
           <section className="craftcalc-section">
             <h3><Package size={16} /> Source materials</h3>
             <div className="craftcalc-material-grid">
