@@ -740,6 +740,7 @@ const statements = {
   markScheduledJobRunning: db.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, last_error = NULL, updated_at = ? WHERE job_key = ?"),
   markScheduledJobSuccess: db.prepare("UPDATE scheduled_jobs SET running = 0, last_success_at = ?, last_error = NULL, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
+  updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
   getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
   listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
@@ -1094,7 +1095,15 @@ async function runRecipeCatalogRefreshJob() {
   };
 }
 
-async function runGeoipRefreshJob() {
+function updateScheduledJobProgress(jobKey, metadata) {
+  if (!jobKey) return;
+  const row = statements.getScheduledJob.get(jobKey);
+  const previous = safeJson(row?.metadata_json, {});
+  const updatedAt = new Date().toISOString();
+  statements.updateScheduledJobMetadata.run(JSON.stringify({ ...previous, ...metadata, progressUpdatedAt: updatedAt }), updatedAt, jobKey);
+}
+
+async function runGeoipRefreshJob({ jobKey } = {}) {
   const settings = visitorSecuritySettings(true);
   if (!settings.geoipSourceUrl) {
     return {
@@ -1109,15 +1118,19 @@ async function runGeoipRefreshJob() {
   }
   let response;
   try {
+    updateScheduledJobProgress(jobKey, { stage: "downloading", source: "GeoIP source URL" });
     response = await fetch(settings.geoipSourceUrl, { headers, signal: AbortSignal.timeout(120000) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`GeoIP download failed before a response was received: ${reason}`);
   }
   if (!response.ok) throw new Error(`GeoIP download failed with HTTP ${response.status}`);
+  updateScheduledJobProgress(jobKey, { stage: "reading_download", statusCode: response.status });
   const body = Buffer.from(await response.arrayBuffer());
+  updateScheduledJobProgress(jobKey, { stage: "parsing", downloadedBytes: body.length });
   const entries = parseGeoipDownload(body, response.headers.get("content-type") ?? "");
   if (!entries.length) throw new Error("GeoIP source did not contain any valid ranges");
+  updateScheduledJobProgress(jobKey, { stage: "writing", entries: entries.length });
   mkdirSync(geoipDir, { recursive: true });
   const tempPath = `${geoipDataPath}.tmp`;
   await writeFile(tempPath, JSON.stringify({ updatedAt: new Date().toISOString(), ranges: entries }, null, 2));
@@ -1228,7 +1241,7 @@ async function runScheduledJob(jobKey, { manual = false } = {}) {
   const startedAt = new Date().toISOString();
   statements.markScheduledJobRunning.run(startedAt, startedAt, jobKey);
   try {
-    const metadata = await registryEntry.run({ manual });
+    const metadata = await registryEntry.run({ manual, jobKey });
     const finishedAt = new Date().toISOString();
     statements.markScheduledJobSuccess.run(finishedAt, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
     return { ok: true, key: jobKey, metadata, nextRunAt: statements.getScheduledJob.get(jobKey)?.next_run_at };
@@ -7726,13 +7739,16 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && url.pathname === "/api/local/admin/jobs/run") {
         const body = await readJson(req, BODY_LIMITS.json);
         const key = String(body.key ?? "").trim();
-        try {
-          const result = await runScheduledJob(key, { manual: true });
-          audit(user, "scheduled_job.run", { key, metadata: result.metadata });
-          return send(res, 200, { ...scheduledJobsStatus(), result });
-        } catch (error) {
-          return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Scheduled job failed", ...scheduledJobsStatus() });
-        }
+        recoverStaleScheduledJobs();
+        if (!scheduledJobRegistry[key]) return send(res, 404, { error: "Unknown scheduled job", ...scheduledJobsStatus() });
+        const row = statements.getScheduledJob.get(key);
+        if (!row) return send(res, 404, { error: "Scheduled job is not configured", ...scheduledJobsStatus() });
+        if (row.running) return send(res, 409, { error: "Scheduled job is already running", ...scheduledJobsStatus() });
+        audit(user, "scheduled_job.run_started", { key });
+        void runScheduledJob(key, { manual: true })
+          .then((result) => audit(user, "scheduled_job.run_completed", { key, metadata: result.metadata }))
+          .catch((error) => console.warn(`Manual scheduled job ${key} failed: ${error instanceof Error ? error.message : String(error)}`));
+        return send(res, 202, { ...scheduledJobsStatus(), result: { ok: true, key, started: true } });
       }
       if (req.method === "POST" && (url.pathname === "/api/local/admin/poll" || url.pathname === "/api/local/admin/collect-now")) {
         await collectServerSnapshot(true);

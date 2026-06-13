@@ -5358,6 +5358,13 @@ function AdminPanel({
                         {" | "}
                         Next run {dateLabel(job.nextRunAt)}
                       </small>
+                      {job.running && job.metadata?.stage ? (
+                        <small>
+                          Current step: {String(job.metadata.stage).replace(/_/g, " ")}
+                          {job.metadata.downloadedBytes ? ` (${formatNumber(job.metadata.downloadedBytes)} bytes downloaded)` : ""}
+                          {job.metadata.entries ? ` (${formatNumber(job.metadata.entries)} entries)` : ""}
+                        </small>
+                      ) : null}
                       {job.lastError ? <small className="error">Last error: {job.lastError}</small> : null}
                     </div>
                     <div className="scheduled-job-actions" onClick={(event) => event.stopPropagation()}>
@@ -5378,7 +5385,7 @@ function AdminPanel({
                         onClick={() => run(async () => {
                           const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
                           setScheduledJobs(result);
-                        }, "Scheduled job completed.")}
+                        }, "Scheduled job started.")}
                       >
                         <RefreshCw size={15} /> Run Now
                       </button>

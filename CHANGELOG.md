@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.26-beta.1] - 2026-06-13
+
+### Changed
+
+- Changed manual scheduled-job runs to start in the background so long GeoIP refreshes no longer leave the Admin page waiting for the request to finish.
+
+### Fixed
+
+- Added visible GeoIP refresh progress details while scheduled jobs are running.
+
 ## [1.0.25-beta.1] - 2026-06-13
 
 ### Fixed

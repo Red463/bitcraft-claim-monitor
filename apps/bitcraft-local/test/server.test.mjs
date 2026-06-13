@@ -42,6 +42,16 @@ async function waitForHealth(origin, child) {
   throw new Error("Timed out waiting for server health");
 }
 
+async function waitForCondition(description, check, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await check();
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${description}`);
+}
+
 async function stop(child) {
   if (child.exitCode != null) return;
   child.kill();
@@ -471,9 +481,18 @@ test("server collection paginates listings and protects production mutations", a
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ key: "geoip_database_refresh" }),
-  }).then((response) => response.json());
-  assert.equal(geoipJobRun.result.ok, true);
-  assert.equal(geoipJobRun.result.metadata.entries, 1);
+  });
+  assert.equal(geoipJobRun.status, 202);
+  const geoipJobStart = await geoipJobRun.json();
+  assert.equal(geoipJobStart.result.started, true);
+  const completedGeoipJob = await waitForCondition("GeoIP scheduled job completion", async () => {
+    const status = await fetch(`${origin}/api/local/admin/jobs`, {
+      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
+    }).then((response) => response.json());
+    const job = status.jobs.find((entry) => entry.key === "geoip_database_refresh");
+    return job && !job.running && job.lastSuccessAt ? job : null;
+  });
+  assert.equal(completedGeoipJob.metadata.entries, 1);
   assert.equal(geoipDownloadRequests, 1);
   const geoipMatchedRequest = await fetch(`${origin}/api/local/health`, { headers: { "x-forwarded-for": "203.0.113.8" } });
   assert.equal(geoipMatchedRequest.status, 200);
