@@ -4927,7 +4927,7 @@ function AdminPanel({
 
   const activeTableResult = tableResult.table === selectedTable ? tableResult : { table: selectedTable, rows: [], columns: [], total: 0, offset: tableOffset, limit: 50 };
   const tableRows: AnyRecord[] = activeTableResult.rows ?? [];
-  const tableColumns = (activeTableResult.columns ?? Object.keys(tableRows[0] ?? {})).slice(0, 10);
+  const tableColumns = activeTableResult.columns ?? Object.keys(tableRows[0] ?? {});
   const selectedTableInfo = tables.find((table) => table.name === selectedTable);
   const tableRangeStart = activeTableResult.total ? tableOffset + 1 : 0;
   const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(activeTableResult.total));
@@ -6134,7 +6134,7 @@ function AdminPanel({
           <div className="database-inspector-stats">
             <Info label="Selected table" value={selectedTable || "-"} />
             <Info label="Total rows" value={formatNumber(selectedTableInfo?.rows ?? activeTableResult.total)} />
-            <Info label="Visible columns" value={formatNumber(tableColumns.length)} />
+            <Info label="Columns" value={formatNumber(tableColumns.length)} />
             <Info label="Showing" value={`${formatNumber(tableRangeStart)}-${formatNumber(tableRangeEnd)}`} />
           </div>
           <div className="database-toolbar">
