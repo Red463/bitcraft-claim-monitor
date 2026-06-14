@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.33-beta.1] - 2026-06-14
+
+### Fixed
+
+- Fixed existing SQLite databases not receiving newer current-state table columns during startup migration.
+
 ## [1.0.32-beta.1] - 2026-06-14
 
 ### Fixed
