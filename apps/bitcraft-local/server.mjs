@@ -85,6 +85,7 @@ db.exec(`
     tier TEXT,
     rarity TEXT,
     occurred_at TEXT NOT NULL,
+    source_key TEXT,
     raw_json TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS market_trades (
@@ -567,6 +568,7 @@ ensureColumn("market_events", "owner_entity_id", "TEXT");
 ensureColumn("market_events", "item_id", "TEXT");
 ensureColumn("market_events", "item_type", "TEXT");
 ensureColumn("market_events", "trade_id", "TEXT");
+ensureColumn("market_events", "source_key", "TEXT");
 ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
@@ -605,6 +607,7 @@ ensureColumn("region_claim_current", "updated_at", "TEXT");
 ensureColumn("region_status_current", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("region_status_current", "updated_at", "TEXT");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';");
 
 const defaultClaimId = "1369094286777412590";
@@ -672,8 +675,8 @@ const statements = {
   `),
   markListingClosed: db.prepare("UPDATE market_listings SET status = ?, sold_at = ?, last_seen = ? WHERE listing_key = ? AND status = 'active'"),
   insertMarketEvent: db.prepare(`
-    INSERT INTO market_events (claim_id, event_type, listing_key, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, occurred_at, trade_id, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO market_events (claim_id, event_type, listing_key, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, occurred_at, trade_id, source_key, raw_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   pendingMarketEvents: db.prepare(`
     SELECT * FROM market_events
@@ -3353,9 +3356,11 @@ function analyticsDashboard(days = 30) {
   return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
-function addActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
-  statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
-  queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata);
+function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null) {
+  const result = sourceKey
+    ? statements.insertSourcedActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata), sourceKey)
+    : statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
+  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata);
 }
 
 function formatGold(value) {
@@ -4880,8 +4885,24 @@ function applyPendingMarketConfirmations(claimId, now, confirmations) {
     const nextType = event.event_type === "partial_quantity_drop" ? "partial_sale" : "sale";
     for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
     statements.confirmMarketEvent.run(nextType, trade.id ?? null, JSON.stringify(trade), event.id);
-    addActivity(claimId, "market_sale_confirmed", `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, { ...listing, tradeId: trade.id ?? null });
+    addActivity(
+      claimId,
+      "market_sale_confirmed",
+      `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
+      now,
+      { ...listing, tradeId: trade.id ?? null },
+      `market_sale_confirmed:${listing.key}:${trade.id ?? ""}`,
+    );
   }
+}
+
+function marketEventSourceKey(eventType, listing) {
+  const key = listing?.key ?? "unknown";
+  const tradeId = listing?.tradeId ? String(listing.tradeId) : "";
+  if (eventType === "new_listing") return `market_event:${eventType}:${key}`;
+  if (eventType === "sale" || eventType === "partial_sale") return `market_event:${eventType}:${key}:${tradeId}`;
+  if (eventType === "removed_or_cancelled") return `market_event:${eventType}:${key}`;
+  return `market_event:${eventType}:${key}:${tradeId || `${toNumber(listing?.quantity)}:${toNumber(listing?.totalValue)}`}`;
 }
 
 function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
@@ -4913,6 +4934,7 @@ function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = n
 }
 
 function addMarketEvent(claimId, eventType, listing, occurredAt) {
+  const sourceKey = marketEventSourceKey(eventType, listing);
   statements.insertMarketEvent.run(
     claimId,
     eventType,
@@ -4930,6 +4952,7 @@ function addMarketEvent(claimId, eventType, listing, occurredAt) {
     listing.rarity,
     occurredAt,
     listing.tradeId,
+    sourceKey,
     JSON.stringify(listing.raw),
   );
 }
@@ -5117,13 +5140,27 @@ async function recordSnapshot(payload) {
       );
       if (!existing) {
         addMarketEvent(claimId, "new_listing", listing, now);
-        addActivity(claimId, "market_new_listing", `New market listing: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, listing);
+        addActivity(
+          claimId,
+          "market_new_listing",
+          `New market listing: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
+          now,
+          listing,
+          `market_new_listing:${listing.key}`,
+        );
       } else if (listing.quantity < toNumber(existing.quantity)) {
         const { soldQuantity, trade } = partialResults.get(listing.key);
         const partial = { ...listing, quantity: soldQuantity, totalValue: soldQuantity * listing.price, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
         if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
         addMarketEvent(claimId, trade ? "partial_sale" : "partial_quantity_drop", partial, now);
-        addActivity(claimId, trade ? "market_sale" : "market_quantity_drop", `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, partial);
+        addActivity(
+          claimId,
+          trade ? "market_sale" : "market_quantity_drop",
+          `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
+          now,
+          partial,
+          `${trade ? "market_sale" : "market_quantity_drop"}:${listing.key}:${trade?.id ?? `${soldQuantity}:${listing.quantity}`}`,
+        );
       }
     }
 
@@ -5134,7 +5171,14 @@ async function recordSnapshot(payload) {
       if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
       statements.markListingClosed.run(eventType, now, now, active.listing_key);
       addMarketEvent(claimId, eventType, closedListing, now);
-      addActivity(claimId, trade ? "market_sale" : "market_removed_or_cancelled", `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`, now, closedListing);
+      addActivity(
+        claimId,
+        trade ? "market_sale" : "market_removed_or_cancelled",
+        `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
+        now,
+        closedListing,
+        `${trade ? "market_sale" : "market_removed_or_cancelled"}:${listing.key}:${trade?.id ?? ""}`,
+      );
     }
 
     applyPendingMarketConfirmations(claimId, now, pendingConfirmations);

@@ -154,7 +154,8 @@ const APP_VERSION = packageJson.version;
 
 type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ToastKind = "market" | "production";
-type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel; item?: AnyRecord | null };
+type ToastNotice = { id: string; title: string; body: string; kind: ToastKind; occurredAt?: string; read?: boolean; destination?: ActivePanel; item?: AnyRecord | null; sourceKey?: string };
+type ToastOptions = { occurredAt?: string; sourceKey?: string };
 type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 type AnalyticsConsent = "accepted" | "declined" | null;
 type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
@@ -3625,6 +3626,10 @@ function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
   };
 }
 
+function activityNoticeKey(event: AnyRecord): string {
+  return String(event.source_key ?? event.sourceKey ?? `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`);
+}
+
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
   const tier = toNumber(item?.tier ?? item?.itemTier);
@@ -3655,12 +3660,27 @@ function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss:
   );
 }
 
+function notificationDedupeKey(notice: ToastNotice): string {
+  return notice.sourceKey ? `source:${notice.sourceKey}` : `legacy:${notice.kind}:${notice.title}:${notice.body}`;
+}
+
+function dedupeNotifications(notices: ToastNotice[]): ToastNotice[] {
+  const seen = new Set<string>();
+  return notices.filter((notice) => {
+    const key = notificationDedupeKey(notice);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices: ToastNotice[]; onClose: () => void; onOpenNotice: (notice: ToastNotice) => void }) {
+  const displayNotices = dedupeNotifications(notices);
   return (
     <div className="drawer-overlay" onClick={onClose}>
       <aside className="notice-drawer" role="dialog" aria-modal="true" aria-label="Recent notifications" onClick={(event) => event.stopPropagation()}>
         <header><h2><Bell size={18} /> Notifications</h2><button onClick={onClose} aria-label="Close notifications"><X size={16} /></button></header>
-        {notices.length ? <div className="notice-list">{notices.map((notice) => (
+        {displayNotices.length ? <div className="notice-list">{displayNotices.map((notice) => (
           <button key={notice.id} className={notice.read ? "" : "unread"} onClick={() => onOpenNotice(notice)}>
             <ToastVisual notice={notice} />
             <strong>{notice.title}</strong>
@@ -6274,6 +6294,7 @@ function DashboardApp() {
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
+  const notificationSourceKeysRef = React.useRef<Set<string>>(new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]));
   const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
   const activityNoticeClaimRef = React.useRef(claimId);
   const craftQueueRef = React.useRef<{ claimId: string; jobs: Map<string, AnyRecord> } | null>(null);
@@ -6363,11 +6384,16 @@ function DashboardApp() {
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
     });
   }, [mapFocus, setActive]);
-  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind, item?: AnyRecord | null) => {
+  React.useEffect(() => {
+    notificationSourceKeysRef.current = new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]);
+  }, [notificationLog]);
+  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind, item?: AnyRecord | null, options: ToastOptions = {}) => {
+    if (options.sourceKey && notificationSourceKeysRef.current.has(options.sourceKey)) return;
+    if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
     const id = `${Date.now()}-${Math.random()}`;
-    const notice: ToastNotice = { id, title, body, kind, occurredAt: new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null };
+    const notice: ToastNotice = { id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null, sourceKey: options.sourceKey };
     setToasts((current) => [...current, notice].slice(-4));
-    setNotificationLog((current) => [notice, ...current].slice(0, 80));
+    setNotificationLog((current) => [notice, ...dedupeNotifications(current)].slice(0, 80));
     const timer = window.setTimeout(() => {
       toastTimersRef.current.delete(id);
       setToasts((current) => current.filter((notice) => notice.id !== id));
@@ -6501,7 +6527,10 @@ function DashboardApp() {
       const isListing = event.event_type === "market_new_listing";
       if (isListing && (!appSettings.toastSettings.marketListings || !userToastSettings.marketListings)) continue;
       if (!isListing && (!appSettings.toastSettings.marketSales || !userToastSettings.marketSales)) continue;
-      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market", toastItemFromActivity(event));
+      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market", toastItemFromActivity(event), {
+        occurredAt: event.occurred_at ?? event.occurredAt,
+        sourceKey: activityNoticeKey(event),
+      });
     }
   }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
@@ -6518,11 +6547,15 @@ function DashboardApp() {
     }
     const started = [...current.entries()].filter(([id]) => !previous.jobs.has(id)).slice(0, 2);
     const completed = [...previous.jobs.entries()].filter(([id]) => !current.has(id)).slice(0, 2);
-    for (const [, job] of started) {
-      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, data.raw?.crafts));
+    for (const [id, job] of started) {
+      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, data.raw?.crafts), {
+        sourceKey: `production-started:${claimId}:${id}`,
+      });
     }
-    for (const [, job] of completed) {
-      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, state.data?.crafts));
+    for (const [id, job] of completed) {
+      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, state.data?.crafts), {
+        sourceKey: `production-completed:${claimId}:${id}`,
+      });
     }
     craftQueueRef.current = { claimId, jobs: current };
   }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);

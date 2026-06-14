@@ -689,12 +689,24 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
+  assert.equal(baselineActivity.events.filter((event) => event.event_type === "market_new_listing").length, 2);
+  const listingMutationDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  listingMutationDb.prepare("DELETE FROM market_listings WHERE listing_key = ?").run("listing-1");
+  listingMutationDb.close();
+  const repeatPoll = await fetch(`${origin}/api/local/admin/poll`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(repeatPoll.status, 200);
+  const repeatActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&q=${encodeURIComponent("New market listing")}&limit=20`).then((response) => response.json());
+  assert.equal(repeatActivity.events.filter((event) => event.event_type === "market_new_listing").length, 2);
   const activitySearch = await fetch(`${origin}/api/local/activity?claimId=${claimId}&q=${encodeURIComponent("Bronze Ingot")}&limit=5`).then((response) => response.json());
   assert.equal(activitySearch.searchedAllHistory, true);
   assert.equal(activitySearch.total >= 1, true);
   assert.equal(activitySearch.events.some((event) => event.summary.includes("Bronze Ingot")), true);
   const baselineSnapshots = await fetch(`${origin}/api/local/snapshots?claimId=${claimId}&limit=10`).then((response) => response.json());
-  assert.equal(baselineSnapshots.snapshots.length, 1);
+  assert.equal(baselineSnapshots.snapshots.length, 2);
   assert.equal(baselineSnapshots.snapshots[0].treasury, 300);
   assert.equal(baselineSnapshots.snapshots[0].supplies, 500);
   const aggregateHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}`).then((response) => response.json());
