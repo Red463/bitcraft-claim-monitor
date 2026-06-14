@@ -88,30 +88,6 @@ const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent_v2";
 const ANALYTICS_VISITOR_COOKIE = "claim_monitor_analytics_visitor";
 const ANALYTICS_SESSION_KEY = "claim-monitor.analytics.session";
 
-const MAP_CATEGORY_ORDER = [
-  "Wood",
-  "Stone",
-  "Ore",
-  "Fiber",
-  "Hide",
-  "Food",
-  "Plants",
-  "Fish",
-  "Animals",
-  "Other",
-];
-const MAP_CATEGORY_SET = new Set(MAP_CATEGORY_ORDER);
-const MAP_CATEGORY_TAG_ALIASES: Array<[RegExp, string]> = [
-  [/\b(wood|log|stick|branch|trunk|timber|plank|tree|stump)\b/i, "Wood"],
-  [/\b(stone|rock|pebble|clay|sand|limestone|granite|marble|slate|basalt)\b/i, "Stone"],
-  [/\b(ore|metal|copper|tin|iron|pyrelite|emarium|luminite|ingot|coal)\b/i, "Ore"],
-  [/\b(fiber|fibre|grass|reed|flax|cotton|cloth|textile)\b/i, "Fiber"],
-  [/\b(hide|skin|leather|pelt|fur)\b/i, "Hide"],
-  [/\b(food|berry|fruit|mushroom|meat|fish|seed|grain|vegetable|herb|spice)\b/i, "Food"],
-  [/\b(plant|flower|bush|moss|root|leaf|leaves|sap|resin)\b/i, "Plants"],
-  [/\b(fish|fishing|ocean|river)\b/i, "Fish"],
-  [/\b(animal|bird|goat|deer|wolf|bear|sagi|nubi|creature)\b/i, "Animals"],
-];
 const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 
 export type MapFocus = { name: string; locationX: number; locationZ: number } | null;
@@ -2225,13 +2201,7 @@ function normalizeMapResourceToken(token: string): string {
 }
 
 function mapResourceCategory(resource: AnyRecord): string {
-  if (resource.mapKind === "enemy") return "Animals";
-  const tag = String(resource.tag ?? resource.category ?? resource.resourceType ?? resource.type ?? "");
-  if (MAP_CATEGORY_SET.has(tag)) return tag;
-  const searchable = `${tag} ${String(resource.name ?? "")}`;
-  const alias = MAP_CATEGORY_TAG_ALIASES.find(([pattern]) => pattern.test(searchable));
-  if (alias) return alias[1];
-  return "";
+  return String(resource.tag ?? resource.category ?? resource.resourceType ?? resource.type ?? "").trim();
 }
 
 export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
@@ -2309,7 +2279,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   } : null;
   const normalizedSelectedResources = React.useMemo(() => selectedResources.map(normalizeMapResourceToken).filter(Boolean), [selectedResources]);
   const resourceByToken = React.useMemo(() => new Map(resources.map((resource) => [mapResourceToken(resource), resource])), [resources]);
-  const resourceCategories = React.useMemo(() => MAP_CATEGORY_ORDER.filter((category) => resources.some((resource) => mapResourceCategory(resource) === category)), [resources]);
+  const resourceCategories = React.useMemo(() => unique(resources.map(mapResourceCategory).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
   const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
   const regionOptions = React.useMemo(() => unique([
     ...activeRegions.map((region) => String(region.regionId ?? "")),

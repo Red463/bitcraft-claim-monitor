@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.39-beta.1] - 2026-06-14
+
+### Changed
+
+- Changed the Map resource category filter to use BitJita resource tags directly instead of broad grouped categories.
+
 ## [1.0.38-beta.1] - 2026-06-14
 
 ### Fixed
