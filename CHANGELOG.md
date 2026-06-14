@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.34-beta.1] - 2026-06-14
+
+### Added
+
+- Added search, row count controls, and pagination to Admin recent security events.
+
 ## [1.0.33-beta.1] - 2026-06-14
 
 ### Fixed

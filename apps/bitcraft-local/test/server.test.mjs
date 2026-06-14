@@ -634,8 +634,20 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(visitorSecurity.totals.uniqueVisitors > 0, true);
   assert.equal(visitorSecurity.locations.some((location) => location.country === "United Kingdom" && location.city === "London"), true);
   assert.equal(visitorSecurity.locations.some((location) => location.country === "Unknown"), true);
-  assert.equal(visitorSecurity.recent.some((event) => String(event.ipAnonymized ?? "").startsWith("127.0.0.0")), true);
-  assert.equal(visitorSecurity.recent.some((event) => event.ipAddress === "127.0.0.1"), true);
+  assert.equal(visitorSecurity.recent.page, 1);
+  assert.equal(visitorSecurity.recent.pageSize, 50);
+  assert.equal(visitorSecurity.recent.total >= visitorSecurity.recent.rows.length, true);
+  assert.equal(visitorSecurity.recent.rows.some((event) => String(event.ipAnonymized ?? "").startsWith("127.0.0.0")), true);
+  assert.equal(visitorSecurity.recent.rows.some((event) => event.ipAddress === "127.0.0.1"), true);
+  const searchedSecurityEvents = await fetch(`${origin}/api/local/admin/visitor-security?days=30&eventSearch=Provider%20City&eventPageSize=10`, {
+    method: "GET",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(searchedSecurityEvents.recent.page, 1);
+  assert.equal(searchedSecurityEvents.recent.pageSize, 10);
+  assert.equal(searchedSecurityEvents.recent.rows.length <= 10, true);
+  assert.equal(searchedSecurityEvents.recent.total >= searchedSecurityEvents.recent.rows.length, true);
+  assert.equal(searchedSecurityEvents.recent.rows.every((event) => event.city === "Provider City"), true);
   const createViewer = await fetch(`${origin}/api/local/admin/users`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

@@ -4471,6 +4471,9 @@ function AdminPanel({
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
   const [visitorSecurityData, setVisitorSecurityData] = React.useState<AnyRecord | null>(null);
+  const [securityEventSearch, setSecurityEventSearch] = React.useState("");
+  const [securityEventPage, setSecurityEventPage] = React.useState(1);
+  const [securityEventPageSize, setSecurityEventPageSize] = React.useState(50);
   const [discordDiscovery, setDiscordDiscovery] = React.useState<AnyRecord | null>(null);
   const [discordToolResults, setDiscordToolResults] = React.useState<Record<string, AnyRecord | null>>({});
   const [expandedRoleOption, setExpandedRoleOption] = React.useState<string | null>(null);
@@ -4567,7 +4570,13 @@ function AdminPanel({
 
   async function refreshAnalytics() {
     setAnalyticsData(await api(`/admin/analytics?days=${encodeURIComponent(analyticsDays)}`));
-    setVisitorSecurityData(await api(`/admin/visitor-security?days=${encodeURIComponent(analyticsDays)}`));
+    const securityParams = new URLSearchParams({
+      days: analyticsDays,
+      eventSearch: securityEventSearch,
+      eventPage: String(securityEventPage),
+      eventPageSize: String(securityEventPageSize),
+    });
+    setVisitorSecurityData(await api(`/admin/visitor-security?${securityParams.toString()}`));
   }
 
   async function refreshDiscordDiscovery() {
@@ -4606,7 +4615,7 @@ function AdminPanel({
       if (tab === "audit") await refreshAudit();
       if (tab === "backups") await refreshBackups();
     });
-  }, [auth?.authenticated, tab, analyticsDays, botSection]);
+  }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize]);
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
     let stale = false;
@@ -4922,6 +4931,14 @@ function AdminPanel({
   const selectedTableInfo = tables.find((table) => table.name === selectedTable);
   const tableRangeStart = activeTableResult.total ? tableOffset + 1 : 0;
   const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(activeTableResult.total));
+  const securityRecent = visitorSecurityData?.recent ?? {};
+  const securityEventRows: AnyRecord[] = Array.isArray(securityRecent) ? securityRecent : securityRecent.rows ?? [];
+  const securityEventTotal = Array.isArray(securityRecent) ? securityEventRows.length : toNumber(securityRecent.total);
+  const securityEventActivePage = Array.isArray(securityRecent) ? 1 : toNumber(securityRecent.page) || securityEventPage;
+  const securityEventActivePageSize = Array.isArray(securityRecent) ? securityEventRows.length || securityEventPageSize : toNumber(securityRecent.pageSize) || securityEventPageSize;
+  const securityEventPageCount = Math.max(1, Math.ceil(securityEventTotal / Math.max(securityEventActivePageSize, 1)));
+  const securityEventRangeStart = securityEventTotal ? (securityEventActivePage - 1) * securityEventActivePageSize + 1 : 0;
+  const securityEventRangeEnd = securityEventTotal ? Math.min(securityEventRangeStart + securityEventRows.length - 1, securityEventTotal) : 0;
   const endpointChecks = [...diagnostics].sort((a, b) => {
     if (Boolean(a.ok) !== Boolean(b.ok)) return a.ok ? 1 : -1;
     return toNumber(b.durationMs) - toNumber(a.durationMs);
@@ -5499,7 +5516,7 @@ function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <h3><TrendingUp size={17} /> Usage Analytics</h3>
-              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => setAnalyticsDays(event.target.value)}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
+              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
             </div>
             <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
             <div className="metric-grid analytics-metrics">
@@ -5564,8 +5581,26 @@ function AdminPanel({
             </section>
           </div>
           <section className="form-card">
-            <h3><Database size={17} /> Recent Security Events</h3>
-            <DataTable rows={visitorSecurityData?.recent ?? []} columns={[
+            <div className="split-header">
+              <div>
+                <h3><Database size={17} /> Recent Security Events</h3>
+                <p className="legend">Search and page through retained server-side request logs for security and abuse investigation.</p>
+              </div>
+              <label className="inline-field">
+                <span>Rows</span>
+                <select className="select-control" value={securityEventPageSize} onChange={(event) => { setSecurityEventPageSize(Number(event.target.value)); setSecurityEventPage(1); }}>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={250}>250</option>
+                </select>
+              </label>
+            </div>
+            <div className="database-toolbar">
+              <SearchBox value={securityEventSearch} onChange={(value) => { setSecurityEventSearch(value); setSecurityEventPage(1); }} placeholder="Search time, group, status, IP, country or city" />
+              <span className="legend">{formatNumber(securityEventTotal)} matching events</span>
+            </div>
+            <DataTable rows={securityEventRows} columns={[
               ["Time", (row) => dateLabel(row.occurredAt)],
               ["Method", (row) => row.method],
               ["Group", (row) => row.routeGroup],
@@ -5573,6 +5608,12 @@ function AdminPanel({
               ["IP", (row) => row.ipAddress ?? row.ipAnonymized ?? "-"],
               ["Location", (row) => [row.city, row.country].filter(Boolean).join(", ") || "Unknown"],
             ]} />
+            <div className="pager">
+              <span>Showing {formatNumber(securityEventRangeStart)}-{formatNumber(securityEventRangeEnd)} of {formatNumber(securityEventTotal)} events</span>
+              <button className="toolbar-button" disabled={securityEventActivePage <= 1} onClick={() => setSecurityEventPage(Math.max(1, securityEventActivePage - 1))}>Previous</button>
+              <span className="legend">Page {formatNumber(securityEventActivePage)} of {formatNumber(securityEventPageCount)}</span>
+              <button className="toolbar-button" disabled={securityEventActivePage >= securityEventPageCount} onClick={() => setSecurityEventPage(securityEventActivePage + 1)}>Next</button>
+            </div>
           </section>
         </div>
       ) : null}

@@ -2697,8 +2697,14 @@ function recordVisitorSecurityEvent(req, pathname, statusCode) {
   );
 }
 
-function visitorSecurityDashboard(days = 30) {
-  const selectedDays = [1, 7, 30, 90].includes(Number(days)) ? Number(days) : 30;
+function visitorSecurityDashboard(params = new URLSearchParams()) {
+  const query = params instanceof URLSearchParams ? params : new URLSearchParams(`days=${encodeURIComponent(String(params ?? 30))}`);
+  const selectedDays = [1, 7, 30, 90].includes(Number(query.get("days"))) ? Number(query.get("days")) : 30;
+  const eventPageSize = Math.min(Math.max(Math.floor(toNumber(query.get("eventPageSize")) || 50), 10), 250);
+  const eventPage = Math.max(Math.floor(toNumber(query.get("eventPage")) || 1), 1);
+  const eventSearch = String(query.get("eventSearch") ?? "").trim().slice(0, 120);
+  const eventStatus = String(query.get("eventStatus") ?? "").trim().slice(0, 3);
+  const eventGroup = String(query.get("eventGroup") ?? "").trim().slice(0, 80);
   const since = new Date(Date.now() - selectedDays * 24 * 60 * 60 * 1000).toISOString();
   const totals = db.prepare(`
     SELECT COUNT(*) AS requests,
@@ -2723,13 +2729,40 @@ function visitorSecurityDashboard(days = 30) {
     ORDER BY requests DESC
     LIMIT 20
   `).all(since);
-  const recent = db.prepare(`
+  const recentWhere = ["occurred_at >= ?"];
+  const recentArgs = [since];
+  if (eventSearch) {
+    const pattern = `%${escapeSqlLike(eventSearch)}%`;
+    recentWhere.push(`(
+      method LIKE ? ESCAPE '\\'
+      OR route_group LIKE ? ESCAPE '\\'
+      OR CAST(status_code AS TEXT) LIKE ? ESCAPE '\\'
+      OR ip_address LIKE ? ESCAPE '\\'
+      OR ip_anonymized LIKE ? ESCAPE '\\'
+      OR country LIKE ? ESCAPE '\\'
+      OR city LIKE ? ESCAPE '\\'
+    )`);
+    recentArgs.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+  }
+  if (eventStatus) {
+    recentWhere.push("CAST(status_code AS TEXT) LIKE ? ESCAPE '\\'");
+    recentArgs.push(`${escapeSqlLike(eventStatus)}%`);
+  }
+  if (eventGroup) {
+    recentWhere.push("route_group = ?");
+    recentArgs.push(eventGroup);
+  }
+  const recentWhereSql = recentWhere.join(" AND ");
+  const recentTotal = toNumber(db.prepare(`SELECT COUNT(*) AS count FROM visitor_security_events WHERE ${recentWhereSql}`).get(...recentArgs)?.count);
+  const recentOffset = Math.min((eventPage - 1) * eventPageSize, Math.max(recentTotal - 1, 0));
+  const recentRows = db.prepare(`
     SELECT id, occurred_at AS occurredAt, method, route_group AS routeGroup, status_code AS statusCode,
       ip_address AS ipAddress, ip_anonymized AS ipAnonymized, country, city
     FROM visitor_security_events
+    WHERE ${recentWhereSql}
     ORDER BY occurred_at DESC, id DESC
-    LIMIT 50
-  `).all();
+    LIMIT ? OFFSET ?
+  `).all(...recentArgs, eventPageSize, recentOffset);
   const retentionSettings = visitorSecuritySettings();
   return {
     days: selectedDays,
@@ -2738,7 +2771,15 @@ function visitorSecurityDashboard(days = 30) {
     totals,
     locations,
     routes,
-    recent,
+    recent: {
+      rows: recentRows,
+      total: recentTotal,
+      page: Math.floor(recentOffset / eventPageSize) + 1,
+      pageSize: eventPageSize,
+      search: eventSearch,
+      status: eventStatus,
+      group: eventGroup,
+    },
   };
 }
 
@@ -8534,7 +8575,7 @@ const server = createServer(async (req, res) => {
         return send(res, 200, analyticsDashboard(url.searchParams.get("days")));
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/visitor-security") {
-        return send(res, 200, visitorSecurityDashboard(url.searchParams.get("days")));
+        return send(res, 200, visitorSecurityDashboard(url.searchParams));
       }
       if (req.method === "DELETE" && url.pathname === "/api/local/admin/analytics") {
         const removed = db.prepare("DELETE FROM analytics_events").run().changes;
