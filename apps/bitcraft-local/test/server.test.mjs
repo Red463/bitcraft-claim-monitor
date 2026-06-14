@@ -170,7 +170,7 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === `/api/claims/${claimId}`) {
       if (failClaimRefresh) return json(res, { error: "rate limited" }, 429);
-      return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300 } });
+      return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300, regionName: "Zephra" } });
     }
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
@@ -194,7 +194,7 @@ test("server collection paginates listings and protects production mutations", a
       });
     }
     if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
-    if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
+    if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
     if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
@@ -416,6 +416,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(pageDataOne.claim.claim.supplies, 500);
   assert.equal(pageDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
   assert.equal(pageDataOne.collectorStatus.collectors.production.label, "Production");
+  const regionPageData = await fetch(`${origin}/api/local/pages/empire?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(String(regionPageData.claim.claim.regionId), "19");
+  assert.equal(regionPageData.region.claims.length, 1);
+  assert.equal(regionPageData.regionStatus.regions.find((region) => String(region.regionId) === "19").signedInPlayers, 42);
   const researchBeforeFailure = await fetch(`${origin}/api/local/pages/research?claimId=${claimId}`).then((response) => response.json());
   assert.equal(researchBeforeFailure.research.technologies.length, 1);
   assert.equal(researchBeforeFailure.research.technologies[0].name, "Claim Upgrades");

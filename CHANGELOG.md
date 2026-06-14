@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.38-beta.1] - 2026-06-14
+
+### Fixed
+
+- Fixed the Region page missing live region details when BitJita returns a settlement region name without a numeric region id.
+- Fixed the Map resource category filter only showing exact-match categories such as Stone by grouping BitJita resource tags into the app's broader resource categories.
+
 ## [1.0.37-beta.1] - 2026-06-14
 
 ### Changed

@@ -5446,6 +5446,25 @@ function normalizeRegionRow(row, source = "bitjita") {
   };
 }
 
+function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPayload, claimId) {
+  const directRegionId = String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim();
+  if (/^\d+$/.test(directRegionId)) return directRegionId;
+  const claimRegionName = String(claim?.regionName ?? claim?.region_name ?? "").trim().toLowerCase();
+  if (claimRegionName) {
+    for (const region of unwrap(regionStatusPayload, "regions", [])) {
+      const regionName = String(region?.regionName ?? region?.name ?? "").trim().toLowerCase();
+      const regionId = String(region?.regionId ?? region?.id ?? region?.entityId ?? "").trim();
+      if (regionName && regionName === claimRegionName && /^\d+$/.test(regionId)) return regionId;
+    }
+  }
+  for (const regionClaim of unwrap(previousRegionPayload, "claims", [])) {
+    const regionClaimId = String(regionClaim?.entityId ?? regionClaim?.id ?? regionClaim?.claimId ?? "").trim();
+    const regionId = String(regionClaim?.regionId ?? regionClaim?.region_id ?? "").trim();
+    if (regionClaimId === String(claimId ?? "") && /^\d+$/.test(regionId)) return regionId;
+  }
+  return "";
+}
+
 async function fetchCachedActiveRegions(extraRegionIds = []) {
   const settings = getSettings();
   const overrideIds = parseRegionIds(settings.additionalActiveRegions);
@@ -5820,6 +5839,7 @@ function tableBackedClaimData(claimId, rowsByDomain = {}) {
   const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
   const claimRow = db.prepare("SELECT * FROM claim_current WHERE claim_id = ?").get(id);
   if (!claimRow) return null;
+  const monitoredRegionClaim = db.prepare("SELECT region_id FROM region_claim_current WHERE claim_id = ? AND region_claim_id = ?").get(id, id);
 
   const claim = {
     ...rowData(claimRow),
@@ -5828,7 +5848,7 @@ function tableBackedClaimData(claimId, rowsByDomain = {}) {
     claimId: id,
     name: claimRow.name ?? rowData(claimRow).name ?? rowData(claimRow).claimName,
     claimName: claimRow.name ?? rowData(claimRow).claimName ?? rowData(claimRow).name,
-    regionId: claimRow.region_id ?? rowData(claimRow).regionId,
+    regionId: claimRow.region_id ?? rowData(claimRow).regionId ?? monitoredRegionClaim?.region_id,
     regionName: claimRow.region_name ?? rowData(claimRow).regionName,
     ownerUsername: claimRow.owner_name ?? rowData(claimRow).ownerUsername ?? rowData(claimRow).ownerName,
     supplies: claimRow.supplies ?? rowData(claimRow).supplies,
@@ -6182,6 +6202,7 @@ function persistCurrentRows(claimId, data, collectedAt) {
   const researchRows = unwrap(data.research, "technologies", unwrap(data.research, "research", unwrap(data.research, "entries", [])));
   const regionClaims = unwrap(data.region, "claims", []);
   const regionStatuses = unwrap(data.regionStatus, "regions", []);
+  const persistedRegionId = claimRegionIdFromKnownData(claim, data.regionStatus, data.region, claimIdText);
 
   db.exec("BEGIN");
   try {
@@ -6192,7 +6213,7 @@ function persistCurrentRows(claimId, data, collectedAt) {
     `).run(
       claimIdText,
       claim.name ?? claim.claimName ?? null,
-      claim.regionId ?? claim.region_id ?? claim.region ?? null,
+      persistedRegionId || null,
       claim.regionName ?? claim.region_name ?? null,
       claim.ownerUsername ?? claim.ownerName ?? claim.owner?.username ?? claim.owner?.name ?? null,
       toNumber(claim.supplies ?? claim.suppliesAmount),
@@ -6565,13 +6586,19 @@ async function buildCurrentClaimData(claimId, options = {}) {
   const contributionEntries = collectorDue(id, "production", "contributions", options)
     ? Object.entries(await craftContributionMap(productionCrafts))
     : Object.entries(previousPayload(previous, "contributions", {}));
+  const derivedRegionId = claimRegionIdFromKnownData(claim, regionStatus, previousPayload(previous, "region", { claims: [] }), id);
+  const claimPayloadWithRegion = derivedRegionId && !String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim()
+    ? (claimPayload?.claim
+      ? { ...claimPayload, claim: { ...claimPayload.claim, regionId: derivedRegionId } }
+      : { ...claimPayload, regionId: derivedRegionId })
+    : claimPayload;
   const [region, tradeVolume] = await Promise.all([
-    collectorDue(id, "region", "region", options) && claim?.regionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => fetchCachedRegionClaims(claim.regionId)) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
-    collectorDue(id, "market", "tradeVolume", options) && claim?.regionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`)) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
+    collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => fetchCachedRegionClaims(derivedRegionId)) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
+    collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`)) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
   ]);
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
-    claim: claimPayload,
+    claim: claimPayloadWithRegion,
     members: membersPayload,
     citizens: citizensPayload,
     buildings: buildingsPayload,
