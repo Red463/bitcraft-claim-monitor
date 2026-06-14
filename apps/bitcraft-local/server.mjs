@@ -5661,7 +5661,11 @@ async function settlementProductionCrafts(body) {
   const cached = productionCraftsCache.get(cacheKey);
   if (!body?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] }));
+  let publicFetchError = "";
+  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch((error) => {
+    publicFetchError = error instanceof Error ? error.message : String(error);
+    return { craftResults: [] };
+  });
   const publicCrafts = unwrap(publicPayload, "craftResults", []);
   const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
   const memberResults = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
@@ -5697,6 +5701,13 @@ async function settlementProductionCrafts(body) {
 
   const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
   const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
+  const partialErrors = [
+    publicFetchError ? `Public craft refresh failed: ${publicFetchError}` : "",
+    ...memberResults.filter((result) => !result.ok).map((result) => `Member craft refresh failed: ${result.error}`),
+  ].filter(Boolean);
+  if (publicFetchError && !memberPayloads.length) {
+    throw new Error(`Production refresh failed: ${publicFetchError}`);
+  }
   const value = {
     craftResults,
     ...catalog,
@@ -5704,6 +5715,8 @@ async function settlementProductionCrafts(body) {
     publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
     privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
     failedMemberRequests: memberResults.filter((result) => !result.ok).length,
+    partialError: partialErrors[0] ?? null,
+    partialErrors,
   };
   productionCraftsCache.set(cacheKey, { value, expiresAt: Date.now() + 30 * 1000 });
   return value;
@@ -6158,6 +6171,12 @@ function persistCurrentRows(claimId, data, collectedAt) {
   const players = Array.isArray(data.players) ? data.players : [];
   const citizens = unwrap(data.citizens, "citizens", []);
   const production = unwrap(data.crafts, "craftResults", []);
+  const hasProductionPayload = Boolean(data.crafts && typeof data.crafts === "object" && (
+    Array.isArray(data.crafts.craftResults)
+    || Array.isArray(data.crafts.crafts)
+    || Array.isArray(data.crafts.results)
+    || Array.isArray(data.crafts.data)
+  ));
   const inventories = unwrap(data.inventories, "buildings", []);
   const constructionProjects = unwrap(data.construction, "projects", unwrap(data.construction, "buildings", []));
   const researchRows = unwrap(data.research, "technologies", unwrap(data.research, "research", unwrap(data.research, "entries", [])));
@@ -6278,37 +6297,42 @@ function persistCurrentRows(claimId, data, collectedAt) {
       }
     }
 
-    const previousProduction = new Map(db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1").all(claimIdText).map((row) => [row.craft_entity_id, row]));
-    db.prepare("UPDATE production_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-    const upsertProduction = db.prepare(`
-      INSERT INTO production_current (claim_id, craft_entity_id, label, building_name, crafter_name, profession, tier, total_xp, progress, is_public, active, first_seen, last_seen, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-      ON CONFLICT(claim_id, craft_entity_id) DO UPDATE SET
-        label = excluded.label,
-        building_name = excluded.building_name,
-        crafter_name = excluded.crafter_name,
-        profession = excluded.profession,
-        tier = excluded.tier,
-        total_xp = excluded.total_xp,
-        progress = excluded.progress,
-        is_public = excluded.is_public,
-        active = 1,
-        last_seen = excluded.last_seen,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    const activeProductionKeys = new Set();
-    for (const craft of production) {
-      const normalized = normalizeProductionJob(craft, data.crafts);
-      const key = String(craft.entityId ?? craft.id ?? normalized.key).trim();
-      if (!key) continue;
-      activeProductionKeys.add(key);
-      const previous = previousProduction.get(key);
-      upsertProduction.run(claimIdText, key, normalized.label, normalized.buildingName, normalized.crafterName, normalized.skillName, normalized.tier, normalized.totalXp, normalized.progressPct, craft.isPublic === false ? 0 : 1, previous?.first_seen ?? collectedAt, collectedAt, JSON.stringify(craft), collectedAt);
-      if (!previous) insertDomainChange(claimIdText, "production", "production_started", key, `Craft started: ${normalized.label}`, collectedAt, normalized);
-    }
-    for (const [key, craft] of previousProduction) {
-      if (!activeProductionKeys.has(key)) insertDomainChange(claimIdText, "production", "production_removed", key, `Craft removed: ${craft.label ?? key}`, collectedAt, craft);
+    if (hasProductionPayload) {
+      const previousProduction = new Map(db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1").all(claimIdText).map((row) => [row.craft_entity_id, row]));
+      const productionPayloadPartial = Boolean(data.crafts?.partialError || (Array.isArray(data.crafts?.partialErrors) && data.crafts.partialErrors.length));
+      if (!productionPayloadPartial) db.prepare("UPDATE production_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
+      const upsertProduction = db.prepare(`
+        INSERT INTO production_current (claim_id, craft_entity_id, label, building_name, crafter_name, profession, tier, total_xp, progress, is_public, active, first_seen, last_seen, data_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        ON CONFLICT(claim_id, craft_entity_id) DO UPDATE SET
+          label = excluded.label,
+          building_name = excluded.building_name,
+          crafter_name = excluded.crafter_name,
+          profession = excluded.profession,
+          tier = excluded.tier,
+          total_xp = excluded.total_xp,
+          progress = excluded.progress,
+          is_public = excluded.is_public,
+          active = 1,
+          last_seen = excluded.last_seen,
+          data_json = excluded.data_json,
+          updated_at = excluded.updated_at
+      `);
+      const activeProductionKeys = new Set();
+      for (const craft of production) {
+        const normalized = normalizeProductionJob(craft, data.crafts);
+        const key = String(craft.entityId ?? craft.id ?? normalized.key).trim();
+        if (!key) continue;
+        activeProductionKeys.add(key);
+        const previous = previousProduction.get(key);
+        upsertProduction.run(claimIdText, key, normalized.label, normalized.buildingName, normalized.crafterName, normalized.skillName, normalized.tier, normalized.totalXp, normalized.progressPct, craft.isPublic === false ? 0 : 1, previous?.first_seen ?? collectedAt, collectedAt, JSON.stringify(craft), collectedAt);
+        if (!previous) insertDomainChange(claimIdText, "production", "production_started", key, `Craft started: ${normalized.label}`, collectedAt, normalized);
+      }
+      if (!productionPayloadPartial) {
+        for (const [key, craft] of previousProduction) {
+          if (!activeProductionKeys.has(key)) insertDomainChange(claimIdText, "production", "production_removed", key, `Craft removed: ${craft.label ?? key}`, collectedAt, craft);
+        }
+      }
     }
 
     db.prepare("UPDATE inventory_container_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);

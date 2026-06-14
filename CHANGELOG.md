@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.37-beta.1] - 2026-06-14
+
+### Changed
+
+- Split major main-app pages and shared interface pieces into focused frontend modules to make future page work safer to maintain.
+- Improved page data resilience so local page views keep the latest successful data when one refresh domain temporarily fails.
+
 ## [1.0.36-beta.1] - 2026-06-14
 
 ### Fixed
