@@ -5576,11 +5576,17 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
   const now = Date.now();
   const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
   const useCache = options.useCache !== false;
-  const progressKey = options.progressKey ?? "buyOrders";
+  const progressKey = Object.hasOwn(options, "progressKey") ? options.progressKey : "buyOrders";
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const onAverage = typeof options.onAverage === "function" ? options.onAverage : null;
   const uniqueOrders = [...new Map(orders
     .filter((order) => regionalSaleAverageKey(order))
     .map((order) => [regionalSaleAverageKey(order), order])).values()];
   let completed = 0;
+  const reportProgress = async () => {
+    if (progressKey) collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+    if (onProgress) await onProgress({ current: completed, total: uniqueOrders.length });
+  };
   const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
     const regionId = String(order.regionId ?? "").trim();
     const itemId = String(order.itemId ?? "").trim();
@@ -5591,8 +5597,7 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
     `).get(String(claimId), regionId, itemId, itemType, staleBefore) : null;
     if (cached) {
       completed += 1;
-      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
-      return {
+      const average = {
         regionId,
         itemId,
         itemType,
@@ -5606,6 +5611,9 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         lastBucketAt: cached.last_bucket_at,
         raw: safeJson(cached.raw_json, {}),
       };
+      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
+      await reportProgress();
+      return average;
     }
     try {
       const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`);
@@ -5620,8 +5628,7 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         totalValue += totals.totalValue;
       }
       completed += 1;
-      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
-      return {
+      const average = {
         regionId,
         itemId,
         itemType,
@@ -5635,17 +5642,20 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         lastBucketAt: buckets.at(-1)?.bucket ?? buckets.at(-1)?.date ?? buckets.at(-1)?.start ?? null,
         raw: { buckets },
       };
+      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
+      await reportProgress();
+      return average;
     } catch (error) {
       failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
       completed += 1;
-      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+      await reportProgress();
       return null;
     }
   });
   return averages.filter(Boolean);
 }
 
-async function runRegionalBuyOrderSaleBaselineRefreshJob() {
+async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
   const claimId = String(getSettings().claimId ?? "").trim();
   if (!claimId) return { refreshed: false, reason: "No claim ID configured", orderCount: 0, averageCount: 0 };
   const rows = db.prepare(`
@@ -5663,21 +5673,49 @@ async function runRegionalBuyOrderSaleBaselineRefreshJob() {
   }));
   if (!orders.length) return { refreshed: true, orderCount: 0, averageCount: 0, failures: [] };
   const failures = [];
-  const averages = await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures, { useCache: false, progressKey: "buyOrders" });
-  const refreshedAt = new Date().toISOString();
   let written = 0;
-  db.exec("BEGIN");
-  try {
-    written = persistRegionalSaleAverages(claimId, averages, refreshedAt);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  const uniqueItemCount = [...new Set(orders.map((order) => regionalSaleAverageKey(order)).filter(Boolean))].length;
+  const progressBase = {
+    orderCount: orders.length,
+    uniqueItemCount,
+    averageCount: 0,
+    failureCount: 0,
+    stage: "fetching_sale_baselines",
+  };
+  updateScheduledJobProgress(jobKey, { ...progressBase, current: 0, total: uniqueItemCount });
+  await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures, {
+    useCache: false,
+    progressKey: null,
+    onAverage: async (average) => {
+      const refreshedAt = new Date().toISOString();
+      db.exec("BEGIN");
+      try {
+        written += persistRegionalSaleAverages(claimId, [average], refreshedAt);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      updateScheduledJobProgress(jobKey, {
+        ...progressBase,
+        averageCount: written,
+        failureCount: failures.length,
+      });
+    },
+    onProgress: async ({ current, total }) => {
+      updateScheduledJobProgress(jobKey, {
+        ...progressBase,
+        current,
+        total,
+        averageCount: written,
+        failureCount: failures.length,
+      });
+    },
+  });
   return {
     refreshed: true,
     orderCount: orders.length,
-    uniqueItemCount: [...new Set(orders.map((order) => regionalSaleAverageKey(order)).filter(Boolean))].length,
+    uniqueItemCount,
     averageCount: written,
     failureCount: failures.length,
     failures: failures.slice(0, 20),

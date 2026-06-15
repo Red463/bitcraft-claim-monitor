@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.45] - 2026-06-15
+
+### Fixed
+
+- Fixed Regional Buy Order sale baselines so completed item baselines appear while the scheduled job is still running.
+- Fixed the page refresh indicator so it no longer shifts page content down during background updates.
+
 ## [1.0.0-beta.44] - 2026-06-15
 
 ### Changed
