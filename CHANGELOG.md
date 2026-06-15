@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.43] - 2026-06-15
+
+### Changed
+
+- Added clearer page refresh indicators so users can see when data is updating in the background.
+- Improved Admin refresh, collection, endpoint check, and scheduled-job buttons with visible busy states during slow actions.
+
 ## [1.0.0-beta.42] - 2026-06-15
 
 ### Changed

@@ -126,6 +126,15 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .nav-tools-menu a { width: 100%; justify-content: flex-start; }
 .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
 .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
+.toolbar-button.is-loading {
+  color: var(--gold);
+  border-color: rgba(240,198,79,.3);
+  background: rgba(240,198,79,.08);
+  cursor: progress;
+}
+.toolbar-button.is-loading svg {
+  animation: busy-spin .85s linear infinite;
+}
 .discord-cta { position: relative; z-index: 1; margin: 10px 10px 0; min-height: 43px; border: 1px solid rgba(129,140,248,.78); border-radius: 9px; background: radial-gradient(circle at 16% 18%, rgba(255,255,255,.2), transparent 28%), linear-gradient(135deg, #6574ff, #4b57d7 72%); color: #fff; padding: 0 11px; display: flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 800; box-shadow: 0 12px 26px rgba(88,101,242,.24), inset 0 1px 0 rgba(255,255,255,.2); transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, width .24s ease, min-height .24s ease, margin .24s ease, padding .24s ease; }
 .discord-cta span { flex: 1; }
 .discord-cta:hover { color: #fff; transform: translateY(-1px); filter: saturate(1.08); box-shadow: 0 14px 30px rgba(88,101,242,.3), inset 0 1px 0 rgba(255,255,255,.22); }
@@ -197,6 +206,38 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .refresh-breakdown { left: calc(100% + 10px); bottom: 0; transform: translateX(-6px); }
 .sidebar-collapsed .refresh-status:hover .refresh-breakdown, .sidebar-collapsed .refresh-status:focus-within .refresh-breakdown { transform: translateX(0); }
 main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: flex; flex-direction: column; }
+.page-loading-indicator {
+  position: sticky;
+  top: 12px;
+  z-index: var(--z-sticky);
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(520px, calc(100% - 32px));
+  margin: 12px 18px -4px auto;
+  min-height: 38px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(240,198,79,.3);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(18,24,32,.94), rgba(8,11,16,.96));
+  color: var(--text);
+  box-shadow: 0 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+  animation: page-loading-enter .16s ease-out both;
+}
+.page-loading-indicator svg {
+  color: var(--gold);
+  animation: busy-spin .85s linear infinite;
+}
+.page-loading-indicator span {
+  font-weight: 800;
+  font-size: 13px;
+}
+.page-loading-indicator small {
+  color: var(--muted);
+  font-size: 12px;
+}
 .page-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; animation: page-enter .17s ease-out both; }
 .panel { padding: 26px; display: grid; gap: 20px; }
 .app-footer { margin-top: auto; border-top: 1px solid rgba(108,123,145,.24); padding: 11px 16px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 100% 0, rgba(240,198,79,.06), transparent 34%), linear-gradient(180deg, rgba(8,12,18,.96), rgba(3,5,8,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 -12px 28px rgba(0,0,0,.24); }
@@ -275,6 +316,8 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 @keyframes toast-enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes page-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes page-loading-enter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes busy-spin { to { transform: rotate(360deg); } }
 @keyframes refresh-pulse { 50% { opacity: .35; transform: scale(.84); } }
 .leaderboard-page {
   background: #030303;
@@ -5319,6 +5362,14 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
 .toolbar-button.primary { color: var(--active-color); border-color: var(--active-border); background: var(--gold-dim); }
 .toolbar-button:disabled,
 .toolbar-button:disabled:hover { opacity: .55; cursor: not-allowed; color: var(--muted); background: transparent; border-color: transparent; box-shadow: none; transform: none; }
+.toolbar-button.is-loading:disabled,
+.toolbar-button.is-loading:disabled:hover {
+  opacity: 1;
+  cursor: progress;
+  color: var(--gold);
+  border-color: rgba(240,198,79,.3);
+  background: rgba(240,198,79,.08);
+}
 .status-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 30px; }
 .toggle-line { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); min-height: 42px; padding: 9px 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text); font-size: 13px; }
 .toggle-line input[type="checkbox"] { order: 2; }

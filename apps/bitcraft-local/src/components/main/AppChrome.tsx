@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data";
 import { unique } from "../../utils/array";
@@ -28,6 +28,17 @@ export function TablePanel({ title, subtitle, rows, columns }: { title: string; 
 
 export function AppSkeleton() {
   return <div className="panel app-skeleton"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
+}
+
+export function PageLoadingIndicator({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <div className="page-loading-indicator" role="status" aria-live="polite">
+      <RefreshCw size={15} />
+      <span>Updating page data</span>
+      <small>Showing latest available data while this refresh completes.</small>
+    </div>
+  );
 }
 
 export type ApiStatusDiagnostics = {

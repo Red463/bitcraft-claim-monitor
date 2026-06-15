@@ -66,7 +66,7 @@ import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
 import { useLocalHistory } from "./api/localHistory";
 import type { BotSection } from "./components/bot/BotSectionNav";
-import { ApiErrorState, ApiStatusBanner, AppSkeleton, Header, RefreshStatus, TablePanel, ToolbarButton, type ApiStatusDiagnostics } from "./components/main/AppChrome";
+import { ApiErrorState, ApiStatusBanner, AppSkeleton, Header, PageLoadingIndicator, RefreshStatus, TablePanel, ToolbarButton, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "./components/main/Badges";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./components/main/DashboardWidgets";
@@ -1347,6 +1347,7 @@ function AdminPanel({
   const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
+  const [busyAction, setBusyAction] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [scheduledJobs, setScheduledJobs] = React.useState<AnyRecord | null>(null);
@@ -1418,9 +1419,13 @@ function AdminPanel({
     return body;
   }
 
-  async function run(task: () => Promise<unknown>, success?: string) {
+  const isBusyAction = React.useCallback((key: string) => busyAction === key, [busyAction]);
+  const busyButtonClass = React.useCallback((key: string, className = "toolbar-button") => `${className}${busyAction === key ? " is-loading" : ""}`, [busyAction]);
+
+  async function run(task: () => Promise<unknown>, success?: string, busyKey?: string) {
     setMessage(null);
     setMessageKind("info");
+    if (busyKey) setBusyAction(busyKey);
     try {
       await task();
       if (success) {
@@ -1430,6 +1435,8 @@ function AdminPanel({
     } catch (error) {
       setMessageKind("error");
       setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (busyKey) setBusyAction((current) => current === busyKey ? null : current);
     }
   }
 
@@ -2243,7 +2250,7 @@ function AdminPanel({
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">
-            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh</button><button className="toolbar-button primary" onClick={() => run(collectNowWithLiveStatus, "Collection run completed.")}><RefreshCw size={15} /> Collect Now</button></div></div>
+            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
             <div className="status-detail">
               <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
@@ -2268,7 +2275,7 @@ function AdminPanel({
                 <h3><Clock size={17} /> Scheduled Jobs</h3>
                 <p className="legend">Background jobs run on the local server. Click a job to edit when and how often it runs.</p>
               </div>
-              <button className="toolbar-button" onClick={() => run(refreshScheduledJobs)}><RefreshCw size={15} /> Refresh</button>
+              <button className={busyButtonClass("jobs-refresh")} disabled={isBusyAction("jobs-refresh")} onClick={() => run(refreshScheduledJobs, undefined, "jobs-refresh")}><RefreshCw size={15} /> {isBusyAction("jobs-refresh") ? "Refreshing..." : "Refresh"}</button>
             </div>
             <div className="status-detail">
               <Info label="Scheduler" value={scheduledJobs?.enabled ? "Enabled" : "Disabled"} />
@@ -2327,14 +2334,14 @@ function AdminPanel({
                         />
                       </label>
                       <button
-                        className="toolbar-button"
-                        disabled={Boolean(job.running)}
+                        className={busyButtonClass(`job-run:${job.key}`)}
+                        disabled={Boolean(job.running) || isBusyAction(`job-run:${job.key}`)}
                         onClick={() => run(async () => {
                           const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
                           setScheduledJobs(result);
-                        }, "Scheduled job started.")}
+                        }, "Scheduled job started.", `job-run:${job.key}`)}
                       >
-                        <RefreshCw size={15} /> Run Now
+                        <RefreshCw size={15} /> {isBusyAction(`job-run:${job.key}`) ? "Starting..." : "Run Now"}
                       </button>
                     </div>
                     {expanded ? (
@@ -2412,7 +2419,7 @@ function AdminPanel({
                 <h3><Activity size={17} /> BitJita Endpoint Check</h3>
                 <p className="legend">Runs live timing checks for public data sources and settlement storage containers.</p>
               </div>
-              <button className="toolbar-button" onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.")}><RefreshCw size={15} /> Run Checks</button>
+              <button className={busyButtonClass("endpoint-checks")} disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
             </div>
             {diagnostics.length ? (
               <div className="endpoint-check-panel">
@@ -2922,7 +2929,7 @@ function AdminPanel({
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
           {(!botOnly || botSection === "commands") ? <section className="form-card discord-channel-card bot-tools-card">
-            <div className="split-header"><div><h3><Command size={17} /> Custom Commands</h3><p className="legend">Create Discord slash commands that respond with static server information. Select an existing command to edit it, then re-register slash commands after saving.</p></div><button className="toolbar-button" onClick={() => run(refreshCustomCommands, "Custom commands loaded.")}><RefreshCw size={15} /> Refresh</button></div>
+            <div className="split-header"><div><h3><Command size={17} /> Custom Commands</h3><p className="legend">Create Discord slash commands that respond with static server information. Select an existing command to edit it, then re-register slash commands after saving.</p></div><button className={busyButtonClass("commands-refresh")} disabled={isBusyAction("commands-refresh")} onClick={() => run(refreshCustomCommands, "Custom commands loaded.", "commands-refresh")}><RefreshCw size={15} /> {isBusyAction("commands-refresh") ? "Refreshing..." : "Refresh"}</button></div>
             <div className="discord-tool-forms">
               <div className="discord-tool-form-card">
                 <h4><Save size={15} /> Command Editor</h4>
@@ -3097,7 +3104,7 @@ function AdminPanel({
         <section className="form-card linked-accounts-card">
           <div className="split-header">
             <h3><MessageCircle size={17} /> Discord Linked Accounts</h3>
-            <button className="toolbar-button" onClick={() => run(refreshLinkedAccounts)}><RefreshCw size={14} /> Refresh</button>
+            <button className={busyButtonClass("linked-accounts-refresh")} disabled={isBusyAction("linked-accounts-refresh")} onClick={() => run(refreshLinkedAccounts, undefined, "linked-accounts-refresh")}><RefreshCw size={14} /> {isBusyAction("linked-accounts-refresh") ? "Refreshing..." : "Refresh"}</button>
           </div>
           <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
           <div className="linked-account-list">
@@ -3603,6 +3610,7 @@ function DashboardApp() {
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
+            <PageLoadingIndicator visible={state.loading && Boolean(state.data)} />
             <div className="page-view" key={active}>{activePanel}</div>
           </>
         )}
