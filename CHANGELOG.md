@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.46] - 2026-06-15
+
+### Changed
+
+- Improved Regional Buy Order sale baseline scheduled-job progress so Admin shows checked, saved, failed, and current-item details while the job runs.
+
+### Fixed
+
+- Fixed slow BitJita sale-history requests blocking the whole Regional Buy Order sale baseline job by timing out individual item lookups and continuing with the remaining items.
+- Fixed BitJita refresh issue banners so they overlay the page instead of shifting dashboard content down.
+
 ## [1.0.0-beta.45] - 2026-06-15
 
 ### Fixed

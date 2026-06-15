@@ -5444,9 +5444,20 @@ async function recordSnapshot(payload) {
   }
 }
 
-async function fetchBitjita(pathname) {
+async function fetchBitjita(pathname, options = {}) {
   const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-  const response = await fetch(url, { headers: { accept: "application/json", "x-app-identifier": appIdentifier } });
+  const timeoutMs = Math.max(0, toNumber(options.timeoutMs));
+  const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
+  if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, fetchOptions);
+  } catch (error) {
+    if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  }
   if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
   return response.json();
 }
@@ -5579,22 +5590,25 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
   const progressKey = Object.hasOwn(options, "progressKey") ? options.progressKey : "buyOrders";
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const onAverage = typeof options.onAverage === "function" ? options.onAverage : null;
+  const requestTimeoutMs = Math.max(1000, Math.min(toNumber(options.requestTimeoutMs ?? process.env.REGIONAL_SALE_BASELINE_REQUEST_TIMEOUT_MS) || 10000, 60000));
   const uniqueOrders = [...new Map(orders
     .filter((order) => regionalSaleAverageKey(order))
     .map((order) => [regionalSaleAverageKey(order), order])).values()];
   let completed = 0;
-  const reportProgress = async () => {
+  const reportProgress = async (extra = {}) => {
     if (progressKey) collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
-    if (onProgress) await onProgress({ current: completed, total: uniqueOrders.length });
+    if (onProgress) await onProgress({ current: completed, total: uniqueOrders.length, ...extra });
   };
   const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
     const regionId = String(order.regionId ?? "").trim();
     const itemId = String(order.itemId ?? "").trim();
     const itemType = String(order.itemType ?? 0).trim() || "0";
+    const currentItem = order.itemName ?? itemId;
     const cached = useCache ? db.prepare(`
       SELECT * FROM market_regional_sale_averages_current
       WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
     `).get(String(claimId), regionId, itemId, itemType, staleBefore) : null;
+    await reportProgress({ currentItem, currentRegionId: regionId, phase: "checking" });
     if (cached) {
       completed += 1;
       const average = {
@@ -5612,11 +5626,12 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         raw: safeJson(cached.raw_json, {}),
       };
       if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress();
+      await reportProgress({ currentItem, currentRegionId: regionId, phase: "cached" });
       return average;
     }
     try {
-      const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`);
+      await reportProgress({ currentItem, currentRegionId: regionId, phase: "fetching" });
+      const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
       const buckets = unwrap(payload, "buckets", []);
       let salesCount = 0;
       let unitsSold = 0;
@@ -5643,12 +5658,12 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         raw: { buckets },
       };
       if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress();
+      await reportProgress({ currentItem, currentRegionId: regionId, phase: "saved" });
       return average;
     } catch (error) {
       failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
       completed += 1;
-      await reportProgress();
+      await reportProgress({ currentItem, currentRegionId: regionId, phase: "failed", lastFailure: failures.at(-1) });
       return null;
     }
   });

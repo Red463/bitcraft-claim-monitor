@@ -495,6 +495,12 @@ test("server collection paginates listings and protects production mutations", a
     checkDb.close();
     return count > 0;
   });
+  const runningBaselineJobs = await fetch(`${origin}/api/local/admin/jobs`, {
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  const runningBaselineJob = runningBaselineJobs.jobs.find((job) => job.key === "regional_buy_order_sale_baselines_refresh");
+  assert.equal(runningBaselineJob.metadata.total ?? runningBaselineJob.metadata.uniqueItemCount, 2);
+  assert.ok(runningBaselineJob.metadata.averageCount >= 1);
   assert.equal(slowPriceHistoryResponded, false);
   await waitForCondition("regional buy-order sale baseline refresh", () => {
     const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });

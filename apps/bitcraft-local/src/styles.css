@@ -912,7 +912,14 @@ body:has(.admin-loading-panel) .floating-actions {
   }
 }
 .api-status-banner {
-  margin: 14px 22px 0;
+  position: fixed;
+  top: 14px;
+  left: 260px;
+  right: 22px;
+  z-index: calc(var(--z-sticky) + 2);
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  margin: 0;
   padding: 10px 12px;
   border: 1px solid rgba(255,179,71,.28);
   border-radius: var(--radius-card);
@@ -925,6 +932,12 @@ body:has(.admin-loading-panel) .floating-actions {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+.app-shell.sidebar-collapsed .api-status-banner {
+  left: 92px;
+}
+.app-shell:has(.api-status-banner) .page-loading-indicator {
+  top: 68px;
 }
 .api-status-main {
   min-width: 0;
@@ -1045,7 +1058,17 @@ body:has(.admin-loading-panel) .floating-actions {
 }
 @media (max-width: 920px) {
   .api-status-banner {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    max-height: min(68vh, 520px);
     grid-template-columns: 1fr;
+  }
+  .app-shell.sidebar-collapsed .api-status-banner {
+    left: 10px;
+  }
+  .app-shell:has(.api-status-banner) .page-loading-indicator {
+    top: 72px;
   }
   .api-status-main {
     grid-template-columns: 30px minmax(0, 1fr);

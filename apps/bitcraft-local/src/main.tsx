@@ -1470,6 +1470,21 @@ function AdminPanel({
     setScheduledJobs(await api("/admin/jobs"));
   }
 
+  function scheduledJobProgressText(metadata: AnyRecord) {
+    const stage = String(metadata?.stage ?? "running").replace(/_/g, " ");
+    const parts: string[] = [];
+    if (metadata?.current != null && metadata?.total != null) parts.push(`${formatNumber(metadata.current)} / ${formatNumber(metadata.total)} checked`);
+    if (metadata?.averageCount != null) parts.push(`${formatNumber(metadata.averageCount)} saved`);
+    if (metadata?.failureCount != null && toNumber(metadata.failureCount) > 0) parts.push(`${formatNumber(metadata.failureCount)} failed`);
+    if (metadata?.currentItem) parts.push(`now ${metadata.currentItem}${metadata.currentRegionId ? ` in R${metadata.currentRegionId}` : ""}`);
+    if (metadata?.phase) parts.push(String(metadata.phase).replace(/_/g, " "));
+    if (metadata?.downloadedBytes) parts.push(`${formatNumber(metadata.downloadedBytes)} bytes downloaded`);
+    if (metadata?.locationRows) parts.push(`${formatNumber(metadata.locationRows)} locations indexed`);
+    if (metadata?.rangeRows) parts.push(`${formatNumber(metadata.rangeRows)} ranges written`);
+    if (metadata?.entries) parts.push(`${formatNumber(metadata.entries)} entries`);
+    return `${stage}${parts.length ? ` (${parts.join(" · ")})` : ""}`;
+  }
+
   function scheduledJobConfig(job: AnyRecord) {
     return scheduledJobDrafts[String(job.key)] ?? job.scheduleConfig ?? { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
   }
@@ -1549,6 +1564,14 @@ function AdminPanel({
       if (tab === "backups") await refreshBackups();
     });
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize]);
+  const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
+  React.useEffect(() => {
+    if (!auth?.authenticated || tab !== "status" || !scheduledJobsRunning) return;
+    const timer = window.setInterval(() => {
+      void refreshScheduledJobs().catch(() => undefined);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [auth?.authenticated, tab, scheduledJobsRunning]);
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "database" || !selectedTable) return;
     let stale = false;
@@ -2312,11 +2335,7 @@ function AdminPanel({
                       </small>
                       {job.running && job.metadata?.stage ? (
                         <small>
-                          Current step: {String(job.metadata.stage).replace(/_/g, " ")}
-                          {job.metadata.downloadedBytes ? ` (${formatNumber(job.metadata.downloadedBytes)} bytes downloaded)` : ""}
-                          {job.metadata.locationRows ? ` (${formatNumber(job.metadata.locationRows)} locations indexed)` : ""}
-                          {job.metadata.rangeRows ? ` (${formatNumber(job.metadata.rangeRows)} ranges written)` : ""}
-                          {job.metadata.entries ? ` (${formatNumber(job.metadata.entries)} entries)` : ""}
+                          Current step: {scheduledJobProgressText(job.metadata)}
                         </small>
                       ) : null}
                       {job.lastError ? <small className="error">Last error: {job.lastError}</small> : null}
