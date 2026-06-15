@@ -3790,6 +3790,63 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   color: #8793a5;
   font-size: 11px;
 }
+.buy-order-opportunities {
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240,198,79,.08), transparent 35%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  padding: 18px;
+}
+.opportunity-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.opportunity-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid rgba(240,198,79,.2);
+  border-radius: 7px;
+  background: rgba(240,198,79,.055);
+  padding: 10px;
+}
+.opportunity-card strong,
+.opportunity-card span,
+.opportunity-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.opportunity-card strong {
+  color: #fff;
+}
+.opportunity-card span,
+.opportunity-card small {
+  color: #aab5c4;
+  font-size: 11px;
+}
+.opportunity-card b {
+  grid-column: 1 / -1;
+  color: #f0c64f;
+  font-size: 12px;
+}
+.pagination-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: #aab5c4;
+  font-size: 12px;
+}
+.pagination-row > div {
+  display: flex;
+  gap: 8px;
+}
 .price-recommendation { min-width: 245px; border-left: 1px solid var(--border); padding-left: 20px; display: grid; gap: 3px; }
 .price-recommendation span { color: var(--gold); text-transform: uppercase; font-size: var(--font-micro); }
 .price-recommendation strong { color: var(--text); font: 700 34px Rajdhani, sans-serif; line-height: 1; }
@@ -6105,6 +6162,7 @@ body .market-page tbody tr:hover td {
   .market-live-grid,
   .market-analytics-metrics,
   .market-page .price-finder .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .opportunity-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .production-command-main,
   .production-crafter-line,
   .market-tool-row,

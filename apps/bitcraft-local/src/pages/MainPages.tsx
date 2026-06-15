@@ -76,7 +76,6 @@ import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
 import { getTrackedOwnerName } from "../utils/ownership";
 import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
-import { buyOrderAgeDays, normalizeBuyOrder, sortBuyOrdersByBestPrice } from "../utils/marketOrders";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
@@ -1070,130 +1069,99 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
 
 export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
   const defaultRegion = monitoredRegionId || "19";
-  const [query, setQuery] = React.useState("");
-  const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
-  const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
-  const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
+  const [search, setSearch] = usePersistedState("market.buyOrders.search", "");
   const [regionChoice, setRegionChoice] = usePersistedState("market.buyOrders.region", defaultRegion);
   const activeRegions = useActiveRegions(defaultRegion);
-  const [orderState, setOrderState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
-  const activeRegion = regionChoice === "All" ? "" : regionChoice;
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = usePersistedState("market.buyOrders.pageSize", "50");
+  const [sort, setSort] = React.useState("unitPrice");
+  const [direction, setDirection] = React.useState<"asc" | "desc">("desc");
+  const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
 
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const itemId = params.get("buyItem");
-    const itemName = params.get("buyItemName");
-    const itemType = params.get("buyItemType");
     const region = params.get("buyRegion");
-    if (itemId && itemName) {
-      setSelectedItem({ id: itemId, name: itemName, itemType: toNumber(itemType) });
-      setQuery(itemName);
-    }
     if (region) setRegionChoice(region === "all" ? "All" : region);
   }, [setRegionChoice]);
 
   React.useEffect(() => {
-    if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
-      setSuggestions([]);
-      setSearchState("idle");
-      return;
-    }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setSearchState("loading");
-      fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
-        .then((payload) => {
-          const items: AnyRecord[] = payload.data?.items ?? [];
-          setSuggestions(items.filter((item) => String(item.name ?? "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8));
-          setSearchState("idle");
-        })
+      const params = new URLSearchParams({
+        regionId: regionChoice === "All" ? "all" : regionChoice,
+        search: search.trim(),
+        page: String(page),
+        pageSize: String(pageSize),
+        sort,
+        direction,
+      });
+      setState((current) => ({ ...current, error: null, loading: true }));
+      fetch(`${LOCAL_API}/market/buy-orders?${params}`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`buy orders HTTP ${response.status}`)))
+        .then((payload) => setState({ data: payload, error: null, loading: false }))
         .catch(() => {
-          if (!controller.signal.aborted) {
-            setSuggestions([]);
-            setSearchState("error");
-          }
+          if (!controller.signal.aborted) setState({ data: null, error: "Unable to load cached buy orders", loading: false });
         });
-    }, 250);
+    }, 180);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query, selectedItem?.name]);
-
-  React.useEffect(() => {
-    if (!selectedItem) {
-      setOrderState({ data: null, error: null, loading: false });
-      return;
-    }
-    const controller = new AbortController();
-    const type = toNumber(selectedItem.itemType) === 1 ? "cargo" : "items";
-    const regionParam = activeRegion ? `?regionId=${encodeURIComponent(activeRegion)}` : "";
-    setOrderState((current) => ({ ...current, error: null, loading: true }));
-    fetch(`${API}/market/${type}/${selectedItem.id}${regionParam}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`buy orders HTTP ${response.status}`)))
-      .then((payload) => setOrderState({ data: payload, error: null, loading: false }))
-      .catch((error) => {
-        if (!controller.signal.aborted) setOrderState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
-      });
-    return () => controller.abort();
-  }, [selectedItem, activeRegion]);
-
-  function chooseItem(item: AnyRecord) {
-    setSelectedItem(item);
-    setQuery(String(item.name));
-    setSuggestions([]);
-    updateQueryState({
-      tab: "buy-orders",
-      buyItem: String(item.id),
-      buyItemName: String(item.name),
-      buyItemType: String(item.itemType ?? 0),
-      buyRegion: activeRegion || "all",
-    });
-    trackAnalyticsEvent("buy_order_finder_search", { region: activeRegion ? "selected_region" : "all_regions" });
-  }
+  }, [regionChoice, search, page, pageSize, sort, direction]);
 
   const regionIds = unique([
     defaultRegion,
     regionChoice !== "All" ? regionChoice : "",
     ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
-  const orders = sortBuyOrdersByBestPrice((orderState.data?.buyOrders ?? [])
-    .map((order: AnyRecord) => normalizeBuyOrder(order, toNumber(selectedItem?.itemType)))
-    .filter((order: ReturnType<typeof normalizeBuyOrder>) => !activeRegion || String(order.regionId) === String(activeRegion)));
-  const bestOrder = orders[0];
-  const largestVolume = [...orders].sort((a, b) => b.quantity - a.quantity || b.unitPrice - a.unitPrice)[0];
-  const totalDemand = orders.reduce((total, order) => total + order.quantity, 0);
-  const totalValue = orders.reduce((total, order) => total + order.totalValue, 0);
-  const marketCount = new Set(orders.map((order) => order.claimEntityId || order.claimName)).size;
-  const regionLabel = activeRegion ? `R${activeRegion}` : "All Regions";
+  const rows: AnyRecord[] = state.data?.rows ?? [];
+  const opportunities: AnyRecord[] = state.data?.opportunities ?? [];
+  const total = toNumber(state.data?.total);
+  const pageCount = toNumber(state.data?.pageCount) || 1;
+  const bestOrder = rows[0];
+  const marketCount = new Set(rows.map((order) => order.marketClaimId || order.marketClaimName)).size;
+  const regionLabel = regionChoice === "All" ? "All Regions" : `R${regionChoice}`;
+
+  function setRegion(nextRegion: string) {
+    setRegionChoice(nextRegion);
+    setPage(1);
+    updateQueryState({ buyRegion: nextRegion === "All" ? "all" : nextRegion });
+    trackAnalyticsEvent("buy_order_region_filter", { region: nextRegion === "All" ? "all_regions" : "selected_region" });
+  }
+
+  function changeSort(nextSort: string) {
+    if (sort === nextSort) setDirection((current) => current === "asc" ? "desc" : "asc");
+    else {
+      setSort(nextSort);
+      setDirection(nextSort === "item" || nextSort === "buyer" || nextSort === "settlement" ? "asc" : "desc");
+    }
+    setPage(1);
+  }
+
+  function SortHeader({ id, children }: { id: string; children: React.ReactNode }) {
+    const active = sort === id;
+    return (
+      <button className={`table-sort-button ${active ? "is-sorted" : ""}`} type="button" onClick={() => changeSort(id)}>
+        {children}
+        <span className="table-sort-indicator">{active ? (direction === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</span>
+      </button>
+    );
+  }
 
   return (
     <section className="price-finder buy-order-finder">
       <div className="market-command-header price-finder-header">
         <span className="production-command-title"><ShoppingBag size={15} /> Buy order lookup</span>
-        <span>{regionLabel} active buy orders</span>
+        <span>{state.loading ? "Updating cached orders..." : `${formatNumber(total)} cached orders`}</span>
       </div>
       <div className="price-finder-controls">
         <label className="research-filter-field price-item-search">
-          <span>Item</span>
-          <div className="suggestion-anchor">
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
-            {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
-              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
-                <ItemIcon item={item} />
-                <strong>{item.name}</strong>
-                {item.tier ? <TierBadge tier={item.tier} /> : null}
-                <small className="item-meta-line">{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
-              </button>
-            ))}</div> : null}
-          </div>
-          {searchState === "loading" ? <small className="legend">Finding market items...</small> : null}
-          {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
+          <span>Search buy orders</span>
+          <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Item, buyer, settlement, rarity..." />
         </label>
         <label className="research-filter-field price-region-field">
           <span>Region</span>
-          <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ buyRegion: event.target.value === "All" ? "all" : event.target.value }); }}>
+          <select value={regionChoice} onChange={(event) => setRegion(event.target.value)}>
             {regionIds.map((regionId) => {
               const region = activeRegions.find((entry) => String(entry.regionId) === String(regionId)) ?? { regionId };
               return <option value={regionId} key={regionId}>{activeRegionLabel(region, defaultRegion)}</option>;
@@ -1201,47 +1169,90 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
             <option value="All">All Regions</option>
           </select>
         </label>
+        <label className="research-filter-field price-page-size-field">
+          <span>Rows</span>
+          <select value={pageSize} onChange={(event) => { setPageSize(event.target.value); setPage(1); }}>
+            <option value="25">25 per page</option>
+            <option value="50">50 per page</option>
+            <option value="100">100 per page</option>
+          </select>
+        </label>
       </div>
-      {!selectedItem ? <div className="empty-state price-empty"><ShoppingBag />Choose an item to find active buy orders.</div> : null}
-      {selectedItem && orderState.loading && !orderState.data ? <div className="loading">Loading buy orders for {selectedItem.name}...</div> : null}
-      {orderState.error ? <div className="error">Unable to load buy orders: {orderState.error}</div> : null}
-      {selectedItem && orderState.data ? (
-        <>
-          <div className="price-finder-heading">
-            <div><h3>{selectedItem.name}</h3><span>{regionLabel} current demand</span></div>
-            <div className="price-recommendation">
-              <span>Best Unit Price</span>
-              <strong>{bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"}</strong>
-              <small>{bestOrder ? `${bestOrder.claimName} - ${bestOrder.ownerUsername}` : "No active buy orders"}</small>
-            </div>
+      {state.error ? <div className="error">Unable to load cached buy orders: {state.error}</div> : null}
+      <div className="metric-grid">
+        <MiniStat icon={<ShoppingBag />} label="Current Buy Orders" value={formatNumber(total)} />
+        <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"} />
+        <MiniStat icon={<Package />} label="Visible Demand" value={formatNumber(rows.reduce((sum, order) => sum + toNumber(order.quantity), 0))} />
+        <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={`${formatCompactNumber(rows.reduce((sum, order) => sum + toNumber(order.totalValue), 0))}g`} />
+        <MiniStat icon={<ShoppingCart />} label="Markets Visible" value={formatNumber(marketCount)} />
+      </div>
+      <section className="buy-order-opportunities">
+        <h3><TrendingUp size={17} /> Best Opportunities <small>Requires 3+ same-region sales in the last 7 days</small></h3>
+        {opportunities.length ? (
+          <div className="opportunity-strip">
+            {opportunities.map((order) => (
+              <article className="opportunity-card" key={order.orderKey}>
+                <ItemIcon item={order} />
+                <div>
+                  <strong>{order.itemName}</strong>
+                  <span>{formatNumber(order.unitPrice)}g buy order vs {formatNumber(Math.round(toNumber(order.averageUnitPrice)))}g average</span>
+                  <small>{formatNumber(order.quantity)} wanted at {order.marketClaimName || `R${order.regionId}`}</small>
+                </div>
+                <b>{formatNumber(Math.round(toNumber(order.premiumPercent)))}% above 7d avg</b>
+              </article>
+            ))}
           </div>
-          <div className="metric-grid">
-            <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"} />
-            <MiniStat icon={<Package />} label="Total Demand" value={formatNumber(totalDemand)} />
-            <MiniStat icon={<TrendingUp />} label="Total Buy Value" value={`${formatCompactNumber(totalValue)}g`} />
-            <MiniStat icon={<ShoppingCart />} label="Markets With Orders" value={formatNumber(marketCount)} />
-            <MiniStat icon={<ShoppingBag />} label="Most Volume" value={largestVolume ? `${formatNumber(largestVolume.quantity)} units` : "-"} />
+        ) : (
+          <div className="empty-state price-empty"><TrendingUp />No high-confidence opportunities yet. Orders still appear in the table below.</div>
+        )}
+      </section>
+      <section>
+        <h3><ShoppingBag size={17} /> Current Buy Orders <small>{regionLabel}</small></h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><SortHeader id="item">Item</SortHeader></th>
+                <th><SortHeader id="tier">Tier</SortHeader></th>
+                <th><SortHeader id="rarity">Rarity</SortHeader></th>
+                <th><SortHeader id="region">Region</SortHeader></th>
+                <th><SortHeader id="buyer">Buyer</SortHeader></th>
+                <th><SortHeader id="settlement">Settlement</SortHeader></th>
+                <th><SortHeader id="quantity">Qty</SortHeader></th>
+                <th><SortHeader id="unitPrice">Unit Price</SortHeader></th>
+                <th><SortHeader id="totalValue">Total Value</SortHeader></th>
+                <th><SortHeader id="premium">Premium</SortHeader></th>
+                <th><SortHeader id="lastSeen">Last Seen</SortHeader></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((order) => (
+                <tr key={order.orderKey}>
+                  <td><ItemLabel item={order} /></td>
+                  <td>{order.tier ? <TierBadge tier={order.tier} /> : "-"}</td>
+                  <td>{order.rarity ? <RarityBadge rarity={order.rarity} /> : "-"}</td>
+                  <td>{order.regionName || (order.regionId ? `R${order.regionId}` : "-")}</td>
+                  <td>{order.buyerName || "-"}</td>
+                  <td>{order.marketClaimName || "-"}</td>
+                  <td>{formatNumber(order.quantity)}</td>
+                  <td>{formatNumber(order.unitPrice)}g</td>
+                  <td>{formatNumber(order.totalValue)}g</td>
+                  <td>{order.premiumPercent == null ? <span className="muted">No sales baseline</span> : `${formatNumber(Math.round(order.premiumPercent))}%`}</td>
+                  <td>{order.lastSeen ? timeAgo(order.lastSeen) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!rows.length ? <div className="empty-state price-empty"><ShoppingBag />{state.loading ? "Loading cached buy orders..." : total ? "No buy orders match your search." : "No cached buy orders are available for this region yet. The regional buy-order collector may not have populated it."}</div> : null}
+        </div>
+        <div className="pagination-row">
+          <span>{formatNumber(total)} matching orders - page {page} of {pageCount}</span>
+          <div>
+            <button className="toolbar-button" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+            <button className="toolbar-button" disabled={page >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>Next</button>
           </div>
-          <section>
-            <h3><ShoppingBag size={17} /> Active Buy Orders <small>{formatNumber(orders.length)} order{orders.length === 1 ? "" : "s"}</small></h3>
-            {orders.length ? (
-              <DataTable rows={orders} columns={[
-                ["Settlement", row => <div><strong>{row.claimName}</strong><small className="table-subline">{row.regionName || (row.regionId ? `R${row.regionId}` : "")}</small></div>],
-                ["Buyer", row => row.ownerUsername],
-                ["Qty", row => formatNumber(row.quantity)],
-                ["Unit Price", row => `${formatNumber(row.unitPrice)}g`],
-                ["Total Value", row => `${formatNumber(row.totalValue)}g`],
-                ["Stored Coins", row => `${formatNumber(row.storedCoins)}g`],
-                ["Listed", row => row.listedAt ? dateLabel(row.listedAt) : "-"],
-                ["Live", row => {
-                  const age = buyOrderAgeDays(row as ReturnType<typeof normalizeBuyOrder>);
-                  return age == null ? "-" : age === 0 ? "Today" : `${age}d`;
-                }],
-              ]} />
-            ) : <div className="empty-state price-empty"><ShoppingBag />No active buy orders found for this item in {regionLabel}.</div>}
-          </section>
-        </>
-      ) : null}
+        </div>
+      </section>
     </section>
   );
 }

@@ -108,6 +108,50 @@ db.exec(`
     imported_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS market_buy_orders_current (
+    claim_id TEXT NOT NULL,
+    order_key TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    region_name TEXT,
+    market_claim_id TEXT,
+    market_claim_name TEXT,
+    buyer_entity_id TEXT,
+    buyer_name TEXT,
+    item_id TEXT,
+    item_type TEXT,
+    item_name TEXT NOT NULL,
+    tier TEXT,
+    rarity TEXT,
+    icon_asset_name TEXT,
+    quantity REAL,
+    unit_price REAL,
+    total_value REAL,
+    stored_coins REAL,
+    listed_at TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    raw_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (claim_id, order_key)
+  );
+  CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current (
+    claim_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    item_type TEXT NOT NULL DEFAULT '0',
+    item_name TEXT,
+    average_unit_price REAL,
+    sales_count REAL,
+    units_sold REAL,
+    total_value REAL,
+    window_days INTEGER NOT NULL DEFAULT 7,
+    first_bucket_at TEXT,
+    last_bucket_at TEXT,
+    raw_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (claim_id, region_id, item_id, item_type)
+  );
   CREATE TABLE IF NOT EXISTS activity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     claim_id TEXT NOT NULL,
@@ -528,6 +572,9 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
+  CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
@@ -569,6 +616,11 @@ ensureColumn("market_events", "item_id", "TEXT");
 ensureColumn("market_events", "item_type", "TEXT");
 ensureColumn("market_events", "trade_id", "TEXT");
 ensureColumn("market_events", "source_key", "TEXT");
+ensureColumn("market_buy_orders_current", "icon_asset_name", "TEXT");
+ensureColumn("market_buy_orders_current", "active", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("market_buy_orders_current", "updated_at", "TEXT");
+ensureColumn("market_regional_sale_averages_current", "item_name", "TEXT");
+ensureColumn("market_regional_sale_averages_current", "window_days", "INTEGER NOT NULL DEFAULT 7");
 ensureColumn("activity_events", "source_key", "TEXT");
 ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("admin_users", "last_login_at", "TEXT");
@@ -1937,6 +1989,7 @@ const domainCollectorDefaults = {
   construction: { label: "Construction", intervalSeconds: 60 },
   research: { label: "Research", intervalSeconds: 600 },
   market: { label: "Market", intervalSeconds: 60 },
+  buyOrders: { label: "Regional buy orders", intervalSeconds: 300 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
   snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
@@ -1944,7 +1997,7 @@ const domainCollectorDefaults = {
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };
 
-const domainPayloadKeys = ["claim", "members", "citizens", "buildings", "construction", "research", "market", "crafts", "players", "playerDetailDiagnostics", "contributions", "region", "regionStatus", "tradeVolume", "inventories", "recruitment", "layout", "skills"];
+const domainPayloadKeys = ["claim", "members", "citizens", "buildings", "construction", "research", "market", "regionalBuyOrders", "crafts", "players", "playerDetailDiagnostics", "contributions", "region", "regionStatus", "tradeVolume", "inventories", "recruitment", "layout", "skills"];
 const collectorPrimaryPayloadDomain = {
   claim: "claim",
   members: "members",
@@ -1955,6 +2008,7 @@ const collectorPrimaryPayloadDomain = {
   construction: "construction",
   research: "research",
   market: "market",
+  buyOrders: "regionalBuyOrders",
   region: "region",
   mapCatalog: "skills",
 };
@@ -2122,6 +2176,7 @@ const loginAttempts = new Map();
 const upstreamCache = new Map();
 const upstreamInflight = new Map();
 const regionCache = new Map();
+const regionClaimListCache = new Map();
 let activeRegionsCache = null;
 const claimDetailCache = new Map();
 const playerDetailCache = new Map();
@@ -5206,14 +5261,178 @@ async function fetchBitjita(pathname) {
   return response.json();
 }
 
-async function fetchAllClaimListings(claimId) {
-  const base = `/claims/${claimId}/market/listings?limit=200`;
+async function fetchAllClaimListings(claimId, options = {}) {
+  const side = String(options.side ?? "").toLowerCase();
+  const sideParam = side === "buy" || side === "sell" ? `&side=${side}` : "";
+  const base = `/claims/${claimId}/market/listings?limit=200${sideParam}`;
   const first = await fetchBitjita(`${base}&page=1`);
   const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
   const pages = totalPages > 1
     ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
     : [];
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
+}
+
+async function fetchRegionClaimList(regionId) {
+  const key = String(regionId);
+  const cached = regionClaimListCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const base = `/claims?regionId=${encodeURIComponent(key)}&limit=100&sort=supplies&order=desc`;
+  const first = await fetchBitjita(`${base}&page=1`);
+  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
+  const pages = totalPages > 1
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
+    : [];
+  const value = { ...first, claims: [first, ...pages].flatMap((page) => unwrap(page, "claims", [])), page: 1, totalPages };
+  regionClaimListCache.set(key, { expiresAt: Date.now() + 5 * 60 * 1000, value });
+  return value;
+}
+
+function buyOrderKey(listing) {
+  return String(listing.entityId ?? listing.id ?? `${listing.claimEntityId ?? "claim"}:${listing.itemType ?? ""}:${listing.itemId ?? ""}:${listing.ownerEntityId ?? ""}:${listing.price ?? ""}`);
+}
+
+function normalizeRegionalBuyOrder(listing, regionId, regionName, fallbackClaim = {}) {
+  const quantity = toNumber(listing.quantity);
+  const unitPrice = toNumber(listing.priceThreshold ?? listing.unitPrice ?? listing.price);
+  const marketClaimId = String(listing.claimEntityId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
+  const itemTypeRaw = listing.itemType ?? listing.item_type;
+  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
+  const listedAt = listing.timestamp ?? listing.createdAt ?? listing.updatedAt ?? null;
+  return {
+    orderKey: buyOrderKey(listing),
+    regionId: String(listing.regionId ?? regionId ?? "").trim(),
+    regionName: String(listing.regionName ?? regionName ?? ""),
+    marketClaimId,
+    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
+    buyerEntityId: String(listing.ownerEntityId ?? listing.ownerId ?? ""),
+    buyerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown buyer"),
+    itemId: String(listing.itemId ?? listing.item_id ?? ""),
+    itemType,
+    itemName: String(listing.itemName ?? listing.name ?? "Unknown item"),
+    tier: listing.itemTier ?? listing.tier ?? null,
+    rarity: listing.itemRarityStr ?? listing.rarityStr ?? listing.itemRarity ?? listing.rarity ?? null,
+    iconAssetName: listing.iconAssetName ?? null,
+    quantity,
+    unitPrice,
+    totalValue: quantity * unitPrice,
+    storedCoins: toNumber(listing.storedCoins),
+    listedAt,
+    raw: listing,
+  };
+}
+
+async function fetchRegionalBuyOrders(claimId, regionIds) {
+  const uniqueRegionIds = [...new Set(regionIds.map((id) => String(id ?? "").trim()).filter((id) => /^\d+$/.test(id)))];
+  const failures = [];
+  const orders = [];
+  for (const regionId of uniqueRegionIds) {
+    let claimPayload;
+    try {
+      claimPayload = await fetchRegionClaimList(regionId);
+    } catch (error) {
+      failures.push(`R${regionId} claims: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    const claims = unwrap(claimPayload, "claims", []);
+    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
+    const pages = await mapWithConcurrency(claims, 3, async (claim) => {
+      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
+      if (!marketClaimId) return [];
+      try {
+        const payload = await fetchAllClaimListings(marketClaimId, { side: "buy" });
+        return unwrap(payload, "listings", []).map((listing) => normalizeRegionalBuyOrder(listing, regionId, regionName, claim));
+      } catch (error) {
+        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      }
+    });
+    orders.push(...pages.flat());
+  }
+  const saleAverages = await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures);
+  return {
+    regions: uniqueRegionIds,
+    orders,
+    saleAverages,
+    failures: failures.slice(0, 50),
+    partialError: failures.length ? `${failures.length} regional buy-order market request${failures.length === 1 ? "" : "s"} failed` : null,
+  };
+}
+
+function regionalSaleAverageKey(order) {
+  const regionId = String(order.regionId ?? "").trim();
+  const itemId = String(order.itemId ?? "").trim();
+  const itemType = String(order.itemType ?? 0).trim() || "0";
+  return regionId && itemId ? `${regionId}:${itemType}:${itemId}` : "";
+}
+
+function priceHistoryBucketTotals(bucket) {
+  const unitsSold = toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume ?? bucket.totalQuantity);
+  const totalValue = toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value ?? bucket.revenue);
+  const salesCount = toNumber(bucket.salesCount ?? bucket.tradeCount ?? bucket.trades ?? bucket.count) || unitsSold;
+  return { unitsSold, totalValue, salesCount };
+}
+
+async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = []) {
+  const now = Date.now();
+  const staleBefore = new Date(now - 60 * 60 * 1000).toISOString();
+  const uniqueOrders = [...new Map(orders
+    .filter((order) => regionalSaleAverageKey(order))
+    .map((order) => [regionalSaleAverageKey(order), order])).values()];
+  const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
+    const regionId = String(order.regionId ?? "").trim();
+    const itemId = String(order.itemId ?? "").trim();
+    const itemType = String(order.itemType ?? 0).trim() || "0";
+    const cached = db.prepare(`
+      SELECT * FROM market_regional_sale_averages_current
+      WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
+    `).get(String(claimId), regionId, itemId, itemType, staleBefore);
+    if (cached) return {
+      regionId,
+      itemId,
+      itemType,
+      itemName: cached.item_name,
+      averageUnitPrice: toNumber(cached.average_unit_price),
+      salesCount: toNumber(cached.sales_count),
+      unitsSold: toNumber(cached.units_sold),
+      totalValue: toNumber(cached.total_value),
+      windowDays: toNumber(cached.window_days) || 7,
+      firstBucketAt: cached.first_bucket_at,
+      lastBucketAt: cached.last_bucket_at,
+      raw: safeJson(cached.raw_json, {}),
+    };
+    try {
+      const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`);
+      const buckets = unwrap(payload, "buckets", []);
+      let salesCount = 0;
+      let unitsSold = 0;
+      let totalValue = 0;
+      for (const bucket of buckets) {
+        const totals = priceHistoryBucketTotals(bucket);
+        salesCount += totals.salesCount;
+        unitsSold += totals.unitsSold;
+        totalValue += totals.totalValue;
+      }
+      return {
+        regionId,
+        itemId,
+        itemType,
+        itemName: order.itemName ?? null,
+        averageUnitPrice: unitsSold > 0 ? totalValue / unitsSold : 0,
+        salesCount,
+        unitsSold,
+        totalValue,
+        windowDays: 7,
+        firstBucketAt: buckets[0]?.bucket ?? buckets[0]?.date ?? buckets[0]?.start ?? null,
+        lastBucketAt: buckets.at(-1)?.bucket ?? buckets.at(-1)?.date ?? buckets.at(-1)?.start ?? null,
+        raw: { buckets },
+      };
+    } catch (error) {
+      failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  });
+  return averages.filter(Boolean);
 }
 
 function marketTradeBackfillKey(claimId, playerId) {
@@ -6133,6 +6352,7 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     region: payload("region", { claims: [] }),
     regionStatus: payload("regionStatus", { regions: [] }),
     tradeVolume: payload("tradeVolume", {}),
+    regionalBuyOrders: payload("regionalBuyOrders", { regions: [], orders: [] }),
     inventories: payload("inventories", { buildings: [] }),
     recruitment: payload("recruitment", { applications: [] }),
     layout: payload("layout", {}),
@@ -6485,6 +6705,112 @@ function persistCurrentRows(claimId, data, collectedAt) {
       upsertRegionStatus.run(regionId, region.name ?? region.regionName ?? `R${regionId}`, toNumber(region.signedInPlayers ?? region.signed_in_players), toNumber(region.playersInQueue ?? region.players_in_queue), JSON.stringify(region), collectedAt);
     }
 
+    const regionalBuyOrders = Array.isArray(data.regionalBuyOrders?.orders) ? data.regionalBuyOrders.orders : [];
+    const buyOrderPayloadPartial = Boolean(data.regionalBuyOrders?.partialError || (Array.isArray(data.regionalBuyOrders?.partialErrors) && data.regionalBuyOrders.partialErrors.length));
+    if (!buyOrderPayloadPartial) db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
+    const previousBuyOrders = new Map(db.prepare("SELECT order_key, first_seen FROM market_buy_orders_current WHERE claim_id = ?").all(claimIdText).map((row) => [row.order_key, row]));
+    const upsertBuyOrder = db.prepare(`
+      INSERT INTO market_buy_orders_current (
+        claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
+        buyer_entity_id, buyer_name, item_id, item_type, item_name, tier, rarity, icon_asset_name,
+        quantity, unit_price, total_value, stored_coins, listed_at, first_seen, last_seen, active, raw_json, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(claim_id, order_key) DO UPDATE SET
+        region_id = excluded.region_id,
+        region_name = excluded.region_name,
+        market_claim_id = excluded.market_claim_id,
+        market_claim_name = excluded.market_claim_name,
+        buyer_entity_id = excluded.buyer_entity_id,
+        buyer_name = excluded.buyer_name,
+        item_id = excluded.item_id,
+        item_type = excluded.item_type,
+        item_name = excluded.item_name,
+        tier = excluded.tier,
+        rarity = excluded.rarity,
+        icon_asset_name = excluded.icon_asset_name,
+        quantity = excluded.quantity,
+        unit_price = excluded.unit_price,
+        total_value = excluded.total_value,
+        stored_coins = excluded.stored_coins,
+        listed_at = excluded.listed_at,
+        last_seen = excluded.last_seen,
+        active = 1,
+        raw_json = excluded.raw_json,
+        updated_at = excluded.updated_at
+    `);
+    for (const order of regionalBuyOrders) {
+      const key = String(order.orderKey ?? order.entityId ?? order.id ?? "").trim();
+      if (!key) continue;
+      upsertBuyOrder.run(
+        claimIdText,
+        key,
+        String(order.regionId ?? ""),
+        order.regionName ?? null,
+        String(order.marketClaimId ?? ""),
+        order.marketClaimName ?? null,
+        String(order.buyerEntityId ?? ""),
+        order.buyerName ?? null,
+        String(order.itemId ?? ""),
+        String(order.itemType ?? 0),
+        order.itemName ?? null,
+        order.tier ?? null,
+        order.rarity ?? null,
+        order.iconAssetName ?? null,
+        toNumber(order.quantity),
+        toNumber(order.unitPrice),
+        toNumber(order.totalValue),
+        toNumber(order.storedCoins),
+        order.listedAt ?? null,
+        previousBuyOrders.get(key)?.first_seen ?? order.firstSeen ?? collectedAt,
+        collectedAt,
+        JSON.stringify(order.raw ?? order),
+        collectedAt,
+      );
+    }
+
+    const regionalSaleAverages = Array.isArray(data.regionalBuyOrders?.saleAverages) ? data.regionalBuyOrders.saleAverages : [];
+    const upsertRegionalSaleAverage = db.prepare(`
+      INSERT INTO market_regional_sale_averages_current (
+        claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
+        units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(claim_id, region_id, item_id, item_type) DO UPDATE SET
+        item_name = excluded.item_name,
+        average_unit_price = excluded.average_unit_price,
+        sales_count = excluded.sales_count,
+        units_sold = excluded.units_sold,
+        total_value = excluded.total_value,
+        window_days = excluded.window_days,
+        first_bucket_at = excluded.first_bucket_at,
+        last_bucket_at = excluded.last_bucket_at,
+        raw_json = excluded.raw_json,
+        updated_at = excluded.updated_at
+    `);
+    for (const average of regionalSaleAverages) {
+      const regionId = String(average.regionId ?? "").trim();
+      const itemId = String(average.itemId ?? "").trim();
+      const itemType = String(average.itemType ?? 0).trim() || "0";
+      if (!regionId || !itemId) continue;
+      upsertRegionalSaleAverage.run(
+        claimIdText,
+        regionId,
+        itemId,
+        itemType,
+        average.itemName ?? null,
+        toNumber(average.averageUnitPrice),
+        toNumber(average.salesCount),
+        toNumber(average.unitsSold),
+        toNumber(average.totalValue),
+        toNumber(average.windowDays) || 7,
+        average.firstBucketAt ?? null,
+        average.lastBucketAt ?? null,
+        JSON.stringify(average.raw ?? average),
+        collectedAt,
+      );
+    }
+
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -6596,6 +6922,14 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => fetchCachedRegionClaims(derivedRegionId)) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
     collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`)) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
   ]);
+  const buyOrderRegionIds = [...new Set([
+    derivedRegionId,
+    ...parseRegionIds(getSettings().additionalActiveRegions),
+    ...unwrap(regionStatus, "regions", []).filter((regionRow) => regionRow?.active !== false).map((regionRow) => String(regionRow.regionId ?? regionRow.id ?? regionRow.entityId ?? "")).filter(Boolean),
+  ].map((regionId) => String(regionId ?? "").trim()).filter((regionId) => /^\d+$/.test(regionId)))];
+  const regionalBuyOrders = collectorDue(id, "buyOrders", "regionalBuyOrders", options) && buyOrderRegionIds.length
+    ? await fetchDomainPayload(previous, "regionalBuyOrders", { regions: [], orders: [] }, "Regional buy orders", () => fetchRegionalBuyOrders(id, buyOrderRegionIds))
+    : previousPayload(previous, "regionalBuyOrders", { regions: [], orders: [] });
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
     claim: claimPayloadWithRegion,
@@ -6616,6 +6950,7 @@ async function buildCurrentClaimData(claimId, options = {}) {
     region,
     regionStatus,
     tradeVolume,
+    regionalBuyOrders,
     inventories: inventoriesPayload,
     recruitment: recruitmentPayload,
     layout: layoutPayload,
@@ -6804,6 +7139,115 @@ function marketHistory(claimId, limit, owner = "") {
     LIMIT 30
   `).all(...args);
   return { liveListings, events, sales, topItems, daily, totals, pending };
+}
+
+function marketBuyOrders(claimId, params = {}) {
+  const id = String(claimId ?? "").trim();
+  const requestedRegion = String(params.regionId ?? "").trim();
+  const regionId = requestedRegion && requestedRegion.toLowerCase() !== "all" ? requestedRegion : "";
+  const query = String(params.search ?? params.q ?? "").trim().toLowerCase();
+  const page = Math.max(1, Math.floor(Number(params.page) || 1));
+  const pageSize = [25, 50, 100].includes(Number(params.pageSize)) ? Number(params.pageSize) : 50;
+  const direction = String(params.direction ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
+  const sort = String(params.sort ?? "unitPrice");
+  const rows = db.prepare(`
+    SELECT * FROM market_buy_orders_current
+    WHERE claim_id = ? AND active = 1
+      ${regionId ? "AND region_id = ?" : ""}
+    ORDER BY last_seen DESC
+  `).all(...(regionId ? [id, regionId] : [id]));
+  const salesByItem = new Map();
+  for (const row of db.prepare(`
+    SELECT region_id, item_id, item_type, sales_count AS salesCount, units_sold AS unitsSold, total_value AS totalValue, average_unit_price AS averageUnitPrice
+    FROM market_regional_sale_averages_current
+    WHERE claim_id = ? AND window_days = 7
+  `).all(id)) {
+    const units = toNumber(row.unitsSold);
+    const total = toNumber(row.totalValue);
+    if (!row.item_id || units <= 0 || toNumber(row.salesCount) < 3) continue;
+    salesByItem.set(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`, {
+      salesCount: toNumber(row.salesCount),
+      averageUnitPrice: toNumber(row.averageUnitPrice) || total / units,
+    });
+  }
+  const normalized = rows.map((row) => {
+    const raw = safeJson(row.raw_json, {});
+    const sales = salesByItem.get(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`) ?? null;
+    const averageUnitPrice = sales?.averageUnitPrice ?? null;
+    const premiumPercent = averageUnitPrice && averageUnitPrice > 0 ? ((toNumber(row.unit_price) - averageUnitPrice) / averageUnitPrice) * 100 : null;
+    return {
+      orderKey: row.order_key,
+      regionId: row.region_id,
+      regionName: row.region_name,
+      marketClaimId: row.market_claim_id,
+      marketClaimName: row.market_claim_name,
+      buyerEntityId: row.buyer_entity_id,
+      buyerName: row.buyer_name,
+      itemId: row.item_id,
+      itemType: row.item_type,
+      itemName: row.item_name,
+      tier: row.tier,
+      rarity: row.rarity,
+      rarityStr: row.rarity,
+      iconAssetName: row.icon_asset_name ?? raw.iconAssetName,
+      quantity: toNumber(row.quantity),
+      unitPrice: toNumber(row.unit_price),
+      totalValue: toNumber(row.total_value),
+      storedCoins: toNumber(row.stored_coins),
+      listedAt: row.listed_at,
+      firstSeen: row.first_seen,
+      lastSeen: row.last_seen,
+      averageUnitPrice,
+      salesCount: sales?.salesCount ?? 0,
+      premiumPercent,
+      opportunityEligible: premiumPercent != null && premiumPercent > 0,
+    };
+  }).filter((row) => {
+    if (!query) return true;
+    return [row.itemName, row.buyerName, row.marketClaimName, row.regionName, row.rarity]
+      .some((value) => String(value ?? "").toLowerCase().includes(query));
+  });
+  const sorters = {
+    item: (row) => row.itemName ?? "",
+    tier: (row) => toNumber(row.tier),
+    rarity: (row) => row.rarity ?? "",
+    region: (row) => toNumber(row.regionId),
+    buyer: (row) => row.buyerName ?? "",
+    settlement: (row) => row.marketClaimName ?? "",
+    quantity: (row) => toNumber(row.quantity),
+    unitPrice: (row) => toNumber(row.unitPrice),
+    totalValue: (row) => toNumber(row.totalValue),
+    premium: (row) => row.premiumPercent ?? -Infinity,
+    lastSeen: (row) => new Date(row.lastSeen ?? row.listedAt ?? 0).getTime(),
+  };
+  const sorter = sorters[sort] ?? sorters.unitPrice;
+  normalized.sort((a, b) => {
+    const av = sorter(a);
+    const bv = sorter(b);
+    if (typeof av === "string" || typeof bv === "string") return direction === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    return direction === "asc" ? toNumber(av) - toNumber(bv) : toNumber(bv) - toNumber(av);
+  });
+  const opportunities = normalized
+    .filter((row) => row.opportunityEligible)
+    .sort((a, b) => (b.premiumPercent ?? 0) - (a.premiumPercent ?? 0) || toNumber(b.totalValue) - toNumber(a.totalValue))
+    .slice(0, 5);
+  const offset = (page - 1) * pageSize;
+  const total = normalized.length;
+  const unfilteredRegionRows = rows.length;
+  return {
+    rows: normalized.slice(offset, offset + pageSize),
+    opportunities,
+    total,
+    unfilteredRegionRows,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    sort,
+    direction,
+    regionId: regionId || "all",
+    sortableFields: Object.keys(sorters),
+    collectorStatus: collectorStatusPayload().collectors.buyOrders,
+  };
 }
 
 function snapshotHistory(claimId, { limit = 96, daily = false, days = 7 } = {}) {
@@ -8719,6 +9163,9 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/buy-orders") {
+      return send(res, 200, marketBuyOrders(url.searchParams.get("claimId") ?? getSettings().claimId, Object.fromEntries(url.searchParams.entries())));
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
       return send(res, 200, contributionLeaderboard(url.searchParams.get("claimId") ?? ""));
