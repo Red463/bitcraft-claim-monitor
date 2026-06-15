@@ -7695,6 +7695,25 @@ function activityHistory(claimId, limit = 500) {
   return { events, total };
 }
 
+function notificationActivity(claimId, limit = 120) {
+  const eventLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
+  const notableTypes = ["market_new_listing", "market_sale", "market_sale_confirmed"];
+  const placeholders = notableTypes.map(() => "?").join(", ");
+  const events = db.prepare(`
+    SELECT *
+    FROM activity_events
+    WHERE claim_id = ? AND event_type IN (${placeholders})
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT ?
+  `).all(claimId, ...notableTypes, eventLimit);
+  const total = toNumber(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM activity_events
+    WHERE claim_id = ? AND event_type IN (${placeholders})
+  `).get(claimId, ...notableTypes)?.count);
+  return { events, total, eventTypes: notableTypes };
+}
+
 function escapeSqlLike(value) {
   return String(value ?? "").replace(/[\\%_]/g, (match) => `\\${match}`);
 }
@@ -9641,6 +9660,10 @@ const server = createServer(async (req, res) => {
       return send(res, 200, query.trim()
         ? activitySearch(claimId, query, Number(url.searchParams.get("limit") ?? 500))
         : activityHistory(claimId, Number(url.searchParams.get("limit") ?? 500)));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/notification-activity") {
+      const claimId = url.searchParams.get("claimId") ?? "";
+      return send(res, 200, notificationActivity(claimId, Number(url.searchParams.get("limit") ?? 120)));
     }
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });

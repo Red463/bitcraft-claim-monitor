@@ -1,7 +1,7 @@
 import React from "react";
 
 import { toNumber } from "../main-app-data";
-import type { ActivePanel, LocalHistoryState } from "../types/app";
+import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
 
 const LOCAL_API = "/api/local";
 
@@ -39,6 +39,37 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
       controller.abort();
     };
   }, [activePanel, claimId, refreshToken]);
+
+  return state;
+}
+
+export function useNotificationActivity(refreshToken: number, claimId: string): NotificationActivityState {
+  const [state, setState] = React.useState<NotificationActivityState>({ events: [], total: 0, error: null, refreshToken: 0 });
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const response = await fetch(`${LOCAL_API}/notification-activity?claimId=${encodeURIComponent(claimId)}&limit=120`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`notification activity HTTP ${response.status}`);
+        const payload = await response.json();
+        setState((prev) => ({
+          events: payload.events ?? [],
+          total: toNumber(payload.total ?? payload.events?.length),
+          error: null,
+          refreshToken: prev.refreshToken + 1,
+        }));
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
+        }
+      }
+    }
+    load();
+    return () => {
+      controller.abort();
+    };
+  }, [claimId, refreshToken]);
 
   return state;
 }

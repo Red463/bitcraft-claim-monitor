@@ -852,6 +852,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
   assert.equal(baselineActivity.events.filter((event) => event.event_type === "market_new_listing").length, 2);
+  const notificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  assert.equal(notificationActivity.events.length >= 2, true);
+  assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed"].includes(event.event_type)), true);
+  assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length, 2);
+  assert.equal(notificationActivity.events.some((event) => event.event_type === "storage"), false);
   const listingMutationDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   listingMutationDb.prepare("DELETE FROM market_listings WHERE listing_key = ?").run("listing-1");
   listingMutationDb.close();

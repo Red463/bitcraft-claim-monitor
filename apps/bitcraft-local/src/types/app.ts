@@ -29,3 +29,10 @@ export type LocalHistoryState = {
   error: string | null;
   refreshToken: number;
 };
+
+export type NotificationActivityState = {
+  events: AnyRecord[];
+  total: number;
+  error: string | null;
+  refreshToken: number;
+};

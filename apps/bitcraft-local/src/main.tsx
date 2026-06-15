@@ -64,7 +64,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
-import { useLocalHistory } from "./api/localHistory";
+import { useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import type { BotSection } from "./components/bot/BotSectionNav";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, Header, PageLoadingIndicator, RefreshStatus, TablePanel, ToolbarButton, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "./components/main/Badges";
@@ -3237,6 +3237,7 @@ function DashboardApp() {
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
   const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
+  const notificationActivity = useNotificationActivity(refreshToken, claimId);
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   analyticsConsent = consent;
@@ -3443,14 +3444,14 @@ function DashboardApp() {
       activityNoticeClaimRef.current = claimId;
       activityNoticeIdsRef.current = null;
     }
-    if (!localHistory.refreshToken) return;
-    const knownIds = localHistory.activity.map((event) => String(event.id));
+    if (!notificationActivity.refreshToken) return;
+    const knownIds = notificationActivity.events.map((event) => String(event.id));
     if (activityNoticeIdsRef.current == null) {
       activityNoticeIdsRef.current = new Set(knownIds);
       return;
     }
     const notable = new Set(["market_new_listing", "market_sale", "market_sale_confirmed"]);
-    const unseen = localHistory.activity
+    const unseen = notificationActivity.events
       .filter((event) => !activityNoticeIdsRef.current?.has(String(event.id)) && notable.has(String(event.event_type)))
       .slice(0, 3)
       .reverse();
@@ -3464,7 +3465,7 @@ function DashboardApp() {
         sourceKey: activityNoticeKey(event),
       });
     }
-  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, localHistory.activity, localHistory.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
+  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
     if (!state.data) return;
     const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));

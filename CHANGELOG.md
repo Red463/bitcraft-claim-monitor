@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.52] - 2026-06-16
+
+### Fixed
+
+- Fixed in-app notifications so market listing and sale toasts are detected from a dedicated background feed instead of only firing after opening the Activity page.
+
 ## [1.0.0-beta.51] - 2026-06-15
 
 ### Fixed
