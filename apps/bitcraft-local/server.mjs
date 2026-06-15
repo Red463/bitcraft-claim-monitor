@@ -7004,10 +7004,11 @@ function persistCurrentRows(claimId, data, collectedAt) {
         for (const item of Array.isArray(items) ? items : []) {
           const row = item.contents ?? item;
           const itemId = itemIdFromRow(item);
-          const rowItemId = itemId || itemIdFromRow(row);
+          const rowItemId = itemIdFromRow(row) || itemId;
           const rowType = row.itemType ?? row.item_type ?? item.itemType ?? item.item_type ?? null;
-          const itemKey = String(item.key ?? item.entityId ?? item.id ?? `${rowItemId || itemNameFromRow(row)}:${rowType ?? ""}`).trim();
-          insertInventoryItem.run(claimIdText, containerKey, itemKey, rowItemId || null, rowType, itemNameFromRow(row), itemQuantityFromRow(row), row.tier ?? row.itemTier ?? item.tier ?? item.itemTier ?? null, row.rarity ?? row.itemRarityStr ?? item.rarity ?? item.itemRarityStr ?? null, JSON.stringify(row), collectedAt);
+          const mergedRow = { ...item, ...row };
+          const itemKey = String(item.key ?? item.entityId ?? item.id ?? `${rowItemId || itemNameFromRow(mergedRow)}:${rowType ?? ""}`).trim();
+          insertInventoryItem.run(claimIdText, containerKey, itemKey, rowItemId || null, rowType, itemNameFromRow(mergedRow), itemQuantityFromRow(row), row.tier ?? row.itemTier ?? item.tier ?? item.itemTier ?? null, row.rarity ?? row.rarityStr ?? row.itemRarityStr ?? item.rarity ?? item.rarityStr ?? item.itemRarityStr ?? null, JSON.stringify(mergedRow), collectedAt);
         }
       }
     }

@@ -188,7 +188,21 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
-    if (url.pathname === `/api/claims/${claimId}/inventories`) return json(res, { buildings: [{ entityId: "storage-1", buildingName: "Basic Storage Chest", buildingNickname: "Ingots" }] });
+    if (url.pathname === `/api/claims/${claimId}/inventories`) return json(res, {
+      buildings: [{
+        entityId: "storage-1",
+        buildingName: "Basic Storage Chest",
+        buildingNickname: "Ingots",
+        inventory: [{
+          name: "Copper Ingot",
+          tag: "Ingot",
+          tier: 2,
+          rarityStr: "Common",
+          iconAssetName: "copper_ingot",
+          contents: { item_type: "item", item_id: "ingot-1", quantity: 12 },
+        }],
+      }],
+    });
     if (url.pathname === `/api/claims/${claimId}/construction`) return json(res, { projects: [] });
     if (url.pathname === `/api/claims/${claimId}/research`) {
       if (failResearchRefresh) return json(res, { error: "research unavailable" }, 500);
@@ -487,6 +501,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
   assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
+  assert.equal(appDb.prepare("SELECT item_name FROM inventory_item_current WHERE claim_id = ? AND item_id = 'ingot-1'").get(claimId).item_name, "Copper Ingot");
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count, 3);
   appDb.close();
   const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });

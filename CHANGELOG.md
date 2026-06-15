@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.50] - 2026-06-15
+
+### Fixed
+
+- Fixed inventory item names so BitJita display metadata on inventory slots is preserved in the local inventory table.
+
 ## [1.0.0-beta.49] - 2026-06-15
 
 ### Fixed
