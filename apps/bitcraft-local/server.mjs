@@ -6524,15 +6524,16 @@ function tableBackedClaimData(claimId, rowsByDomain = {}) {
     const slots = (itemRowsByContainer.get(container.container_key) ?? []).map((row, index) => {
       const raw = rowData(row);
       const itemType = row.item_type === "cargo" || row.item_type === 1 || row.item_type === "1" ? "cargo" : "item";
+      const existingCatalog = (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id)) ?? {};
       const catalogEntry = {
-        ...((itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id)) ?? {}),
+        ...existingCatalog,
         ...raw,
         id: row.item_id,
-        name: row.item_name ?? raw.name ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.name,
-        tier: row.tier ?? raw.tier ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.tier,
-        rarityStr: row.rarity ?? raw.rarityStr ?? raw.rarity ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.rarityStr,
-        iconAssetName: raw.iconAssetName ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.iconAssetName,
-        tag: raw.tag ?? (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id))?.tag,
+        name: meaningfulItemName(row.item_name) ?? meaningfulItemName(raw.name) ?? meaningfulItemName(existingCatalog.name) ?? meaningfulItemName(raw.tag) ?? meaningfulItemName(existingCatalog.tag),
+        tier: row.tier ?? raw.tier ?? existingCatalog.tier,
+        rarityStr: row.rarity ?? raw.rarityStr ?? raw.rarity ?? existingCatalog.rarityStr,
+        iconAssetName: raw.iconAssetName ?? existingCatalog.iconAssetName,
+        tag: raw.tag ?? existingCatalog.tag,
       };
       if (row.item_id != null) (itemType === "cargo" ? inventoryCargos : inventoryItems).set(String(row.item_id), catalogEntry);
       return {
@@ -6731,8 +6732,24 @@ function insertDomainChange(claimId, domain, eventType, subjectKey, summary, occ
   statements.insertDomainChange.run(String(claimId), domain, eventType, String(subjectKey), summary, occurredAt, JSON.stringify(metadata), key);
 }
 
+function meaningfulItemName(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text.toLowerCase() === "unknown item") return null;
+  return text;
+}
+
 function itemNameFromRow(row) {
-  return String(row?.itemName ?? row?.name ?? row?.item?.name ?? row?.cargo?.name ?? row?.cargoName ?? "Unknown item");
+  return String(
+    meaningfulItemName(row?.itemName)
+    ?? meaningfulItemName(row?.name)
+    ?? meaningfulItemName(row?.item?.name)
+    ?? meaningfulItemName(row?.cargo?.name)
+    ?? meaningfulItemName(row?.cargoName)
+    ?? meaningfulItemName(row?.tag)
+    ?? meaningfulItemName(row?.item?.tag)
+    ?? meaningfulItemName(row?.cargo?.tag)
+    ?? "Unknown item"
+  );
 }
 
 function itemIdFromRow(row) {

@@ -200,6 +200,12 @@ test("server collection paginates listings and protects production mutations", a
           rarityStr: "Common",
           iconAssetName: "copper_ingot",
           contents: { item_type: "item", item_id: "ingot-1", quantity: 12 },
+        }, {
+          tag: "Berry",
+          tier: 3,
+          rarityStr: "Common",
+          iconAssetName: "berry",
+          contents: { item_type: "item", item_id: "berry-1", quantity: 24 },
         }],
       }],
     });
@@ -502,6 +508,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
   assert.equal(appDb.prepare("SELECT item_name FROM inventory_item_current WHERE claim_id = ? AND item_id = 'ingot-1'").get(claimId).item_name, "Copper Ingot");
+  assert.equal(appDb.prepare("SELECT item_name FROM inventory_item_current WHERE claim_id = ? AND item_id = 'berry-1'").get(claimId).item_name, "Berry");
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count, 3);
   appDb.close();
   const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });

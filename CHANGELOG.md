@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.51] - 2026-06-15
+
+### Fixed
+
+- Fixed inventory rows that only expose a BitJita tag, such as berries and meat, so the tag is shown as the item name instead of `Unknown item`.
+
 ## [1.0.0-beta.50] - 2026-06-15
 
 ### Fixed

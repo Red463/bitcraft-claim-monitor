@@ -140,6 +140,12 @@ function safeDisplayJson(value: unknown): AnyRecord {
   }
 }
 
+function displayItemName(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text || text.toLowerCase() === "unknown item") return null;
+  return text;
+}
+
 function listingTrackingKey(listing: AnyRecord): string {
   return String(listing.entityId ?? listing.id ?? listing.marketListingId ?? listing.listingId ?? "");
 }
@@ -457,17 +463,19 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
     const items = (building.inventory ?? []).map((slot: AnyRecord, index: number) => {
       const contents = slot.contents ?? {};
       const lookup = itemLookup.get(String(contents.item_id)) ?? {};
+      const name = displayItemName(lookup.name) ?? displayItemName(lookup.tag) ?? displayItemName(contents.itemName) ?? displayItemName(contents.name) ?? `Item #${contents.item_id ?? "?"}`;
+      const tag = displayItemName(lookup.tag);
       return {
         id: `${building.entityId}-${contents.item_id}-${slot.slot ?? index}`,
         building: building.buildingNickname ?? building.buildingName,
         itemId: contents.item_id == null ? null : String(contents.item_id),
-        name: lookup.name ?? `Item #${contents.item_id ?? "?"}`,
+        name,
         iconAssetName: lookup.iconAssetName,
         quantity: contents.quantity,
         type: contents.item_type === "cargo" ? "Cargo" : "Item",
         tier: lookup.tier,
         rarity: lookup.rarityStr,
-        tag: lookup.tag,
+        tag: tag && tag !== name ? tag : null,
       };
     });
     return {
