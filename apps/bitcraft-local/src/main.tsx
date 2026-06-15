@@ -1789,12 +1789,13 @@ function AdminPanel({
         <div className="admin-loader-orb" aria-hidden="true">
           <span className="admin-loader-ring" />
           <span className="admin-loader-ring delay" />
+          <span className="admin-loader-core" />
           <KeyRound size={30} />
         </div>
         <div className="admin-loader-copy">
           <span className="eyebrow">Admin Console</span>
           <h2>Verifying Access</h2>
-          <p>Checking your encrypted session and administrator permissions.</p>
+          <p>Checking your session, permissions, and console modules.</p>
         </div>
         <div className="admin-loader-track" aria-hidden="true">
           <span />

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.40-beta.1] - 2026-06-15
+
+### Changed
+
+- Improved the Admin loading screen animation and reduced visual clutter while administrator access is being verified.
+- Fixed sidebar Last Refresh spacing so the label and timestamp no longer run together.
+
 ## [1.0.39-beta.1] - 2026-06-14
 
 ### Changed

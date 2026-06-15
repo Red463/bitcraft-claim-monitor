@@ -98,7 +98,7 @@ export function RefreshStatus({
   return (
     <div className="refresh-status" aria-label={`Display refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
       <span className={`refresh-dot ${loading ? "refreshing" : ""}`} />
-      <span>
+      <span className="refresh-copy">
         <small>{loading ? "Refreshing" : "Last refresh"}</small>
         <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
       </span>
