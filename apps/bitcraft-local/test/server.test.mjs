@@ -505,6 +505,13 @@ test("server collection paginates listings and protects production mutations", a
     )
     VALUES (?, '9', '999', '0', 'Old Regional Item', 1, 3, 3, 3, 7, '2026-05-18', '2026-05-20', '{}', ?)
   `).run(claimId, new Date().toISOString());
+  staleRegionalDb.prepare(`
+    INSERT OR REPLACE INTO market_regional_sale_averages_current (
+      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
+      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
+    )
+    VALUES (?, '19', '998', '0', 'Empty Old Baseline', 0, 0, 0, 0, 7, NULL, NULL, '{"buckets":[]}', ?)
+  `).run(claimId, new Date().toISOString());
   staleRegionalDb.close();
   const buyOrdersBeforeSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersBeforeSales.total, 1);
@@ -540,8 +547,10 @@ test("server collection paginates listings and protects production mutations", a
   });
   const scopedBaselineDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '9'").get(claimId).count, 0);
+  assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '19' AND item_id = '998'").get(claimId).count, 0);
   assert.equal(scopedBaselineDb.prepare("SELECT active FROM market_buy_orders_current WHERE claim_id = ? AND order_key = 'stale-r9-order'").get(claimId).active, 0);
   assert.equal(scopedBaselineDb.prepare("SELECT average_unit_price FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '32' AND item_type = '1'").get(claimId).average_unit_price, 40);
+  assert.equal(scopedBaselineDb.prepare("SELECT raw_json FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '32' AND item_type = '1'").get(claimId).raw_json.includes('"buckets"'), false);
   scopedBaselineDb.close();
   assert.equal(priceHistoryRequests, 3);
   const buyOrdersAfterBaselineJob = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());

@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.49] - 2026-06-15
+
+### Fixed
+
+- Fixed Regional Buy Order sale baselines so stale empty bucket rows are cleaned up instead of staying in the database.
+- Improved Regional Buy Order sale baselines to store compact price-stat metadata instead of raw empty bucket dumps.
+
 ## [1.0.0-beta.48] - 2026-06-15
 
 ### Fixed

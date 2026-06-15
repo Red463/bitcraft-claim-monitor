@@ -5648,7 +5648,7 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
     try {
       await reportProgress({ currentItem, currentRegionId: regionId, phase: "fetching" });
       const historyKind = marketPriceHistoryKind(itemType);
-      const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
+      const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
       const buckets = unwrap(payload, "buckets", []);
       const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
       let salesCount = 0;
@@ -5660,12 +5660,23 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         unitsSold += totals.unitsSold;
         totalValue += totals.totalValue;
       }
+      const statsAverage = toNumber(stats.avg7d);
+      const statsSalesCount = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
+      const statsUnitsSold = toNumber(stats.totalVolume ?? stats.unitsSold ?? stats.volume ?? stats.totalQuantity);
+      if (statsAverage > 0) {
+        salesCount = statsSalesCount || salesCount;
+        unitsSold = statsUnitsSold || unitsSold;
+        totalValue = unitsSold > 0 ? statsAverage * unitsSold : totalValue;
+      }
       completed += 1;
-      if (salesCount <= 0 || unitsSold <= 0 || totalValue <= 0) {
+      if (salesCount <= 0 || (statsAverage <= 0 && (unitsSold <= 0 || totalValue <= 0))) {
+        db.prepare(`
+          DELETE FROM market_regional_sale_averages_current
+          WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?
+        `).run(String(claimId), regionId, itemId, itemType);
         await reportProgress({ currentItem, currentRegionId: regionId, phase: "no_sales" });
         return null;
       }
-      const statsAverage = toNumber(stats.avg7d);
       const average = {
         regionId,
         itemId,
@@ -5678,7 +5689,11 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         windowDays: 7,
         firstBucketAt: buckets[0]?.bucket ?? buckets[0]?.date ?? buckets[0]?.start ?? null,
         lastBucketAt: buckets.at(-1)?.bucket ?? buckets.at(-1)?.date ?? buckets.at(-1)?.start ?? null,
-        raw: { buckets },
+        raw: {
+          priceStats: stats,
+          bucketCount: buckets.length,
+          source: statsAverage > 0 ? "priceStats.avg7d" : "bucketTotals",
+        },
       };
       if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
       await reportProgress({ currentItem, currentRegionId: regionId, phase: "saved" });
@@ -5701,6 +5716,14 @@ async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
   const cleanupAt = new Date().toISOString();
   db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id <> ?").run(cleanupAt, claimId, regionId);
   db.prepare("DELETE FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id <> ?").run(claimId, regionId);
+  db.prepare(`
+    DELETE FROM market_regional_sale_averages_current
+    WHERE claim_id = ? AND region_id = ?
+      AND (
+        average_unit_price <= 0 OR sales_count <= 0 OR units_sold <= 0 OR total_value <= 0
+        OR raw_json LIKE '%"buckets":[]%'
+      )
+  `).run(claimId, regionId);
   const rows = db.prepare(`
     SELECT *
     FROM market_buy_orders_current
