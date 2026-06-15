@@ -5576,6 +5576,18 @@ function regionalSaleAverageKey(order) {
   return regionId && itemId ? `${regionId}:${itemType}:${itemId}` : "";
 }
 
+function currentMonitoredRegionId(claimId) {
+  const id = String(claimId ?? "").trim();
+  if (!id) return "";
+  const claimRow = db.prepare("SELECT region_id, data_json FROM claim_current WHERE claim_id = ?").get(id);
+  const claimData = safeJson(claimRow?.data_json, {});
+  const directRegionId = String(claimRow?.region_id ?? claimData.regionId ?? claimData.region_id ?? "").trim();
+  if (/^\d+$/.test(directRegionId)) return directRegionId;
+  const regionClaimRow = db.prepare("SELECT region_id FROM region_claim_current WHERE claim_id = ? AND region_claim_id = ?").get(id, id);
+  const fallbackRegionId = String(regionClaimRow?.region_id ?? "").trim();
+  return /^\d+$/.test(fallbackRegionId) ? fallbackRegionId : "";
+}
+
 function priceHistoryBucketTotals(bucket) {
   const unitsSold = toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume ?? bucket.totalQuantity);
   const totalValue = toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value ?? bucket.revenue);
@@ -5643,6 +5655,10 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         totalValue += totals.totalValue;
       }
       completed += 1;
+      if (salesCount <= 0 || unitsSold <= 0 || totalValue <= 0) {
+        await reportProgress({ currentItem, currentRegionId: regionId, phase: "no_sales" });
+        return null;
+      }
       const average = {
         regionId,
         itemId,
@@ -5673,12 +5689,17 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
 async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
   const claimId = String(getSettings().claimId ?? "").trim();
   if (!claimId) return { refreshed: false, reason: "No claim ID configured", orderCount: 0, averageCount: 0 };
+  const regionId = currentMonitoredRegionId(claimId);
+  if (!regionId) return { refreshed: false, reason: "No monitored region is known yet", orderCount: 0, averageCount: 0 };
+  const cleanupAt = new Date().toISOString();
+  db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id <> ?").run(cleanupAt, claimId, regionId);
+  db.prepare("DELETE FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id <> ?").run(claimId, regionId);
   const rows = db.prepare(`
     SELECT *
     FROM market_buy_orders_current
-    WHERE claim_id = ? AND active = 1
+    WHERE claim_id = ? AND active = 1 AND region_id = ?
     ORDER BY region_id ASC, item_name ASC
-  `).all(claimId);
+  `).all(claimId, regionId);
   const orders = rows.map((row) => ({
     orderKey: row.order_key,
     regionId: row.region_id,
@@ -5693,6 +5714,7 @@ async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
   const progressBase = {
     orderCount: orders.length,
     uniqueItemCount,
+    regionId,
     averageCount: 0,
     failureCount: 0,
     stage: "fetching_sale_baselines",
@@ -7056,7 +7078,21 @@ function persistCurrentRows(claimId, data, collectedAt) {
 
     const regionalBuyOrders = Array.isArray(data.regionalBuyOrders?.orders) ? data.regionalBuyOrders.orders : [];
     const buyOrderPayloadPartial = Boolean(data.regionalBuyOrders?.partialError || (Array.isArray(data.regionalBuyOrders?.partialErrors) && data.regionalBuyOrders.partialErrors.length));
-    if (!buyOrderPayloadPartial) db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
+    const scannedBuyOrderRegionIds = [...new Set((Array.isArray(data.regionalBuyOrders?.regions) ? data.regionalBuyOrders.regions : [])
+      .map((regionId) => String(regionId ?? "").trim())
+      .filter((regionId) => /^\d+$/.test(regionId)))];
+    if (scannedBuyOrderRegionIds.length) {
+      const placeholders = scannedBuyOrderRegionIds.map(() => "?").join(", ");
+      db.prepare(`UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id NOT IN (${placeholders})`).run(collectedAt, claimIdText, ...scannedBuyOrderRegionIds);
+    }
+    if (!buyOrderPayloadPartial) {
+      if (scannedBuyOrderRegionIds.length) {
+        const placeholders = scannedBuyOrderRegionIds.map(() => "?").join(", ");
+        db.prepare(`UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id IN (${placeholders})`).run(collectedAt, claimIdText, ...scannedBuyOrderRegionIds);
+      } else {
+        db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
+      }
+    }
     const previousBuyOrders = new Map(db.prepare("SELECT order_key, first_seen FROM market_buy_orders_current WHERE claim_id = ?").all(claimIdText).map((row) => [row.order_key, row]));
     const upsertBuyOrder = db.prepare(`
       INSERT INTO market_buy_orders_current (

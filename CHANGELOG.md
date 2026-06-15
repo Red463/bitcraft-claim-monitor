@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.47] - 2026-06-15
+
+### Fixed
+
+- Fixed Regional Buy Order sales baselines so stale buy orders from old region scans no longer create zero-value sale averages for unrelated regions.
+- Fixed Regional Buy Order sales baselines so empty BitJita sale-history responses are not saved as confirmed sale averages.
+
 ## [1.0.0-beta.46] - 2026-06-15
 
 ### Changed
