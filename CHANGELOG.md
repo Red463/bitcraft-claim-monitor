@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.44] - 2026-06-15
+
+### Changed
+
+- Reduced Regional Buy Order collector load by scanning only the monitored settlement region every 30 minutes.
+- Moved Regional Buy Order sales baseline refreshes into a separate daily scheduled job.
+
 ## [1.0.0-beta.43] - 2026-06-15
 
 ### Changed

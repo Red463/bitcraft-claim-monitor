@@ -1318,6 +1318,13 @@ const scheduledJobRegistry = {
     enabled: true,
     run: runRecipeCatalogRefreshJob,
   },
+  regional_buy_order_sale_baselines_refresh: {
+    label: "Regional buy-order sale baselines",
+    description: "Refreshes 7-day confirmed-sale baselines for cached regional buy orders once per day.",
+    schedule: "daily_midnight",
+    enabled: true,
+    run: runRegionalBuyOrderSaleBaselineRefreshJob,
+  },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
     description: "Refreshes the local visitor IP-to-location lookup file when local GeoIP mode is used. Provider mode resolves locations on demand with cache.",
@@ -1989,7 +1996,7 @@ const domainCollectorDefaults = {
   construction: { label: "Construction", intervalSeconds: 60 },
   research: { label: "Research", intervalSeconds: 600 },
   market: { label: "Market", intervalSeconds: 60 },
-  buyOrders: { label: "Regional buy orders", intervalSeconds: 300 },
+  buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
   snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
@@ -2013,6 +2020,46 @@ const collectorPrimaryPayloadDomain = {
   mapCatalog: "skills",
 };
 
+const payloadDomainCollector = {
+  claim: "claim",
+  members: "members",
+  players: "players",
+  playerDetailDiagnostics: "players",
+  citizens: "professions",
+  skills: "mapCatalog",
+  crafts: "production",
+  contributions: "production",
+  inventories: "inventory",
+  recruitment: "inventory",
+  layout: "inventory",
+  buildings: "construction",
+  construction: "construction",
+  research: "research",
+  market: "market",
+  tradeVolume: "market",
+  regionalBuyOrders: "buyOrders",
+  region: "region",
+  regionStatus: "region",
+};
+
+const collectorCurrentTables = {
+  claim: ["claim_current"],
+  members: ["member_current"],
+  players: ["player_current"],
+  professions: ["profession_current"],
+  production: ["production_current", "production_contributions"],
+  inventory: ["inventory_container_current", "inventory_item_current"],
+  construction: ["construction_project_current", "construction_material_current"],
+  research: ["research_current"],
+  market: ["market_listings", "market_trades"],
+  buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
+  region: ["region_claim_current", "region_status_current"],
+  mapCatalog: ["domain_payload_current"],
+  snapshotHistory: ["snapshots"],
+  storageActivity: ["activity_events"],
+  marketTrades: ["market_trades"],
+};
+
 function normalizeCollectorSettings(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return Object.fromEntries(Object.entries(domainCollectorDefaults).map(([key, defaults]) => {
@@ -2028,6 +2075,25 @@ function normalizeCollectorSettings(value = {}) {
 function getCollectorSettings() {
   return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
 }
+
+function migrateBuyOrderCollectorInterval() {
+  const markerKey = "buy_order_baseline_split_migrated_at";
+  if (statements.getSetting.get(markerKey)?.value) return;
+  const now = new Date().toISOString();
+  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
+  const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const existingBuyOrders = current.buyOrders && typeof current.buyOrders === "object" ? current.buyOrders : {};
+  statements.upsertSetting.run("collector_settings_json", JSON.stringify({
+    ...current,
+    buyOrders: {
+      ...existingBuyOrders,
+      intervalSeconds: 1800,
+    },
+  }), now);
+  statements.upsertSetting.run(markerKey, now, now);
+}
+
+migrateBuyOrderCollectorInterval();
 
 function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
@@ -2063,6 +2129,7 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
+  lastRunMetrics: null,
   collectors: Object.fromEntries(Object.entries(getCollectorSettings()).map(([key, value]) => [key, { ...value, intervalMs: value.intervalSeconds * 1000, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null }])),
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
@@ -2097,6 +2164,12 @@ function collectorAttempt(key, step = "Starting") {
   setCollectorStatus(key, {
     lastAttemptAt: new Date().toISOString(),
     lastError: null,
+    fetchDurationMs: null,
+    fetchSteps: [],
+    payloadWriteDurationMs: null,
+    currentRowsWriteDurationMs: null,
+    rowCount: null,
+    tableCounts: null,
     running: true,
     currentStep: step,
     progressCurrent: null,
@@ -2135,6 +2208,99 @@ function collectorFailure(key, startedAt, error) {
     progressCurrent: null,
     progressTotal: null,
   });
+}
+
+function blankCollectionMetrics() {
+  return {
+    startedAt: new Date().toISOString(),
+    collectors: {},
+    domainPayloadWriteDurationMs: null,
+    currentRowsWriteDurationMs: null,
+    currentTableCounts: {},
+  };
+}
+
+function collectorMetric(metrics, key) {
+  if (!metrics || !key) return null;
+  metrics.collectors[key] ??= {
+    fetchDurationMs: 0,
+    fetchSteps: [],
+    payloadWriteDurationMs: 0,
+    tableCounts: {},
+    rowCount: 0,
+  };
+  return metrics.collectors[key];
+}
+
+function recordCollectorFetch(metrics, key, label, durationMs, error = null) {
+  const metric = collectorMetric(metrics, key);
+  if (!metric) return;
+  const roundedDuration = Math.max(Math.round(durationMs), 0);
+  metric.fetchDurationMs += roundedDuration;
+  metric.fetchSteps.push({
+    label,
+    durationMs: roundedDuration,
+    error: error ? (error instanceof Error ? error.message : String(error)) : null,
+  });
+}
+
+function recordCollectorPayloadWrite(metrics, domain, durationMs) {
+  const key = payloadDomainCollector[domain];
+  const metric = collectorMetric(metrics, key);
+  if (!metric) return;
+  metric.payloadWriteDurationMs += Math.max(Math.round(durationMs), 0);
+}
+
+async function timedCollectorFetch(metrics, key, label, load) {
+  const startedAt = Date.now();
+  collectorProgress(key, `Fetching ${label}`);
+  try {
+    const result = await load();
+    recordCollectorFetch(metrics, key, label, Date.now() - startedAt);
+    return result;
+  } catch (error) {
+    recordCollectorFetch(metrics, key, label, Date.now() - startedAt, error);
+    throw error;
+  }
+}
+
+function tableCount(table, claimId = "") {
+  try {
+    if (table === "region_status_current") return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count);
+    return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE claim_id = ?`).get(String(claimId ?? ""))?.count);
+  } catch {
+    return null;
+  }
+}
+
+function collectorTableCounts(claimId) {
+  return Object.fromEntries(Object.entries(collectorCurrentTables).map(([key, tables]) => {
+    const tableCounts = Object.fromEntries(tables.map((table) => [table, tableCount(table, claimId)]));
+    return [key, {
+      tables: tableCounts,
+      rowCount: Object.values(tableCounts).reduce((sum, count) => sum + (Number.isFinite(Number(count)) ? Number(count) : 0), 0),
+    }];
+  }));
+}
+
+function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
+  if (!metrics) return;
+  const counts = collectorTableCounts(claimId);
+  metrics.completedAt = collectedAt;
+  metrics.currentTableCounts = counts;
+  for (const key of collectorKeys) {
+    const metric = metrics.collectors[key] ?? {};
+    const count = counts[key] ?? { tables: {}, rowCount: 0 };
+    setCollectorStatus(key, {
+      fetchDurationMs: Number.isFinite(Number(metric.fetchDurationMs)) ? Number(metric.fetchDurationMs) : null,
+      fetchSteps: Array.isArray(metric.fetchSteps) ? metric.fetchSteps : [],
+      payloadWriteDurationMs: Number.isFinite(Number(metric.payloadWriteDurationMs)) ? Number(metric.payloadWriteDurationMs) : null,
+      currentRowsWriteDurationMs: metrics.currentRowsWriteDurationMs,
+      tableCounts: count.tables,
+      rowCount: count.rowCount,
+    });
+  }
+  pollStatus.lastRunMetrics = metrics;
 }
 
 function validSyncUrl(value) {
@@ -5383,12 +5549,10 @@ async function fetchRegionalBuyOrders(claimId, regionIds) {
     });
     orders.push(...pages.flat());
   }
-  collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: 0, total: orders.length });
-  const saleAverages = await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures);
   return {
     regions: uniqueRegionIds,
     orders,
-    saleAverages,
+    saleAverages: [],
     failures: failures.slice(0, 50),
     partialError: failures.length ? `${failures.length} regional buy-order market request${failures.length === 1 ? "" : "s"} failed` : null,
   };
@@ -5408,9 +5572,11 @@ function priceHistoryBucketTotals(bucket) {
   return { unitsSold, totalValue, salesCount };
 }
 
-async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = []) {
+async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [], options = {}) {
   const now = Date.now();
   const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
+  const useCache = options.useCache !== false;
+  const progressKey = options.progressKey ?? "buyOrders";
   const uniqueOrders = [...new Map(orders
     .filter((order) => regionalSaleAverageKey(order))
     .map((order) => [regionalSaleAverageKey(order), order])).values()];
@@ -5419,13 +5585,13 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
     const regionId = String(order.regionId ?? "").trim();
     const itemId = String(order.itemId ?? "").trim();
     const itemType = String(order.itemType ?? 0).trim() || "0";
-    const cached = db.prepare(`
+    const cached = useCache ? db.prepare(`
       SELECT * FROM market_regional_sale_averages_current
       WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
-    `).get(String(claimId), regionId, itemId, itemType, staleBefore);
+    `).get(String(claimId), regionId, itemId, itemType, staleBefore) : null;
     if (cached) {
       completed += 1;
-      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
       return {
         regionId,
         itemId,
@@ -5454,7 +5620,7 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
         totalValue += totals.totalValue;
       }
       completed += 1;
-      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
       return {
         regionId,
         itemId,
@@ -5472,11 +5638,50 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
     } catch (error) {
       failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
       completed += 1;
-      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+      collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
       return null;
     }
   });
   return averages.filter(Boolean);
+}
+
+async function runRegionalBuyOrderSaleBaselineRefreshJob() {
+  const claimId = String(getSettings().claimId ?? "").trim();
+  if (!claimId) return { refreshed: false, reason: "No claim ID configured", orderCount: 0, averageCount: 0 };
+  const rows = db.prepare(`
+    SELECT *
+    FROM market_buy_orders_current
+    WHERE claim_id = ? AND active = 1
+    ORDER BY region_id ASC, item_name ASC
+  `).all(claimId);
+  const orders = rows.map((row) => ({
+    orderKey: row.order_key,
+    regionId: row.region_id,
+    itemId: row.item_id,
+    itemType: row.item_type,
+    itemName: row.item_name,
+  }));
+  if (!orders.length) return { refreshed: true, orderCount: 0, averageCount: 0, failures: [] };
+  const failures = [];
+  const averages = await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures, { useCache: false, progressKey: "buyOrders" });
+  const refreshedAt = new Date().toISOString();
+  let written = 0;
+  db.exec("BEGIN");
+  try {
+    written = persistRegionalSaleAverages(claimId, averages, refreshedAt);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return {
+    refreshed: true,
+    orderCount: orders.length,
+    uniqueItemCount: [...new Set(orders.map((order) => regionalSaleAverageKey(order)).filter(Boolean))].length,
+    averageCount: written,
+    failureCount: failures.length,
+    failures: failures.slice(0, 20),
+  };
 }
 
 function marketTradeBackfillKey(claimId, playerId) {
@@ -6448,6 +6653,53 @@ function inventoryStoredTotalsFromPayload(inventories) {
   return totals;
 }
 
+function persistRegionalSaleAverages(claimId, averages, collectedAt) {
+  const claimIdText = String(claimId ?? "").trim();
+  const upsertRegionalSaleAverage = db.prepare(`
+    INSERT INTO market_regional_sale_averages_current (
+      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
+      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(claim_id, region_id, item_id, item_type) DO UPDATE SET
+      item_name = excluded.item_name,
+      average_unit_price = excluded.average_unit_price,
+      sales_count = excluded.sales_count,
+      units_sold = excluded.units_sold,
+      total_value = excluded.total_value,
+      window_days = excluded.window_days,
+      first_bucket_at = excluded.first_bucket_at,
+      last_bucket_at = excluded.last_bucket_at,
+      raw_json = excluded.raw_json,
+      updated_at = excluded.updated_at
+  `);
+  let written = 0;
+  for (const average of Array.isArray(averages) ? averages : []) {
+    const regionId = String(average.regionId ?? "").trim();
+    const itemId = String(average.itemId ?? "").trim();
+    const itemType = String(average.itemType ?? 0).trim() || "0";
+    if (!claimIdText || !regionId || !itemId) continue;
+    upsertRegionalSaleAverage.run(
+      claimIdText,
+      regionId,
+      itemId,
+      itemType,
+      average.itemName ?? null,
+      toNumber(average.averageUnitPrice),
+      toNumber(average.salesCount),
+      toNumber(average.unitsSold),
+      toNumber(average.totalValue),
+      toNumber(average.windowDays) || 7,
+      average.firstBucketAt ?? null,
+      average.lastBucketAt ?? null,
+      JSON.stringify(average.raw ?? average),
+      collectedAt,
+    );
+    written += 1;
+  }
+  return written;
+}
+
 function persistCurrentRows(claimId, data, collectedAt) {
   const claim = data.claim?.claim ?? data.claim ?? {};
   const claimIdText = String(claimId ?? "");
@@ -6813,47 +7065,7 @@ function persistCurrentRows(claimId, data, collectedAt) {
       );
     }
 
-    const regionalSaleAverages = Array.isArray(data.regionalBuyOrders?.saleAverages) ? data.regionalBuyOrders.saleAverages : [];
-    const upsertRegionalSaleAverage = db.prepare(`
-      INSERT INTO market_regional_sale_averages_current (
-        claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-        units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(claim_id, region_id, item_id, item_type) DO UPDATE SET
-        item_name = excluded.item_name,
-        average_unit_price = excluded.average_unit_price,
-        sales_count = excluded.sales_count,
-        units_sold = excluded.units_sold,
-        total_value = excluded.total_value,
-        window_days = excluded.window_days,
-        first_bucket_at = excluded.first_bucket_at,
-        last_bucket_at = excluded.last_bucket_at,
-        raw_json = excluded.raw_json,
-        updated_at = excluded.updated_at
-    `);
-    for (const average of regionalSaleAverages) {
-      const regionId = String(average.regionId ?? "").trim();
-      const itemId = String(average.itemId ?? "").trim();
-      const itemType = String(average.itemType ?? 0).trim() || "0";
-      if (!regionId || !itemId) continue;
-      upsertRegionalSaleAverage.run(
-        claimIdText,
-        regionId,
-        itemId,
-        itemType,
-        average.itemName ?? null,
-        toNumber(average.averageUnitPrice),
-        toNumber(average.salesCount),
-        toNumber(average.unitsSold),
-        toNumber(average.totalValue),
-        toNumber(average.windowDays) || 7,
-        average.firstBucketAt ?? null,
-        average.lastBucketAt ?? null,
-        JSON.stringify(average.raw ?? average),
-        collectedAt,
-      );
-    }
+    persistRegionalSaleAverages(claimIdText, data.regionalBuyOrders?.saleAverages, collectedAt);
 
     db.exec("COMMIT");
   } catch (error) {
@@ -6862,13 +7074,19 @@ function persistCurrentRows(claimId, data, collectedAt) {
   }
 }
 
-function persistDomainPayloads(claimId, data, attemptedAt, collectedAt) {
+function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null) {
+  const payloadWriteStartedAt = Date.now();
   for (const domain of domainPayloadKeys) {
+    const domainStartedAt = Date.now();
     const payload = domainPayloadFromData(data, domain);
     const domainError = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.partialError : null;
     statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
+    recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
   }
+  if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
+  const currentRowsStartedAt = Date.now();
   persistCurrentRows(claimId, data, collectedAt);
+  if (metrics) metrics.currentRowsWriteDurationMs = Math.max(Date.now() - currentRowsStartedAt, 0);
 }
 
 function collectorDue(claimId, collectorKey, payloadDomain, options = {}) {
@@ -6910,13 +7128,14 @@ async function buildCurrentClaimData(claimId, options = {}) {
     error.statusCode = 400;
     throw error;
   }
+  const metrics = options.metrics ?? null;
   const previous = readDomainPayloadMap(id);
   const claimPayload = collectorDue(id, "claim", "claim", options)
-    ? await fetchBitjita(`/claims/${id}`)
+    ? await timedCollectorFetch(metrics, "claim", "claim", () => fetchBitjita(`/claims/${id}`))
     : previousPayload(previous, "claim", {});
   const claim = claimPayload.claim ?? claimPayload;
   const membersPayload = collectorDue(id, "members", "members", options)
-    ? await fetchBitjita(`/claims/${id}/members`)
+    ? await timedCollectorFetch(metrics, "members", "members", () => fetchBitjita(`/claims/${id}/members`))
     : previousPayload(previous, "members", { members: [] });
   const members = unwrap(membersPayload, "members", []);
 
@@ -6934,27 +7153,27 @@ async function buildCurrentClaimData(claimId, options = {}) {
     skillsPayload,
     regionStatus,
   ] = await Promise.all([
-    collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => fetchBitjita(`/claims/${id}/citizens`)) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
-    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => fetchBitjita(`/claims/${id}/buildings`)) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
-    collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => fetchBitjita(`/claims/${id}/construction`)) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
-    collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => fetchBitjita(`/claims/${id}/research`)) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
-    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => fetchAllClaimListings(id)) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
+    collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
+    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "construction", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
+    collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => timedCollectorFetch(metrics, "construction", "construction", () => fetchBitjita(`/claims/${id}/construction`))) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
+    collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => timedCollectorFetch(metrics, "research", "research", () => fetchBitjita(`/claims/${id}/research`))) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
+    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
     collectorDue(id, "production", "crafts", options)
-      ? settlementProductionCrafts({ claimId: id, members, forceRefresh: true }).catch((error) => {
+      ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
         const fallback = previousPayload(previous, "crafts", { craftResults: [] });
         return { ...fallback, partialError: error instanceof Error ? error.message : String(error) };
       })
       : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
-    collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => playerDetailSummaries({ members })) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
-    collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => fetchBitjita(`/claims/${id}/inventories`)) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "inventory", "recruitment", options) ? fetchDomainPayload(previous, "recruitment", { applications: [] }, "Recruitment", () => fetchBitjita(`/claims/${id}/recruitment`)) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
-    collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => fetchBitjita(`/claims/${id}/layout`)) : Promise.resolve(previousPayload(previous, "layout", {})),
-    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => fetchBitjita("/skills")) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
-    collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => fetchBitjita("/regions/status")) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
+    collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
+    collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
+    collectorDue(id, "inventory", "recruitment", options) ? fetchDomainPayload(previous, "recruitment", { applications: [] }, "Recruitment", () => timedCollectorFetch(metrics, "inventory", "recruitment", () => fetchBitjita(`/claims/${id}/recruitment`))) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
+    collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => timedCollectorFetch(metrics, "inventory", "layout", () => fetchBitjita(`/claims/${id}/layout`))) : Promise.resolve(previousPayload(previous, "layout", {})),
+    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
+    collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
   const contributionEntries = collectorDue(id, "production", "contributions", options)
-    ? Object.entries(await craftContributionMap(productionCrafts))
+    ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
     : Object.entries(previousPayload(previous, "contributions", {}));
   const derivedRegionId = claimRegionIdFromKnownData(claim, regionStatus, previousPayload(previous, "region", { claims: [] }), id);
   const claimPayloadWithRegion = derivedRegionId && !String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim()
@@ -6963,16 +7182,14 @@ async function buildCurrentClaimData(claimId, options = {}) {
       : { ...claimPayload, regionId: derivedRegionId })
     : claimPayload;
   const [region, tradeVolume] = await Promise.all([
-    collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => fetchCachedRegionClaims(derivedRegionId)) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
-    collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`)) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
+    collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => timedCollectorFetch(metrics, "region", "region claims", () => fetchCachedRegionClaims(derivedRegionId))) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
+    collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => timedCollectorFetch(metrics, "market", "trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`))) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
   ]);
   const buyOrderRegionIds = [...new Set([
     derivedRegionId,
-    ...parseRegionIds(getSettings().additionalActiveRegions),
-    ...unwrap(regionStatus, "regions", []).filter((regionRow) => regionRow?.active !== false).map((regionRow) => String(regionRow.regionId ?? regionRow.id ?? regionRow.entityId ?? "")).filter(Boolean),
   ].map((regionId) => String(regionId ?? "").trim()).filter((regionId) => /^\d+$/.test(regionId)))];
   const regionalBuyOrders = collectorDue(id, "buyOrders", "regionalBuyOrders", options) && buyOrderRegionIds.length
-    ? await fetchDomainPayload(previous, "regionalBuyOrders", { regions: [], orders: [] }, "Regional buy orders", () => fetchRegionalBuyOrders(id, buyOrderRegionIds))
+    ? await fetchDomainPayload(previous, "regionalBuyOrders", { regions: [], orders: [] }, "Regional buy orders", () => timedCollectorFetch(metrics, "buyOrders", "regional buy orders", () => fetchRegionalBuyOrders(id, buyOrderRegionIds)))
     : previousPayload(previous, "regionalBuyOrders", { regions: [], orders: [] });
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
@@ -7013,14 +7230,16 @@ function readCurrentClaimState(claimId) {
 async function refreshCurrentClaimState(claimId, options = {}) {
   const id = String(claimId ?? "").trim();
   const attemptedAt = new Date().toISOString();
+  const metrics = blankCollectionMetrics();
   const dueCollectors = Object.entries(collectorPrimaryPayloadDomain)
     .filter(([key, domain]) => collectorDue(id, key, domain, options))
     .map(([key]) => key);
   const domainStartedAt = Object.fromEntries(dueCollectors.map((key) => [key, collectorAttempt(key)]));
   try {
-    const data = await buildCurrentClaimData(id, options);
+    const data = await buildCurrentClaimData(id, { ...options, metrics });
     const collectedAt = new Date().toISOString();
-    persistDomainPayloads(id, data, attemptedAt, collectedAt);
+    persistDomainPayloads(id, data, attemptedAt, collectedAt, metrics);
+    applyCollectionMetrics(metrics, dueCollectors, id, collectedAt);
     for (const [key, startedAt] of Object.entries(domainStartedAt)) collectorSuccess(key, startedAt);
     return readCurrentClaimState(id);
   } catch (error) {
@@ -7060,6 +7279,7 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
+    lastRunMetrics: pollStatus.lastRunMetrics,
     collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => {
       const domain = collectorPrimaryPayloadDomain[key];
       const row = domain ? statements.domainPayload.get(getSettings().claimId, domain) : null;
@@ -8564,16 +8784,37 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname.startsWith("/api/local/pages/")) {
       try {
+        const startedAt = Date.now();
         const page = url.pathname.slice("/api/local/pages/".length).replace(/\/+$/, "") || "dashboard";
         if (!validPage(page)) return send(res, 404, { error: "Unknown page" });
-        return send(res, 200, await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, page));
+        const payload = await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, page);
+        const readDurationMs = Math.max(Date.now() - startedAt, 0);
+        const payloadWithMetrics = {
+          ...payload,
+          localReadMetrics: {
+            page,
+            durationMs: readDurationMs,
+            payloadBytes: Buffer.byteLength(JSON.stringify(payload)),
+          },
+        };
+        return send(res, 200, payloadWithMetrics);
       } catch (error) {
         return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load local page data", collectorStatus: collectorStatusPayload() });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/app-data") {
       try {
-        return send(res, 200, await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, url.searchParams.get("page") ?? "dashboard"));
+        const startedAt = Date.now();
+        const page = url.searchParams.get("page") ?? "dashboard";
+        const payload = await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, page);
+        return send(res, 200, {
+          ...payload,
+          localReadMetrics: {
+            page,
+            durationMs: Math.max(Date.now() - startedAt, 0),
+            payloadBytes: Buffer.byteLength(JSON.stringify(payload)),
+          },
+        });
       } catch (error) {
         return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load local app data", collectorStatus: collectorStatusPayload() });
       }

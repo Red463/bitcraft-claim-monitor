@@ -136,6 +136,7 @@ test("server collection paginates listings and protects production mutations", a
   let craftContributionRequests = 0;
   let playerCraftRequests = 0;
   let recipeDetailRequests = 0;
+  let priceHistoryRequests = 0;
   let geoipDownloadRequests = 0;
   let ipapiRequests = 0;
   let craftEntityRevision = 0;
@@ -223,7 +224,8 @@ test("server collection paginates listings and protects production mutations", a
       return json(res, { listings: [], totalPages: 1, page: Number(url.searchParams.get("page") || 1) });
     }
     if (url.pathname === "/api/market/items/30/price-history") {
-      if (url.searchParams.get("regionId") !== "3") return json(res, { buckets: [] });
+      priceHistoryRequests += 1;
+      if (url.searchParams.get("regionId") !== "19") return json(res, { buckets: [] });
       return json(res, {
         buckets: [
           { bucket: "2026-05-18", quantity: 1, totalValue: 10 },
@@ -442,6 +444,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(pageDataOne.claim.claim.supplies, 500);
   assert.equal(pageDataOne.crafts.craftResults.some((craft) => craft.entityId === "private-craft"), true);
   assert.equal(pageDataOne.collectorStatus.collectors.production.label, "Production");
+  assert.equal(pageDataOne.localReadMetrics.page, "production");
+  assert.equal(typeof pageDataOne.localReadMetrics.durationMs, "number");
+  assert.equal(typeof pageDataOne.localReadMetrics.payloadBytes, "number");
   const regionPageData = await fetch(`${origin}/api/local/pages/empire?claimId=${claimId}`).then((response) => response.json());
   assert.equal(String(regionPageData.claim.claim.regionId), "19");
   assert.equal(regionPageData.region.claims.length, 1);
@@ -459,11 +464,25 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(buyOrdersBeforeSales.total, 1);
   assert.equal(buyOrdersBeforeSales.rows[0].itemName, "Leather");
   assert.equal(buyOrdersBeforeSales.opportunities.length, 0);
+  assert.equal(priceHistoryRequests, 0);
   const regionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=3&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
-  assert.equal(regionalBuyOrders.total, 1);
-  assert.equal(regionalBuyOrders.rows[0].regionId, "3");
-  assert.equal(regionalBuyOrders.opportunities.length, 1);
-  assert.equal(Math.round(regionalBuyOrders.opportunities[0].premiumPercent), 20);
+  assert.equal(regionalBuyOrders.total, 0);
+  const baselineJob = await fetch(`${origin}/api/local/admin/jobs/run`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ key: "regional_buy_order_sale_baselines_refresh" }),
+  });
+  assert.equal(baselineJob.status, 202);
+  await waitForCondition("regional buy-order sale baseline refresh", () => {
+    const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+    const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ?").get(claimId).count;
+    checkDb.close();
+    return count > 0;
+  });
+  assert.equal(priceHistoryRequests, 1);
+  const buyOrdersAfterBaselineJob = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
+  assert.equal(buyOrdersAfterBaselineJob.opportunities.length, 1);
+  assert.equal(Math.round(buyOrdersAfterBaselineJob.opportunities[0].premiumPercent), 20);
   const writableAppDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   writableAppDb.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, updated_at = ? WHERE job_key = ?")
     .run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "geoip_database_refresh");
@@ -492,6 +511,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
+  assert.equal(initialConfig.collectorSettings.buyOrders.intervalSeconds, 1800);
   const geoipSettingsResponse = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -720,6 +740,13 @@ test("server collection paginates listings and protects production mutations", a
     body: "{}",
   });
   assert.equal(poll.status, 200);
+  const pollJson = await poll.json();
+  assert.equal(typeof pollJson.collectorStatus.lastRunMetrics.currentRowsWriteDurationMs, "number");
+  assert.equal(typeof pollJson.collectorStatus.collectors.production.fetchDurationMs, "number");
+  assert.equal(Array.isArray(pollJson.collectorStatus.collectors.production.fetchSteps), true);
+  assert.equal(typeof pollJson.collectorStatus.collectors.production.payloadWriteDurationMs, "number");
+  assert.equal(typeof pollJson.collectorStatus.collectors.production.currentRowsWriteDurationMs, "number");
+  assert.equal(typeof pollJson.collectorStatus.collectors.production.rowCount, "number");
   const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
   assert.equal(baselineHistory.totals.confirmedSales, 1);
   assert.equal(baselineHistory.totals.confirmedUnits, 5);
