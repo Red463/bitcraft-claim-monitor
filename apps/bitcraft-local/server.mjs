@@ -5595,6 +5595,10 @@ function priceHistoryBucketTotals(bucket) {
   return { unitsSold, totalValue, salesCount };
 }
 
+function marketPriceHistoryKind(itemType) {
+  return toNumber(itemType) === 1 || String(itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
+}
+
 async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [], options = {}) {
   const now = Date.now();
   const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
@@ -5643,8 +5647,10 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
     }
     try {
       await reportProgress({ currentItem, currentRegionId: regionId, phase: "fetching" });
-      const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
+      const historyKind = marketPriceHistoryKind(itemType);
+      const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
       const buckets = unwrap(payload, "buckets", []);
+      const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
       let salesCount = 0;
       let unitsSold = 0;
       let totalValue = 0;
@@ -5659,12 +5665,13 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [],
         await reportProgress({ currentItem, currentRegionId: regionId, phase: "no_sales" });
         return null;
       }
+      const statsAverage = toNumber(stats.avg7d);
       const average = {
         regionId,
         itemId,
         itemType,
         itemName: order.itemName ?? null,
-        averageUnitPrice: unitsSold > 0 ? totalValue / unitsSold : 0,
+        averageUnitPrice: statsAverage > 0 ? statsAverage : unitsSold > 0 ? totalValue / unitsSold : 0,
         salesCount,
         unitsSold,
         totalValue,

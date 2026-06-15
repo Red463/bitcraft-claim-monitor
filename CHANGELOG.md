@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.48] - 2026-06-15
+
+### Fixed
+
+- Fixed Regional Buy Order opportunity baselines so cargo buy orders use the same BitJita price-history endpoint as Price Finder.
+- Improved Regional Buy Order opportunity baselines to use BitJita's 7-day average sale price when available.
+
 ## [1.0.0-beta.47] - 2026-06-15
 
 ### Fixed

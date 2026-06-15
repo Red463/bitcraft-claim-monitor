@@ -121,6 +121,7 @@ test("server collection paginates listings and protects production mutations", a
   const buyListings = [
     { entityId: "buy-listing-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 10, price: 12, storedCoins: 120, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
     { entityId: "buy-listing-2", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 31, itemType: "0", itemName: "Slow Gem", itemTier: 3, itemRarityStr: "Common", iconAssetName: "gem.png", quantity: 1, price: 100, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
+    { entityId: "buy-listing-3", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 32, itemType: "1", itemName: "Fine Timber Package", itemTier: 4, itemRarityStr: "Common", iconAssetName: "timber.png", quantity: 2, price: 50, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
   ];
   const seasonalBuyListings = [
     { entityId: "buy-listing-r3", claimEntityId: seasonalClaimId, claimName: "Seasonal Market", regionId: 3, regionName: "Region 3", ownerUsername: "Regional Buyer", ownerEntityId: "buyer-r3", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 5, price: 12, storedCoins: 60, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
@@ -249,6 +250,18 @@ test("server collection paginates listings and protects production mutations", a
           ],
         });
       }, 1000);
+    }
+    if (url.pathname === "/api/market/cargo/32/price-history") {
+      priceHistoryRequests += 1;
+      if (url.searchParams.get("regionId") !== "19") return json(res, { buckets: [] });
+      return json(res, {
+        priceStats: { avg7d: 40, totalTrades: 3 },
+        buckets: [
+          { bucket: "2026-05-18", quantity: 1, totalValue: 30 },
+          { bucket: "2026-05-19", quantity: 1, totalValue: 30 },
+          { bucket: "2026-05-20", quantity: 1, totalValue: 30 },
+        ],
+      });
     }
     if (url.pathname === "/api/market/player/player-1/history") return json(res, {
       sellOrderHistory: [
@@ -474,7 +487,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
   assert.ok(appDb.prepare("SELECT COUNT(*) AS count FROM domain_payload_current WHERE claim_id = ?").get(claimId).count > 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM production_current WHERE claim_id = ? AND active = 1").get(claimId).count, 2);
-  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count, 2);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count, 3);
   appDb.close();
   const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   staleRegionalDb.prepare(`
@@ -516,20 +529,21 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
   const runningBaselineJob = runningBaselineJobs.jobs.find((job) => job.key === "regional_buy_order_sale_baselines_refresh");
-  assert.equal(runningBaselineJob.metadata.total ?? runningBaselineJob.metadata.uniqueItemCount, 2);
+  assert.equal(runningBaselineJob.metadata.total ?? runningBaselineJob.metadata.uniqueItemCount, 3);
   assert.ok(runningBaselineJob.metadata.averageCount >= 1);
   assert.equal(slowPriceHistoryResponded, false);
   await waitForCondition("regional buy-order sale baseline refresh", () => {
     const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
     const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ?").get(claimId).count;
     checkDb.close();
-    return count === 2;
+    return count === 3;
   });
   const scopedBaselineDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '9'").get(claimId).count, 0);
   assert.equal(scopedBaselineDb.prepare("SELECT active FROM market_buy_orders_current WHERE claim_id = ? AND order_key = 'stale-r9-order'").get(claimId).active, 0);
+  assert.equal(scopedBaselineDb.prepare("SELECT average_unit_price FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '32' AND item_type = '1'").get(claimId).average_unit_price, 40);
   scopedBaselineDb.close();
-  assert.equal(priceHistoryRequests, 2);
+  assert.equal(priceHistoryRequests, 3);
   const buyOrdersAfterBaselineJob = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersAfterBaselineJob.opportunities.length, 1);
   assert.equal(Math.round(buyOrdersAfterBaselineJob.opportunities[0].premiumPercent), 20);
