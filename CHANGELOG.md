@@ -2,74 +2,84 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses beta semantic versioning.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses beta semantic versioning. See [VERSIONING.md](VERSIONING.md) for the release policy.
+
+Historical beta version headings have been normalised to follow SemVer more closely. The original `1.0.0-beta.1` entry is preserved as the first beta, and earlier patch-heavy beta versions such as `1.0.40-beta.1` are now represented as `1.0.0-beta.41`. Release dates and changelog content have been preserved.
 
 ## [Unreleased]
 
-## [1.0.40-beta.1] - 2026-06-15
+## [1.0.0-beta.42] - 2026-06-15
+
+### Changed
+
+- Added live collector progress details to the sidebar Last Refresh hover panel and Admin collection status while refreshes are running.
+- Reduced repeated regional buy-order sales baseline lookups by reusing cached 7-day sale averages for longer between collector runs.
+- Normalised compact money summary cards to show `K`, `M`, and `B` without an extra gold suffix.
+
+## [1.0.0-beta.41] - 2026-06-15
 
 ### Changed
 
 - Improved the Admin loading screen animation and reduced visual clutter while administrator access is being verified.
 - Fixed sidebar Last Refresh spacing so the label and timestamp no longer run together.
 
-## [1.0.39-beta.1] - 2026-06-14
+## [1.0.0-beta.40] - 2026-06-14
 
 ### Changed
 
 - Changed the Map resource category filter to use BitJita resource tags directly instead of broad grouped categories.
 
-## [1.0.38-beta.1] - 2026-06-14
+## [1.0.0-beta.39] - 2026-06-14
 
 ### Fixed
 
 - Fixed the Region page missing live region details when BitJita returns a settlement region name without a numeric region id.
 - Fixed the Map resource category filter only showing exact-match categories such as Stone by grouping BitJita resource tags into the app's broader resource categories.
 
-## [1.0.37-beta.1] - 2026-06-14
+## [1.0.0-beta.38] - 2026-06-14
 
 ### Changed
 
 - Split major main-app pages and shared interface pieces into focused frontend modules to make future page work safer to maintain.
 - Improved page data resilience so local page views keep the latest successful data when one refresh domain temporarily fails.
 
-## [1.0.36-beta.1] - 2026-06-14
+## [1.0.0-beta.37] - 2026-06-14
 
 ### Fixed
 
 - Fixed duplicate market notifications and stale notification timestamps when listing events were reprocessed.
 
-## [1.0.35-beta.1] - 2026-06-14
+## [1.0.0-beta.36] - 2026-06-14
 
 ### Fixed
 
 - Fixed the Admin database browser hiding columns after the first ten fields.
 
-## [1.0.34-beta.1] - 2026-06-14
+## [1.0.0-beta.35] - 2026-06-14
 
 ### Added
 
 - Added search, row count controls, and pagination to Admin recent security events.
 
-## [1.0.33-beta.1] - 2026-06-14
+## [1.0.0-beta.34] - 2026-06-14
 
 ### Fixed
 
 - Fixed existing SQLite databases not receiving newer current-state table columns during startup migration.
 
-## [1.0.32-beta.1] - 2026-06-14
+## [1.0.0-beta.33] - 2026-06-14
 
 ### Fixed
 
 - Fixed the research current table staying empty by storing BitJita research responses that use the `technologies` field.
 
-## [1.0.31-beta.1] - 2026-06-13
+## [1.0.0-beta.32] - 2026-06-13
 
 ### Fixed
 
 - Fixed page data being cleared when a partial BitJita refresh failed, so pages keep showing the latest successful local data during API blips.
 
-## [1.0.30-beta.1] - 2026-06-13
+## [1.0.0-beta.31] - 2026-06-13
 
 ### Added
 
@@ -80,25 +90,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Changed the GeoIP refresh job to skip local downloads when ipapi.co provider mode is active.
 
-## [1.0.29-beta.1] - 2026-06-13
+## [1.0.0-beta.30] - 2026-06-13
 
 ### Fixed
 
 - Fixed oversized legacy GeoIP JSON fallback files being loaded into memory during normal app startup and visitor lookup.
 
-## [1.0.28-beta.1] - 2026-06-13
+## [1.0.0-beta.29] - 2026-06-13
 
 ### Fixed
 
 - Fixed MaxMind GeoLite2 City imports exhausting Node memory by storing imported IP ranges in SQLite instead of a large JSON lookup file.
 
-## [1.0.27-beta.1] - 2026-06-13
+## [1.0.0-beta.28] - 2026-06-13
 
 ### Changed
 
 - Improved MaxMind GeoLite2 City imports so GeoIP refreshes process only the required CSV files and show clearer progress while running.
 
-## [1.0.26-beta.1] - 2026-06-13
+## [1.0.0-beta.27] - 2026-06-13
 
 ### Changed
 
@@ -108,25 +118,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added visible GeoIP refresh progress details while scheduled jobs are running.
 
-## [1.0.25-beta.1] - 2026-06-13
+## [1.0.0-beta.26] - 2026-06-13
 
 ### Fixed
 
 - Fixed scheduled jobs staying stuck as running after a server crash or timeout.
 
-## [1.0.24-beta.1] - 2026-06-13
+## [1.0.0-beta.25] - 2026-06-13
 
 ### Fixed
 
 - Fixed background polling and GeoIP download failures being able to take the local server offline.
 
-## [1.0.23-beta.1] - 2026-06-13
+## [1.0.0-beta.24] - 2026-06-13
 
 ### Changed
 
 - Changed the Admin session-loading animation to remain visible briefly before entering the console.
 
-## [1.0.22-beta.1] - 2026-06-13
+## [1.0.0-beta.23] - 2026-06-13
 
 ### Added
 
@@ -137,7 +147,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Improved Admin GeoIP configuration wording and masked saved MaxMind license keys in settings/database views.
 
-## [1.0.21-beta.1] - 2026-06-13
+## [1.0.0-beta.22] - 2026-06-13
 
 ### Added
 
@@ -148,7 +158,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Documented visitor security logging separately from optional analytics cookies.
 
-## [1.0.20-beta.1] - 2026-06-13
+## [1.0.0-beta.21] - 2026-06-13
 
 ### Changed
 
@@ -160,7 +170,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fixed member permission columns in the database browser showing zeroes when BitJita reports permissions using non-boolean field shapes.
 - Fixed construction current data so material requirements, added materials and storage coverage follow the same logic as the construction page.
 
-## [1.0.19-beta.1] - 2026-06-13
+## [1.0.0-beta.20] - 2026-06-13
 
 ### Changed
 
@@ -171,7 +181,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fixed the Admin database browser showing stale rows when switching tables quickly.
 
-## [1.0.18-beta.1] - 2026-06-13
+## [1.0.0-beta.19] - 2026-06-13
 
 ### Changed
 
@@ -184,7 +194,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fixed sidebar last-refresh spacing so the label and timestamp no longer overlap.
 - Fixed Admin being interrupted by the full administrator-session loading screen during normal display refreshes.
 
-## [1.0.17-beta.1] - 2026-06-13
+## [1.0.0-beta.18] - 2026-06-13
 
 ### Added
 
@@ -203,7 +213,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Removed the legacy `current_claim_state` all-in-one cache table and its fallback usage.
 
-## [1.0.16-beta.1] - 2026-06-13
+## [1.0.0-beta.17] - 2026-06-13
 
 ### Added
 
@@ -213,7 +223,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fixed online members showing "Playing 0m" when BitJita reports them online without a usable session timestamp.
 
-## [1.0.15-beta.1] - 2026-06-13
+## [1.0.0-beta.16] - 2026-06-13
 
 ### Added
 
@@ -230,7 +240,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fixed server collection using short-lived production cache during manual polls, so changed craft data is not masked by cached production responses.
 
-## [1.0.14-beta.1] - 2026-06-13
+## [1.0.0-beta.15] - 2026-06-13
 
 ### Added
 
@@ -240,27 +250,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Changed offline Leaderboard current-session values to show a dash instead of "Unavailable".
 
-## [1.0.13-beta.1] - 2026-06-13
+## [1.0.0-beta.14] - 2026-06-13
 
 ### Fixed
 
 - Fixed the Leaderboard Online/Sessions tab showing members as offline because it was not loading player-detail status data.
 
-## [1.0.12-beta.1] - 2026-06-13
+## [1.0.0-beta.13] - 2026-06-13
 
 ### Added
 
 - Added Leaderboard tabs for Contribution, Professions, Activity, Market, and Online/Sessions settlement comparisons.
 - Added BitJita total played and total signed-in values to the Leaderboard Online/Sessions tab when player detail data provides them.
 
-## [1.0.11-beta.1] - 2026-06-13
+## [1.0.0-beta.12] - 2026-06-13
 
 ### Changed
 
 - Improved Craft Calculator recipe route selection with clearer route cards and route-type labels.
 - Changed Craft Calculator defaults to prefer normal processing recipes over unpack/package routes when multiple recipe routes are available.
 
-## [1.0.10-beta.1] - 2026-06-13
+## [1.0.0-beta.11] - 2026-06-13
 
 ### Changed
 
@@ -268,13 +278,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed the Dashboard online member card fallback from "Session active" to a clearer playtime unavailable label.
 - Removed the Craft Calculator calculation notes panel to reduce clutter when multiple recipe options exist.
 
-## [1.0.9-beta.1] - 2026-06-12
+## [1.0.0-beta.10] - 2026-06-12
 
 ### Changed
 
 - Improved Map player tracking diagnostics and prevented temporary player-detail failures from emptying the member roster used by the map.
 
-## [1.0.8-beta.1] - 2026-06-12
+## [1.0.0-beta.9] - 2026-06-12
 
 ### Added
 
@@ -290,14 +300,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fixed the Admin database browser returning to the Status tab after refreshes by persisting the selected Admin tab.
 
-## [1.0.7-beta.1] - 2026-06-12
+## [1.0.0-beta.8] - 2026-06-12
 
 ### Added
 
 - Added direct recipe materials to Craft Calculator so users can compare immediate recipe inputs with fully expanded source materials.
 - Added a technical application overview covering current architecture, pages, data flow, integrations, security, and risk areas.
 
-## [1.0.6-beta.1] - 2026-06-12
+## [1.0.0-beta.7] - 2026-06-12
 
 ### Added
 
@@ -312,7 +322,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Made Craft Calculator ingredient lookups more resilient to BitJita rate limits by caching recipe details, reducing lookup bursts, and treating failed child ingredients as source materials instead of failing the whole plan.
 
-## [1.0.5-beta.1] - 2026-06-12
+## [1.0.0-beta.6] - 2026-06-12
 
 ### Changed
 
@@ -322,7 +332,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Fixed Admin and Activity no-poll pages clearing the last good BitJita data snapshot during navigation.
 
-## [1.0.4-beta.1] - 2026-06-12
+## [1.0.0-beta.5] - 2026-06-12
 
 ### Changed
 
@@ -332,7 +342,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Improved HTTP 429 refresh warnings so local rate limiting is easier to distinguish from upstream BitJita issues.
 
-## [1.0.3-beta.1] - 2026-06-12
+## [1.0.0-beta.4] - 2026-06-12
 
 ### Added
 
@@ -342,14 +352,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Replaced the Admin sign-in and administrator management UI with Discord account approval instead of separate app passwords.
 
-## [1.0.2-beta.1] - 2026-06-12
+## [1.0.0-beta.3] - 2026-06-12
 
 ### Changed
 
 - Removed the visible "not syncing" suffix from active-region dropdown labels.
 - Updated Production's active/paused state to recognize craft progress that moves during refreshes, while keeping contribution recording limited to BitJita contribution data.
 
-## [1.0.1-beta.1] - 2026-06-12
+## [1.0.0-beta.2] - 2026-06-12
 
 ### Added
 
@@ -1449,4 +1459,3 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-

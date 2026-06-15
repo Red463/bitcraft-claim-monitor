@@ -110,12 +110,12 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<Users />} label="Players Online" value={liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} />
         <MiniStat icon={<Server />} label="Region Status" value={regionStatusLabel} />
         <MiniStat icon={<ShoppingCart />} label="Regional Trades" value={formatNumber(tradeSummary.totalTrades)} />
-        <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={`${formatCompactNumber(totalTreasury)}g`} />
+        <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={formatCompactNumber(totalTreasury)} />
       </div>
       <div className="highlight-grid region-insights">
         <div><strong>Average Tier</strong><span>{avgTier.toFixed(1)} across known settlements</span></div>
         <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
-        <div><strong>Regional Trade Value</strong><span>{formatNumber(tradeSummary.totalValue)}g in selected API window</span></div>
+        <div><strong>Regional Trade Value</strong><span>{formatCompactNumber(tradeSummary.totalValue)} in selected API window</span></div>
       </div>
       <div className="region-context">
         <section className="bar-panel region-leaders-panel">

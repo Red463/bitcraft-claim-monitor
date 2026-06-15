@@ -2,7 +2,7 @@
 
 BitCraft Claim Monitor is a settlement operations dashboard built around the public [BitJita API](https://bitjita.com/docs/api). It combines live settlement information with locally persisted market and activity history, providing one place to check supplies, members, professions, skills, production, storage, research, trade, and regional context.
 
-The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve.
+The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve. See [VERSIONING.md](./VERSIONING.md) for the release policy.
 
 The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local). Historical Replit export artifacts have been removed from the active workspace so new development stays focused on the maintained app.
 

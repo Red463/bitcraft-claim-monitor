@@ -323,7 +323,7 @@ export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpd
         <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
         <DashboardMetric icon={<Hammer />} label="Construction" value={activeProjects} detail={`${activeProjects} current project${activeProjects === 1 ? "" : "s"}`} onClick={() => onNavigate("construction")} />
-        <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatNumber(marketListingValue)}g total listing value`} tone="green" onClick={() => onNavigate("market")} />
+        <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatCompactNumber(marketListingValue)} total listing value`} tone="green" onClick={() => onNavigate("market")} />
         <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
       </section>
 
@@ -807,7 +807,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
           <div className="metric-grid market-analytics-metrics">
             <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
-            <MiniStat icon={<CircleDollarSign />} label="Sales Revenue" value={`${formatNumber(confirmedRevenue)}g`} />
+            <MiniStat icon={<CircleDollarSign />} label="Sales Revenue" value={formatCompactNumber(confirmedRevenue)} />
             <MiniStat icon={<TrendingUp />} label="Average Sale Value" value={`${formatNumber(averageSaleValue)}g`} />
           </div>
           <div className="two-col market-analytics">
@@ -859,7 +859,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
         <MiniStat icon={<ShoppingCart />} label="Visible Listings" value={all.length} />
         <MiniStat icon={<TrendingDown />} label="Sell Orders" value={sellOrders.length || all.length} />
         <MiniStat icon={<TrendingUp />} label="Buy Orders" value={buyOrders.length} />
-        <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? `${formatNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1))}g` : "-"} />
+        <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? formatCompactNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1)) : "-"} />
       </div>
       <div className="highlight-grid market-highlights">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><ItemLabel item={{ ...listing, name: listing.itemName }} name={listing.itemName} /><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
       <section className="production-command-panel market-filter-panel">
@@ -1183,7 +1183,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
         <MiniStat icon={<ShoppingBag />} label="Current Buy Orders" value={formatNumber(total)} />
         <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"} />
         <MiniStat icon={<Package />} label="Visible Demand" value={formatNumber(rows.reduce((sum, order) => sum + toNumber(order.quantity), 0))} />
-        <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={`${formatCompactNumber(rows.reduce((sum, order) => sum + toNumber(order.totalValue), 0))}g`} />
+        <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={formatCompactNumber(rows.reduce((sum, order) => sum + toNumber(order.totalValue), 0))} />
         <MiniStat icon={<ShoppingCart />} label="Markets Visible" value={formatNumber(marketCount)} />
       </div>
       <section className="buy-order-opportunities">
@@ -1933,7 +1933,7 @@ export function Leaderboard({
   ] : activeTab === "market" ? [
     <MiniStat key="members" icon={<Users />} label="Market Members" value={formatNumber(sortedMarketRows.length)} />,
     <MiniStat key="listings" icon={<ShoppingBag />} label="Active Listings" value={formatNumber(leaderboard.market?.summary?.activeListings)} />,
-    <MiniStat key="sales" icon={<CircleDollarSign />} label="Confirmed Sales Value" value={`${formatNumber(leaderboard.market?.summary?.confirmedSaleValue)}g`} />,
+    <MiniStat key="sales" icon={<CircleDollarSign />} label="Confirmed Sales Value" value={formatCompactNumber(leaderboard.market?.summary?.confirmedSaleValue)} />,
     <MiniStat key="top" icon={<Trophy />} label="Top Seller" value={sortedMarketRows[0]?.name ?? "None yet"} />,
   ] : activeTab === "online" ? [
     <MiniStat key="online" icon={<Users />} label="Online Now" value={formatNumber(onlineRows.filter((row) => row.signedIn).length)} />,

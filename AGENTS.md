@@ -369,7 +369,8 @@ For normal feature/fix work, mention a suggested changelog entry in the final re
 
 When preparing a release:
 
-* Use beta semver, for example `1.0.11-beta.1`.
+* Use the beta train format from `VERSIONING.md`, for example `1.0.0-beta.41`.
+* During the current beta train, increment the beta number instead of creating patch-heavy versions like `1.0.41-beta.1`.
 * Move accumulated unreleased notes into a dated version section.
 * Keep the latest version at the top of `CHANGELOG.md`.
 * Write changelog entries from the user's point of view.

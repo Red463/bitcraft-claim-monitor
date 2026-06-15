@@ -95,6 +95,14 @@ export function RefreshStatus({
   intervalSeconds: number;
 }) {
   const collectors = Object.entries((collectorStatus?.collectors ?? {}) as Record<string, AnyRecord>);
+  const collectorDetail = (collector: AnyRecord) => {
+    if (collector.running) {
+      const hasProgress = collector.progressCurrent != null && collector.progressTotal != null;
+      const progress = hasProgress ? ` (${toNumber(collector.progressCurrent)} / ${toNumber(collector.progressTotal)})` : "";
+      return `${collector.currentStep ?? "Running"}${progress}`;
+    }
+    return collector.lastError ? `Error: ${collector.lastError}` : `Updated ${collectorTimeLabel(collector.lastSuccessAt)}`;
+  };
   return (
     <div className="refresh-status" aria-label={`Display refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
       <span className={`refresh-dot ${loading ? "refreshing" : ""}`} />
@@ -111,10 +119,10 @@ export function RefreshStatus({
           <div className="refresh-breakdown-list">
             {collectors.map(([key, collector]) => (
               <div className="refresh-breakdown-row" key={key}>
-                <span className={`collector-dot ${collector.lastError ? "is-error" : collector.lastSuccessAt ? "is-ok" : ""}`} />
+                <span className={`collector-dot ${collector.running ? "is-running" : collector.lastError ? "is-error" : collector.lastSuccessAt ? "is-ok" : ""}`} />
                 <span>
                   <strong>{collector.label ?? key}</strong>
-                  <small>{collector.lastError ? `Error: ${collector.lastError}` : `Updated ${collectorTimeLabel(collector.lastSuccessAt)}`}</small>
+                  <small>{collectorDetail(collector)}</small>
                 </span>
               </div>
             ))}

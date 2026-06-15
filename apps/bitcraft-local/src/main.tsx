@@ -1437,6 +1437,28 @@ function AdminPanel({
     setStatus(await api("/admin/status"));
   }
 
+  async function collectNowWithLiveStatus() {
+    let timer: number | null = window.setInterval(() => {
+      void refreshStatus().catch(() => undefined);
+    }, 1000);
+    try {
+      await api("/admin/poll", { method: "POST", body: "{}" });
+    } finally {
+      if (timer != null) window.clearInterval(timer);
+      timer = null;
+      await refreshStatus();
+    }
+  }
+
+  function collectorStatusValue(collector: AnyRecord) {
+    if (collector.running) {
+      const hasProgress = collector.progressCurrent != null && collector.progressTotal != null;
+      const progress = hasProgress ? ` (${formatNumber(collector.progressCurrent)} / ${formatNumber(collector.progressTotal)})` : "";
+      return `Running: ${collector.currentStep ?? "Collecting"}${progress}`;
+    }
+    return `${collector.lastSuccessAt ? `OK ${dateLabel(collector.lastSuccessAt)}` : "Not collected yet"}${collector.lastError ? ` - ${collector.lastError}` : ""}`;
+  }
+
   async function refreshScheduledJobs() {
     setScheduledJobs(await api("/admin/jobs"));
   }
@@ -2221,7 +2243,7 @@ function AdminPanel({
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">
-            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh</button><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/poll", { method: "POST", body: "{}" }); await refreshStatus(); }, "Collection run completed.")}><RefreshCw size={15} /> Collect Now</button></div></div>
+            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className="toolbar-button" onClick={() => run(refreshStatus)}><RefreshCw size={15} /> Refresh</button><button className="toolbar-button primary" onClick={() => run(collectNowWithLiveStatus, "Collection run completed.")}><RefreshCw size={15} /> Collect Now</button></div></div>
             <div className="status-detail">
               <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
@@ -2235,7 +2257,7 @@ function AdminPanel({
                 <Info
                   key={key}
                   label={collector.label ?? key}
-                  value={`${collector.lastSuccessAt ? `OK ${dateLabel(collector.lastSuccessAt)}` : "Not collected yet"}${collector.lastError ? ` - ${collector.lastError}` : ""}`}
+                  value={collectorStatusValue(collector)}
                 />
               ))}
             </div>

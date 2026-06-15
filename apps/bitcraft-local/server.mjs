@@ -2093,9 +2093,25 @@ function setCollectorStatus(key, patch = {}) {
   pollStatus.collectors[key] = { ...current, ...patch };
 }
 
-function collectorAttempt(key) {
-  setCollectorStatus(key, { lastAttemptAt: new Date().toISOString(), lastError: null });
+function collectorAttempt(key, step = "Starting") {
+  setCollectorStatus(key, {
+    lastAttemptAt: new Date().toISOString(),
+    lastError: null,
+    running: true,
+    currentStep: step,
+    progressCurrent: null,
+    progressTotal: null,
+  });
   return Date.now();
+}
+
+function collectorProgress(key, step, progress = {}) {
+  setCollectorStatus(key, {
+    running: true,
+    currentStep: step,
+    progressCurrent: Number.isFinite(Number(progress.current)) ? Number(progress.current) : null,
+    progressTotal: Number.isFinite(Number(progress.total)) ? Number(progress.total) : null,
+  });
 }
 
 function collectorSuccess(key, startedAt) {
@@ -2103,6 +2119,10 @@ function collectorSuccess(key, startedAt) {
     lastSuccessAt: new Date().toISOString(),
     lastError: null,
     durationMs: Math.max(Date.now() - startedAt, 0),
+    running: false,
+    currentStep: null,
+    progressCurrent: null,
+    progressTotal: null,
   });
 }
 
@@ -2110,6 +2130,10 @@ function collectorFailure(key, startedAt, error) {
   setCollectorStatus(key, {
     lastError: error instanceof Error ? error.message : String(error),
     durationMs: Math.max(Date.now() - startedAt, 0),
+    running: false,
+    currentStep: null,
+    progressCurrent: null,
+    progressTotal: null,
   });
 }
 
@@ -5326,7 +5350,8 @@ async function fetchRegionalBuyOrders(claimId, regionIds) {
   const uniqueRegionIds = [...new Set(regionIds.map((id) => String(id ?? "").trim()).filter((id) => /^\d+$/.test(id)))];
   const failures = [];
   const orders = [];
-  for (const regionId of uniqueRegionIds) {
+  for (const [regionIndex, regionId] of uniqueRegionIds.entries()) {
+    collectorProgress("buyOrders", `Loading R${regionId} settlements`, { current: regionIndex + 1, total: uniqueRegionIds.length });
     let claimPayload;
     try {
       claimPayload = await fetchRegionClaimList(regionId);
@@ -5336,19 +5361,29 @@ async function fetchRegionalBuyOrders(claimId, regionIds) {
     }
     const claims = unwrap(claimPayload, "claims", []);
     const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
+    let completedClaims = 0;
     const pages = await mapWithConcurrency(claims, 3, async (claim) => {
       const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
-      if (!marketClaimId) return [];
+      if (!marketClaimId) {
+        completedClaims += 1;
+        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
+        return [];
+      }
       try {
         const payload = await fetchAllClaimListings(marketClaimId, { side: "buy" });
+        completedClaims += 1;
+        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
         return unwrap(payload, "listings", []).map((listing) => normalizeRegionalBuyOrder(listing, regionId, regionName, claim));
       } catch (error) {
         failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
+        completedClaims += 1;
+        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
         return [];
       }
     });
     orders.push(...pages.flat());
   }
+  collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: 0, total: orders.length });
   const saleAverages = await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures);
   return {
     regions: uniqueRegionIds,
@@ -5375,10 +5410,11 @@ function priceHistoryBucketTotals(bucket) {
 
 async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = []) {
   const now = Date.now();
-  const staleBefore = new Date(now - 60 * 60 * 1000).toISOString();
+  const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
   const uniqueOrders = [...new Map(orders
     .filter((order) => regionalSaleAverageKey(order))
     .map((order) => [regionalSaleAverageKey(order), order])).values()];
+  let completed = 0;
   const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
     const regionId = String(order.regionId ?? "").trim();
     const itemId = String(order.itemId ?? "").trim();
@@ -5387,20 +5423,24 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
       SELECT * FROM market_regional_sale_averages_current
       WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
     `).get(String(claimId), regionId, itemId, itemType, staleBefore);
-    if (cached) return {
-      regionId,
-      itemId,
-      itemType,
-      itemName: cached.item_name,
-      averageUnitPrice: toNumber(cached.average_unit_price),
-      salesCount: toNumber(cached.sales_count),
-      unitsSold: toNumber(cached.units_sold),
-      totalValue: toNumber(cached.total_value),
-      windowDays: toNumber(cached.window_days) || 7,
-      firstBucketAt: cached.first_bucket_at,
-      lastBucketAt: cached.last_bucket_at,
-      raw: safeJson(cached.raw_json, {}),
-    };
+    if (cached) {
+      completed += 1;
+      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
+      return {
+        regionId,
+        itemId,
+        itemType,
+        itemName: cached.item_name,
+        averageUnitPrice: toNumber(cached.average_unit_price),
+        salesCount: toNumber(cached.sales_count),
+        unitsSold: toNumber(cached.units_sold),
+        totalValue: toNumber(cached.total_value),
+        windowDays: toNumber(cached.window_days) || 7,
+        firstBucketAt: cached.first_bucket_at,
+        lastBucketAt: cached.last_bucket_at,
+        raw: safeJson(cached.raw_json, {}),
+      };
+    }
     try {
       const payload = await fetchBitjita(`/market/items/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`);
       const buckets = unwrap(payload, "buckets", []);
@@ -5413,6 +5453,8 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
         unitsSold += totals.unitsSold;
         totalValue += totals.totalValue;
       }
+      completed += 1;
+      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
       return {
         regionId,
         itemId,
@@ -5429,6 +5471,8 @@ async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [])
       };
     } catch (error) {
       failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
+      completed += 1;
+      collectorProgress("buyOrders", "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
       return null;
     }
   });
