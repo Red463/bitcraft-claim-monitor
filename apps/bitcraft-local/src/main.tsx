@@ -2712,7 +2712,7 @@ function AdminPanel({
             <div className="split-header">
               <div>
                 <h3><RefreshCw size={17} /> Domain Collectors</h3>
-                <p className="legend">The server collects BitJita data once per domain, then browser tabs read the latest local data.</p>
+                <p className="legend">The server collects background history and notification data. Main pages refresh live BitJita data through the local proxy while users view them.</p>
               </div>
             </div>
             <div className="collector-settings-list">
@@ -3539,13 +3539,11 @@ function DashboardApp() {
   const activePanel = panels[active] ?? panels.dashboard;
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
-    const serverError = data.raw?.serverFreshness?.lastError ? `Server BitJita collection failed: ${data.raw.serverFreshness.lastError}` : null;
     return [
       ...(state.error ? [`Main BitJita refresh failed: ${state.error}`] : []),
-      ...(serverError ? [serverError] : []),
       ...partialErrors,
     ];
-  }, [data.raw?.partialErrors, data.raw?.serverFreshness?.lastError, state.error]);
+  }, [data.raw?.partialErrors, state.error]);
   const apiDiagnostics = React.useMemo<ApiStatusDiagnostics>(() => ({
     appVersion: APP_VERSION,
     page: active,

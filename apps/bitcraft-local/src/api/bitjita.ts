@@ -106,20 +106,6 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
   return Object.fromEntries([...keys].map((key) => [key, endpoints[key]]));
 }
 
-const SERVER_HELD_PANELS = new Set<ActivePanel>([
-  "dashboard",
-  "leaderboard",
-  "members",
-  "skills",
-  "production",
-  "inventory",
-  "construction",
-  "research",
-  "market",
-  "empire",
-  "map",
-]);
-
 export function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
@@ -131,14 +117,6 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
     const controller = new AbortController();
     async function load() {
       try {
-        if (SERVER_HELD_PANELS.has(activePanel)) {
-          setState((prev) => ({ ...prev, loading: true, error: null }));
-          const response = await fetch(`${LOCAL_API}/pages/${encodeURIComponent(activePanel)}?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
-          if (!response.ok) throw new Error(`Unable to refresh local app data (HTTP ${response.status}). The server will keep showing the latest successful BitJita data when available.`);
-          const raw = await response.json();
-          React.startTransition(() => setState({ loading: false, error: null, data: raw }));
-          return;
-        }
         async function request(path: string) {
           const response = await fetch(`${API}${path}`, { signal: controller.signal });
           if (!response.ok) throw new Error(httpErrorMessage(path, response.status));

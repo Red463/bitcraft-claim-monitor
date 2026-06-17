@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.53] - 2026-06-17
+
+### Changed
+
+- Restored main app pages to refresh live BitJita data through the local proxy instead of using SQLite current-state tables for page display.
+- Clarified Admin collector wording so background collectors are described as history and notification support rather than the source of live page data.
+
 ## [1.0.0-beta.52] - 2026-06-16
 
 ### Fixed
