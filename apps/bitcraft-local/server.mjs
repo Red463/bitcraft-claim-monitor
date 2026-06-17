@@ -210,164 +210,6 @@ db.exec(`
     updated_at TEXT NOT NULL,
     PRIMARY KEY (claim_id, domain)
   );
-  CREATE TABLE IF NOT EXISTS claim_current (
-    claim_id TEXT PRIMARY KEY,
-    name TEXT,
-    region_id TEXT,
-    region_name TEXT,
-    owner_name TEXT,
-    supplies REAL,
-    treasury REAL,
-    tier TEXT,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS member_current (
-    claim_id TEXT NOT NULL,
-    member_key TEXT NOT NULL,
-    player_entity_id TEXT,
-    username TEXT,
-    co_owner_permission INTEGER,
-    officer_permission INTEGER,
-    build_permission INTEGER,
-    inventory_permission INTEGER,
-    active INTEGER NOT NULL DEFAULT 1,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, member_key)
-  );
-  CREATE TABLE IF NOT EXISTS player_current (
-    claim_id TEXT NOT NULL,
-    player_entity_id TEXT NOT NULL,
-    username TEXT,
-    signed_in INTEGER NOT NULL DEFAULT 0,
-    sign_in_timestamp REAL,
-    session_seconds REAL,
-    time_played_seconds REAL,
-    time_signed_in_seconds REAL,
-    active INTEGER NOT NULL DEFAULT 1,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, player_entity_id)
-  );
-  CREATE TABLE IF NOT EXISTS profession_current (
-    claim_id TEXT NOT NULL,
-    player_entity_id TEXT NOT NULL,
-    username TEXT,
-    profession_id TEXT NOT NULL,
-    profession_name TEXT,
-    level REAL,
-    xp REAL,
-    tier INTEGER,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, player_entity_id, profession_id)
-  );
-  CREATE TABLE IF NOT EXISTS production_current (
-    claim_id TEXT NOT NULL,
-    craft_entity_id TEXT NOT NULL,
-    label TEXT,
-    building_name TEXT,
-    crafter_name TEXT,
-    profession TEXT,
-    tier TEXT,
-    total_xp REAL,
-    progress REAL,
-    is_public INTEGER,
-    active INTEGER NOT NULL DEFAULT 1,
-    first_seen TEXT,
-    last_seen TEXT NOT NULL,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, craft_entity_id)
-  );
-  CREATE TABLE IF NOT EXISTS inventory_container_current (
-    claim_id TEXT NOT NULL,
-    container_key TEXT NOT NULL,
-    container_name TEXT,
-    building_id TEXT,
-    building_name TEXT,
-    active INTEGER NOT NULL DEFAULT 1,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, container_key)
-  );
-  CREATE TABLE IF NOT EXISTS inventory_item_current (
-    claim_id TEXT NOT NULL,
-    container_key TEXT NOT NULL,
-    item_key TEXT NOT NULL,
-    item_id TEXT,
-    item_type TEXT,
-    item_name TEXT,
-    quantity REAL,
-    tier TEXT,
-    rarity TEXT,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, container_key, item_key)
-  );
-  CREATE TABLE IF NOT EXISTS construction_project_current (
-    claim_id TEXT NOT NULL,
-    project_key TEXT NOT NULL,
-    structure_name TEXT,
-    progress REAL,
-    active INTEGER NOT NULL DEFAULT 1,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, project_key)
-  );
-  CREATE TABLE IF NOT EXISTS construction_material_current (
-    claim_id TEXT NOT NULL,
-    project_key TEXT NOT NULL,
-    material_key TEXT NOT NULL,
-    item_name TEXT,
-    required_quantity REAL,
-    added_quantity REAL,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, project_key, material_key)
-  );
-  CREATE TABLE IF NOT EXISTS research_current (
-    claim_id TEXT NOT NULL,
-    research_key TEXT NOT NULL,
-    name TEXT,
-    status TEXT,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, research_key)
-  );
-  CREATE TABLE IF NOT EXISTS region_claim_current (
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    region_claim_id TEXT NOT NULL,
-    name TEXT,
-    supplies REAL,
-    treasury REAL,
-    owner_name TEXT,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, region_id, region_claim_id)
-  );
-  CREATE TABLE IF NOT EXISTS region_status_current (
-    region_id TEXT PRIMARY KEY,
-    region_name TEXT,
-    signed_in_players REAL,
-    players_in_queue REAL,
-    active INTEGER NOT NULL DEFAULT 1,
-    data_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS domain_change_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    subject_key TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    occurred_at TEXT NOT NULL,
-    metadata_json TEXT NOT NULL,
-    source_key TEXT NOT NULL UNIQUE
-  );
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -594,11 +436,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
-  CREATE INDEX IF NOT EXISTS idx_domain_change_claim_time ON domain_change_events (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_member_current_claim ON member_current (claim_id, active, username);
-  CREATE INDEX IF NOT EXISTS idx_player_current_claim ON player_current (claim_id, active, signed_in);
-  CREATE INDEX IF NOT EXISTS idx_production_current_claim ON production_current (claim_id, active, last_seen DESC);
-  CREATE INDEX IF NOT EXISTS idx_inventory_item_claim ON inventory_item_current (claim_id, item_name);
 `);
 
 db.exec("DROP TABLE IF EXISTS current_claim_state;");
@@ -631,33 +468,6 @@ ensureColumn("admin_users", "discord_global_name", "TEXT");
 ensureColumn("admin_users", "discord_avatar", "TEXT");
 ensureColumn("production_jobs", "start_notified", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("domain_payload_current", "updated_at", "TEXT");
-ensureColumn("claim_current", "owner_name", "TEXT");
-ensureColumn("claim_current", "tier", "TEXT");
-ensureColumn("claim_current", "updated_at", "TEXT");
-ensureColumn("member_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("member_current", "updated_at", "TEXT");
-ensureColumn("player_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("player_current", "updated_at", "TEXT");
-ensureColumn("profession_current", "xp", "REAL");
-ensureColumn("profession_current", "tier", "INTEGER");
-ensureColumn("profession_current", "updated_at", "TEXT");
-ensureColumn("production_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("production_current", "first_seen", "TEXT");
-ensureColumn("production_current", "last_seen", "TEXT");
-ensureColumn("production_current", "data_json", "TEXT DEFAULT '{}'");
-ensureColumn("production_current", "updated_at", "TEXT");
-ensureColumn("inventory_container_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("inventory_container_current", "updated_at", "TEXT");
-ensureColumn("inventory_item_current", "tier", "TEXT");
-ensureColumn("inventory_item_current", "rarity", "TEXT");
-ensureColumn("inventory_item_current", "updated_at", "TEXT");
-ensureColumn("construction_project_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("construction_project_current", "updated_at", "TEXT");
-ensureColumn("construction_material_current", "updated_at", "TEXT");
-ensureColumn("research_current", "updated_at", "TEXT");
-ensureColumn("region_claim_current", "updated_at", "TEXT");
-ensureColumn("region_status_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("region_status_current", "updated_at", "TEXT");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';");
@@ -819,10 +629,6 @@ const statements = {
       updated_at = excluded.updated_at
   `),
   updateDomainPayloadError: db.prepare("UPDATE domain_payload_current SET last_attempt_at = ?, last_error = ?, updated_at = ? WHERE claim_id = ? AND domain = ?"),
-  insertDomainChange: db.prepare(`
-    INSERT OR IGNORE INTO domain_change_events (claim_id, domain, event_type, subject_key, summary, occurred_at, metadata_json, source_key)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `),
   getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
   upsertSecret: db.prepare(`
     INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)
@@ -2043,17 +1849,9 @@ const payloadDomainCollector = {
 };
 
 const collectorCurrentTables = {
-  claim: ["claim_current"],
-  members: ["member_current"],
-  players: ["player_current"],
-  professions: ["profession_current"],
-  production: ["production_current", "production_contributions"],
-  inventory: ["inventory_container_current", "inventory_item_current"],
-  construction: ["construction_project_current", "construction_material_current"],
-  research: ["research_current"],
+  production: ["production_contributions"],
   market: ["market_listings", "market_trades"],
   buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
-  region: ["region_claim_current", "region_status_current"],
   mapCatalog: ["domain_payload_current"],
   snapshotHistory: ["snapshots"],
   storageActivity: ["activity_events"],
@@ -2167,7 +1965,6 @@ function collectorAttempt(key, step = "Starting") {
     fetchDurationMs: null,
     fetchSteps: [],
     payloadWriteDurationMs: null,
-    currentRowsWriteDurationMs: null,
     rowCount: null,
     tableCounts: null,
     running: true,
@@ -2215,7 +2012,6 @@ function blankCollectionMetrics() {
     startedAt: new Date().toISOString(),
     collectors: {},
     domainPayloadWriteDurationMs: null,
-    currentRowsWriteDurationMs: null,
     currentTableCounts: {},
   };
 }
@@ -2266,7 +2062,6 @@ async function timedCollectorFetch(metrics, key, label, load) {
 
 function tableCount(table, claimId = "") {
   try {
-    if (table === "region_status_current") return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count);
     return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE claim_id = ?`).get(String(claimId ?? ""))?.count);
   } catch {
     return null;
@@ -2295,7 +2090,6 @@ function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
       fetchDurationMs: Number.isFinite(Number(metric.fetchDurationMs)) ? Number(metric.fetchDurationMs) : null,
       fetchSteps: Array.isArray(metric.fetchSteps) ? metric.fetchSteps : [],
       payloadWriteDurationMs: Number.isFinite(Number(metric.payloadWriteDurationMs)) ? Number(metric.payloadWriteDurationMs) : null,
-      currentRowsWriteDurationMs: metrics.currentRowsWriteDurationMs,
       tableCounts: count.tables,
       rowCount: count.rowCount,
     });
@@ -5579,12 +5373,15 @@ function regionalSaleAverageKey(order) {
 function currentMonitoredRegionId(claimId) {
   const id = String(claimId ?? "").trim();
   if (!id) return "";
-  const claimRow = db.prepare("SELECT region_id, data_json FROM claim_current WHERE claim_id = ?").get(id);
-  const claimData = safeJson(claimRow?.data_json, {});
-  const directRegionId = String(claimRow?.region_id ?? claimData.regionId ?? claimData.region_id ?? "").trim();
+  const rowsByDomain = readDomainPayloadMap(id);
+  const claimPayload = rowsByDomain.claim?.data ?? {};
+  const claimData = claimPayload.claim ?? claimPayload;
+  const directRegionId = String(claimData.regionId ?? claimData.region_id ?? claimData.region ?? "").trim();
   if (/^\d+$/.test(directRegionId)) return directRegionId;
-  const regionClaimRow = db.prepare("SELECT region_id FROM region_claim_current WHERE claim_id = ? AND region_claim_id = ?").get(id, id);
-  const fallbackRegionId = String(regionClaimRow?.region_id ?? "").trim();
+  const regionPayload = rowsByDomain.region?.data ?? {};
+  const regionClaims = unwrap(regionPayload, "claims", []);
+  const monitoredRegionClaim = regionClaims.find((claim) => String(claim.entityId ?? claim.id ?? claim.claimId ?? "") === id);
+  const fallbackRegionId = String(monitoredRegionClaim?.regionId ?? monitoredRegionClaim?.region_id ?? "").trim();
   return /^\d+$/.test(fallbackRegionId) ? fallbackRegionId : "";
 }
 
@@ -6407,270 +6204,6 @@ function rowData(row) {
   return safeJson(row?.data_json, {});
 }
 
-function tableBackedClaimData(claimId, rowsByDomain = {}) {
-  const id = String(claimId ?? "");
-  const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
-  const claimRow = db.prepare("SELECT * FROM claim_current WHERE claim_id = ?").get(id);
-  if (!claimRow) return null;
-  const monitoredRegionClaim = db.prepare("SELECT region_id FROM region_claim_current WHERE claim_id = ? AND region_claim_id = ?").get(id, id);
-
-  const claim = {
-    ...rowData(claimRow),
-    entityId: rowData(claimRow).entityId ?? rowData(claimRow).id ?? id,
-    id,
-    claimId: id,
-    name: claimRow.name ?? rowData(claimRow).name ?? rowData(claimRow).claimName,
-    claimName: claimRow.name ?? rowData(claimRow).claimName ?? rowData(claimRow).name,
-    regionId: claimRow.region_id ?? rowData(claimRow).regionId ?? monitoredRegionClaim?.region_id,
-    regionName: claimRow.region_name ?? rowData(claimRow).regionName,
-    ownerUsername: claimRow.owner_name ?? rowData(claimRow).ownerUsername ?? rowData(claimRow).ownerName,
-    supplies: claimRow.supplies ?? rowData(claimRow).supplies,
-    treasury: claimRow.treasury ?? rowData(claimRow).treasury,
-    tier: claimRow.tier ?? rowData(claimRow).tier,
-  };
-
-  const memberRows = db.prepare("SELECT * FROM member_current WHERE claim_id = ? AND active = 1 ORDER BY username").all(id);
-  const members = memberRows.map((row) => ({
-    ...rowData(row),
-    playerEntityId: row.player_entity_id ?? rowData(row).playerEntityId ?? row.member_key,
-    entityId: row.player_entity_id ?? rowData(row).entityId ?? row.member_key,
-    username: row.username ?? rowData(row).username ?? rowData(row).userName,
-    userName: row.username ?? rowData(row).userName ?? rowData(row).username,
-    coOwnerPermission: Boolean(row.co_owner_permission),
-    officerPermission: Boolean(row.officer_permission),
-    buildPermission: Boolean(row.build_permission),
-    inventoryPermission: Boolean(row.inventory_permission),
-  }));
-
-  const players = db.prepare("SELECT * FROM player_current WHERE claim_id = ? AND active = 1 ORDER BY username").all(id).map((row) => ({
-    ...rowData(row),
-    entityId: row.player_entity_id,
-    playerEntityId: row.player_entity_id,
-    username: row.username ?? rowData(row).username ?? rowData(row).userName,
-    userName: row.username ?? rowData(row).userName ?? rowData(row).username,
-    signedIn: Boolean(row.signed_in),
-    online: Boolean(row.signed_in),
-    signInTimestamp: row.sign_in_timestamp,
-    sessionSeconds: row.session_seconds,
-    timePlayedSeconds: row.time_played_seconds,
-    totalPlayedSeconds: row.time_played_seconds,
-    timeSignedInSeconds: row.time_signed_in_seconds,
-    totalSignedInSeconds: row.time_signed_in_seconds,
-  }));
-
-  const professionGroups = new Map();
-  for (const row of db.prepare("SELECT * FROM profession_current WHERE claim_id = ?").all(id)) {
-    const key = String(row.player_entity_id ?? row.username ?? "");
-    if (!key) continue;
-    const current = professionGroups.get(key) ?? {
-      playerEntityId: row.player_entity_id,
-      entityId: row.player_entity_id,
-      username: row.username,
-      userName: row.username,
-      skills: {},
-      totalLevel: 0,
-      totalSkillLevel: 0,
-      totalXP: 0,
-      totalXp: 0,
-    };
-    current.skills[String(row.profession_id)] = row.level;
-    current.totalLevel += toNumber(row.level);
-    current.totalSkillLevel = current.totalLevel;
-    current.totalXP += toNumber(row.xp);
-    current.totalXp = current.totalXP;
-    professionGroups.set(key, current);
-  }
-  const citizens = [...professionGroups.values()];
-
-  const productionPayload = payload("crafts", {});
-  const production = db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1 ORDER BY last_seen DESC").all(id).map((row) => {
-    const raw = rowData(row);
-    const rawItem = raw.item ?? raw.output ?? raw.craftedItem?.[0] ?? {};
-    const itemName = rawItem.name ?? raw.outputItemName ?? raw.itemName ?? raw.recipeName ?? raw.name ?? row.label;
-    const normalized = normalizeProductionJob({ ...raw, itemName, recipeName: raw.recipeName ?? itemName }, productionPayload);
-    const label = itemName ?? normalized.label ?? row.label ?? raw.label;
-    return {
-      ...raw,
-      entityId: row.craft_entity_id,
-      id: row.craft_entity_id,
-      label,
-      item: {
-        ...rawItem,
-        ...(raw.item ?? {}),
-        name: rawItem.name ?? raw.outputItemName ?? raw.itemName ?? label,
-        tier: rawItem.tier ?? raw.item?.tier ?? row.tier ?? raw.tier,
-      },
-      buildingName: row.building_name ?? raw.buildingName,
-      crafterName: row.crafter_name ?? raw.crafterName,
-      skillName: row.profession ?? raw.skillName,
-      tier: row.tier ?? raw.tier,
-      totalXp: row.total_xp ?? raw.totalXp,
-      progressPct: row.progress ?? raw.progressPct,
-      isPublic: Boolean(row.is_public),
-    };
-  });
-
-  const containerRows = db.prepare("SELECT * FROM inventory_container_current WHERE claim_id = ? AND active = 1 ORDER BY container_name").all(id);
-  const itemRowsByContainer = new Map();
-  for (const row of db.prepare("SELECT * FROM inventory_item_current WHERE claim_id = ?").all(id)) {
-    const list = itemRowsByContainer.get(row.container_key) ?? [];
-    list.push(row);
-    itemRowsByContainer.set(row.container_key, list);
-  }
-  const rawInventoryPayload = payload("inventories", {});
-  const inventoryItems = new Map((rawInventoryPayload.items ?? []).map((entry) => [String(entry.id), entry]));
-  const inventoryCargos = new Map((rawInventoryPayload.cargos ?? []).map((entry) => [String(entry.id), entry]));
-  const buildings = containerRows.map((container) => {
-    const slots = (itemRowsByContainer.get(container.container_key) ?? []).map((row, index) => {
-      const raw = rowData(row);
-      const itemType = row.item_type === "cargo" || row.item_type === 1 || row.item_type === "1" ? "cargo" : "item";
-      const existingCatalog = (itemType === "cargo" ? inventoryCargos : inventoryItems).get(String(row.item_id)) ?? {};
-      const catalogEntry = {
-        ...existingCatalog,
-        ...raw,
-        id: row.item_id,
-        name: meaningfulItemName(row.item_name) ?? meaningfulItemName(raw.name) ?? meaningfulItemName(existingCatalog.name) ?? meaningfulItemName(raw.tag) ?? meaningfulItemName(existingCatalog.tag),
-        tier: row.tier ?? raw.tier ?? existingCatalog.tier,
-        rarityStr: row.rarity ?? raw.rarityStr ?? raw.rarity ?? existingCatalog.rarityStr,
-        iconAssetName: raw.iconAssetName ?? existingCatalog.iconAssetName,
-        tag: raw.tag ?? existingCatalog.tag,
-      };
-      if (row.item_id != null) (itemType === "cargo" ? inventoryCargos : inventoryItems).set(String(row.item_id), catalogEntry);
-      return {
-        slot: index,
-        contents: {
-          ...raw,
-          item_id: row.item_id,
-          itemId: row.item_id,
-          item_type: itemType,
-          itemType,
-          quantity: row.quantity,
-        },
-      };
-    });
-    return {
-      ...rowData(container),
-      entityId: container.container_key,
-      buildingEntityId: container.building_id,
-      buildingName: container.building_name ?? rowData(container).buildingName,
-      buildingNickname: container.container_name ?? rowData(container).buildingNickname ?? rowData(container).name,
-      inventory: slots,
-    };
-  });
-
-  const materialRowsByProject = new Map();
-  for (const row of db.prepare("SELECT * FROM construction_material_current WHERE claim_id = ?").all(id)) {
-    const list = materialRowsByProject.get(row.project_key) ?? [];
-    list.push({
-      ...rowData(row),
-      name: row.item_name ?? rowData(row).name,
-      required: row.required_quantity,
-      contributed: row.added_quantity,
-      type: rowData(row).type ?? (rowData(row).itemType === "cargo" ? "cargo" : "item"),
-      itemId: rowData(row).itemId ?? rowData(row).item_id ?? row.material_key,
-      stored: rowData(row).stored ?? 0,
-    });
-    materialRowsByProject.set(row.project_key, list);
-  }
-  const constructionProjects = db.prepare("SELECT * FROM construction_project_current WHERE claim_id = ? AND active = 1 ORDER BY structure_name").all(id).map((row) => ({
-    ...rowData(row),
-    entityId: row.project_key,
-    id: row.project_key,
-    name: row.structure_name ?? rowData(row).name,
-    structureName: row.structure_name ?? rowData(row).structureName,
-    buildingName: row.structure_name ?? rowData(row).buildingName,
-    progress: row.progress ?? rowData(row).progress,
-    materials: materialRowsByProject.get(row.project_key) ?? [],
-  }));
-
-  const researchRows = db.prepare("SELECT * FROM research_current WHERE claim_id = ? ORDER BY name").all(id).map((row) => ({
-    ...rowData(row),
-    id: row.research_key,
-    name: row.name ?? rowData(row).name,
-    status: row.status ?? rowData(row).status,
-    unlocked: row.status === "unlocked" || rowData(row).unlocked === true,
-  }));
-
-  const regionClaims = db.prepare("SELECT * FROM region_claim_current WHERE claim_id = ? ORDER BY name").all(id).map((row) => ({
-    ...rowData(row),
-    entityId: row.region_claim_id,
-    id: row.region_claim_id,
-    claimId: row.region_claim_id,
-    regionId: row.region_id,
-    name: row.name ?? rowData(row).name,
-    claimName: row.name ?? rowData(row).claimName,
-    supplies: row.supplies ?? rowData(row).supplies,
-    treasury: row.treasury ?? rowData(row).treasury,
-    ownerUsername: row.owner_name ?? rowData(row).ownerUsername ?? rowData(row).ownerName,
-  }));
-  const regionStatuses = db.prepare("SELECT * FROM region_status_current WHERE active = 1 ORDER BY CAST(region_id AS INTEGER)").all().map((row) => ({
-    ...rowData(row),
-    regionId: row.region_id,
-    id: row.region_id,
-    name: row.region_name ?? rowData(row).name,
-    regionName: row.region_name ?? rowData(row).regionName,
-    signedInPlayers: row.signed_in_players ?? rowData(row).signedInPlayers,
-    playersInQueue: row.players_in_queue ?? rowData(row).playersInQueue,
-  }));
-
-  const market = statements.activeListings.all(id).map((row) => ({
-    ...safeJson(row.raw_json, {}),
-    entityId: row.listing_key,
-    itemName: row.item_name,
-    name: row.item_name,
-    side: row.side,
-    owner: row.owner,
-    ownerUsername: row.owner,
-    ownerEntityId: row.owner_entity_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    quantity: row.quantity,
-    price: row.price,
-    totalPrice: row.total_value,
-    totalValue: row.total_value,
-    tier: row.tier,
-    rarity: row.rarity,
-    firstSeen: row.first_seen,
-    lastSeen: row.last_seen,
-  }));
-
-  const fallbackData = domainRowsToAppData(id, rowsByDomain);
-  return {
-    ...fallbackData,
-    claim: { ...payload("claim", {}), claim },
-    members: { members },
-    citizens: { citizens },
-    crafts: { ...productionPayload, craftResults: production },
-    players,
-    inventories: {
-      ...payload("inventories", {}),
-      buildings,
-      items: [...inventoryItems.values()],
-      cargos: [...inventoryCargos.values()],
-    },
-    construction: {
-      ...payload("construction", {}),
-      projects: constructionProjects,
-    },
-    research: {
-      technologies: researchRows,
-      research: researchRows,
-    },
-    market: {
-      ...payload("market", {}),
-      listings: market,
-    },
-    region: {
-      ...payload("region", {}),
-      claims: regionClaims,
-    },
-    regionStatus: {
-      ...payload("regionStatus", {}),
-      regions: regionStatuses,
-    },
-  };
-}
-
 function domainRowsToAppData(claimId, rowsByDomain) {
   const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
   const partialErrors = Object.values(rowsByDomain)
@@ -6727,11 +6260,6 @@ function domainRowsToAppData(claimId, rowsByDomain) {
   };
 }
 
-function insertDomainChange(claimId, domain, eventType, subjectKey, summary, occurredAt, metadata = {}) {
-  const key = `${claimId}:${domain}:${eventType}:${subjectKey}:${occurredAt}`;
-  statements.insertDomainChange.run(String(claimId), domain, eventType, String(subjectKey), summary, occurredAt, JSON.stringify(metadata), key);
-}
-
 function meaningfulItemName(value) {
   const text = String(value ?? "").trim();
   if (!text || text.toLowerCase() === "unknown item") return null;
@@ -6773,6 +6301,86 @@ function inventoryStoredTotalsFromPayload(inventories) {
     }
   }
   return totals;
+}
+
+function persistRegionalBuyOrdersCurrent(claimId, payload, collectedAt) {
+  const claimIdText = String(claimId ?? "").trim();
+  if (!claimIdText || !payload || typeof payload !== "object") return 0;
+  const orders = Array.isArray(payload.orders) ? payload.orders : [];
+  const regions = [...new Set([
+    ...unwrap(payload, "regions", []),
+    ...orders.map((order) => order.regionId),
+  ].map((regionId) => String(regionId ?? "").trim()).filter((regionId) => /^\d+$/.test(regionId)))];
+  const upsertBuyOrder = db.prepare(`
+    INSERT INTO market_buy_orders_current (
+      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
+      buyer_entity_id, buyer_name, item_id, item_type, item_name, tier, rarity, icon_asset_name,
+      quantity, unit_price, total_value, stored_coins, listed_at, first_seen, last_seen, active,
+      raw_json, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    ON CONFLICT(claim_id, order_key) DO UPDATE SET
+      region_id = excluded.region_id,
+      region_name = excluded.region_name,
+      market_claim_id = excluded.market_claim_id,
+      market_claim_name = excluded.market_claim_name,
+      buyer_entity_id = excluded.buyer_entity_id,
+      buyer_name = excluded.buyer_name,
+      item_id = excluded.item_id,
+      item_type = excluded.item_type,
+      item_name = excluded.item_name,
+      tier = excluded.tier,
+      rarity = excluded.rarity,
+      icon_asset_name = excluded.icon_asset_name,
+      quantity = excluded.quantity,
+      unit_price = excluded.unit_price,
+      total_value = excluded.total_value,
+      stored_coins = excluded.stored_coins,
+      listed_at = excluded.listed_at,
+      last_seen = excluded.last_seen,
+      active = 1,
+      raw_json = excluded.raw_json,
+      updated_at = excluded.updated_at
+  `);
+  let written = 0;
+  for (const regionId of regions) {
+    db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id = ?").run(collectedAt, claimIdText, regionId);
+  }
+  for (const order of orders) {
+    const orderKey = String(order.orderKey ?? "").trim();
+    const regionId = String(order.regionId ?? "").trim();
+    const itemName = String(order.itemName ?? "").trim();
+    if (!orderKey || !regionId || !itemName) continue;
+    const quantity = toNumber(order.quantity);
+    const unitPrice = toNumber(order.unitPrice);
+    upsertBuyOrder.run(
+      claimIdText,
+      orderKey,
+      regionId,
+      order.regionName ?? null,
+      order.marketClaimId ?? null,
+      order.marketClaimName ?? null,
+      order.buyerEntityId ?? null,
+      order.buyerName ?? null,
+      order.itemId ?? null,
+      order.itemType ?? "0",
+      itemName,
+      order.tier ?? null,
+      order.rarity ?? null,
+      order.iconAssetName ?? null,
+      quantity,
+      unitPrice,
+      order.totalValue ?? quantity * unitPrice,
+      toNumber(order.storedCoins),
+      order.listedAt ?? null,
+      order.firstSeen ?? collectedAt,
+      collectedAt,
+      JSON.stringify(order.raw ?? order),
+      collectedAt,
+    );
+    written += 1;
+  }
+  return written;
 }
 
 function persistRegionalSaleAverages(claimId, averages, collectedAt) {
@@ -6822,395 +6430,6 @@ function persistRegionalSaleAverages(claimId, averages, collectedAt) {
   return written;
 }
 
-function persistCurrentRows(claimId, data, collectedAt) {
-  const claim = data.claim?.claim ?? data.claim ?? {};
-  const claimIdText = String(claimId ?? "");
-  const members = unwrap(data.members, "members", []);
-  const players = Array.isArray(data.players) ? data.players : [];
-  const citizens = unwrap(data.citizens, "citizens", []);
-  const production = unwrap(data.crafts, "craftResults", []);
-  const hasProductionPayload = Boolean(data.crafts && typeof data.crafts === "object" && (
-    Array.isArray(data.crafts.craftResults)
-    || Array.isArray(data.crafts.crafts)
-    || Array.isArray(data.crafts.results)
-    || Array.isArray(data.crafts.data)
-  ));
-  const inventories = unwrap(data.inventories, "buildings", []);
-  const constructionProjects = unwrap(data.construction, "projects", unwrap(data.construction, "buildings", []));
-  const researchRows = unwrap(data.research, "technologies", unwrap(data.research, "research", unwrap(data.research, "entries", [])));
-  const regionClaims = unwrap(data.region, "claims", []);
-  const regionStatuses = unwrap(data.regionStatus, "regions", []);
-  const persistedRegionId = claimRegionIdFromKnownData(claim, data.regionStatus, data.region, claimIdText);
-
-  db.exec("BEGIN");
-  try {
-    db.prepare("DELETE FROM claim_current WHERE claim_id = ?").run(claimIdText);
-    db.prepare(`
-      INSERT INTO claim_current (claim_id, name, region_id, region_name, owner_name, supplies, treasury, tier, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      claimIdText,
-      claim.name ?? claim.claimName ?? null,
-      persistedRegionId || null,
-      claim.regionName ?? claim.region_name ?? null,
-      claim.ownerUsername ?? claim.ownerName ?? claim.owner?.username ?? claim.owner?.name ?? null,
-      toNumber(claim.supplies ?? claim.suppliesAmount),
-      toNumber(claim.treasury ?? claim.treasuryBalance ?? claim.gold),
-      claim.tier ?? claim.level ?? null,
-      JSON.stringify(claim),
-      collectedAt,
-    );
-
-    const previousMembers = new Map(db.prepare("SELECT * FROM member_current WHERE claim_id = ? AND active = 1").all(claimIdText).map((row) => [row.member_key, row]));
-    db.prepare("UPDATE member_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-    const upsertMember = db.prepare(`
-      INSERT INTO member_current (claim_id, member_key, player_entity_id, username, co_owner_permission, officer_permission, build_permission, inventory_permission, active, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(claim_id, member_key) DO UPDATE SET
-        player_entity_id = excluded.player_entity_id,
-        username = excluded.username,
-        co_owner_permission = excluded.co_owner_permission,
-        officer_permission = excluded.officer_permission,
-        build_permission = excluded.build_permission,
-        inventory_permission = excluded.inventory_permission,
-        active = 1,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    const activeMemberKeys = new Set();
-    for (const member of members) {
-      const key = String(member.playerEntityId ?? member.player_entity_id ?? member.entityId ?? member.id ?? member.username ?? member.userName ?? "").trim();
-      if (!key) continue;
-      activeMemberKeys.add(key);
-      const permissions = parseMemberPermissions(member);
-      upsertMember.run(
-        claimIdText,
-        key,
-        String(member.playerEntityId ?? member.player_entity_id ?? member.entityId ?? member.id ?? ""),
-        member.username ?? member.userName ?? member.name ?? null,
-        permissions.coOwnerPermission ? 1 : 0,
-        permissions.officerPermission ? 1 : 0,
-        permissions.buildPermission ? 1 : 0,
-        permissions.inventoryPermission ? 1 : 0,
-        JSON.stringify(member),
-        collectedAt,
-      );
-      const previous = previousMembers.get(key);
-      if (!previous) insertDomainChange(claimIdText, "members", "member_joined", key, `${member.username ?? member.userName ?? "A member"} joined the tracked settlement`, collectedAt, { member });
-      else {
-        const nextFlags = [permissions.coOwnerPermission, permissions.officerPermission, permissions.buildPermission, permissions.inventoryPermission].map(Boolean).join("|");
-        const previousFlags = [previous.co_owner_permission, previous.officer_permission, previous.build_permission, previous.inventory_permission].map(Boolean).join("|");
-        if (nextFlags !== previousFlags) insertDomainChange(claimIdText, "members", "member_permissions_changed", key, `${member.username ?? member.userName ?? "A member"} permission flags changed`, collectedAt, { before: previousFlags, after: nextFlags });
-      }
-    }
-    for (const [key, member] of previousMembers) {
-      if (!activeMemberKeys.has(key)) insertDomainChange(claimIdText, "members", "member_left", key, `${member.username ?? "A member"} left the tracked settlement`, collectedAt, { member });
-    }
-
-    db.prepare("UPDATE player_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-    const upsertPlayer = db.prepare(`
-      INSERT INTO player_current (claim_id, player_entity_id, username, signed_in, sign_in_timestamp, session_seconds, time_played_seconds, time_signed_in_seconds, active, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(claim_id, player_entity_id) DO UPDATE SET
-        username = excluded.username,
-        signed_in = excluded.signed_in,
-        sign_in_timestamp = excluded.sign_in_timestamp,
-        session_seconds = excluded.session_seconds,
-        time_played_seconds = excluded.time_played_seconds,
-        time_signed_in_seconds = excluded.time_signed_in_seconds,
-        active = 1,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    for (const player of players) {
-      const key = String(player.entityId ?? player.playerEntityId ?? player.id ?? "").trim();
-      if (!key) continue;
-      upsertPlayer.run(
-        claimIdText,
-        key,
-        player.username ?? player.userName ?? player.name ?? null,
-        player.signedIn === true || player.online === true || player.isOnline === true ? 1 : 0,
-        toNumber(player.signInTimestamp ?? player.sign_in_timestamp ?? player.signedInTimestamp ?? player.sessionStartTimestamp ?? player.session_start_timestamp),
-        toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds),
-        toNumber(player.timePlayed ?? player.totalTimePlayed ?? player.totalPlayed ?? player.timePlayedSeconds ?? player.totalPlayedSeconds ?? player.time_played ?? player.total_time_played),
-        toNumber(player.timeSignedIn ?? player.totalTimeSignedIn ?? player.totalSignedIn ?? player.timeSignedInSeconds ?? player.totalSignedInSeconds ?? player.time_signed_in ?? player.total_time_signed_in),
-        JSON.stringify(player),
-        collectedAt,
-      );
-    }
-
-    db.prepare("DELETE FROM profession_current WHERE claim_id = ?").run(claimIdText);
-    const insertProfession = db.prepare(`
-      INSERT INTO profession_current (claim_id, player_entity_id, username, profession_id, profession_name, level, xp, tier, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const citizen of citizens) {
-      const playerKey = String(citizen.playerEntityId ?? citizen.player_entity_id ?? citizen.entityId ?? citizen.id ?? citizen.username ?? "").trim();
-      const entries = citizen.skills ?? citizen.professions ?? citizen.skillLevels ?? citizen.professionLevels ?? citizen.experience ?? [];
-      const list = Array.isArray(entries) ? entries : Object.entries(entries).map(([key, value]) => ({ professionId: key, ...(value && typeof value === "object" ? value : { level: value }) }));
-      for (const entry of list) {
-        const professionId = String(entry.skillId ?? entry.skill_id ?? entry.professionId ?? entry.id ?? entry.name ?? "").trim();
-        if (!playerKey || !professionId) continue;
-        const level = toNumber(entry.level ?? entry.skillLevel ?? entry.value);
-        insertProfession.run(claimIdText, playerKey, citizen.username ?? citizen.userName ?? citizen.name ?? null, professionId, entry.skillName ?? entry.professionName ?? entry.name ?? skillNames[toNumber(professionId)] ?? null, level, toNumber(entry.xp ?? entry.experience), Math.floor(level / 10) + 1, JSON.stringify(entry), collectedAt);
-      }
-    }
-
-    if (hasProductionPayload) {
-      const previousProduction = new Map(db.prepare("SELECT * FROM production_current WHERE claim_id = ? AND active = 1").all(claimIdText).map((row) => [row.craft_entity_id, row]));
-      const productionPayloadPartial = Boolean(data.crafts?.partialError || (Array.isArray(data.crafts?.partialErrors) && data.crafts.partialErrors.length));
-      if (!productionPayloadPartial) db.prepare("UPDATE production_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-      const upsertProduction = db.prepare(`
-        INSERT INTO production_current (claim_id, craft_entity_id, label, building_name, crafter_name, profession, tier, total_xp, progress, is_public, active, first_seen, last_seen, data_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-        ON CONFLICT(claim_id, craft_entity_id) DO UPDATE SET
-          label = excluded.label,
-          building_name = excluded.building_name,
-          crafter_name = excluded.crafter_name,
-          profession = excluded.profession,
-          tier = excluded.tier,
-          total_xp = excluded.total_xp,
-          progress = excluded.progress,
-          is_public = excluded.is_public,
-          active = 1,
-          last_seen = excluded.last_seen,
-          data_json = excluded.data_json,
-          updated_at = excluded.updated_at
-      `);
-      const activeProductionKeys = new Set();
-      for (const craft of production) {
-        const normalized = normalizeProductionJob(craft, data.crafts);
-        const key = String(craft.entityId ?? craft.id ?? normalized.key).trim();
-        if (!key) continue;
-        activeProductionKeys.add(key);
-        const previous = previousProduction.get(key);
-        upsertProduction.run(claimIdText, key, normalized.label, normalized.buildingName, normalized.crafterName, normalized.skillName, normalized.tier, normalized.totalXp, normalized.progressPct, craft.isPublic === false ? 0 : 1, previous?.first_seen ?? collectedAt, collectedAt, JSON.stringify(craft), collectedAt);
-        if (!previous) insertDomainChange(claimIdText, "production", "production_started", key, `Craft started: ${normalized.label}`, collectedAt, normalized);
-      }
-      if (!productionPayloadPartial) {
-        for (const [key, craft] of previousProduction) {
-          if (!activeProductionKeys.has(key)) insertDomainChange(claimIdText, "production", "production_removed", key, `Craft removed: ${craft.label ?? key}`, collectedAt, craft);
-        }
-      }
-    }
-
-    db.prepare("UPDATE inventory_container_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-    db.prepare("DELETE FROM inventory_item_current WHERE claim_id = ?").run(claimIdText);
-    const upsertContainer = db.prepare(`
-      INSERT INTO inventory_container_current (claim_id, container_key, container_name, building_id, building_name, active, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(claim_id, container_key) DO UPDATE SET
-        container_name = excluded.container_name,
-        building_id = excluded.building_id,
-        building_name = excluded.building_name,
-        active = 1,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    const insertInventoryItem = db.prepare(`
-      INSERT OR REPLACE INTO inventory_item_current (claim_id, container_key, item_key, item_id, item_type, item_name, quantity, tier, rarity, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const building of inventories) {
-      const containers = building.containers ?? building.inventories ?? building.storage ?? (building.entityId || building.id || Array.isArray(building.inventory) || Array.isArray(building.items) ? [building] : []);
-      for (const container of Array.isArray(containers) ? containers : []) {
-        const containerKey = String(container.entityId ?? container.id ?? container.containerId ?? building.entityId ?? building.id ?? `${building.name ?? "container"}:${containers.indexOf(container)}`).trim();
-        if (!containerKey) continue;
-        upsertContainer.run(claimIdText, containerKey, container.buildingNickname ?? container.nickname ?? container.name ?? building.buildingNickname ?? building.nickname ?? building.name ?? building.buildingName ?? null, building.entityId ?? building.id ?? null, building.name ?? building.buildingName ?? null, JSON.stringify(container), collectedAt);
-        const items = container.items ?? container.inventory ?? container.contents ?? container.cargos ?? [];
-        for (const item of Array.isArray(items) ? items : []) {
-          const row = item.contents ?? item;
-          const itemId = itemIdFromRow(item);
-          const rowItemId = itemIdFromRow(row) || itemId;
-          const rowType = row.itemType ?? row.item_type ?? item.itemType ?? item.item_type ?? null;
-          const mergedRow = { ...item, ...row };
-          const itemKey = String(item.key ?? item.entityId ?? item.id ?? `${rowItemId || itemNameFromRow(mergedRow)}:${rowType ?? ""}`).trim();
-          insertInventoryItem.run(claimIdText, containerKey, itemKey, rowItemId || null, rowType, itemNameFromRow(mergedRow), itemQuantityFromRow(row), row.tier ?? row.itemTier ?? item.tier ?? item.itemTier ?? null, row.rarity ?? row.rarityStr ?? row.itemRarityStr ?? item.rarity ?? item.rarityStr ?? item.itemRarityStr ?? null, JSON.stringify(mergedRow), collectedAt);
-        }
-      }
-    }
-
-    db.prepare("UPDATE construction_project_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-    db.prepare("DELETE FROM construction_material_current WHERE claim_id = ?").run(claimIdText);
-    const upsertProject = db.prepare(`
-      INSERT INTO construction_project_current (claim_id, project_key, structure_name, progress, active, data_json, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(claim_id, project_key) DO UPDATE SET
-        structure_name = excluded.structure_name,
-        progress = excluded.progress,
-        active = 1,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    const insertMaterial = db.prepare(`
-      INSERT OR REPLACE INTO construction_material_current (claim_id, project_key, material_key, item_name, required_quantity, added_quantity, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const storedTotals = inventoryStoredTotalsFromPayload(data.inventories);
-    const constructionItemLookup = new Map((data.construction?.items ?? []).map((entry) => [String(entry.id), entry]));
-    const constructionCargoLookup = new Map((data.construction?.cargos ?? []).map((entry) => [String(entry.id), entry]));
-    for (const project of constructionProjects) {
-      const projectKey = String(project.entityId ?? project.id ?? project.projectId ?? project.buildingEntityId ?? project.name ?? "").trim();
-      if (!projectKey) continue;
-      upsertProject.run(claimIdText, projectKey, project.structureName ?? project.buildingName ?? project.name ?? null, toNumber(project.progress ?? project.progressPct), JSON.stringify(project), collectedAt);
-      const contributed = new Map();
-      for (const [type, rows] of [["item", project.items ?? []], ["cargo", project.cargos ?? []]]) {
-        for (const material of Array.isArray(rows) ? rows : []) {
-          const itemId = material.item_id ?? material.itemId ?? material.id;
-          if (itemId == null) continue;
-          const key = `${type}:${itemId}`;
-          contributed.set(key, (contributed.get(key) ?? 0) + toNumber(material.quantity ?? material.amount));
-        }
-      }
-      const materialGroups = [
-        ["item", project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [], constructionItemLookup],
-        ["cargo", project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [], constructionCargoLookup],
-      ];
-      for (const [type, rows, lookup] of materialGroups) {
-        for (const material of Array.isArray(rows) ? rows : []) {
-          const itemId = material.item_id ?? material.itemId ?? material.id;
-          if (itemId == null) continue;
-          const lookupEntry = lookup.get(String(itemId)) ?? {};
-          const key = `${type}:${itemId}`;
-          const enriched = {
-            ...material,
-            type,
-            itemId,
-            name: lookupEntry.name ?? itemNameFromRow(material),
-            tier: lookupEntry.tier ?? material.tier,
-            rarity: lookupEntry.rarityStr ?? lookupEntry.rarity ?? material.rarityStr ?? material.rarity,
-            iconAssetName: lookupEntry.iconAssetName ?? material.iconAssetName,
-            stored: storedTotals.get(key) ?? 0,
-          };
-          insertMaterial.run(claimIdText, projectKey, key, enriched.name, toNumber(material.requiredQuantity ?? material.required ?? material.quantity ?? material.amount), contributed.get(key) ?? 0, JSON.stringify(enriched), collectedAt);
-        }
-      }
-    }
-
-    db.prepare("DELETE FROM research_current WHERE claim_id = ?").run(claimIdText);
-    const insertResearch = db.prepare("INSERT INTO research_current (claim_id, research_key, name, status, data_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const research of Array.isArray(researchRows) ? researchRows : []) {
-      const key = String(research.entityId ?? research.id ?? research.researchId ?? research.name ?? "").trim();
-      if (!key) continue;
-      insertResearch.run(claimIdText, key, research.name ?? research.researchName ?? null, research.status ?? (research.unlocked ? "unlocked" : null), JSON.stringify(research), collectedAt);
-    }
-
-    db.prepare("DELETE FROM region_claim_current WHERE claim_id = ?").run(claimIdText);
-    const insertRegionClaim = db.prepare(`
-      INSERT INTO region_claim_current (claim_id, region_id, region_claim_id, name, supplies, treasury, owner_name, data_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const regionClaim of regionClaims) {
-      const regionClaimId = String(regionClaim.entityId ?? regionClaim.id ?? regionClaim.claimId ?? "").trim();
-      if (!regionClaimId) continue;
-      insertRegionClaim.run(claimIdText, String(regionClaim.regionId ?? regionClaim.region_id ?? ""), regionClaimId, regionClaim.name ?? regionClaim.claimName ?? null, toNumber(regionClaim.supplies), toNumber(regionClaim.treasury ?? regionClaim.gold), regionClaim.ownerUsername ?? regionClaim.ownerName ?? null, JSON.stringify(regionClaim), collectedAt);
-    }
-
-    db.prepare("UPDATE region_status_current SET active = 0, updated_at = ?").run(collectedAt);
-    const upsertRegionStatus = db.prepare(`
-      INSERT INTO region_status_current (region_id, region_name, signed_in_players, players_in_queue, active, data_json, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(region_id) DO UPDATE SET
-        region_name = excluded.region_name,
-        signed_in_players = excluded.signed_in_players,
-        players_in_queue = excluded.players_in_queue,
-        active = 1,
-        data_json = excluded.data_json,
-        updated_at = excluded.updated_at
-    `);
-    for (const region of regionStatuses) {
-      const regionId = String(region.regionId ?? region.id ?? region.entityId ?? "").trim();
-      if (!regionId) continue;
-      upsertRegionStatus.run(regionId, region.name ?? region.regionName ?? `R${regionId}`, toNumber(region.signedInPlayers ?? region.signed_in_players), toNumber(region.playersInQueue ?? region.players_in_queue), JSON.stringify(region), collectedAt);
-    }
-
-    const regionalBuyOrders = Array.isArray(data.regionalBuyOrders?.orders) ? data.regionalBuyOrders.orders : [];
-    const buyOrderPayloadPartial = Boolean(data.regionalBuyOrders?.partialError || (Array.isArray(data.regionalBuyOrders?.partialErrors) && data.regionalBuyOrders.partialErrors.length));
-    const scannedBuyOrderRegionIds = [...new Set((Array.isArray(data.regionalBuyOrders?.regions) ? data.regionalBuyOrders.regions : [])
-      .map((regionId) => String(regionId ?? "").trim())
-      .filter((regionId) => /^\d+$/.test(regionId)))];
-    if (scannedBuyOrderRegionIds.length) {
-      const placeholders = scannedBuyOrderRegionIds.map(() => "?").join(", ");
-      db.prepare(`UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id NOT IN (${placeholders})`).run(collectedAt, claimIdText, ...scannedBuyOrderRegionIds);
-    }
-    if (!buyOrderPayloadPartial) {
-      if (scannedBuyOrderRegionIds.length) {
-        const placeholders = scannedBuyOrderRegionIds.map(() => "?").join(", ");
-        db.prepare(`UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id IN (${placeholders})`).run(collectedAt, claimIdText, ...scannedBuyOrderRegionIds);
-      } else {
-        db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ?").run(collectedAt, claimIdText);
-      }
-    }
-    const previousBuyOrders = new Map(db.prepare("SELECT order_key, first_seen FROM market_buy_orders_current WHERE claim_id = ?").all(claimIdText).map((row) => [row.order_key, row]));
-    const upsertBuyOrder = db.prepare(`
-      INSERT INTO market_buy_orders_current (
-        claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
-        buyer_entity_id, buyer_name, item_id, item_type, item_name, tier, rarity, icon_asset_name,
-        quantity, unit_price, total_value, stored_coins, listed_at, first_seen, last_seen, active, raw_json, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(claim_id, order_key) DO UPDATE SET
-        region_id = excluded.region_id,
-        region_name = excluded.region_name,
-        market_claim_id = excluded.market_claim_id,
-        market_claim_name = excluded.market_claim_name,
-        buyer_entity_id = excluded.buyer_entity_id,
-        buyer_name = excluded.buyer_name,
-        item_id = excluded.item_id,
-        item_type = excluded.item_type,
-        item_name = excluded.item_name,
-        tier = excluded.tier,
-        rarity = excluded.rarity,
-        icon_asset_name = excluded.icon_asset_name,
-        quantity = excluded.quantity,
-        unit_price = excluded.unit_price,
-        total_value = excluded.total_value,
-        stored_coins = excluded.stored_coins,
-        listed_at = excluded.listed_at,
-        last_seen = excluded.last_seen,
-        active = 1,
-        raw_json = excluded.raw_json,
-        updated_at = excluded.updated_at
-    `);
-    for (const order of regionalBuyOrders) {
-      const key = String(order.orderKey ?? order.entityId ?? order.id ?? "").trim();
-      if (!key) continue;
-      upsertBuyOrder.run(
-        claimIdText,
-        key,
-        String(order.regionId ?? ""),
-        order.regionName ?? null,
-        String(order.marketClaimId ?? ""),
-        order.marketClaimName ?? null,
-        String(order.buyerEntityId ?? ""),
-        order.buyerName ?? null,
-        String(order.itemId ?? ""),
-        String(order.itemType ?? 0),
-        order.itemName ?? null,
-        order.tier ?? null,
-        order.rarity ?? null,
-        order.iconAssetName ?? null,
-        toNumber(order.quantity),
-        toNumber(order.unitPrice),
-        toNumber(order.totalValue),
-        toNumber(order.storedCoins),
-        order.listedAt ?? null,
-        previousBuyOrders.get(key)?.first_seen ?? order.firstSeen ?? collectedAt,
-        collectedAt,
-        JSON.stringify(order.raw ?? order),
-        collectedAt,
-      );
-    }
-
-    persistRegionalSaleAverages(claimIdText, data.regionalBuyOrders?.saleAverages, collectedAt);
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
 function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null) {
   const payloadWriteStartedAt = Date.now();
   for (const domain of domainPayloadKeys) {
@@ -7220,10 +6439,8 @@ function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics 
     statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
     recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
   }
+  persistRegionalBuyOrdersCurrent(claimId, data?.regionalBuyOrders, collectedAt);
   if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
-  const currentRowsStartedAt = Date.now();
-  persistCurrentRows(claimId, data, collectedAt);
-  if (metrics) metrics.currentRowsWriteDurationMs = Math.max(Date.now() - currentRowsStartedAt, 0);
 }
 
 function collectorDue(claimId, collectorKey, payloadDomain, options = {}) {
@@ -7358,8 +6575,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
 
 function readCurrentClaimState(claimId) {
   const rowsByDomain = readDomainPayloadMap(claimId);
-  const tableBacked = tableBackedClaimData(claimId, rowsByDomain);
-  if (tableBacked) return tableBacked;
   if (!Object.keys(rowsByDomain).length) return null;
   return domainRowsToAppData(claimId, rowsByDomain);
 }
@@ -7389,18 +6604,6 @@ async function refreshCurrentClaimState(claimId, options = {}) {
     if (cached) return cached;
     throw error;
   }
-}
-
-async function currentClaimAppData(claimId) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const cached = readCurrentClaimState(id);
-  if (cached) return cached;
-  return refreshCurrentClaimState(id, { allowStaleOnError: true });
 }
 
 function collectorStatusPayload() {
@@ -8938,43 +8141,6 @@ const server = createServer(async (req, res) => {
       return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
-    if (req.method === "GET" && url.pathname.startsWith("/api/local/pages/")) {
-      try {
-        const startedAt = Date.now();
-        const page = url.pathname.slice("/api/local/pages/".length).replace(/\/+$/, "") || "dashboard";
-        if (!validPage(page)) return send(res, 404, { error: "Unknown page" });
-        const payload = await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, page);
-        const readDurationMs = Math.max(Date.now() - startedAt, 0);
-        const payloadWithMetrics = {
-          ...payload,
-          localReadMetrics: {
-            page,
-            durationMs: readDurationMs,
-            payloadBytes: Buffer.byteLength(JSON.stringify(payload)),
-          },
-        };
-        return send(res, 200, payloadWithMetrics);
-      } catch (error) {
-        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load local page data", collectorStatus: collectorStatusPayload() });
-      }
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/app-data") {
-      try {
-        const startedAt = Date.now();
-        const page = url.searchParams.get("page") ?? "dashboard";
-        const payload = await currentClaimAppData(url.searchParams.get("claimId") ?? getSettings().claimId, page);
-        return send(res, 200, {
-          ...payload,
-          localReadMetrics: {
-            page,
-            durationMs: Math.max(Date.now() - startedAt, 0),
-            payloadBytes: Buffer.byteLength(JSON.stringify(payload)),
-          },
-        });
-      } catch (error) {
-        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load local app data", collectorStatus: collectorStatusPayload() });
-      }
-    }
     if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
       try {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";

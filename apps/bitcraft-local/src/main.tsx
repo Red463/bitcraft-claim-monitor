@@ -2639,12 +2639,12 @@ function AdminPanel({
               <label className="field unit-field">
                 <span>Display refresh interval</span>
                 <div className="unit-input"><input type="number" min={15} max={300} value={draft.refreshSeconds} onChange={(event) => updateDraft("refreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
-                <small>How often browser tabs ask the local server for the latest stored data.</small>
+                <small>How often browser tabs refresh live page data through the local proxy.</small>
               </label>
               <label className="field unit-field">
                 <span>Server collection interval</span>
                 <div className="unit-input"><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
-                <small>Fallback interval for server-owned BitJita collection.</small>
+                <small>Fallback interval for background history and notification collectors.</small>
               </label>
               <label className="field unit-field">
                 <span>Snapshot retention</span>

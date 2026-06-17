@@ -515,7 +515,7 @@ Important backend constraints:
 * Keep admin mutations behind authenticated admin routes and CSRF checks.
 * Public BitCraft/BitJita game data can be shown to ordinary users unless it is app configuration, secrets, or admin-only testing data.
 * Production polling should continue without any browser open.
-* Normal main-app page refreshes should read `/api/local/pages/:page` from SQLite-backed domain current tables. Do not reintroduce automatic browser-tab BitJita polling for page rendering; keep BitJita proxy calls for explicit user-triggered tools and diagnostics.
+* Normal main-app page refreshes should use live BitJita data through the local `/api/bitjita/*` proxy. SQLite is retained for history, notifications, cached tools, analytics and diagnostics, not as the source of truth for normal page rendering.
 * Settlement-specific history should be filtered to the configured claim/settlement where relevant.
 
 When changing backend code, prefer small focused tests over broad brittle snapshots.

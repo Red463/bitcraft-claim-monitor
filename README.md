@@ -279,12 +279,7 @@ It records:
 | Table | Purpose |
 | --- | --- |
 | `snapshots` | Settlement state captured over time |
-| `domain_payload_current` | Latest successful per-domain BitJita payloads used by page-ready local APIs |
-| `claim_current`, `member_current`, `player_current`, `profession_current` | Current settlement, roster, player session and profession rows |
-| `production_current`, `construction_project_current`, `construction_material_current` | Current craft and construction state |
-| `inventory_container_current`, `inventory_item_current` | Current storage containers and item quantities |
-| `research_current`, `region_claim_current`, `region_status_current` | Current research and regional settlement/status data |
-| `domain_change_events` | Deduplicated meaningful changes detected while refreshing domain tables |
+| `domain_payload_current` | Latest successful background collector payloads used for history, diagnostics and stale-status context |
 | `market_listings` | Currently and previously observed listings |
 | `market_events` | Listing lifecycle and reconciled trade events |
 | `market_trades` | Imported, deduplicated completed sell trades for settlement members |
@@ -309,7 +304,7 @@ Production default configured by the deployment service:
 /var/lib/bitcraft-claim-monitor/bitcraft-local.sqlite
 ```
 
-The server owns automatic BitJita refreshes. It refreshes enabled domain collectors on their configured schedules, stores the latest successful domain data in SQLite, and keeps serving stale-but-labelled local data when BitJita has a temporary issue. Browser views refresh cheaply by reading page-ready local endpoints such as `/api/local/pages/production`; normal page rendering should not create per-browser BitJita fan-out.
+Normal browser pages refresh live BitJita data through the local `/api/bitjita/*` proxy. The server still owns background collection for history, notifications, analytics, recipes, regional buy-order cache and diagnostics, but those collectors are not the source of truth for normal page rendering.
 
 Uploaded branding is stored under `branding/` and administrator-created SQLite backups under `backups/` inside the same data directory.
 
