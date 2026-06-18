@@ -8,13 +8,6 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
-## [1.0.0-beta.56] - 2026-06-18
-
-### Changed
-
-- Redesigned the public wiki into a player-facing game wiki with guide cards, searchable item/cargo/recipe/profession entries, output chance pages, and admin-only source metadata.
-- Improved wiki generation so it builds friendly pages from the newest available local game data tables instead of exposing raw cached recipe JSON.
-
 ## [1.0.0-beta.55] - 2026-06-18
 
 ### Added

@@ -789,9 +789,7 @@ const statements = {
   `),
   getWikiGeneratedEntry: db.prepare("SELECT * FROM wiki_generated_entries WHERE entry_key = ? OR slug = ?"),
   wikiGeneratedCount: db.prepare("SELECT COUNT(*) AS count FROM wiki_generated_entries"),
-  wikiGeneratedTypeCount: db.prepare("SELECT COUNT(*) AS count FROM wiki_generated_entries WHERE entry_type = ?"),
   wikiGeneratedCategories: db.prepare("SELECT category, COUNT(*) AS count FROM wiki_generated_entries GROUP BY category ORDER BY category COLLATE NOCASE"),
-  deleteWikiGeneratedEntries: db.prepare("DELETE FROM wiki_generated_entries"),
   insertWikiGenerationRun: db.prepare("INSERT INTO wiki_generation_runs (source, entries_count, started_at, finished_at, status, message) VALUES (?, ?, ?, ?, ?, ?)"),
   lastWikiGenerationRun: db.prepare("SELECT * FROM wiki_generation_runs ORDER BY id DESC LIMIT 1"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
@@ -1127,148 +1125,19 @@ function wikiSummary(markdown) {
 
 function seedWikiPages() {
   const now = new Date().toISOString();
-  const pages = [
-    {
-      slug: "getting-started",
-      title: "Using the Wiki",
-      category: "Start Here",
-      body: [
-        "# Using the Wiki",
-        "",
-        "This wiki is a player-facing reference for BitCraft mechanics, recipes, materials, output chances, professions, settlement systems, and trade information.",
-        "",
-        "Use the search box to look up an item, cargo, recipe, profession, or mechanic. Generated game-data pages are built from locally captured public game data and app caches, while guide pages are curated notes that can be edited by admins.",
-        "",
-        "## Good Starting Points",
-        "- Search for a material such as Fine Timber to see where it comes from and what it is used for.",
-        "- Open Recipe pages to compare ingredients, outputs, station requirements, XP, and passive/active crafting.",
-        "- Open Output Chance pages to inspect variable outputs such as 0-1 bonus materials.",
-        "- Read Settlement Systems pages for supplies, treasury, and research explanations.",
-      ].join("\n"),
-    },
-    {
-      slug: "treasury-and-hex",
-      title: "Treasury and Hex Income",
-      category: "Settlement Systems",
-      body: [
-        "# Treasury and Hex Income",
-        "",
-        "Settlement treasury is the claim's stored Hex balance. The public APIs currently expose treasury totals and history observed by this app, but not every internal rule behind Hex generation is confirmed.",
-        "",
-        "## What We Can Show Reliably",
-        "- Current treasury value for the monitored settlement.",
-        "- Regional treasury comparisons where settlement data is available.",
-        "- Local recorded treasury changes over time.",
-        "",
-        "## Current Understanding",
-        "- Treasury appears to increase from settlement activity rather than a simple daily rent bill.",
-        "- Some income rules may be driven by game-server mechanics that are not fully documented in public API responses.",
-        "- Treat exact income attribution as unconfirmed until developer-program or official data confirms the formula.",
-        "",
-        "## Practical Use",
-        "- Use treasury trends as an operations signal, not as a perfect accounting ledger.",
-        "- Use the Activity page for locally recorded changes when diagnosing sudden movement.",
-      ].join("\n"),
-    },
-    {
-      slug: "supplies-and-claim-upkeep",
-      title: "Supplies and Claim Upkeep",
-      category: "Settlement Systems",
-      body: [
-        "# Supplies and Claim Upkeep",
-        "",
-        "Supplies represent the settlement's stored upkeep stock. The app calculates runway from the current stock and the claim's reported daily upkeep.",
-        "",
-        "## Important Values",
-        "- Current stock: supplies currently stored in the claim.",
-        "- Storage cap: maximum supplies the settlement can hold.",
-        "- Supplies per day: current reported daily upkeep.",
-        "- Runway: estimated time until supplies reach zero if nothing changes.",
-        "",
-        "## Limitations",
-        "The public BitJita data used by this app does not currently expose a reliable player-by-player supplies contribution log. The app can show supply totals and changes, but not who added each supply item unless a future API exposes that detail.",
-      ].join("\n"),
-    },
-    {
-      slug: "crafting-and-output-chances",
-      title: "Crafting, Recipes, and Output Chances",
-      category: "Crafting",
-      body: [
-        "# Crafting, Recipes, and Output Chances",
-        "",
-        "Recipes can consume items or cargo and produce guaranteed or variable outputs. Some recipes also use output tables where the game rolls between possible results.",
-        "",
-        "## Guaranteed Outputs",
-        "Most recipes list fixed outputs. These are shown in Recipe pages under Produces.",
-        "",
-        "## Possible Extra Outputs",
-        "Some recipes list variable outputs such as 0-1 extra materials. These are shown as Output Chance pages when the game data exposes the table.",
-        "",
-        "## Recipe Selection",
-        "Some items have multiple valid recipes. For example, an item may be crafted directly, unpacked from a package, or produced through a longer raw-material chain. The Craft Calculator avoids choosing unpack routes by default where a normal processing route is available.",
-      ].join("\n"),
-    },
-    {
-      slug: "professions-and-stations",
-      title: "Professions and Stations",
-      category: "Crafting",
-      body: [
-        "# Professions and Stations",
-        "",
-        "BitCraft crafting is organised around professions such as Carpentry, Smithing, Tailoring, Forestry, Mining, Cooking, Fishing, Farming, Hunting, and others.",
-        "",
-        "Recipe pages list the profession level requirement when the game data exposes it. They also list station/building requirements where available.",
-        "",
-        "## Reading a Recipe Requirement",
-        "- Profession level shows the minimum level required to perform the craft.",
-        "- Station shows the building or station type required.",
-        "- Tier shows the required station tier when known.",
-      ].join("\n"),
-    },
-    {
-      slug: "markets-and-trade",
-      title: "Markets and Trade",
-      category: "Economy",
-      body: [
-        "# Markets and Trade",
-        "",
-        "Market data in the app comes from BitJita and local history recorded by the monitor.",
-        "",
-        "## What the App Tracks",
-        "- Current market listings for the monitored settlement.",
-        "- Confirmed sales where BitJita exposes sale history.",
-        "- Buy orders cached by the regional buy-order collector.",
-        "- Price Finder averages for recent sales.",
-        "",
-        "## Important Caveat",
-        "Market data can be delayed or incomplete when BitJita has API issues. Use the app's warning banners and timestamps when judging whether prices are current.",
-      ].join("\n"),
-    },
-    {
-      slug: "research-and-unlocks",
-      title: "Research and Unlocks",
-      category: "Settlement Systems",
-      body: [
-        "# Research and Unlocks",
-        "",
-        "Research unlocks settlement upgrades, recipes, buildings, and operational capabilities. The app shows completed and available research when BitJita returns that data for the monitored settlement.",
-        "",
-        "If a research page appears empty, check the BitJita refresh warning first. Research data has historically been one of the API areas that can briefly return incomplete data during upstream issues.",
-      ].join("\n"),
-    },
-    {
-      slug: "unconfirmed-mechanics",
-      title: "Unconfirmed Mechanics",
-      category: "Unconfirmed Mechanics",
-      body: existsSync(path.join(repoRoot, "docs", "bitcraft-mechanics-unconfirmed.md"))
-        ? readFileSync(path.join(repoRoot, "docs", "bitcraft-mechanics-unconfirmed.md"), "utf8")
-        : "# Unconfirmed Mechanics\n\nThis page is reserved for mechanics that are observed but not yet confirmed by official data.",
-    },
+  const docs = [
+    ["mechanics-guide", "BitCraft Mechanics Guide", "Mechanics", "docs/bitcraft-mechanics-guide.md"],
+    ["hidden-mechanics", "Hidden Mechanics Findings", "Mechanics", "docs/bitcraft-hidden-mechanics-report.md"],
+    ["live-db-inspection", "Live DB Inspection Notes", "Data Sources", "docs/bitcraft-live-db-inspection.md"],
+    ["unconfirmed-mechanics", "Unconfirmed Mechanics", "Research Notes", "docs/bitcraft-mechanics-unconfirmed.md"],
+    ["mechanics-sources", "Mechanics Source Notes", "Data Sources", "docs/bitcraft-mechanics-guide-sources.md"],
   ];
-  for (const page of pages) {
-    const existing = statements.getWikiPageAdmin.get(page.slug);
-    if (existing?.updated_by === "admin") continue;
-    statements.upsertWikiPage.run(page.slug, page.title, page.category, wikiSummary(page.body), page.body, "curated", 1, 0, now, now, "system");
+  for (const [slug, title, category, relativePath] of docs) {
+    if (statements.getWikiPageAdmin.get(slug)) continue;
+    const filePath = path.join(repoRoot, relativePath);
+    if (!existsSync(filePath)) continue;
+    const body = readFileSync(filePath, "utf8");
+    statements.upsertWikiPage.run(slug, title, category, wikiSummary(body), body, relativePath, 1, 0, now, now, "system");
   }
 }
 
@@ -1306,32 +1175,6 @@ function readDumpTable(tablesDir, tableName) {
   }
 }
 
-function readLatestDumpTable(tableName) {
-  const dumpsRoot = path.join(repoRoot, ".dev-data", "bitcraft-live-db", "dumps");
-  if (!existsSync(dumpsRoot)) return [];
-  const dumpDirs = readdirSync(dumpsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(dumpsRoot, entry.name))
-    .sort()
-    .reverse();
-  for (const dumpDir of dumpDirs) {
-    const regionalDirs = readdirSync(dumpDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith("bitcraft-live-"))
-      .map((entry) => path.join(dumpDir, entry.name, "tables"));
-    for (const tablesDir of regionalDirs) {
-      const filePath = path.join(tablesDir, `${tableName}.json`);
-      if (!existsSync(filePath)) continue;
-      try {
-        const parsed = JSON.parse(readFileSync(filePath, "utf8"));
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-  }
-  return [];
-}
-
 function indexById(rows) {
   const map = new Map();
   for (const row of rows) {
@@ -1344,156 +1187,57 @@ function indexById(rows) {
 function wikiNamedThing(id, itemById, cargoById, listById) {
   const key = String(id ?? "");
   const item = itemById.get(key);
-  if (item) return { id: key, name: wikiCleanName(item.name ?? `Item ${key}`), kind: "Item", tier: item.tier, tag: item.tag, rarity: item.rarity, description: item.description, icon: item.icon_asset_name };
+  if (item) return { id: key, name: item.name ?? `Item ${key}`, kind: "Item", tier: item.tier, tag: item.tag };
   const cargo = cargoById.get(key);
-  if (cargo) return { id: key, name: wikiCleanName(cargo.name ?? `Cargo ${key}`), kind: "Cargo", tier: cargo.tier, tag: cargo.tag, rarity: cargo.rarity, description: cargo.description, icon: cargo.icon_asset_name };
+  if (cargo) return { id: key, name: cargo.name ?? `Cargo ${key}`, kind: "Cargo", tier: cargo.tier, tag: cargo.tag };
   const list = listById.get(key);
-  if (list) return { id: key, name: wikiCleanName(list.name ?? `Output List ${key}`), kind: "Output table", tier: null, tag: "Variable output" };
+  if (list) return { id: key, name: list.name ?? `Output List ${key}`, kind: "Output table", tier: null, tag: "Variable output" };
   return { id: key, name: `Unknown ${key}`, kind: "Unknown", tier: null, tag: null };
 }
 
-function wikiCleanName(value) {
-  return String(value ?? "")
-    .replace(/\{0\}/g, "item")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function wikiPercent(value) {
-  const number = Number(value ?? 0);
-  if (!Number.isFinite(number)) return "Unknown";
-  const percent = number <= 1 ? number * 100 : number;
-  return `${Math.round(percent * 100) / 100}%`;
-}
-
-function wikiRarityName(value) {
-  const code = Array.isArray(value) ? Number(value[0]) : Number(value);
-  return ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"][code] ?? "Unknown";
-}
-
-function wikiTierLabel(value) {
-  const tier = toNumber(value);
-  return tier > 0 ? `T${tier}` : "No tier";
-}
-
-function wikiStackParts(stack, itemById, cargoById, listById) {
+function wikiStackLabel(stack, itemById, cargoById, listById) {
   const id = Array.isArray(stack) ? stack[0] : stack?.id;
   const quantity = Array.isArray(stack) ? stack[1] : stack?.quantity;
   const thing = wikiNamedThing(id, itemById, cargoById, listById);
-  return { ...thing, quantity: toNumber(quantity || 1) };
+  return `${Number(quantity ?? 1).toLocaleString()} x ${thing.name} (${thing.kind} ${thing.id})`;
 }
 
-function wikiStackLabel(stack, itemById, cargoById, listById) {
-  const thing = wikiStackParts(stack, itemById, cargoById, listById);
-  return `${thing.quantity.toLocaleString()} x ${thing.name}`;
-}
-
-function wikiSkillName(skillId, skillById) {
-  const skill = skillById.get(String(skillId));
-  return wikiCleanName(skill?.name ?? `Profession ${skillId}`);
-}
-
-function wikiBuildingRequirement(recipe, buildingById) {
-  const requirement = recipe?.building_requirement?.[1] ?? {};
-  const buildingType = requirement.building_type;
-  const building = buildingById.get(String(buildingType));
-  return {
-    name: wikiCleanName(building?.name ?? (buildingType ? `Building ${buildingType}` : "Any station")),
-    tier: toNumber(requirement.tier),
-  };
-}
-
-function recipeDisplayTitle(recipe, itemById, cargoById, listById) {
-  const output = (Array.isArray(recipe.crafted_item_stacks) ? recipe.crafted_item_stacks : [])
-    .map((stack) => wikiStackParts(stack, itemById, cargoById, listById))
-    .find((part) => part.kind !== "Output table");
-  const input = (Array.isArray(recipe.consumed_item_stacks) ? recipe.consumed_item_stacks : [])
-    .map((stack) => wikiStackParts(stack, itemById, cargoById, listById))
-    .find(Boolean);
-  return wikiCleanName(String(recipe.name ?? `Recipe ${recipe.id}`).replace(/\{0\}/g, output?.name ?? input?.name ?? "item"));
-}
-
-function recipeDumpMarkdown(recipe, itemById, cargoById, listById, buildingById, skillById) {
+function recipeDumpMarkdown(recipe, itemById, cargoById, listById) {
   const inputs = Array.isArray(recipe.consumed_item_stacks) ? recipe.consumed_item_stacks : [];
   const outputs = Array.isArray(recipe.crafted_item_stacks) ? recipe.crafted_item_stacks : [];
-  const levelRequirements = Array.isArray(recipe.level_requirements) ? recipe.level_requirements : [];
-  const xpRows = Array.isArray(recipe.experience_per_progress) ? recipe.experience_per_progress : [];
-  const station = wikiBuildingRequirement(recipe, buildingById);
-  const title = recipeDisplayTitle(recipe, itemById, cargoById, listById);
-  const totalXp = xpRows.reduce((sum, row) => sum + toNumber(row?.[1]) * toNumber(recipe.actions_required), 0);
   const lines = [
-    `# ${title}`,
+    `# ${recipe.name ?? `Recipe ${recipe.id}`}`,
     "",
-    "## Quick Facts",
-    `- Station: ${station.name}${station.tier > 0 ? ` (${wikiTierLabel(station.tier)})` : ""}`,
-    `- Craft type: ${recipe.is_passive ? "Passive craft" : "Active craft"}`,
-    `- Actions required: ${toNumber(recipe.actions_required).toLocaleString()}`,
-    `- Time requirement: ${toNumber(recipe.time_requirement).toLocaleString()}s`,
-    totalXp ? `- Total XP: ${Math.round(totalXp).toLocaleString()}` : "- Total XP: Not listed",
-    ...(levelRequirements.length ? levelRequirements.map((row) => `- Requires ${wikiSkillName(row?.[0], skillById)} Lv ${toNumber(row?.[1]).toLocaleString()}`) : []),
+    `Recipe id: \`${recipe.id}\``,
+    `Actions required: ${toNumber(recipe.actions_required).toLocaleString()}`,
+    `Time requirement: ${toNumber(recipe.time_requirement).toLocaleString()}s`,
     "",
-    "## Materials Required",
-    ...(inputs.length ? inputs.map((stack) => `- ${wikiStackLabel(stack, itemById, cargoById, listById)}`) : ["- No materials listed."]),
+    "## Inputs",
+    ...(inputs.length ? inputs.map((stack) => `- ${wikiStackLabel(stack, itemById, cargoById, listById)}`) : ["- No consumed item stack listed."]),
     "",
-    "## Produces",
+    "## Outputs",
     ...(outputs.length ? outputs.map((stack) => `- ${wikiStackLabel(stack, itemById, cargoById, listById)}`) : ["- No crafted item stack listed."]),
   ];
   const variableOutputs = outputs
     .map((stack) => listById.get(String(Array.isArray(stack) ? stack[0] : stack?.id)))
     .filter(Boolean);
   for (const outputList of variableOutputs) {
-    lines.push("", `## Possible Extra Outputs: ${wikiCleanName(outputList.name ?? outputList.id)}`);
+    lines.push("", `## Variable Output: ${outputList.name ?? outputList.id}`);
     const possibilities = Array.isArray(outputList.possibilities) ? outputList.possibilities : [];
     for (const [chance, stacks] of possibilities) {
-      lines.push(`- ${wikiPercent(chance)} chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, listById)).join(", ") || "nothing listed"}`);
+      lines.push(`- ${Math.round(Number(chance ?? 0) * 10000) / 100}% chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, listById)).join(", ") || "nothing listed"}`);
     }
   }
-  lines.push("", "## Notes", "Recipe values are generated from locally captured public game data. If the in-game UI differs, treat the game client as the final source of truth.");
+  lines.push("", "## Source", "Generated from local SpacetimeDB table dumps when available. These values reflect observed public table data and should be treated as game-data references, not app-authored balance rules.");
   return lines.join("\n");
 }
 
 function listDumpMarkdown(list, itemById, cargoById) {
-  const lines = [`# ${wikiCleanName(list.name ?? `Output Table ${list.id}`)}`, "", "Output tables describe variable recipe results. A recipe may roll one of these rows when it completes.", "", "## Possible Results"];
+  const lines = [`# ${list.name ?? `Output Table ${list.id}`}`, "", `Output table id: \`${list.id}\``, "", "## Possibilities"];
   const possibilities = Array.isArray(list.possibilities) ? list.possibilities : [];
   for (const [chance, stacks] of possibilities) {
-    lines.push(`- ${wikiPercent(chance)} chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, new Map())).join(", ") || "nothing listed"}`);
+    lines.push(`- ${Math.round(Number(chance ?? 0) * 10000) / 100}% chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, new Map())).join(", ") || "nothing listed"}`);
   }
-  return lines.join("\n");
-}
-
-function addMapEntry(map, key, value) {
-  if (!key) return;
-  if (!map.has(key)) map.set(key, []);
-  map.get(key).push(value);
-}
-
-function itemDumpMarkdown(thing, producedBy, usedIn, outputTables) {
-  const title = wikiCleanName(thing.name ?? `${thing.kind} ${thing.id}`);
-  const lines = [
-    `# ${title}`,
-    "",
-    "## Quick Facts",
-    `- Type: ${thing.kind}`,
-    `- Tier: ${wikiTierLabel(thing.tier)}`,
-    `- Rarity: ${wikiRarityName(thing.rarity)}`,
-    thing.tag ? `- Category: ${thing.tag}` : "- Category: Not listed",
-  ];
-  if (thing.description) lines.push("", thing.description);
-  lines.push("", "## Produced By");
-  lines.push(...(producedBy.length ? producedBy.slice(0, 30).map((recipe) => `- ${recipe.title}`) : ["- No producing recipe was found in the current data."]));
-  lines.push("", "## Used In");
-  lines.push(...(usedIn.length ? usedIn.slice(0, 30).map((recipe) => `- ${recipe.title}`) : ["- No consuming recipe was found in the current data."]));
-  if (outputTables.length) {
-    lines.push("", "## Appears In Output Chance Tables");
-    lines.push(...outputTables.slice(0, 20).map((entry) => `- ${entry.title} (${entry.chance})`));
-  }
-  return lines.join("\n");
-}
-
-function professionDumpMarkdown(skill, recipes) {
-  const title = wikiCleanName(skill.name ?? `Profession ${skill.id}`);
-  const lines = [`# ${title}`, "", skill.description || "Profession data is generated from public skill and recipe tables.", "", "## Related Recipes"];
-  lines.push(...(recipes.length ? recipes.slice(0, 60).map((recipe) => `- ${recipe.title}`) : ["- No related recipes found in the current data."]));
   return lines.join("\n");
 }
 
@@ -1502,115 +1246,68 @@ function refreshWikiGeneratedEntries(source = "manual") {
   let entries = 0;
   try {
     const now = new Date().toISOString();
-    statements.deleteWikiGeneratedEntries.run();
-    const itemRows = readLatestDumpTable("item_desc");
-    const cargoRows = readLatestDumpTable("cargo_desc");
-    const listRows = readLatestDumpTable("item_list_desc");
-    const recipeRows = readLatestDumpTable("crafting_recipe_desc");
-    const buildingRows = readLatestDumpTable("building_desc");
-    const skillRows = readLatestDumpTable("skill_desc");
-    const itemById = indexById(itemRows);
-    const cargoById = indexById(cargoRows);
-    const listById = indexById(listRows);
-    const buildingById = indexById(buildingRows);
-    const skillById = indexById(skillRows);
-    const producedBy = new Map();
-    const usedIn = new Map();
-    const outputTables = new Map();
-    const recipesBySkill = new Map();
-    const recipeSummaries = [];
-
-    for (const recipe of recipeRows) {
-      const title = recipeDisplayTitle(recipe, itemById, cargoById, listById);
-      const summary = { id: String(recipe.id), title };
-      recipeSummaries.push({ recipe, title });
-      for (const stack of Array.isArray(recipe.crafted_item_stacks) ? recipe.crafted_item_stacks : []) addMapEntry(producedBy, String(stack?.[0] ?? ""), summary);
-      for (const stack of Array.isArray(recipe.consumed_item_stacks) ? recipe.consumed_item_stacks : []) addMapEntry(usedIn, String(stack?.[0] ?? ""), summary);
-      for (const row of Array.isArray(recipe.level_requirements) ? recipe.level_requirements : []) addMapEntry(recipesBySkill, String(row?.[0] ?? ""), summary);
-      for (const row of Array.isArray(recipe.experience_per_progress) ? recipe.experience_per_progress : []) addMapEntry(recipesBySkill, String(row?.[0] ?? ""), summary);
-    }
-
-    for (const list of listRows) {
-      const title = wikiCleanName(list.name ?? `Output Table ${list.id}`);
-      for (const [chance, stacks] of Array.isArray(list.possibilities) ? list.possibilities : []) {
-        for (const stack of Array.isArray(stacks) ? stacks : []) addMapEntry(outputTables, String(stack?.[0] ?? ""), { title, chance: wikiPercent(chance) });
-      }
-    }
-
-    for (const row of [...itemRows.map((item) => ({ ...item, kind: "Item" })), ...cargoRows.map((cargo) => ({ ...cargo, kind: "Cargo" }))]) {
-      const title = wikiCleanName(row.name ?? `${row.kind} ${row.id}`);
-      const body = itemDumpMarkdown(row, producedBy.get(String(row.id)) ?? [], usedIn.get(String(row.id)) ?? [], outputTables.get(String(row.id)) ?? []);
+    const recipeRows = statements.listRecipeCatalogEntries.all(2000);
+    for (const row of recipeRows) {
+      const detail = safeJson(row.detail_json, {});
+      const title = row.name ? `${row.name} recipe detail` : `Recipe detail ${row.catalog_key}`;
+      const body = [`# ${title}`, "", `Catalog key: \`${row.catalog_key}\``, `Source: ${row.source}`, "", "## Cached BitJita Detail", "```json", JSON.stringify(detail, null, 2), "```"].join("\n");
       statements.upsertWikiGeneratedEntry.run(
-        `${row.kind.toLowerCase()}:${row.id}`,
-        `${row.kind.toLowerCase()}s/${wikiSlug(title)}-${row.id}`,
-        title,
-        row.kind === "Cargo" ? "Cargo" : "Items",
-        row.kind.toLowerCase(),
-        wikiSummary(body),
-        body,
-        `${title} ${row.tag ?? ""} ${row.description ?? ""} ${body}`.toLowerCase().slice(0, 20000),
-        row.kind === "Cargo" ? "cargo_desc" : "item_desc",
-        String(row.id),
-        now,
-      );
-      entries += 1;
-    }
-
-    for (const { recipe, title } of recipeSummaries) {
-      const body = recipeDumpMarkdown(recipe, itemById, cargoById, listById, buildingById, skillById);
-      statements.upsertWikiGeneratedEntry.run(
-        `crafting-recipe:${recipe.id}`,
-        `recipes/${wikiSlug(title)}-${recipe.id}`,
+        `recipe-catalog:${row.catalog_key}`,
+        `recipes/${wikiSlug(row.name ?? row.catalog_key)}-${wikiSlug(row.target_id)}`,
         title,
         "Recipes",
-        "crafting-recipe",
+        "recipe-catalog",
         wikiSummary(body),
         body,
-        `${title} ${body}`.toLowerCase().slice(0, 20000),
-        "crafting_recipe_desc",
-        String(recipe.id),
+        `${title} ${row.kind} ${row.target_id} ${row.tag ?? ""}`.toLowerCase(),
+        "recipe_catalog_entries",
+        row.catalog_key,
         now,
       );
       entries += 1;
     }
 
-    for (const list of listRows) {
-      const title = wikiCleanName(list.name ?? `Output Table ${list.id}`);
-      const body = listDumpMarkdown(list, itemById, cargoById);
-      statements.upsertWikiGeneratedEntry.run(
-        `item-list:${list.id}`,
-        `outputs/${wikiSlug(title)}-${list.id}`,
-        title,
-        "Output Chances",
-        "item-list",
-        wikiSummary(body),
-        body,
-        `${title} ${body}`.toLowerCase().slice(0, 20000),
-        "item_list_desc",
-        String(list.id),
-        now,
-      );
-      entries += 1;
-    }
-
-    for (const skill of skillRows) {
-      const title = wikiCleanName(skill.name ?? `Profession ${skill.id}`);
-      if (!title || title.toLowerCase() === "any") continue;
-      const body = professionDumpMarkdown(skill, recipesBySkill.get(String(skill.id)) ?? []);
-      statements.upsertWikiGeneratedEntry.run(
-        `profession:${skill.id}`,
-        `professions/${wikiSlug(title)}-${skill.id}`,
-        title,
-        "Professions",
-        "profession",
-        wikiSummary(body),
-        body,
-        `${title} ${body}`.toLowerCase().slice(0, 20000),
-        "skill_desc",
-        String(skill.id),
-        now,
-      );
-      entries += 1;
+    const tablesDir = latestDumpTablesDir();
+    if (tablesDir) {
+      const itemById = indexById(readDumpTable(tablesDir, "item_desc"));
+      const cargoById = indexById(readDumpTable(tablesDir, "cargo_desc"));
+      const listById = indexById(readDumpTable(tablesDir, "item_list_desc"));
+      for (const recipe of readDumpTable(tablesDir, "crafting_recipe_desc")) {
+        const title = String(recipe.name ?? `Recipe ${recipe.id}`).replace(/\{0\}/g, "item");
+        const body = recipeDumpMarkdown(recipe, itemById, cargoById, listById);
+        statements.upsertWikiGeneratedEntry.run(
+          `crafting-recipe:${recipe.id}`,
+          `recipes/${wikiSlug(title)}-${recipe.id}`,
+          title,
+          "Recipes",
+          "crafting-recipe",
+          wikiSummary(body),
+          body,
+          `${title} ${body}`.toLowerCase().slice(0, 20000),
+          "crafting_recipe_desc",
+          String(recipe.id),
+          now,
+        );
+        entries += 1;
+      }
+      for (const list of readDumpTable(tablesDir, "item_list_desc")) {
+        const title = list.name ?? `Output Table ${list.id}`;
+        const body = listDumpMarkdown(list, itemById, cargoById);
+        statements.upsertWikiGeneratedEntry.run(
+          `item-list:${list.id}`,
+          `outputs/${wikiSlug(title)}-${list.id}`,
+          title,
+          "Output Chances",
+          "item-list",
+          wikiSummary(body),
+          body,
+          `${title} ${body}`.toLowerCase().slice(0, 20000),
+          "item_list_desc",
+          String(list.id),
+          now,
+        );
+        entries += 1;
+      }
     }
 
     const finishedAt = new Date().toISOString();
@@ -1626,7 +1323,7 @@ function refreshWikiGeneratedEntries(source = "manual") {
 
 function bootstrapWiki() {
   seedWikiPages();
-  if (!isTestRuntime && (toNumber(statements.wikiGeneratedCount.get()?.count) === 0 || toNumber(statements.wikiGeneratedTypeCount.get("item")?.count) === 0)) refreshWikiGeneratedEntries("startup");
+  if (toNumber(statements.wikiGeneratedCount.get()?.count) === 0) refreshWikiGeneratedEntries("startup");
 }
 
 bootstrapWiki();
