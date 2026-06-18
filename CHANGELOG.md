@@ -8,9 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.54] - 2026-06-18
+
 ### Changed
 
 - Updated project documentation to reflect current BitJita API reliability notes, Discord-backed admin login, deployment guidance, and the live BitJita proxy data model.
+- Refactored the frontend app shell so the entrypoint, navigation, theme, settings defaults, analytics, and helper logic are split into focused modules for easier maintenance.
 
 ### Fixed
 
