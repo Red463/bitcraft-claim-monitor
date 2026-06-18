@@ -6637,6 +6637,50 @@ body .market-page tbody tr:hover td {
   gap: 12px;
 }
 
+.wiki-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.wiki-category-card {
+  display: grid;
+  gap: 8px;
+  min-height: 132px;
+  width: 100%;
+  padding: 16px;
+  color: inherit;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--gold) 16%, transparent), transparent 42%),
+    linear-gradient(180deg, var(--panel), var(--panel-2));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.wiki-category-card span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wiki-category-card strong {
+  color: var(--text);
+  font-size: 22px;
+}
+
+.wiki-category-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .wiki-page-card,
 .wiki-generated-list button {
   display: grid;
@@ -6648,6 +6692,7 @@ body .market-page tbody tr:hover td {
 }
 
 .wiki-page-card:hover,
+.wiki-category-card:hover,
 .wiki-generated-list button:hover,
 .wiki-pill-list button:hover,
 .wiki-brand:hover {

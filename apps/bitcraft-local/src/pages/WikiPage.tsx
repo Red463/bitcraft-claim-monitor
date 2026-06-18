@@ -1,5 +1,5 @@
 import React from "react";
-import { BookOpen, Database, Edit3, FileText, RefreshCw, Save, Search, ShieldCheck, Sparkles, X } from "lucide-react";
+import { BookOpen, Boxes, Coins, Database, Edit3, FileText, FlaskConical, Hammer, Package, RefreshCw, Save, Search, ShieldCheck, Sparkles, Trophy, X } from "lucide-react";
 
 type WikiPageSummary = {
   slug: string;
@@ -56,6 +56,26 @@ function formatWikiDate(value?: string | null) {
   if (Number.isNaN(date.getTime())) return "Unknown";
   return date.toLocaleString();
 }
+
+const WIKI_CATEGORY_CARDS = [
+  { category: "Start Here", title: "Start Here", description: "How to use the wiki and where to find the most useful player references.", icon: BookOpen },
+  { category: "Items", title: "Items", description: "Materials, tools, gear, ingredients, and other inventory items.", icon: Package },
+  { category: "Cargo", title: "Cargo", description: "Large carried resources such as trunks, ore chunks, carcasses, and fish.", icon: Boxes },
+  { category: "Recipes", title: "Recipes", description: "Crafting inputs, outputs, station requirements, and XP where known.", icon: Hammer },
+  { category: "Output Chances", title: "Output Chances", description: "Variable result tables for crafts with chance-based outputs.", icon: Sparkles },
+  { category: "Professions", title: "Professions", description: "Profession pages and related recipes from public game data.", icon: Trophy },
+  { category: "Settlement Systems", title: "Settlement Systems", description: "Supplies, treasury, research, upkeep, and claim mechanics.", icon: ShieldCheck },
+  { category: "Economy", title: "Economy", description: "Market and trading notes for interpreting app price data.", icon: Coins },
+];
+
+const WIKI_STARTER_LINKS = [
+  "getting-started",
+  "crafting-and-output-chances",
+  "supplies-and-claim-upkeep",
+  "treasury-and-hex",
+  "professions-and-stations",
+  "markets-and-trade",
+];
 
 function MarkdownView({ markdown }: { markdown: string }) {
   const blocks: React.ReactNode[] = [];
@@ -207,19 +227,21 @@ export function WikiApp() {
 
   const visibleGenerated = results.generated;
   const visiblePages = results.pages.length || search || category ? results.pages : index?.pages ?? [];
+  const starterPages = WIKI_STARTER_LINKS.map((slug) => index?.pages.find((entry) => entry.slug === slug)).filter(Boolean) as WikiPageSummary[];
+  const categoryCards = WIKI_CATEGORY_CARDS.filter((card) => (index?.categories ?? []).includes(card.category) || (index?.generatedCategories ?? []).some((entry) => entry.category === card.category));
 
   return (
     <main className="wiki-shell">
       <section className="wiki-hero">
         <button className="wiki-brand" onClick={() => navigate("home")}><BookOpen size={20} /> Timbersteel Wiki</button>
         <div>
-          <p className="eyebrow">BitCraft mechanics reference</p>
-          <h1>Settlement Knowledge Base</h1>
-          <p>Game mechanics, recipe data, output chances, treasury notes, and live DB findings collected for players and maintainers.</p>
+          <p className="eyebrow">BitCraft game wiki</p>
+          <h1>Recipes, Materials, and Settlement Mechanics</h1>
+          <p>Search player-friendly pages for crafting recipes, output chances, professions, market notes, treasury behaviour, supplies, research, and other game systems.</p>
         </div>
         <div className="wiki-hero-stats">
-          <span><FileText size={15} /> {index?.pages.length ?? 0} curated pages</span>
-          <span><Database size={15} /> {(index?.generatedCount ?? 0).toLocaleString()} generated references</span>
+          <span><FileText size={15} /> {index?.pages.length ?? 0} guide pages</span>
+          <span><Database size={15} /> {(index?.generatedCount ?? 0).toLocaleString()} wiki entries</span>
           {admin.authenticated ? <span><ShieldCheck size={15} /> Admin editing enabled</span> : null}
         </div>
       </section>
@@ -229,21 +251,41 @@ export function WikiApp() {
       <section className="wiki-search-panel">
         <label className="wiki-search">
           <Search size={17} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search recipes, mechanics, treasury notes, output chances..." />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search items, cargo, recipes, professions, output chances..." />
         </label>
         <select value={category} onChange={(event) => setCategory(event.target.value)}>
           <option value="">All categories</option>
           {(index?.categories ?? []).map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+          {(index?.generatedCategories ?? [])
+            .map((entry) => entry.category)
+            .filter((entry) => !(index?.categories ?? []).includes(entry))
+            .map((entry) => <option key={entry} value={entry}>{entry}</option>)}
         </select>
-        {admin.authenticated ? <button className="toolbar-button" disabled={busy} onClick={regenerate}><RefreshCw size={15} /> Regenerate references</button> : null}
+        {admin.authenticated ? <button className="toolbar-button" disabled={busy} onClick={regenerate}><RefreshCw size={15} /> Rebuild wiki index</button> : null}
       </section>
 
       {route.kind === "home" ? (
         <div className="wiki-grid">
           <section className="wiki-card wiki-span">
-            <div className="wiki-section-title"><Sparkles size={16} /> Curated Guides</div>
+            <div className="wiki-section-title"><FlaskConical size={16} /> Browse the Wiki</div>
+            <div className="wiki-category-grid">
+              {categoryCards.map((entry) => {
+                const Icon = entry.icon;
+                const count = (index?.generatedCategories ?? []).find((generatedCategory) => generatedCategory.category === entry.category)?.count;
+                return (
+                  <button key={entry.category} className="wiki-category-card" onClick={() => setCategory(entry.category)}>
+                    <span><Icon size={18} /> {entry.title}</span>
+                    <strong>{count ? count.toLocaleString() : "Guide"}</strong>
+                    <small>{entry.description}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+          <section className="wiki-card wiki-span">
+            <div className="wiki-section-title"><Sparkles size={16} /> Player Guides</div>
             <div className="wiki-card-grid">
-              {visiblePages.map((entry) => (
+              {(search || category ? visiblePages : starterPages.length ? starterPages : visiblePages).map((entry) => (
                 <button key={entry.slug} className="wiki-page-card" onClick={() => navigate("page", entry.slug)}>
                   <span>{entry.category}</span>
                   <strong>{entry.title}</strong>
@@ -253,22 +295,24 @@ export function WikiApp() {
             </div>
           </section>
           <section className="wiki-card">
-            <div className="wiki-section-title"><Database size={16} /> Generated Reference</div>
-            <p className="wiki-muted">Generated entries are built from cached BitJita recipe data and local SpacetimeDB table dumps where available.</p>
+            <div className="wiki-section-title"><Database size={16} /> Game Data Entries</div>
+            <p className="wiki-muted">These pages are generated from captured public game data and app caches, then presented as player-readable item, recipe, profession, and output chance pages.</p>
             <div className="wiki-generated-list">
               {visibleGenerated.map((entry) => (
                 <button key={entry.entry_key} onClick={() => navigate("generated", entry.entry_key)}>
                   <strong>{entry.title}</strong>
-                  <span>{entry.category} | {entry.entry_type}</span>
+                  <span>{entry.category}</span>
                 </button>
               ))}
-              {!visibleGenerated.length ? <p className="wiki-muted">Search to browse generated recipe and output reference entries.</p> : null}
+              {!visibleGenerated.length ? <p className="wiki-muted">Search or choose a category to browse generated wiki entries.</p> : null}
             </div>
           </section>
           <section className="wiki-card">
             <div className="wiki-section-title"><BookOpen size={16} /> Categories</div>
             <div className="wiki-pill-list">
-              {(index?.categories ?? []).map((entry) => <button key={entry} onClick={() => setCategory(entry)}>{entry}</button>)}
+              {[...(index?.categories ?? []), ...(index?.generatedCategories ?? []).map((entry) => entry.category)]
+                .filter((entry, indexValue, list) => list.indexOf(entry) === indexValue)
+                .map((entry) => <button key={entry} onClick={() => setCategory(entry)}>{entry}</button>)}
             </div>
           </section>
         </div>
@@ -280,7 +324,7 @@ export function WikiApp() {
             <button className="toolbar-button" onClick={() => navigate("home")}>Back to wiki</button>
             {admin.authenticated ? <button className="toolbar-button" onClick={() => setEditing(page)}><Edit3 size={15} /> Edit page</button> : null}
           </div>
-          <div className="wiki-meta"><span>{page.category}</span><span>Updated {formatWikiDate(page.updated_at)}</span><span>Source {page.source}</span></div>
+          <div className="wiki-meta"><span>{page.category}</span><span>Updated {formatWikiDate(page.updated_at)}</span>{admin.authenticated ? <span>Source {page.source}</span> : null}</div>
           <MarkdownView markdown={page.body_markdown} />
         </article>
       ) : null}
@@ -288,7 +332,7 @@ export function WikiApp() {
       {generated ? (
         <article className="wiki-reader">
           <div className="wiki-reader-top"><button className="toolbar-button" onClick={() => navigate("home")}>Back to wiki</button></div>
-          <div className="wiki-meta"><span>{generated.category}</span><span>{generated.entry_type}</span><span>Source {generated.source}</span></div>
+          <div className="wiki-meta"><span>{generated.category}</span><span>{generated.entry_type}</span>{admin.authenticated ? <span>Source {generated.source}</span> : null}</div>
           <MarkdownView markdown={generated.body_markdown ?? ""} />
         </article>
       ) : null}
