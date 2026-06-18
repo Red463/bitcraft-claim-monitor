@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.58] - 2026-06-19
+
+### Changed
+
+- Updated the professions page so adventure skills use the same sortable table layout as professions while remaining in a separate section.
+
 ## [1.0.0-beta.57] - 2026-06-18
 
 ### Removed

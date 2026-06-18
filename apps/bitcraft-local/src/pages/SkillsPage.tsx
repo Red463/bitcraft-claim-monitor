@@ -28,6 +28,8 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
+  const [adventureSortKey, setAdventureSortKey] = usePersistedState<SortKey>("skills.adventure-sort", "total");
+  const [adventureSortDir, setAdventureSortDir] = usePersistedState<"asc" | "desc">("skills.adventure-direction", "desc");
   const citizens = data.citizens;
   const professionRows = bitjitaSkillRows(data.skills, "Profession");
   const adventureRows = bitjitaSkillRows(data.skills, "Adventure");
@@ -37,32 +39,41 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const focusedProfession = professionIds.includes(focusSkill) ? focusSkill : professionIds[0];
   const getName = (c: AnyRecord) => c.userName ?? c.username ?? "Unknown";
   const getSkill = (c: AnyRecord, id: number) => toNumber(c.skills?.[String(id)]);
-  const getTotal = (c: AnyRecord) => professionIds.reduce((total, id) => total + getSkill(c, id), 0);
-  const getHighest = (c: AnyRecord) => Math.max(...professionIds.map((id) => getSkill(c, id)), 0);
+  const getTotalFor = (ids: number[]) => (c: AnyRecord) => ids.reduce((total, id) => total + getSkill(c, id), 0);
+  const getHighestFor = (ids: number[]) => (c: AnyRecord) => Math.max(...ids.map((id) => getSkill(c, id)), 0);
+  const getTotal = getTotalFor(professionIds);
+  const getHighest = getHighestFor(professionIds);
   React.useEffect(() => {
     if (focusSkill !== focusedProfession) setFocusSkill(focusedProfession);
   }, [focusSkill, focusedProfession, setFocusSkill]);
   React.useEffect(() => {
     if (typeof sortKey === "number" && !professionIds.includes(sortKey)) setSortKey("total");
   }, [professionIds, sortKey, setSortKey]);
+  React.useEffect(() => {
+    if (typeof adventureSortKey === "number" && !adventureSkillIds.includes(adventureSortKey)) setAdventureSortKey("total");
+  }, [adventureSkillIds, adventureSortKey, setAdventureSortKey]);
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir((dir) => dir === "desc" ? "asc" : "desc");
+  function toggleSort(key: SortKey, currentKey: SortKey, setKey: (value: SortKey) => void, setDirection: React.Dispatch<React.SetStateAction<"asc" | "desc">>) {
+    if (currentKey === key) setDirection((dir) => dir === "desc" ? "asc" : "desc");
     else {
-      setSortKey(key);
-      setSortDir("desc");
+      setKey(key);
+      setDirection("desc");
     }
   }
 
   const filtered = citizens.filter((citizen) => getName(citizen).toLowerCase().includes(searchTerm.toLowerCase()));
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortKey === "name") {
-      return sortDir === "asc" ? getName(a).localeCompare(getName(b)) : getName(b).localeCompare(getName(a));
+  const sortCitizens = (rows: AnyRecord[], ids: number[], activeSortKey: SortKey, activeSortDir: "asc" | "desc") => [...rows].sort((a, b) => {
+    if (activeSortKey === "name") {
+      return activeSortDir === "asc" ? getName(a).localeCompare(getName(b)) : getName(b).localeCompare(getName(a));
     }
-    const va = sortKey === "total" ? getTotal(a) : sortKey === "highest" ? getHighest(a) : getSkill(a, sortKey);
-    const vb = sortKey === "total" ? getTotal(b) : sortKey === "highest" ? getHighest(b) : getSkill(b, sortKey);
-    return sortDir === "asc" ? va - vb : vb - va;
+    const totalFor = getTotalFor(ids);
+    const highestFor = getHighestFor(ids);
+    const va = activeSortKey === "total" ? totalFor(a) : activeSortKey === "highest" ? highestFor(a) : getSkill(a, activeSortKey);
+    const vb = activeSortKey === "total" ? totalFor(b) : activeSortKey === "highest" ? highestFor(b) : getSkill(b, activeSortKey);
+    return activeSortDir === "asc" ? va - vb : vb - va;
   });
+  const sorted = sortCitizens(filtered, professionIds, sortKey, sortDir);
+  const sortedAdventure = sortCitizens(filtered, adventureSkillIds, adventureSortKey, adventureSortDir);
 
   const settlementTotalLevel = citizens.reduce((sum, c) => sum + getTotal(c), 0);
   const settlementBest = Math.max(...citizens.map(getHighest), 0);
@@ -83,8 +94,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
     return { id, name: skillLabel(id), max, avg, tier, specialists };
   }).sort((a, b) => b.max - a.max || b.avg - a.avg);
   const coverage = summarizeCoverage(professionIds);
-  const adventureSkills = summarizeCoverage(adventureSkillIds);
-  const sortIcon = (key: SortKey) => sortKey !== key ? <ArrowUpDown size={11} /> : sortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
+  const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
     <div className="panel skills-page">
@@ -144,35 +154,25 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           </div>
         </section>
       </div>
-      <section className="adventure-skills-panel">
-        <div className="split-header">
-          <h3><Activity size={17} /> Skills</h3>
-          <p className="legend">Adventure skills are tracked separately from professions.</p>
-        </div>
-        <div className="adventure-skill-grid">
-          {adventureSkills.map((skill) => (
-            <article key={skill.id}>
-              <span>{skill.name}</span>
-              <b>{skill.tier ? <TierBadge tier={skill.tier} /> : "-"} <small>Best Lv {skill.max}</small></b>
-              <em>Settlement average {formatNumber(skill.avg, 1)}</em>
-            </article>
-          ))}
-        </div>
-      </section>
       <div className="toolbar-row skills-toolbar">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
       </div>
+      <section className="skills-table-section">
+        <div className="split-header">
+          <h3><GraduationCap size={17} /> Professions</h3>
+          <p className="legend">Professions are the main crafting and gathering disciplines.</p>
+        </div>
       <div className="heatmap-wrap">
         <table className="skill-table">
           <thead>
             <tr>
-              <th className="sticky-col clickable" onClick={() => toggleSort("name")}>Member {sortIcon("name")}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("total")}><span>Total Levels</span>{sortIcon("total")}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("highest")}><span>Best Level</span>{sortIcon("highest")}</th>
+              <th className="sticky-col clickable" onClick={() => toggleSort("name", sortKey, setSortKey, setSortDir)}>Member {sortIcon("name", sortKey, sortDir)}</th>
+              <th className="clickable numeric summary-header" onClick={() => toggleSort("total", sortKey, setSortKey, setSortDir)}><span>Total Levels</span>{sortIcon("total", sortKey, sortDir)}</th>
+              <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", sortKey, setSortKey, setSortDir)}><span>Best Level</span>{sortIcon("highest", sortKey, sortDir)}</th>
               {professionIds.map((id) => (
-                <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id)}>
-                  <span>{skillLabel(id)}</span>{sortIcon(id)}
+                <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, sortKey, setSortKey, setSortDir)}>
+                  <span>{skillLabel(id)}</span>{sortIcon(id, sortKey, sortDir)}
                 </th>
               ))}
             </tr>
@@ -207,6 +207,59 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         </table>
       </div>
       <p className="legend tier-legend">Profession tiers: <span className="lvl0">0</span> {Object.keys(TIER_COLORS).map((tier) => <TierBadge key={tier} tier={tier} />)} - cells show exact level, hover for tier</p>
+      </section>
+      <section className="skills-table-section">
+        <div className="split-header">
+          <h3><Activity size={17} /> Skills</h3>
+          <p className="legend">Adventure skills are tracked separately from professions.</p>
+        </div>
+        <div className="heatmap-wrap">
+          <table className="skill-table">
+            <thead>
+              <tr>
+                <th className="sticky-col clickable" onClick={() => toggleSort("name", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>Member {sortIcon("name", adventureSortKey, adventureSortDir)}</th>
+                <th className="clickable numeric summary-header" onClick={() => toggleSort("total", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Total Levels</span>{sortIcon("total", adventureSortKey, adventureSortDir)}</th>
+                <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Best Level</span>{sortIcon("highest", adventureSortKey, adventureSortDir)}</th>
+                {adventureSkillIds.map((id) => (
+                  <th key={id} className={`clickable profession-header ${adventureSortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>
+                    <span>{skillLabel(id)}</span>{sortIcon(id, adventureSortKey, adventureSortDir)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedAdventure.map((citizen, index) => {
+                const name = getName(citizen);
+                const totalForSkills = getTotalFor(adventureSkillIds);
+                const highestForSkills = getHighestFor(adventureSkillIds);
+                return (
+                  <tr key={citizen.entityId ?? name ?? index}>
+                    <td className="sticky-col member-cell">{name}</td>
+                    <td className="numeric">{formatNumber(totalForSkills(citizen))}</td>
+                    <td className="numeric best">{highestForSkills(citizen)}</td>
+                    {adventureSkillIds.map((id) => {
+                      const level = getSkill(citizen, id);
+                      return <td key={id} className={`skill-cell ${levelClass(level)}`} style={skillStyle(level)} title={`${name} - ${skillLabel(id)}: Lv ${level} (${skillTierLabel(level)})`}>{level > 0 ? level : "-"}</td>;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className="sticky-col member-cell">Settlement Max</td>
+                <td className="numeric">-</td>
+                <td className="numeric best">{Math.max(...citizens.map(getHighestFor(adventureSkillIds)), 0)}</td>
+                {adventureSkillIds.map((id) => {
+                  const max = Math.max(...citizens.map((c) => getSkill(c, id)), 0);
+                  return <td key={id} className={`skill-cell ${levelClass(max)}`} style={skillStyle(max)} title={`${skillLabel(id)} max: Lv ${max} (${skillTierLabel(max)})`}>{max > 0 ? max : "-"}</td>;
+                })}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p className="legend tier-legend">Skill tiers: <span className="lvl0">0</span> {Object.keys(TIER_COLORS).map((tier) => <TierBadge key={tier} tier={tier} />)} - cells show exact level, hover for tier</p>
+      </section>
     </div>
   );
 }
