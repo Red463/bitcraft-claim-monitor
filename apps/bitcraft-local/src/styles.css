@@ -916,18 +916,20 @@ body:has(.admin-loading-panel) .floating-actions {
   top: 14px;
   left: 260px;
   right: 22px;
-  z-index: calc(var(--z-sticky) + 2);
+  z-index: calc(var(--z-overlay) + 2);
   max-height: min(56vh, 520px);
   overflow: auto;
+  isolation: isolate;
   margin: 0;
   padding: 10px 12px;
   border: 1px solid rgba(255,179,71,.28);
   border-radius: var(--radius-card);
   background:
     linear-gradient(90deg, rgba(255,179,71,.10), transparent 28%),
-    linear-gradient(180deg, var(--card-bg-start), var(--card-bg-end));
+    linear-gradient(180deg, color-mix(in srgb, var(--card-top) 96%, #000), color-mix(in srgb, var(--card-bottom) 98%, #000));
   color: var(--text);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 22px 60px rgba(0,0,0,.56), 0 0 0 1px rgba(0,0,0,.26);
+  backdrop-filter: blur(12px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
