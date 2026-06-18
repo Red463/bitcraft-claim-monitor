@@ -1,5 +1,7 @@
 # BitCraft Claim Monitor
 
+> **BitJita API reliability note:** This app currently relies on BitJita's public API, which can be unstable or stale at times. I have applied to join the BitCraft developer program and hope to provide more accurate and reliable data in the future if official developer access becomes available.
+
 BitCraft Claim Monitor is a settlement operations dashboard built around the public [BitJita API](https://bitjita.com/docs/api). It combines live settlement information with locally persisted market and activity history, providing one place to check supplies, members, professions, skills, production, storage, research, trade, and regional context.
 
 The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve. See [VERSIONING.md](./VERSIONING.md) for the release policy.
@@ -28,7 +30,7 @@ The maintained application is in [`apps/bitcraft-local`](./apps/bitcraft-local).
 The command-center view for the monitored settlement:
 
 - Settlement tier, region, owner, member count, structure count, and market listing count.
-- Online member count and shortcuts into Members, Structures, and Market.
+- Online member count and shortcuts into Members, Production, Construction, and Market.
 - Supply runway using the API run-out timestamp and the current hourly/daily supply upkeep.
 - Treasury balance alongside the current supply upkeep and claimed tile count.
 - Work queue summaries for production, construction, and research.
@@ -102,15 +104,6 @@ Container `volume` is intentionally not displayed: the available API value repre
 - Required material comparison against currently stored inventory.
 - A "What to Gather Next" summary for missing construction materials.
 
-### Structures
-
-- Settlement structures grouped by their operational category.
-- Search and filtering for easier inspection of large settlements.
-- Slot and station summaries for crafting, refining, storage, and housing.
-- Structure details where supplied by BitJita.
-
-The app uses `Structures` terminology because BitCraft data may classify containers and similar assets as buildings, while players commonly distinguish operational stations and settlement structures.
-
 ### Research
 
 - Completed and available research lists.
@@ -141,13 +134,12 @@ Sales analytics use completed BitJita sell trades only after completed order his
 - Region dropdown defaulting to the monitored settlement's region, with all-region and available-region options.
 - BitJita completed-trade average prices over 24 hours, 7 days and 30 days.
 - Suggested list price based on the most recent available average, alongside recent trades and volume for judgement.
-- Pin useful market items to the Overview watchlist.
+- Pin useful market items to the notification inbox and relevant market views.
 
 ### Monitoring Experience
 
 - Browser refresh restores the current page and applicable Market or Public Craft Finder context.
 - `Ctrl+K` or `/` opens quick navigation for pages, Price Finder and settlement members.
-- Overview watchlist pins finished core materials, market items and production crafts for regular checks.
 - Notification inbox retains recent market and production alerts after toast messages disappear.
 - Compact/comfortable density modes make long tables easier to scan on different displays.
 - Background updates preserve visible page content and briefly highlight changing figures.
@@ -201,7 +193,7 @@ Admin features:
 - Review server collection health and run public BitJita endpoint diagnostics, including per-container Activity storage timing.
 - Inspect, search and export local SQLite tables during testing.
 - Create and download database backups, and prune expired snapshots without deleting market/activity history.
-- Manage multiple administrator accounts, sessions and passwords.
+- Manage Discord-backed administrator accounts, roles and sessions.
 - Review administrator actions and sign-in attempts.
 
 ### Discord Bot
@@ -236,12 +228,12 @@ Dedicated public pages are available for Discord application submission:
 
 Authentication behavior:
 
-- The first administrator is created from the Admin page; additional administrators can then be created there.
-- Passwords are stored as salted `scrypt` hashes.
+- Administrator access is Discord-backed by default, with the owner Discord ID seeded by the server.
+- Legacy password-based admin setup still exists as a compatibility path, but should normally remain disabled.
+- Legacy passwords, where enabled, are stored as salted `scrypt` hashes.
 - Login sessions use an `HttpOnly`, `SameSite=Lax` cookie.
 - Administrator changes require a session-bound request token and same-origin request validation.
 - Repeated failed logins are temporarily throttled.
-- In production, first-time admin creation requires the server-side `ADMIN_SETUP_KEY`.
 - Production history collection is server-owned; public browsers cannot submit snapshots.
 
 ### Privacy And Analytics
@@ -286,7 +278,7 @@ It records:
 | `activity_events` | Settlement activity history |
 | `analytics_events` | Consented first-party aggregate usage analytics |
 | `visitor_security_events` | Short-term request security logs and anonymised visitor location statistics |
-| `admin_users` | Local admin credentials |
+| `admin_users` | Discord-backed administrator accounts and optional legacy credentials |
 | `admin_sessions` | Authenticated sessions |
 | `app_settings` | Settlement, Sync, display, branding and collection configuration |
 | `admin_audit_log` | Administrative changes and operations |
@@ -382,7 +374,12 @@ Supported application server environment variables:
 | `BITCRAFT_LOCAL_DATA_DIR` | SQLite storage directory | `apps/bitcraft-local/data` |
 | `BITJITA_API_ORIGIN` | Alternate BitJita upstream origin | `https://bitjita.com` |
 | `BITJITA_APP_IDENTIFIER` | Identifier sent with upstream BitJita requests | project GitHub identifier |
-| `ADMIN_SETUP_KEY` | One-time key required to create the first production admin | unset |
+| `ADMIN_SETUP_KEY` | Optional compatibility key for legacy first-admin password setup | unset |
+| `DEFAULT_OWNER_DISCORD_ID` | Discord user ID seeded as the owner administrator | `145544610234630144` |
+| `DISCORD_OAUTH_CLIENT_ID` | Discord OAuth client ID for sign-in | admin setting/application ID |
+| `DISCORD_OAUTH_CLIENT_SECRET` | Discord OAuth client secret for sign-in | unset |
+| `DISCORD_OAUTH_REDIRECT_URI` | Explicit Discord OAuth callback URL | inferred from request origin |
+| `ENABLE_LEGACY_ADMIN_PASSWORD_AUTH` | Re-enable legacy password admin login | disabled |
 | `ENABLE_SERVER_POLLING` | Override server-side snapshot polling | enabled in production |
 | `SNAPSHOT_INTERVAL_MS` | Polling interval, minimum 10 seconds | `30000` |
 | `DISCORD_BOT_TOKEN` | Optional Discord bot token override | admin-stored secret |

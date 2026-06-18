@@ -79,7 +79,7 @@ The current frontend already reads claim detail, members, citizen skills, struct
 - Production now reads craft contributions and shows contributor progress and recency.
 - Activity now incorporates public storage movement logs with an explicit Storage filter.
 - Region now uses live region status/trade-volume data and resolves settlement detail for owner names.
-- Members, Inventory and Structures now offer public API-backed drill-down information.
+- Members, Inventory, Production and Construction now offer public API-backed drill-down information where BitJita exposes suitable detail data.
 
 ## Further Additions
 

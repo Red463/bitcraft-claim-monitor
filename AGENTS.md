@@ -314,7 +314,7 @@ curl.exe -s http://127.0.0.1:18449/api/local/health
 Useful target URLs:
 
 ```txt
-http://127.0.0.1:18449/?page=overview
+http://127.0.0.1:18449/?page=dashboard
 http://127.0.0.1:18449/?page=map
 http://127.0.0.1:18449/bot
 ```

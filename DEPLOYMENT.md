@@ -7,7 +7,7 @@ This guide is for the Hostworld Ubuntu VPS configuration with no control panel. 
 - systemd to keep the app running after restarts
 - SQLite data stored outside the Git checkout at `/var/lib/bitcraft-claim-monitor`
 
-The app server now serves the compiled frontend, the local history/admin API, and the restricted BitJita API proxy. In production it records settlement, market, and activity snapshots from BitJita every 30 seconds, even when no browser is open. Caddy only exposes it securely through your domain.
+The app server serves the compiled frontend, the local history/admin API, and the restricted BitJita API proxy. Normal browser pages refresh live data through that local BitJita proxy. In production, background collectors also record market, activity, contribution, notification, recipe and diagnostic history even when no browser is open. Caddy only exposes the app securely through your domain.
 
 ## Before You Begin
 
@@ -88,13 +88,21 @@ sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
 
 ## 5. Start the Application Service
 
-The first production admin account is protected by a one-time server setup key. Create one and keep the printed value ready for the first Admin page login:
+Create an environment file if you need production-only secrets such as Discord OAuth, a Discord bot token, or a non-default owner Discord ID. If you do not need environment overrides yet, create an empty protected file:
 
 ```bash
-SETUP_KEY=$(openssl rand -hex 32)
-printf 'ADMIN_SETUP_KEY=%s\n' "$SETUP_KEY" > /etc/bitcraft-claim-monitor.env
+touch /etc/bitcraft-claim-monitor.env
 chmod 600 /etc/bitcraft-claim-monitor.env
-echo "$SETUP_KEY"
+```
+
+Common optional values:
+
+```bash
+cat > /etc/bitcraft-claim-monitor.env <<'EOF'
+DEFAULT_OWNER_DISCORD_ID=145544610234630144
+DISCORD_OAUTH_CLIENT_SECRET=replace-with-discord-client-secret
+EOF
+chmod 600 /etc/bitcraft-claim-monitor.env
 ```
 
 Install the checked-in systemd service:
@@ -107,7 +115,7 @@ systemctl status bitcraft-claim-monitor
 curl http://127.0.0.1:18430/api/local/health
 ```
 
-The final command should return JSON containing `"ok":true` and polling status. Within about 30 seconds, `polling.lastSuccessAt` should contain a timestamp.
+The final command should return JSON containing `"ok":true` and collection/status metadata.
 
 ## 6. Publish the Website With HTTPS
 
@@ -122,14 +130,9 @@ systemctl reload caddy
 
 Open `https://app.timbersteeltrade.com/` in your browser. Caddy automatically obtains and renews the HTTPS certificate when DNS is pointing at the VPS and ports 80 and 443 are open.
 
-Go to the app's **Admin** page. Enter the server setup key printed above and create your admin password. Once this succeeds, remove the one-time setup key from the running service:
+Go to the app's **Admin** page and sign in with Discord once Discord OAuth is configured. The default owner Discord ID is seeded as the owner administrator unless you override `DEFAULT_OWNER_DISCORD_ID`. Legacy password admin setup is a compatibility path only and should normally remain disabled.
 
-```bash
-rm /etc/bitcraft-claim-monitor.env
-systemctl restart bitcraft-claim-monitor
-```
-
-On a production installation, market/activity history is collected by the server every 30 seconds. Visitors do not write snapshots, and manually resolving uncertain market events remains an admin-only action.
+On a production installation, market/activity/contribution history and notification-support data are collected by the server on the configured intervals. Visitors do not write snapshots, and manually resolving uncertain market events remains an admin-only action.
 
 ## Updating the App
 
@@ -148,7 +151,7 @@ Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so u
 
 A new VPS begins with a new database. Activity history begins when it starts collecting snapshots, but Market Analytics now backfills available completed sell orders identified by BitJita as belonging to the monitored settlement market during the first successful collection.
 
-After upgrading to `0.3.1-beta.1`, existing browser admin sessions expire because the server session lookup hash was changed. Sign in again on the Admin page; stored accounts and data are unchanged.
+After security or authentication changes, existing browser admin sessions may expire. Sign in again on the Admin page; stored accounts and data are unchanged.
 
 ## Database Backups
 

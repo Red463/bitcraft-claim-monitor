@@ -3,8 +3,8 @@
 BitCraft Claim Monitor is a local-first operations dashboard for a BitCraft settlement. The active app lives in `apps/bitcraft-local` and combines:
 
 - a React/Vite frontend for public settlement monitoring, local settings, admin tools, and Discord bot controls;
-- a Node HTTP server that serves the app, proxies BitJita requests, owns automatic BitJita collection, records SQLite current state/history, and handles Discord integrations;
-- a local SQLite database for domain current state, market history, activity history, production contribution history, app settings, admin/user sessions, analytics, Discord diagnostics, scheduled jobs, and cached recipe records.
+- a Node HTTP server that serves the app, proxies BitJita requests, records SQLite history/cache data, runs background collection for history and notifications, and handles Discord integrations;
+- a local SQLite database for market history, activity history, production contribution history, app settings, admin/user sessions, analytics, Discord diagnostics, scheduled jobs, cached regional buy orders, cached recipes, and collector diagnostics.
 
 The main app is intended to display public BitJita game data for the selected settlement. Admin-only areas manage local app settings, jobs, stored data, Discord bot settings, moderation tools, branding, and user/account approvals.
 
@@ -73,8 +73,8 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 - Purpose: high-level settlement health and command-centre summary.
 - Key components/functions: `Dashboard`, `DashboardMetric`, `DashboardCardHeader`, `DashboardTrend` in `apps/bitcraft-local/src/main.tsx`.
 - Data needs: claim summary, members, supply, treasury, construction count, production queue, online members, recent non-treasury/non-supply activity, snapshots/trends.
-- Data source: frontend `useBitjitaData` calls local `/api/local/pages/dashboard`; local history comes from `useLocalHistory` and `/api/local/history`.
-- Fetching/transformation: backend reads current domain rows and page-ready payloads from SQLite, while frontend still uses `normalizeData`, `claimSupplyRunOutAt`, `claimSupplyCap`, and formatting helpers from `main-app-data.ts`.
+- Data source: frontend `useBitjitaData` refreshes live claim, member, production, construction, market and region data through the local `/api/bitjita/*` proxy; local history comes from `useLocalHistory` and `/api/local/history`.
+- Fetching/transformation: frontend normalizers such as `normalizeData`, `claimSupplyRunOutAt`, `claimSupplyCap`, and formatting helpers from `main-app-data.ts` adapt live BitJita responses into dashboard-ready values.
 - Actions: navigates to related pages using `onNavigate`.
 - Auth: public.
 - Loading/error/empty states: global BitJita warning banner displays partial refresh issues; chart and recent activity have empty states.
@@ -84,10 +84,10 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=leaderboard`
 - Purpose: shows recorded craft contribution totals by member and profession.
-- Key components/functions: `Leaderboard` in `src/main.tsx`; backend `/api/local/pages/leaderboard`.
+- Key components/functions: `Leaderboard` in `src/main.tsx`; backend `/api/local/leaderboard`.
 - Data needs: `production_contributions`, production job metadata, member/profession filters.
 - Data source: local SQLite only, populated by server polling from BitJita production contribution data.
-- Fetching/transformation: frontend fetches `/api/local/pages/leaderboard?claimId=...`; backend combines local page data with stored contribution rows.
+- Fetching/transformation: frontend fetches the local leaderboard endpoint; backend combines stored contribution rows, local market/activity history, and current live member/player data where needed.
 - Actions: profession filter.
 - Auth: public.
 - Loading/error/empty states: page-level loading and empty states.
@@ -221,8 +221,8 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 - Purpose: regional settlement statistics, rankings, nearby settlements, region wealth.
 - Key components/functions: `Region` in `src/pages/RegionPage.tsx`.
 - Data needs: current claim region, regional claim list, settlement owners, treasuries, supplies, trade volume where available.
-- Data source: claim and region data from `useBitjitaData` via `/api/local/pages/empire`.
-- Fetching/transformation: server collectors update local region current tables and payload rows; frontend sorts/renders tables.
+- Data source: claim and region data from `useBitjitaData` through the local `/api/bitjita/*` proxy, with slower background region payloads retained for history and diagnostics.
+- Fetching/transformation: frontend sorts/renders live regional responses and uses local history/cache endpoints only where the page needs retained data.
 - Actions: sorting/filtering where available.
 - Auth: public.
 - Loading/error/empty states: local loading/error/empty states for regional data.
@@ -300,15 +300,14 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 | Entity | Source of truth | Stored locally | Notes |
 | --- | --- | --- | --- |
-| Claim/settlement | BitJita `/claims/:claimId` | `claim_current`, `snapshots`, `domain_payload_current` | Core settlement identity, region, treasury, supplies. |
-| Members/citizens | BitJita `/claims/:claimId/members`, `/citizens` | `member_current`, `profession_current`, `domain_payload_current` | Used for roster, professions, owner crown, player details. |
-| Player details/equipment | BitJita player endpoints through server helpers | `player_current`, `domain_payload_current` | Used for online state, playtime, equipment and eligibility display. |
-| Crafts/production jobs | BitJita `/crafts` and local enrichment | `production_current`, `production_jobs`, `production_contributions` | Contributions are stored only when BitJita reports them. |
+| Claim/settlement | BitJita `/claims/:claimId` | `snapshots`, `domain_payload_current` | Core settlement identity, region, treasury, supplies. Normal pages render from live proxy responses. |
+| Members/citizens | BitJita `/claims/:claimId/members`, `/citizens` | `domain_payload_current` for background diagnostics/history context | Used for roster, professions, owner crown, player details. |
+| Player details/equipment | BitJita player endpoints through server helpers | `domain_payload_current` for background diagnostics/history context | Used for online state, playtime, equipment and eligibility display. |
+| Crafts/production jobs | BitJita `/crafts` and local enrichment | `production_jobs`, `production_contributions`, `domain_payload_current` | Contributions are stored only when BitJita reports them. |
 | Market listings/events/trades | BitJita market endpoints and server polling | `market_listings`, `market_events`, `market_trades` | Used for market analytics, sales history, price tools. |
 | Activity events | BitJita/log endpoints and server polling | `activity_events` | Settlement-scoped local historical feed. |
-| Construction/research/inventory | BitJita claim endpoints | `construction_project_current`, `construction_material_current`, `research_current`, `inventory_container_current`, `inventory_item_current`, `domain_payload_current` | Displayed directly and in summary calculations. |
-| Region status/claims | BitJita region endpoints | `region_claim_current`, `region_status_current`, `domain_payload_current` | Used by Region, Map and regional summary views. |
-| Domain change events | Server collectors | `domain_change_events` | Deduplicated meaningful changes such as member joins/leaves, permission changes and production starts/removals. |
+| Construction/research/inventory | BitJita claim endpoints | `domain_payload_current` for background diagnostics/history context | Displayed from live proxy responses and used in summary calculations. |
+| Region status/claims | BitJita region endpoints | `domain_payload_current` for background diagnostics/history context | Used by Region, Map and regional summary views. |
 | Recipe details | BitJita recipe/item/cargo endpoints | `recipe_catalog_entries` | Local cache of known recipe records; refreshed by scheduled job. |
 | App settings/secrets | Admin UI/server | `app_settings`, `app_secrets` | Secrets should not be returned to frontend. |
 | Admin/users/sessions | Discord OAuth/admin routes | `admin_users`, `admin_sessions`, `user_accounts`, `user_sessions` | Admin RBAC and optional public Discord login. |
@@ -320,7 +319,6 @@ flowchart TD
   React["React page/component"]
   UseBitjita["useBitjitaData"]
   UseHistory["useLocalHistory"]
-  PageApi["/api/local/pages/:page"]
   LocalApi["/api/local/*"]
   Proxy["/api/bitjita/* proxy"]
   Server["server.mjs"]
@@ -333,10 +331,9 @@ flowchart TD
   User --> React
   React --> UseBitjita
   React --> UseHistory
-  UseBitjita --> PageApi
+  UseBitjita --> Proxy
   UseBitjita --> LocalApi
   UseHistory --> LocalApi
-  PageApi --> Server
   Proxy --> Server
   LocalApi --> Server
   Server --> Cache
@@ -351,12 +348,12 @@ flowchart TD
 ### Fetching and transformation pattern
 
 1. `DashboardApp` chooses the active page from the `page` query parameter.
-2. `useBitjitaData(refreshToken, claimId, activePanel)` requests `/api/local/pages/:page` for normal main-app pages.
-3. The server reads page-ready data from SQLite domain tables and per-domain payload rows, then includes freshness and collector-status metadata.
-4. The server-side `/api/bitjita/*` proxy still applies origin restrictions, caching, and local rate limits for explicit user-triggered tools such as recipe lookup, price lookup, buy-order search and diagnostics.
-5. `normalizeData`, `unwrap`, `toNumber`, and page-specific utilities adapt local page responses to UI-friendly structures.
+2. `useBitjitaData(refreshToken, claimId, activePanel)` requests the live BitJita endpoints needed by the active page through the same-origin `/api/bitjita/*` proxy.
+3. The server-side `/api/bitjita/*` proxy applies origin restrictions, caching, local rate limits and upstream request headers before forwarding to BitJita.
+4. Local helper endpoints are still used where the app needs retained history, notifications, recipe cache, regional buy-order cache, player detail enrichment, or diagnostics.
+5. `normalizeData`, `unwrap`, `toNumber`, and page-specific utilities adapt live BitJita responses to UI-friendly structures.
 6. `useLocalHistory` loads stored market/activity/snapshot/dashboard history from `/api/local/history`.
-7. Background collection in `collectServerSnapshot` refreshes enabled domain collectors, updates current tables, records meaningful change events, and preserves stale current data when BitJita has a temporary failure.
+7. Background collection in `collectServerSnapshot` supports history, notifications, analytics, recipes, regional buy-order cache and diagnostics. It is not the normal page-rendering source of truth.
 
 ## Important User Flows
 
@@ -374,10 +371,10 @@ sequenceDiagram
   S-->>B: Static app
   B->>A: Load selected page
   A->>S: GET /api/local/config
-  A->>S: GET /api/local/pages/:page
-  S->>D: Read current domain rows
-  D-->>S: Current page data
-  S-->>A: Page JSON with freshness metadata
+  A->>S: GET /api/bitjita/* for active page data
+  S->>J: Forward/cache/rate-limit upstream requests
+  J-->>S: Live BitJita responses
+  S-->>A: Live page data
   A->>S: GET /api/local/history
   S->>D: Read stored local history
   D-->>S: Stored rows
@@ -405,10 +402,9 @@ sequenceDiagram
   Timer->>S: collectServerSnapshot()
   S->>J: Fetch due production collector data
   J-->>S: Crafts and contribution fields when available
-  S->>D: Upsert production_current
   S->>D: Upsert production_jobs
   S->>D: Insert/update production_contributions
-  UI->>S: GET /api/local/pages/leaderboard
+  UI->>S: GET /api/local/leaderboard
   S->>D: Aggregate contribution rows
   D-->>S: Contribution totals
   S-->>UI: Leaderboard data

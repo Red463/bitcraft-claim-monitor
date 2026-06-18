@@ -22,7 +22,7 @@ Persistent history and cached tool data are stored at `apps/bitcraft-local/data/
 
 In production, the Node server runs background collectors itself, so market, activity, production contribution and notification history continues collecting without a browser left open. Collector intervals and enabled states are configurable from Admin.
 
-The Admin page is protected by a local server-side session. On first run, open Admin and create the initial password. The password is stored as a salted scrypt hash in SQLite, and the browser receives an HttpOnly session cookie. Administrator mutations additionally require a same-origin session token.
+The Admin page is protected by a local server-side session. Current deployments use Discord-backed administrator accounts, with the default owner Discord ID seeded by the server. Legacy password-based admin setup exists only as a compatibility path and should normally remain disabled. Administrator mutations additionally require a same-origin session token.
 
 For isolated testing, set `BITCRAFT_LOCAL_DATA_DIR` before running the dev server to point at a different database directory.
 
@@ -30,9 +30,9 @@ For hosting on an Ubuntu VPS, see [`DEPLOYMENT.md`](../../DEPLOYMENT.md). The pr
 
 ```sh
 corepack pnpm --filter @workspace/bitcraft-local run build
-NODE_ENV=production ADMIN_SETUP_KEY=choose-a-one-time-key BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor corepack pnpm --filter @workspace/bitcraft-local run start
+NODE_ENV=production BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor corepack pnpm --filter @workspace/bitcraft-local run start
 ```
 
-Use the one-time setup key when creating the first production admin, then restart the process without that variable. The full systemd and Caddy procedure is in the deployment guide.
+Configure Discord OAuth/bot settings before relying on Discord admin login in production. The full systemd and Caddy procedure is in the deployment guide.
 
 License: repository-wide `AGPL-3.0-only`. See the root [`LICENSE`](../../LICENSE), [`NOTICE`](../../NOTICE), and [`TRADEMARKS.md`](../../TRADEMARKS.md).
