@@ -2,6 +2,9 @@ import type { AnyRecord } from "../main-app-data";
 import type { ThemeSettings } from "../theme";
 import type { ActivePanel } from "./app";
 
+// Shared settings types mirror the JSON saved by the local server. Optional
+// token/secret fields are write-only in practice: public config responses should
+// expose "configured" flags rather than returning sensitive values.
 export type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
 export type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean };
 export type ActiveRegion = { regionId: string; regionName?: string; active?: boolean; syncing?: boolean; signedInPlayers?: number; playersInQueue?: number; updatedAt?: string | null; source?: string };

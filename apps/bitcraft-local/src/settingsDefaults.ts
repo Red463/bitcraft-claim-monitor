@@ -1,6 +1,14 @@
 import { DEFAULT_THEME } from "./theme";
 import type { AppSettings, DiscordPresence, DiscordRolePanel, DiscordWelcomeFlow, UserToastSettings } from "./types/settings";
 
+/*
+ * Installation defaults shared by the browser and admin UI.
+ *
+ * These values seed server settings and provide frontend fallbacks before the
+ * admin configuration is loaded. Keep secrets out of this file; Discord tokens,
+ * OAuth secrets, and credentials belong in server-side settings only.
+ */
+
 export const DEFAULT_CLAIM_ID = "1369094286777412590";
 export const DEFAULT_SYNC_URL = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 
@@ -44,6 +52,8 @@ export const DEFAULT_CRAFT_ROLES: Record<string, string> = {
 };
 
 export const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
+  // "profession" is a routing sentinel handled by the server: craft
+  // notifications are posted to the configured channel for that profession.
   marketListings: "notifications",
   marketSales: "notifications",
   lowSupplies: "notifications",
@@ -122,6 +132,9 @@ export const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
 export const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
 export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
+  // Background collectors support local history, notifications, diagnostics,
+  // and cached tools. Live public pages primarily read BitJita through the local
+  // proxy, so these intervals are not the same as the browser display refresh.
   claim: { label: "Claim", enabled: true, intervalSeconds: 30 },
   members: { label: "Members", enabled: true, intervalSeconds: 30 },
   players: { label: "Player details", enabled: true, intervalSeconds: 60 },

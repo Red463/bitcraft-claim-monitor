@@ -5,6 +5,16 @@ import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
 
+/*
+ * BitJita data loader for the public app pages.
+ *
+ * Normal page refreshes intentionally go through the local /api/bitjita proxy
+ * rather than calling BitJita directly from the browser. The proxy centralises
+ * CORS handling, upstream error wording, lightweight caching, and rate limiting.
+ * Local /api/local helpers are used only where the app needs server-side
+ * enrichment, batching, or locally recorded history.
+ */
+
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
@@ -51,6 +61,9 @@ function fallbackPlayerFromMember(member: AnyRecord, error: string): AnyRecord {
 }
 
 function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
+  // These are the core BitJita endpoints the app understands. Each page below
+  // opts into only the domains it needs so switching tabs does not fan out every
+  // possible claim request.
   const endpoints = {
     claim: `/claims/${claimId}`,
     members: `/claims/${claimId}/members`,
@@ -137,6 +150,9 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         }
         setState((prev) => ({ ...prev, loading: true, error: null }));
         if (activePanel === "dashboard") {
+          // Dashboard combines data from several BitJita endpoints and local
+          // history tables, so it stays behind a page-specific local aggregate
+          // instead of duplicating that join logic in the browser.
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
           const raw = await response.json();
@@ -153,6 +169,9 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
         if (activePanel === "production") {
           try {
+            // Production cards need contribution and station details that are
+            // expensive to request one-by-one from the browser. The local helper
+            // batches those lookups and falls back to raw /crafts data on failure.
             const response = await fetch(`${LOCAL_API}/production/crafts`, {
               method: "POST",
               headers: { "content-type": "application/json" },
@@ -176,6 +195,8 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         const readsRegionDetail = activePanel === "empire";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
           readsPlayerDetail ? fetch(`${LOCAL_API}/player-details`, {
+            // Player detail requests are batched server-side because each member
+            // can require an individual BitJita lookup for online/session state.
             method: "POST",
             headers: { "content-type": "application/json" },
             signal: controller.signal,
@@ -203,6 +224,8 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
                 status: "fulfilled",
                 value: {
                   craftId: String(craft.entityId),
+                  // Contribution data is treated as API-owned truth. The app
+                  // deliberately does not infer contribution from progress bars.
                   payload: await request(`/crafts/${craft.entityId}/contributions`),
                 },
               } as PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }>;

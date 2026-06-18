@@ -11,6 +11,10 @@ import {
 import { formatNumber } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 
+// Construction projects are displayed from BitJita's current project/material
+// shape. The page focuses on material readiness rather than build progress,
+// because the final construction action is usually quick once all materials are
+// supplied.
 function materialCompletion(materials: AnyRecord[] = []) {
   const required = materials.reduce((sum: number, mat: AnyRecord) => sum + toNumber(mat.required), 0);
   const contributed = materials.reduce((sum: number, mat: AnyRecord) => {

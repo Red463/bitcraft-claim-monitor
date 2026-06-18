@@ -81,6 +81,14 @@ import { unique } from "../utils/array";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import type { ActivePanel, LoadState } from "../types/app";
 
+/*
+ * Main application pages that still share a large amount of display logic.
+ *
+ * AppShell passes normalized BitJita data and local history into these pages.
+ * Keep automatic BitJita fetching out of page components unless the interaction
+ * is an explicit user-triggered tool such as market search or map catalog lookup.
+ */
+
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent_v2";
@@ -221,6 +229,9 @@ function listingDate(listing: AnyRecord, firstSeen: unknown): unknown {
 }
 
 export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+  // The dashboard intentionally mixes live BitJita data with local historical
+  // snapshots. Snapshot-backed trends only appear when enough history exists;
+  // the page should never fabricate trend data.
   const { claim, members, market, construction, crafts, research } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);

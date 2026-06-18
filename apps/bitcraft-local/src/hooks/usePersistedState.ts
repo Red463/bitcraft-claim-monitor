@@ -2,6 +2,11 @@ import React from "react";
 
 const STORAGE_PREFIX = "claim-monitor.";
 
+/**
+ * Persists browser-only preferences such as collapsed navigation and selected
+ * filters. This intentionally uses localStorage rather than analytics cookies so
+ * usability preferences still work when a visitor declines analytics tracking.
+ */
 export function usePersistedState<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = React.useState<T>(() => {
     try {

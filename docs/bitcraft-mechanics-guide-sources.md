@@ -81,3 +81,35 @@ All source paths below are relative to the public repository root.
 - That means exact recipe values, drop rates, market tuning, claim tech thresholds, and parameter values often require live static-data access rather than the public code alone.
 - Some files include internal comments or TODOs from Clockwork Labs. Those were treated as context, not as stable public API guarantees.
 
+## Live SpacetimeDB Dump Sources
+
+The guide also references a local, read-only SpacetimeDB inspection captured on 2026-06-18. These files are not committed source-of-truth game code; they are observed live data for the captured region/time and should be treated as evidence for current behaviour only.
+
+Useful captured files:
+
+| Local dump file | Why It Matters |
+| --- | --- |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_state.json` | Timbersteel Trade claim identity, owner player id, and claim name. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_local_state.json` | Timbersteel Trade supplies, treasury, tile count, location, and XP remainder. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_member_state.json` | Settlement member names and permission booleans. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_tech_state.json` | Learned claim tech and active research state. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_tech_desc.json` | Live claim tech thresholds, caps, and XP-to-coin values. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/building_state.json` | Buildings assigned to the claim. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/building_desc.json` | Building description names for `building_state` joins. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/building_nickname_state.json` | User-facing storage/building names. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-44-10Z/bitcraft-live-19/tables/claim_recruitment_state.json` | Recruitment stock, requirement, and approval settings. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-45-56Z/bitcraft-live-19/tables/crafting_recipe_desc.json` | Live recipe rows needed for craft and treasury calculations. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-45-56Z/bitcraft-live-19/tables/experience_state.json` | Per-player `experience_stacks` arrays. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-45-56Z/bitcraft-live-19/tables/skill_desc.json` | Skill/profession names for experience stack IDs. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-48-35Z/bitcraft-live-19/tables/storage_log_state.json` | Settlement-scoped storage activity rows. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-50-18Z/bitcraft-live-19/tables/marketplace_state.json` | Marketplace building to claim linkage. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-50-18Z/bitcraft-live-19/tables/sell_order_state.json` | Active sell orders scoped by claim. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-50-18Z/bitcraft-live-19/tables/buy_order_state.json` | Active buy orders scoped by claim. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-50-18Z/bitcraft-live-19/tables/closed_listing_state.json` | Closed market listing rows scoped by claim. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-53-41Z/bitcraft-live-19/tables/empire_settlement_state.json` | Claim to empire linkage and member donations. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-53-41Z/bitcraft-live-19/tables/empire_state.json` | Empire name, claim count, and treasury. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-53-41Z/bitcraft-live-global/tables/region_connection_info.json` | Region module discovery. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-53-41Z/bitcraft-live-global/tables/world_region_name_state.json` | Player-facing region names. |
+| `.dev-data/bitcraft-live-db/dumps/2026-06-18T17-53-41Z/bitcraft-live-global/tables/region_population_info.json` | Region population metadata. |
+
+Important data handling note: several BitCraft entity IDs exceed JavaScript's safe integer range. Future dumps should preserve IDs as strings or BigInts before joining records. Plain JavaScript JSON parsing can round IDs and make exact joins unreliable.

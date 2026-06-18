@@ -21,6 +21,9 @@ import { formatCompactNumber, formatNumber } from "../utils/format";
 import { getOwnerName } from "../utils/ownership";
 import { normalizeData } from "../utils/normalize";
 
+// Region compares the monitored settlement against other visible settlements in
+// the same active region. Rankings are derived from the current BitJita claim
+// list and should be treated as a snapshot, not a complete historical ranking.
 export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortKey, setSortKey] = usePersistedState("region.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction", "desc");

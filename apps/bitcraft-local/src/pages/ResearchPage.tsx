@@ -9,6 +9,9 @@ import { unique } from "../utils/array";
 import { formatNumber } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 
+// BitCraft research unlocks are effectively instant once obtained, so this page
+// presents researched versus available technologies and derives settlement caps
+// from the unlocked tech list rather than modelling an active research queue.
 export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [query, setQuery] = React.useState("");
   const [tier, setTier] = usePersistedState("research.tier", "All");

@@ -1,5 +1,14 @@
 export type AnyRecord = Record<string, any>;
 
+/*
+ * Shared data helpers for BitJita payloads.
+ *
+ * BitJita responses are not fully uniform: some endpoints wrap arrays in named
+ * properties, timestamps can arrive in several units, and construction projects
+ * expose "required" and "already contributed" materials separately. These
+ * helpers keep that domain knowledge out of page components.
+ */
+
 export function unwrap<T>(payload: any, key: string, fallback: T): T {
   if (Array.isArray(payload)) return payload as T;
   return (payload?.[key] ?? fallback) as T;
@@ -23,6 +32,9 @@ export function parseDateValue(value: unknown): Date | null {
     const text = String(value).trim();
     const numeric = Number(text);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    // BitJita and local history have used seconds, milliseconds, and
+    // microseconds. Length-based detection preserves old rows without forcing
+    // every caller to know which source produced the timestamp.
     const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
     const date = new Date(millis);
     return Number.isNaN(date.getTime()) ? null : date;
@@ -38,6 +50,9 @@ export function claimSupplyRunOutAt(claim: AnyRecord): unknown {
 export function claimSupplyCap(claim: AnyRecord): number {
   const direct = toNumber(claim.maxSupplies ?? claim.suppliesMax ?? claim.supplyCap ?? claim.maxSupply);
   if (direct > 0) return direct;
+  // Older claim payloads did not include a direct cap. The researched tech list
+  // can still expose it in the tech name, so this fallback keeps the supply card
+  // useful without inventing a value.
   const maxSupplyTechs = (claim.researchedTechs ?? []).filter((tech: AnyRecord) => tech.techType === "max_supplies");
   return maxSupplyTechs.reduce((max: number, tech: AnyRecord) => {
     const match = String(tech.name ?? "").match(/(\d[\d,]*)\s*max supplies/i);

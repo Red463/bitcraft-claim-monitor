@@ -7,6 +7,11 @@ import { formatNumber } from "../../utils/format";
 import { DataTable } from "./DataTable";
 import { Info } from "./Stats";
 
+/*
+ * Shared chrome for the public app: page headers, loading/error states, the
+ * BitJita warning banner, and the sidebar refresh status widget.
+ */
+
 export function Header({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
     <div className="section-header">
@@ -81,6 +86,8 @@ export function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnin
           {uniqueWarnings.map((warning) => <li key={warning}>{warning}</li>)}
         </ul>
         <div className="api-status-log">
+          {/* The diagnostic block is intentionally copyable so users can send
+              enough context to debug transient BitJita/API issues. */}
           <span>Copyable diagnostic context</span>
           <code>{diagnosticLog}</code>
         </div>
@@ -123,6 +130,9 @@ export function RefreshStatus({
       </span>
       {collectors.length ? (
         <div className="refresh-breakdown" role="tooltip">
+          {/* This hover panel reports server background collectors. It is
+              diagnostic only; public pages may still be reading live BitJita
+              data through the local proxy. */}
           <header>
             <strong>Collector status</strong>
             <span>{collectorStatus?.intervalMs ? `Server every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Server schedule"}</span>

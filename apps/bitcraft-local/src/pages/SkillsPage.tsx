@@ -18,6 +18,9 @@ import {
   skillTierLabel,
 } from "../utils/professions";
 
+// The UI calls these "Professions" even though BitJita exposes them as skill
+// rows. This page keeps the profession/adventure split explicit so future skill
+// categories can be displayed without changing the underlying BitJita mapping.
 type SortKey = "name" | "total" | "highest" | number;
 
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {

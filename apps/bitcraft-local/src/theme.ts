@@ -1,5 +1,13 @@
 import type { AnyRecord } from "./main-app-data";
 
+/*
+ * Browser-local theme system.
+ *
+ * Presets and custom themes are applied through CSS variables so the same
+ * dashboard style can be shared across pages without introducing a separate
+ * styling framework. Imported themes are validated before they touch the DOM.
+ */
+
 export const DEFAULT_THEME = {
   bg: "#0c0d10",
   sidebar: "#06070a",
@@ -61,6 +69,8 @@ export function normalizeThemeCandidate(input: unknown): { theme: ThemeSettings;
   for (const key of Object.keys(DEFAULT_THEME) as ThemeKey[]) {
     const value = (source as AnyRecord)[key];
     if (THEME_RANGE_KEYS.includes(key as ThemeRangeKey)) {
+      // Range fields are stored as strings because they are written directly to
+      // CSS custom properties with units added by applyTheme.
       const config = THEME_RANGE_FIELD_CONFIG[key as ThemeRangeKey];
       const nextValue = clampThemeNumber(value, config.min, config.max, DEFAULT_THEME[key]);
       if (nextValue !== DEFAULT_THEME[key] || value !== undefined) {

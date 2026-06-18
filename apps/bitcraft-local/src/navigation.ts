@@ -19,6 +19,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ActivePanel } from "./types/app";
 
+/*
+ * Main app navigation model.
+ *
+ * The sidebar, command palette, URL validation, and default-page handling derive
+ * from these groups. Keep href generation intact so middle-click and
+ * open-in-new-tab continue to work like normal links.
+ */
+
 export type NavItem = readonly [ActivePanel, string, LucideIcon];
 export type NavGroup = { id: string; label: string; items: readonly NavItem[] };
 
@@ -59,6 +67,8 @@ export const DEFAULT_SIDEBAR_GROUPS = Object.fromEntries(NAV_GROUPS.map((group) 
 
 export function urlPanel(): ActivePanel | null {
   const panel = new URLSearchParams(window.location.search).get("page");
+  // Legacy routes from earlier releases should land on the replacement dashboard
+  // instead of leaving users on a removed page.
   if (panel === "buildings" || panel === "overview") return "dashboard";
   return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
 }

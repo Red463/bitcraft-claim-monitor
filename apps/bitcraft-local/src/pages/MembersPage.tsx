@@ -25,6 +25,14 @@ import { normalizeData } from "../utils/normalize";
 
 const API = "/api/bitjita";
 
+/**
+ * Settlement roster and member-detail view.
+ *
+ * Summary rows come from the normalized claim/member payload, while the detail
+ * pane may fetch extra BitJita player data for equipment, tools, sessions, and
+ * passive crafts. Keep those detail fetches optional because BitJita can return
+ * partial player data during API blips.
+ */
 export function Members({
   data,
   selectedMemberId,

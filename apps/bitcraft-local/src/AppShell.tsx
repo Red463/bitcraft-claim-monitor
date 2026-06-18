@@ -128,6 +128,7 @@ import { Research } from "./pages/ResearchPage";
 import { Region } from "./pages/RegionPage";
 import { Skills } from "./pages/SkillsPage";
 import { SyncPanel } from "./pages/SyncPage";
+import { WikiApp } from "./pages/WikiPage";
 import { ActivityPanel, Dashboard, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder, activityNoticeKey, activitySummary, toastItemFromActivity, type MapFocus } from "./pages/MainPages";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {
@@ -164,6 +165,16 @@ import {
   type ThemeSettings,
 } from "./theme";
 
+/*
+ * Top-level browser application shell.
+ *
+ * This module coordinates the public claim monitor, the admin console, and the
+ * dedicated /bot dashboard route. Page-level rendering has mostly been moved to
+ * focused modules, but cross-cutting state remains here because routing,
+ * persisted browser settings, auth, analytics consent, notifications, and the
+ * current BitJita payload all need to meet in one place.
+ */
+
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
@@ -172,6 +183,13 @@ const APP_VERSION = packageJson.version;
 
 type ToastOptions = { occurredAt?: string; sourceKey?: string };
 
+/**
+ * Browser-local preferences dialog.
+ *
+ * These settings intentionally follow the browser rather than the installation:
+ * density, toast preferences, page defaults, linked account controls, and custom
+ * themes should not be written into global admin configuration.
+ */
 function UserSettingsDialog({
   density,
   onDensityChange,
@@ -562,6 +580,13 @@ function bytesLabel(value: unknown) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Admin console for installation-wide settings and diagnostics.
+ *
+ * Admin-only mutations, scheduled job controls, database inspection, analytics,
+ * and Discord/bot configuration all enter through this component. The server
+ * still enforces permissions; this component is only the management UI.
+ */
 function AdminPanel({
   settings,
   members = [],
@@ -633,6 +658,8 @@ function AdminPanel({
     setDiscordToolResults((current) => ({ ...current, [botSection]: result }));
   }, [botSection]);
 
+  // Centralise admin API calls so CSRF headers, JSON parsing, and readable error
+  // handling stay consistent across a large number of admin tabs.
   async function api(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
@@ -680,6 +707,9 @@ function AdminPanel({
   }
 
   async function collectNowWithLiveStatus() {
+    // Manual collection can run for long enough that a static button looks
+    // broken. Polling status while it runs gives admins live feedback without
+    // changing the collector implementation.
     let timer: number | null = window.setInterval(() => {
       void refreshStatus().catch(() => undefined);
     }, 1000);
@@ -2430,6 +2460,12 @@ function AdminPanel({
   );
 }
 
+/**
+ * Main public application route.
+ *
+ * This component owns public navigation, BitJita refreshes, browser-local
+ * preferences, user Discord auth state, notifications, and page composition.
+ */
 function DashboardApp() {
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
   const mainRef = React.useRef<HTMLElement | null>(null);
@@ -2468,6 +2504,9 @@ function DashboardApp() {
   const state = useBitjitaData(refreshToken, claimId, active);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
+    // BitJita payloads vary by endpoint. Normalize them once here, then apply
+    // the admin-controlled member visibility filter before any page receives
+    // app data.
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
@@ -2636,6 +2675,8 @@ function DashboardApp() {
   }, [browserTheme]);
   React.useEffect(() => {
     if (consent !== "accepted") return;
+    // Analytics are first-party and consent-gated. Duration is sent on page exit
+    // so feature usage can be measured without tracking identifiable users.
     trackAnalyticsEvent("page_view", undefined, undefined, active);
     const enteredAt = Date.now();
     let recorded = false;
@@ -2682,6 +2723,8 @@ function DashboardApp() {
     if (!notificationActivity.refreshToken) return;
     const knownIds = notificationActivity.events.map((event) => String(event.id));
     if (activityNoticeIdsRef.current == null) {
+      // Seed from existing history so opening the app does not replay old market
+      // or activity rows as fresh toast notifications.
       activityNoticeIdsRef.current = new Set(knownIds);
       return;
     }
@@ -2706,6 +2749,8 @@ function DashboardApp() {
     const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
     const previous = craftQueueRef.current;
     if (!previous || previous.claimId !== claimId) {
+      // Establish the initial craft baseline per claim. Only jobs that appear
+      // after this point should produce local toast notifications.
       craftQueueRef.current = { claimId, jobs: current };
       return;
     }
@@ -2913,6 +2958,12 @@ function DashboardApp() {
   );
 }
 
+/**
+ * Dedicated bot dashboard route.
+ *
+ * This keeps bot administration separate from the public app while still using
+ * the same AdminPanel implementation and server-side admin permissions.
+ */
 function BotControlApp() {
   const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = React.useState(true);
@@ -2940,8 +2991,12 @@ function BotControlApp() {
 export default function App() {
   const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
+  const dedicatedWikiPath = window.location.pathname === "/wiki" || window.location.pathname.startsWith("/wiki/");
+  // Route-level branching happens before mounting DashboardApp so legal pages
+  // the wiki, and the bot console do not initialise public page data unnecessarily.
   if (dedicatedLegalPath) return <DedicatedLegalPage type={dedicatedLegalPath} />;
   if (dedicatedBotPath) return <BotControlApp />;
+  if (dedicatedWikiPath) return <WikiApp />;
   return <DashboardApp />;
 }
 

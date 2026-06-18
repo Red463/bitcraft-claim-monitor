@@ -2,6 +2,14 @@ import React from "react";
 import type { AnyRecord } from "../../main-app-data";
 import { compareSortValues, type SortDirection } from "../../utils/tableSort";
 
+/*
+ * Small generic sortable table used by several operational pages.
+ *
+ * Columns render React nodes for display, then cellSortText derives a stable
+ * string for sorting. That keeps callers simple while preserving deterministic
+ * ordering for badges, links, and nested label components.
+ */
+
 function cellSortText(value: React.ReactNode): string {
   if (value == null || typeof value === "boolean") return "";
   if (typeof value === "string" || typeof value === "number") return String(value);

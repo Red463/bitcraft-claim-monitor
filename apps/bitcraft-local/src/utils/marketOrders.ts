@@ -1,3 +1,6 @@
+// Buy-order helpers keep market tool behaviour consistent between the server
+// collector and the frontend table. BitJita has used several field names for the
+// same concepts over time, so normalization accepts the known variants here.
 export type NormalizedBuyOrder = {
   id: string;
   itemId: string;
@@ -48,6 +51,8 @@ function timestampMs(value: unknown): number {
 }
 
 export function normalizeBuyOrder(order: Record<string, unknown>, itemTypeFallback = 0): NormalizedBuyOrder {
+  // priceThreshold is the important BitJita buy-order field: it is the maximum
+  // unit price the buyer is willing to pay, which the app presents as unit price.
   const unitPrice = toNumber(order.priceThreshold ?? order.unitPrice ?? order.price);
   const quantity = toNumber(order.quantity);
   const totalValue = unitPrice * quantity;
@@ -72,6 +77,8 @@ export function normalizeBuyOrder(order: Record<string, unknown>, itemTypeFallba
 }
 
 export function sortBuyOrdersByBestPrice(orders: NormalizedBuyOrder[]) {
+  // The default "best" sort favours highest price first, then deeper demand, then
+  // newest listing where timestamps are available.
   return [...orders].sort((a, b) => b.unitPrice - a.unitPrice || b.quantity - a.quantity || timestampMs(b.listedAt) - timestampMs(a.listedAt));
 }
 

@@ -5,6 +5,13 @@ import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "
 
 const LOCAL_API = "/api/local";
 
+/**
+ * Loads locally recorded history that BitJita does not provide directly.
+ *
+ * Live page data still comes from BitJita/proxy calls, but activity history,
+ * snapshots, dashboard trend data, and market history are built from SQLite
+ * records captured by the local server.
+ */
 export function useLocalHistory(refreshToken: number, claimId: string, activePanel: ActivePanel): LocalHistoryState {
   const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], dashboard: null, error: null, refreshToken: 0 });
 
@@ -53,6 +60,8 @@ export function useNotificationActivity(refreshToken: number, claimId: string): 
         const response = await fetch(`${LOCAL_API}/notification-activity?claimId=${encodeURIComponent(claimId)}&limit=120`, { signal: controller.signal });
         if (!response.ok) throw new Error(`notification activity HTTP ${response.status}`);
         const payload = await response.json();
+        // This endpoint is intentionally page-independent so market/activity
+        // toast notifications continue to work no matter which page is open.
         setState((prev) => ({
           events: payload.events ?? [],
           total: toNumber(payload.total ?? payload.events?.length),

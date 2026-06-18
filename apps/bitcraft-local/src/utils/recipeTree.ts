@@ -1,5 +1,9 @@
 import type { AnyRecord } from "../main-app-data";
 
+// Craft Calculator recipe planning lives here so the page can stay focused on
+// search/selection UI. BitJita exposes multiple recipe families and sometimes
+// package/unpack routes; this module normalizes those into a deterministic plan
+// without inventing missing recipe data.
 export type RecipeKind = "items" | "cargo";
 
 export type RecipeTarget = {
@@ -116,6 +120,9 @@ export function isUnpackRecipe(recipe: AnyRecord) {
 }
 
 function recipeSortScore(recipe: AnyRecord) {
+  // Package/unpack routes are usually convenience conversions, not the actual
+  // production chain users expect. Penalising them keeps raw-resource processing
+  // as the default while still allowing users to select an alternate route.
   const packagePenalty = isUnpackRecipe(recipe) ? 10000 : 0;
   const passivePenalty = recipe.isPassive ? 10 : 0;
   return packagePenalty + passivePenalty + recipeInputs(recipe).length;
@@ -138,6 +145,14 @@ export function selectedRecipeForTarget(detail: RecipeDetail, target: RecipeTarg
   return recipes.find((recipe) => recipeId(recipe) === selectedId) ?? recipes[0];
 }
 
+/**
+ * Builds a recursive material plan for the requested target.
+ *
+ * `detailsByKey` must contain BitJita recipe detail responses keyed by
+ * `items:<id>` or `cargo:<id>`. Missing details are treated as source materials
+ * rather than guessed, because showing a wrong recipe tree is worse than showing
+ * an incomplete one.
+ */
 export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByKey: Map<string, RecipeDetail>, maxDepth = 14, selections: RecipeSelections = {}): RecipePlan {
   const raw = new Map<string, RecipeMaterial>();
   let directMaterials: RecipeMaterial[] = [];
@@ -155,11 +170,16 @@ export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByK
     const key = recipeKey(nextTarget.kind, nextTarget.id);
     const detail = detailsByKey.get(key);
     if (!detail) {
+      // The calculator only expands items BitJita can describe. Source materials
+      // and unavailable endpoints stop here by design.
       addRaw({ ...nextTarget, quantity });
       warnings.push(`No recipe data was available for ${nextTarget.name}; it was treated as a source material.`);
       return { ...nextTarget, quantity };
     }
     if (depth > maxDepth || stack.includes(key)) {
+      // Recipe data can contain loops through conversion/package chains. The
+      // depth and stack checks make the failure explicit instead of freezing the
+      // UI or returning an infinite plan.
       addRaw({ ...nextTarget, quantity });
       warnings.push(`Recipe chain for ${nextTarget.name} was stopped to avoid a loop or excessive depth.`);
       return { ...nextTarget, quantity };

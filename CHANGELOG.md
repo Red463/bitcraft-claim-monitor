@@ -8,9 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.55] - 2026-06-18
+
 ### Added
 
 - Added a public BitCraft server mechanics guide with source-backed notes on claim treasury, crafting XP, gathering, loot, research, market state, and unconfirmed mechanics.
+- Added a public `/wiki` knowledge base with admin-editable guide pages and generated recipe/output reference entries from local discovery data.
 
 ## [1.0.0-beta.54] - 2026-06-18
 

@@ -17,6 +17,10 @@ import { unique } from "./array";
 import { NAV } from "../navigation";
 import { toNumber, type AnyRecord } from "../main-app-data";
 
+// Settings are stored as JSON in SQLite and are also edited locally in several
+// admin/browser dialogs. This module is the compatibility layer that merges
+// older saved shapes with current defaults before the rest of the app consumes
+// them.
 export function uniqueKey(prefix = "colour"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -96,6 +100,9 @@ export function normalizeDiscordPresence(value: AnyRecord = {}): DiscordPresence
 }
 
 export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
+  // Keep this tolerant of missing/narrow legacy shapes: self-hosted installs can
+  // jump across many beta versions, and invalid settings should fall back to a
+  // safe default rather than breaking the Admin page.
   const savedColourRoles = Array.isArray((config as AnyRecord)?.discord?.colourRoles) ? (config as AnyRecord).discord.colourRoles : null;
   const savedRolePanels = Array.isArray((config as AnyRecord)?.discord?.rolePanels) ? (config as AnyRecord).discord.rolePanels : null;
   const excludedMemberIds = Array.isArray((config as AnyRecord)?.excludedMemberIds)

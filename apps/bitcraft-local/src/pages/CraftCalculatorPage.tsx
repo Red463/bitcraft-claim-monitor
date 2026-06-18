@@ -8,6 +8,15 @@ import { MiniStat } from "../components/main/Stats";
 import { formatNumber } from "../utils/format";
 import { itemTypeFromKind, isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
+/*
+ * Craft Calculator page.
+ *
+ * The calculator builds a recursive recipe plan from BitJita recipe detail data.
+ * Recipe details are fetched through local endpoints so the server can use its
+ * catalog cache and rate limiting. Package/unpack recipes remain selectable,
+ * but normal material-processing routes are preferred by default.
+ */
+
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const RECIPE_DETAIL_CACHE_MS = 30 * 60 * 1000;
@@ -132,6 +141,8 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
     details.set(key, detail);
     const recipe = selectedRecipeForTarget(detail, normalizedTarget, selections);
     if (!recipe) return;
+    // Recursing only through the selected recipe keeps multi-route items stable:
+    // changing a route dropdown rebuilds the tree from that specific choice.
     const inputStacks: AnyRecord[] = Array.isArray(recipe.consumedItemStacks) ? recipe.consumedItemStacks : [];
     const displays: AnyRecord[] = Array.isArray(recipe.consumedItems) ? recipe.consumedItems : [];
     for (let index = 0; index < inputStacks.length; index += 1) {

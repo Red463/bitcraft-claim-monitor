@@ -1,5 +1,8 @@
 import React from "react";
 
+// Bot dashboard sections are lazy-loaded behind the `/bot` route so ordinary app
+// users do not pay the upfront cost of Discord moderation/configuration UI. Keep
+// new bot-only sections in this folder rather than moving them back into AppShell.
 export const BotSectionNav = React.lazy(() => import("./BotSectionNav").then((module) => ({ default: module.BotSectionNav })));
 export const DiscordChannelsSection = React.lazy(() => import("./DiscordChannelsSection").then((module) => ({ default: module.DiscordChannelsSection })));
 export const DiscordColourRolesSection = React.lazy(() => import("./DiscordColourRolesSection").then((module) => ({ default: module.DiscordColourRolesSection })));
