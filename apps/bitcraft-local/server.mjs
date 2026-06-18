@@ -255,54 +255,6 @@ db.exec(`
     last_error TEXT,
     updated_at TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS wiki_pages (
-    slug TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    summary TEXT,
-    body_markdown TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'manual',
-    published INTEGER NOT NULL DEFAULT 1,
-    generated INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    updated_by TEXT
-  );
-  CREATE TABLE IF NOT EXISTS wiki_page_revisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    slug TEXT NOT NULL,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    summary TEXT,
-    body_markdown TEXT NOT NULL,
-    source TEXT NOT NULL,
-    published INTEGER NOT NULL,
-    generated INTEGER NOT NULL,
-    edited_at TEXT NOT NULL,
-    edited_by TEXT
-  );
-  CREATE TABLE IF NOT EXISTS wiki_generated_entries (
-    entry_key TEXT PRIMARY KEY,
-    slug TEXT NOT NULL,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    entry_type TEXT NOT NULL,
-    summary TEXT,
-    body_markdown TEXT NOT NULL,
-    search_text TEXT NOT NULL,
-    source TEXT NOT NULL,
-    source_ref TEXT,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS wiki_generation_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source TEXT NOT NULL,
-    entries_count INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT NOT NULL,
-    finished_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    message TEXT
-  );
   CREATE TABLE IF NOT EXISTS production_jobs (
     job_key TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
@@ -493,9 +445,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
-  CREATE INDEX IF NOT EXISTS idx_wiki_pages_category ON wiki_pages (published, category, updated_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_wiki_generated_category ON wiki_generated_entries (category, entry_type, updated_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_wiki_generated_search ON wiki_generated_entries (search_text);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
 `);
 
@@ -741,57 +690,6 @@ const statements = {
       updated_at = excluded.updated_at
   `),
   updateRecipeCatalogError: db.prepare("UPDATE recipe_catalog_entries SET last_error = ?, updated_at = ? WHERE catalog_key = ?"),
-  listWikiPagesPublic: db.prepare("SELECT slug, title, category, summary, source, published, generated, updated_at, updated_by FROM wiki_pages WHERE published = 1 ORDER BY category COLLATE NOCASE, title COLLATE NOCASE"),
-  listWikiPagesAdmin: db.prepare("SELECT slug, title, category, summary, source, published, generated, updated_at, updated_by FROM wiki_pages ORDER BY category COLLATE NOCASE, title COLLATE NOCASE"),
-  getWikiPagePublic: db.prepare("SELECT * FROM wiki_pages WHERE slug = ? AND published = 1"),
-  getWikiPageAdmin: db.prepare("SELECT * FROM wiki_pages WHERE slug = ?"),
-  upsertWikiPage: db.prepare(`
-    INSERT INTO wiki_pages (slug, title, category, summary, body_markdown, source, published, generated, created_at, updated_at, updated_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(slug) DO UPDATE SET
-      title = excluded.title,
-      category = excluded.category,
-      summary = excluded.summary,
-      body_markdown = excluded.body_markdown,
-      source = excluded.source,
-      published = excluded.published,
-      generated = excluded.generated,
-      updated_at = excluded.updated_at,
-      updated_by = excluded.updated_by
-  `),
-  insertWikiRevision: db.prepare(`
-    INSERT INTO wiki_page_revisions (slug, title, category, summary, body_markdown, source, published, generated, edited_at, edited_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  listWikiRevisions: db.prepare("SELECT id, slug, title, category, summary, source, published, generated, edited_at, edited_by FROM wiki_page_revisions WHERE slug = ? ORDER BY id DESC LIMIT 20"),
-  upsertWikiGeneratedEntry: db.prepare(`
-    INSERT INTO wiki_generated_entries (entry_key, slug, title, category, entry_type, summary, body_markdown, search_text, source, source_ref, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(entry_key) DO UPDATE SET
-      slug = excluded.slug,
-      title = excluded.title,
-      category = excluded.category,
-      entry_type = excluded.entry_type,
-      summary = excluded.summary,
-      body_markdown = excluded.body_markdown,
-      search_text = excluded.search_text,
-      source = excluded.source,
-      source_ref = excluded.source_ref,
-      updated_at = excluded.updated_at
-  `),
-  searchWikiGeneratedEntries: db.prepare(`
-    SELECT entry_key, slug, title, category, entry_type, summary, source, source_ref, updated_at
-    FROM wiki_generated_entries
-    WHERE (? = '' OR search_text LIKE ?)
-      AND (? = '' OR category = ?)
-    ORDER BY category COLLATE NOCASE, title COLLATE NOCASE
-    LIMIT ?
-  `),
-  getWikiGeneratedEntry: db.prepare("SELECT * FROM wiki_generated_entries WHERE entry_key = ? OR slug = ?"),
-  wikiGeneratedCount: db.prepare("SELECT COUNT(*) AS count FROM wiki_generated_entries"),
-  wikiGeneratedCategories: db.prepare("SELECT category, COUNT(*) AS count FROM wiki_generated_entries GROUP BY category ORDER BY category COLLATE NOCASE"),
-  insertWikiGenerationRun: db.prepare("INSERT INTO wiki_generation_runs (source, entries_count, started_at, finished_at, status, message) VALUES (?, ?, ?, ?, ?, ?)"),
-  lastWikiGenerationRun: db.prepare("SELECT * FROM wiki_generation_runs ORDER BY id DESC LIMIT 1"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
@@ -1105,228 +1003,6 @@ async function recipeDetailFromCatalogOrFetch(target) {
     lastError: null,
   };
 }
-
-function wikiSlug(value) {
-  return String(value ?? "wiki")
-    .toLowerCase()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120) || "wiki";
-}
-
-function wikiSummary(markdown) {
-  const cleaned = String(markdown ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^#+\s*/, "").trim())
-    .filter((line) => line && !line.startsWith("```") && !line.startsWith("|"));
-  return cleaned.slice(0, 2).join(" ").slice(0, 220);
-}
-
-function seedWikiPages() {
-  const now = new Date().toISOString();
-  const docs = [
-    ["mechanics-guide", "BitCraft Mechanics Guide", "Mechanics", "docs/bitcraft-mechanics-guide.md"],
-    ["hidden-mechanics", "Hidden Mechanics Findings", "Mechanics", "docs/bitcraft-hidden-mechanics-report.md"],
-    ["live-db-inspection", "Live DB Inspection Notes", "Data Sources", "docs/bitcraft-live-db-inspection.md"],
-    ["unconfirmed-mechanics", "Unconfirmed Mechanics", "Research Notes", "docs/bitcraft-mechanics-unconfirmed.md"],
-    ["mechanics-sources", "Mechanics Source Notes", "Data Sources", "docs/bitcraft-mechanics-guide-sources.md"],
-  ];
-  for (const [slug, title, category, relativePath] of docs) {
-    if (statements.getWikiPageAdmin.get(slug)) continue;
-    const filePath = path.join(repoRoot, relativePath);
-    if (!existsSync(filePath)) continue;
-    const body = readFileSync(filePath, "utf8");
-    statements.upsertWikiPage.run(slug, title, category, wikiSummary(body), body, relativePath, 1, 0, now, now, "system");
-  }
-}
-
-function latestDumpTablesDir() {
-  const dumpsRoot = path.join(repoRoot, ".dev-data", "bitcraft-live-db", "dumps");
-  if (!existsSync(dumpsRoot)) return null;
-  const candidates = [];
-  const dumpDirs = readdirSync(dumpsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(dumpsRoot, entry.name))
-    .sort()
-    .reverse();
-  for (const dumpDir of dumpDirs) {
-    const regionalDirs = readdirSync(dumpDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith("bitcraft-live-"))
-      .map((entry) => path.join(dumpDir, entry.name, "tables"));
-    for (const tablesDir of regionalDirs) {
-      if (!existsSync(tablesDir)) continue;
-      const hasStaticRecipes = existsSync(path.join(tablesDir, "crafting_recipe_desc.json")) || existsSync(path.join(tablesDir, "item_list_desc.json"));
-      candidates.push({ tablesDir, hasStaticRecipes });
-    }
-  }
-  return candidates.find((candidate) => candidate.hasStaticRecipes)?.tablesDir ?? candidates[0]?.tablesDir ?? null;
-}
-
-function readDumpTable(tablesDir, tableName) {
-  if (!tablesDir) return [];
-  const filePath = path.join(tablesDir, `${tableName}.json`);
-  if (!existsSync(filePath)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function indexById(rows) {
-  const map = new Map();
-  for (const row of rows) {
-    const id = row?.id ?? row?.entity_id;
-    if (id != null) map.set(String(id), row);
-  }
-  return map;
-}
-
-function wikiNamedThing(id, itemById, cargoById, listById) {
-  const key = String(id ?? "");
-  const item = itemById.get(key);
-  if (item) return { id: key, name: item.name ?? `Item ${key}`, kind: "Item", tier: item.tier, tag: item.tag };
-  const cargo = cargoById.get(key);
-  if (cargo) return { id: key, name: cargo.name ?? `Cargo ${key}`, kind: "Cargo", tier: cargo.tier, tag: cargo.tag };
-  const list = listById.get(key);
-  if (list) return { id: key, name: list.name ?? `Output List ${key}`, kind: "Output table", tier: null, tag: "Variable output" };
-  return { id: key, name: `Unknown ${key}`, kind: "Unknown", tier: null, tag: null };
-}
-
-function wikiStackLabel(stack, itemById, cargoById, listById) {
-  const id = Array.isArray(stack) ? stack[0] : stack?.id;
-  const quantity = Array.isArray(stack) ? stack[1] : stack?.quantity;
-  const thing = wikiNamedThing(id, itemById, cargoById, listById);
-  return `${Number(quantity ?? 1).toLocaleString()} x ${thing.name} (${thing.kind} ${thing.id})`;
-}
-
-function recipeDumpMarkdown(recipe, itemById, cargoById, listById) {
-  const inputs = Array.isArray(recipe.consumed_item_stacks) ? recipe.consumed_item_stacks : [];
-  const outputs = Array.isArray(recipe.crafted_item_stacks) ? recipe.crafted_item_stacks : [];
-  const lines = [
-    `# ${recipe.name ?? `Recipe ${recipe.id}`}`,
-    "",
-    `Recipe id: \`${recipe.id}\``,
-    `Actions required: ${toNumber(recipe.actions_required).toLocaleString()}`,
-    `Time requirement: ${toNumber(recipe.time_requirement).toLocaleString()}s`,
-    "",
-    "## Inputs",
-    ...(inputs.length ? inputs.map((stack) => `- ${wikiStackLabel(stack, itemById, cargoById, listById)}`) : ["- No consumed item stack listed."]),
-    "",
-    "## Outputs",
-    ...(outputs.length ? outputs.map((stack) => `- ${wikiStackLabel(stack, itemById, cargoById, listById)}`) : ["- No crafted item stack listed."]),
-  ];
-  const variableOutputs = outputs
-    .map((stack) => listById.get(String(Array.isArray(stack) ? stack[0] : stack?.id)))
-    .filter(Boolean);
-  for (const outputList of variableOutputs) {
-    lines.push("", `## Variable Output: ${outputList.name ?? outputList.id}`);
-    const possibilities = Array.isArray(outputList.possibilities) ? outputList.possibilities : [];
-    for (const [chance, stacks] of possibilities) {
-      lines.push(`- ${Math.round(Number(chance ?? 0) * 10000) / 100}% chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, listById)).join(", ") || "nothing listed"}`);
-    }
-  }
-  lines.push("", "## Source", "Generated from local SpacetimeDB table dumps when available. These values reflect observed public table data and should be treated as game-data references, not app-authored balance rules.");
-  return lines.join("\n");
-}
-
-function listDumpMarkdown(list, itemById, cargoById) {
-  const lines = [`# ${list.name ?? `Output Table ${list.id}`}`, "", `Output table id: \`${list.id}\``, "", "## Possibilities"];
-  const possibilities = Array.isArray(list.possibilities) ? list.possibilities : [];
-  for (const [chance, stacks] of possibilities) {
-    lines.push(`- ${Math.round(Number(chance ?? 0) * 10000) / 100}% chance: ${(Array.isArray(stacks) ? stacks : []).map((stack) => wikiStackLabel(stack, itemById, cargoById, new Map())).join(", ") || "nothing listed"}`);
-  }
-  return lines.join("\n");
-}
-
-function refreshWikiGeneratedEntries(source = "manual") {
-  const startedAt = new Date().toISOString();
-  let entries = 0;
-  try {
-    const now = new Date().toISOString();
-    const recipeRows = statements.listRecipeCatalogEntries.all(2000);
-    for (const row of recipeRows) {
-      const detail = safeJson(row.detail_json, {});
-      const title = row.name ? `${row.name} recipe detail` : `Recipe detail ${row.catalog_key}`;
-      const body = [`# ${title}`, "", `Catalog key: \`${row.catalog_key}\``, `Source: ${row.source}`, "", "## Cached BitJita Detail", "```json", JSON.stringify(detail, null, 2), "```"].join("\n");
-      statements.upsertWikiGeneratedEntry.run(
-        `recipe-catalog:${row.catalog_key}`,
-        `recipes/${wikiSlug(row.name ?? row.catalog_key)}-${wikiSlug(row.target_id)}`,
-        title,
-        "Recipes",
-        "recipe-catalog",
-        wikiSummary(body),
-        body,
-        `${title} ${row.kind} ${row.target_id} ${row.tag ?? ""}`.toLowerCase(),
-        "recipe_catalog_entries",
-        row.catalog_key,
-        now,
-      );
-      entries += 1;
-    }
-
-    const tablesDir = latestDumpTablesDir();
-    if (tablesDir) {
-      const itemById = indexById(readDumpTable(tablesDir, "item_desc"));
-      const cargoById = indexById(readDumpTable(tablesDir, "cargo_desc"));
-      const listById = indexById(readDumpTable(tablesDir, "item_list_desc"));
-      for (const recipe of readDumpTable(tablesDir, "crafting_recipe_desc")) {
-        const title = String(recipe.name ?? `Recipe ${recipe.id}`).replace(/\{0\}/g, "item");
-        const body = recipeDumpMarkdown(recipe, itemById, cargoById, listById);
-        statements.upsertWikiGeneratedEntry.run(
-          `crafting-recipe:${recipe.id}`,
-          `recipes/${wikiSlug(title)}-${recipe.id}`,
-          title,
-          "Recipes",
-          "crafting-recipe",
-          wikiSummary(body),
-          body,
-          `${title} ${body}`.toLowerCase().slice(0, 20000),
-          "crafting_recipe_desc",
-          String(recipe.id),
-          now,
-        );
-        entries += 1;
-      }
-      for (const list of readDumpTable(tablesDir, "item_list_desc")) {
-        const title = list.name ?? `Output Table ${list.id}`;
-        const body = listDumpMarkdown(list, itemById, cargoById);
-        statements.upsertWikiGeneratedEntry.run(
-          `item-list:${list.id}`,
-          `outputs/${wikiSlug(title)}-${list.id}`,
-          title,
-          "Output Chances",
-          "item-list",
-          wikiSummary(body),
-          body,
-          `${title} ${body}`.toLowerCase().slice(0, 20000),
-          "item_list_desc",
-          String(list.id),
-          now,
-        );
-        entries += 1;
-      }
-    }
-
-    const finishedAt = new Date().toISOString();
-    statements.insertWikiGenerationRun.run(source, entries, startedAt, finishedAt, "success", null);
-    return { entries, startedAt, finishedAt, status: "success" };
-  } catch (error) {
-    const finishedAt = new Date().toISOString();
-    const message = error instanceof Error ? error.message : String(error);
-    statements.insertWikiGenerationRun.run(source, entries, startedAt, finishedAt, "failed", message);
-    return { entries, startedAt, finishedAt, status: "failed", message };
-  }
-}
-
-function bootstrapWiki() {
-  seedWikiPages();
-  if (toNumber(statements.wikiGeneratedCount.get()?.count) === 0) refreshWikiGeneratedEntries("startup");
-}
-
-bootstrapWiki();
 
 async function runRecipeCatalogRefreshJob() {
   const limit = Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_REFRESH_LIMIT ?? 250), 1000));
@@ -3290,7 +2966,6 @@ function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
   if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
-  if (pathname.startsWith("/api/local/admin/wiki")) return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/branding") return "settings.manage";
   if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
   if (pathname === "/api/local/admin/sessions/clear") return "users.manage";
@@ -8512,45 +8187,6 @@ const server = createServer(async (req, res) => {
       return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
-    if (req.method === "GET" && url.pathname === "/api/local/wiki") {
-      const pages = statements.listWikiPagesPublic.all();
-      const generatedCategories = statements.wikiGeneratedCategories.all().map((row) => ({ category: row.category, count: toNumber(row.count) }));
-      const categories = Array.from(new Set([...pages.map((page) => page.category), ...generatedCategories.map((row) => row.category)])).sort((a, b) => a.localeCompare(b));
-      return send(res, 200, {
-        pages,
-        categories,
-        generatedCategories,
-        generatedCount: toNumber(statements.wikiGeneratedCount.get()?.count),
-        lastGeneration: statements.lastWikiGenerationRun.get() ?? null,
-      });
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/wiki/page") {
-      const slug = String(url.searchParams.get("slug") ?? "").trim();
-      if (!slug) return send(res, 400, { error: "Wiki page slug is required" });
-      const page = statements.getWikiPagePublic.get(slug);
-      if (!page) return send(res, 404, { error: "Wiki page not found" });
-      return send(res, 200, { page });
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/wiki/generated") {
-      const key = String(url.searchParams.get("key") ?? "").trim();
-      if (!key) return send(res, 400, { error: "Generated wiki entry key is required" });
-      const entry = statements.getWikiGeneratedEntry.get(key, key);
-      if (!entry) return send(res, 404, { error: "Generated wiki entry not found" });
-      return send(res, 200, { entry });
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/wiki/search") {
-      const query = String(url.searchParams.get("q") ?? "").trim().toLowerCase();
-      const category = String(url.searchParams.get("category") ?? "").trim();
-      const limit = Math.max(1, Math.min(toNumber(url.searchParams.get("limit") ?? 50), 100));
-      const like = query ? `%${query.replace(/[%_]/g, "")}%` : "";
-      const pages = statements.listWikiPagesPublic.all().filter((page) => {
-        if (category && page.category !== category) return false;
-        if (!query) return true;
-        return `${page.title} ${page.summary ?? ""} ${page.category}`.toLowerCase().includes(query);
-      }).slice(0, limit);
-      const generated = statements.searchWikiGeneratedEntries.all(query, like, category, category, limit);
-      return send(res, 200, { pages, generated });
-    }
     if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
       try {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
@@ -8704,49 +8340,6 @@ const server = createServer(async (req, res) => {
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
-      if (req.method === "GET" && url.pathname === "/api/local/admin/wiki/pages") {
-        return send(res, 200, { pages: statements.listWikiPagesAdmin.all(), lastGeneration: statements.lastWikiGenerationRun.get() ?? null });
-      }
-      if (req.method === "GET" && url.pathname === "/api/local/admin/wiki/page") {
-        const slug = String(url.searchParams.get("slug") ?? "").trim();
-        if (!slug) return send(res, 400, { error: "Wiki page slug is required" });
-        const page = statements.getWikiPageAdmin.get(slug);
-        if (!page) return send(res, 404, { error: "Wiki page not found" });
-        return send(res, 200, { page, revisions: statements.listWikiRevisions.all(slug) });
-      }
-      if (req.method === "PUT" && url.pathname === "/api/local/admin/wiki/page") {
-        const body = await readJson(req, BODY_LIMITS.json);
-        const slug = wikiSlug(body.slug ?? body.title);
-        const title = String(body.title ?? "").trim();
-        const category = String(body.category ?? "General").trim() || "General";
-        const summary = String(body.summary ?? "").trim() || null;
-        const bodyMarkdown = String(body.bodyMarkdown ?? body.body_markdown ?? "").trim();
-        if (!slug || !title || !bodyMarkdown) return send(res, 400, { error: "Wiki slug, title and body are required" });
-        const now = new Date().toISOString();
-        const previous = statements.getWikiPageAdmin.get(slug);
-        if (previous) {
-          statements.insertWikiRevision.run(
-            previous.slug,
-            previous.title,
-            previous.category,
-            previous.summary,
-            previous.body_markdown,
-            previous.source,
-            previous.published,
-            previous.generated,
-            now,
-            user.username,
-          );
-        }
-        statements.upsertWikiPage.run(slug, title, category, summary, bodyMarkdown, "admin", body.published === false ? 0 : 1, 0, previous?.created_at ?? now, now, user.username);
-        audit(user, previous ? "wiki.page.update" : "wiki.page.create", { slug, title, category });
-        return send(res, 200, { page: statements.getWikiPageAdmin.get(slug), revisions: statements.listWikiRevisions.all(slug) });
-      }
-      if (req.method === "POST" && url.pathname === "/api/local/admin/wiki/generate") {
-        const result = refreshWikiGeneratedEntries(`admin:${user.username}`);
-        audit(user, "wiki.generated.refresh", result);
-        return send(res, result.status === "success" ? 200 : 500, { result, generatedCount: toNumber(statements.wikiGeneratedCount.get()?.count), lastGeneration: statements.lastWikiGenerationRun.get() ?? null });
-      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/jobs") return send(res, 200, scheduledJobsStatus());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/jobs") {
         const body = await readJson(req, BODY_LIMITS.json);

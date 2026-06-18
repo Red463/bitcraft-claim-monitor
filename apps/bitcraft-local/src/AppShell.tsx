@@ -128,7 +128,6 @@ import { Research } from "./pages/ResearchPage";
 import { Region } from "./pages/RegionPage";
 import { Skills } from "./pages/SkillsPage";
 import { SyncPanel } from "./pages/SyncPage";
-import { WikiApp } from "./pages/WikiPage";
 import { ActivityPanel, Dashboard, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder, activityNoticeKey, activitySummary, toastItemFromActivity, type MapFocus } from "./pages/MainPages";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {
@@ -2991,12 +2990,10 @@ function BotControlApp() {
 export default function App() {
   const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
-  const dedicatedWikiPath = window.location.pathname === "/wiki" || window.location.pathname.startsWith("/wiki/");
   // Route-level branching happens before mounting DashboardApp so legal pages
-  // the wiki, and the bot console do not initialise public page data unnecessarily.
+  // and the bot console do not initialise public page data unnecessarily.
   if (dedicatedLegalPath) return <DedicatedLegalPage type={dedicatedLegalPath} />;
   if (dedicatedBotPath) return <BotControlApp />;
-  if (dedicatedWikiPath) return <WikiApp />;
   return <DashboardApp />;
 }
 

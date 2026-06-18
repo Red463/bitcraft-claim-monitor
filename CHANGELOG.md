@@ -8,6 +8,19 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.57] - 2026-06-18
+
+### Removed
+
+- Removed the public `/wiki` knowledge base, related API endpoints, generated wiki data setup, route handling, page component, and styles after the feature caused app instability.
+
+## [1.0.0-beta.56] - 2026-06-18
+
+### Changed
+
+- Redesigned the public wiki into a player-facing game wiki with guide cards, searchable item, cargo, recipe, profession, and output-reference entries.
+- Improved wiki generation so it built friendly pages from the newest available local game data tables instead of exposing raw cached recipe JSON.
+
 ## [1.0.0-beta.55] - 2026-06-18
 
 ### Added
