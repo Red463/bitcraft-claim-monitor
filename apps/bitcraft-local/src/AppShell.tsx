@@ -2904,6 +2904,7 @@ function DashboardApp() {
         />
       </aside>
       <main ref={mainRef}>
+        <div className={`page-refresh-line ${state.loading ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />

@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.62] - 2026-06-19
+
+### Changed
+
+- Added a subtle top-edge refresh progress line while keeping the sidebar as the main refresh status indicator.
+
 ## [1.0.0-beta.61] - 2026-06-19
 
 ### Changed

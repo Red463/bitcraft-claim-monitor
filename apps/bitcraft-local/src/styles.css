@@ -205,7 +205,31 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .refresh-status .refresh-dot { margin: 0 auto; }
 .sidebar-collapsed .refresh-breakdown { left: calc(100% + 10px); bottom: 0; transform: translateX(-6px); }
 .sidebar-collapsed .refresh-status:hover .refresh-breakdown, .sidebar-collapsed .refresh-status:focus-within .refresh-breakdown { transform: translateX(0); }
-main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: flex; flex-direction: column; }
+main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: flex; flex-direction: column; }
+.page-refresh-line {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .16s ease;
+}
+.page-refresh-line::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 42%;
+  height: 2px;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(90deg, transparent, var(--active-color), var(--good), transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--active-color) 38%, transparent), 0 0 18px color-mix(in srgb, var(--good) 22%, transparent);
+  animation: page-refresh-line 1.15s ease-in-out infinite;
+}
+.page-refresh-line.is-visible {
+  opacity: 1;
+}
 .page-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; animation: page-enter .17s ease-out both; }
 .panel { padding: 26px; display: grid; gap: 20px; }
 .app-footer { margin-top: auto; border-top: 1px solid rgba(108,123,145,.24); padding: 11px 16px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 100% 0, rgba(240,198,79,.06), transparent 34%), linear-gradient(180deg, rgba(8,12,18,.96), rgba(3,5,8,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 -12px 28px rgba(0,0,0,.24); }
@@ -284,6 +308,7 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 @keyframes toast-enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes page-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes page-refresh-line { 0% { transform: translateX(-44vw); } 100% { transform: translateX(102vw); } }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 @keyframes refresh-pulse { 50% { opacity: .35; transform: scale(.84); } }
 .leaderboard-page {
