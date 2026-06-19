@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.59] - 2026-06-19
+
+### Fixed
+
+- Added BitJita request timeouts so slow production refreshes fail gracefully instead of leaving the page stuck refreshing.
+
 ## [1.0.0-beta.58] - 2026-06-19
 
 ### Changed

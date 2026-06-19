@@ -2196,6 +2196,10 @@ let mapCatalogCache = null;
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
+const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 20000));
+const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 20000));
+const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
+const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
 const BITJITA_PROXY_CACHE_POLICIES = [
   { pattern: /^\/api\/(?:resources|creatures|skills|items|cargos|recipes|crafting-recipes)(?:\/|$)/, ttlMs: 60 * 60 * 1000 },
   { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
@@ -5271,7 +5275,7 @@ async function fetchBitjita(pathname, options = {}) {
   // the identifying header here so upstream sees a consistent app identity, and
   // prefer adding resilience here instead of duplicating fetch logic in callers.
   const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-  const timeoutMs = Math.max(0, toNumber(options.timeoutMs));
+  const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
   const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
   if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
   let response;
@@ -6082,16 +6086,16 @@ async function settlementProductionCrafts(body) {
   if (!body?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
   let publicFetchError = "";
-  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch((error) => {
+  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS }).catch((error) => {
     publicFetchError = error instanceof Error ? error.message : String(error);
     return { craftResults: [] };
   });
   const publicCrafts = unwrap(publicPayload, "craftResults", []);
   const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
-  const memberResults = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
+  const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     try {
-      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`) };
+      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS }) };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -8128,6 +8132,7 @@ async function fetchUpstreamCached(upstream) {
   const request = (async () => {
     const response = await fetch(upstream, {
       headers: { accept: "application/json", "x-app-identifier": appIdentifier },
+      signal: AbortSignal.timeout(BITJITA_PROXY_TIMEOUT_MS),
     });
     const body = Buffer.from(await response.arrayBuffer());
     const headers = {
