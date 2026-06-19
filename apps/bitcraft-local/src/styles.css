@@ -222,7 +222,7 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
   background-size: 260% 100%;
   background-position: 120% 0;
   box-shadow: 0 0 14px color-mix(in srgb, var(--active-color) 38%, transparent), 0 0 18px color-mix(in srgb, var(--good) 22%, transparent);
-  animation: page-refresh-line 1.15s ease-in-out infinite;
+  animation: page-refresh-line 2.4s ease-in-out infinite;
 }
 .sidebar-collapsed .page-refresh-line { left: 72px; }
 .page-refresh-line.is-visible {

@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.64] - 2026-06-19
+
+### Changed
+
+- Slowed the top refresh progress animation so refresh cycles feel less distracting.
+
 ## [1.0.0-beta.63] - 2026-06-19
 
 ### Fixed
