@@ -70,7 +70,7 @@ import {
   DiscordSetupSection,
   DiscordTestsPanel,
 } from "./components/bot/lazySections";
-import { ApiErrorState, ApiStatusBanner, AppSkeleton, Header, PageLoadingIndicator, RefreshStatus, TablePanel, ToolbarButton, type ApiStatusDiagnostics } from "./components/main/AppChrome";
+import { ApiErrorState, ApiStatusBanner, AppSkeleton, Header, RefreshStatus, TablePanel, ToolbarButton, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "./components/main/Badges";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./components/main/DashboardWidgets";
@@ -2907,7 +2907,6 @@ function DashboardApp() {
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
-            <PageLoadingIndicator visible={state.loading && Boolean(state.data)} />
             <div className="page-view" key={active}>{activePanel}</div>
           </>
         )}

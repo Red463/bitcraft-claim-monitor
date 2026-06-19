@@ -119,6 +119,9 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
   return Object.fromEntries([...keys].map((key) => [key, endpoints[key]]));
 }
 
+const PAGE_NAVIGATION_CACHE_TTL_MS = 20_000;
+const pageNavigationCache = new Map<string, { data: AnyRecord; updatedAt: number }>();
+
 export function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
@@ -127,6 +130,18 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
   });
 
   React.useEffect(() => {
+    const cacheKey = `${claimId}:${activePanel}`;
+    const cached = pageNavigationCache.get(cacheKey);
+    const cachedAgeMs = cached ? Date.now() - cached.updatedAt : Number.POSITIVE_INFINITY;
+    if (cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
+      setState({ loading: false, error: null, data: cached.data });
+      return;
+    }
+    if (cached) {
+      setState({ loading: true, error: null, data: cached.data });
+    }
+
+    let cancelled = false;
     const controller = new AbortController();
     async function load() {
       try {
@@ -145,10 +160,10 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         }
         const requestedEndpoints = endpointMap(claimId, activePanel);
         if (Object.keys(requestedEndpoints).length === 0) {
-          React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
+          if (!cancelled) React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
           return;
         }
-        setState((prev) => ({ ...prev, loading: true, error: null }));
+        if (!cached) setState((prev) => ({ ...prev, loading: true, error: null }));
         if (activePanel === "dashboard") {
           // Dashboard combines data from several BitJita endpoints and local
           // history tables, so it stays behind a page-specific local aggregate
@@ -156,7 +171,8 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
           const raw = await response.json();
-          React.startTransition(() => setState({ loading: false, error: null, data: raw }));
+          pageNavigationCache.set(cacheKey, { data: raw, updatedAt: Date.now() });
+          if (!cancelled) React.startTransition(() => setState({ loading: false, error: null, data: raw }));
           return;
         }
         const entries = await Promise.all(
@@ -184,7 +200,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
               appendPartialError(raw, `Unable to refresh full production details (HTTP ${response.status}). Showing direct BitJita craft data only.`);
             }
           } catch (error) {
-            if (!controller.signal.aborted) {
+            if (!cancelled) {
               appendPartialError(raw, `Production craft aggregation failed: ${error instanceof Error ? error.message : String(error)}. Showing direct BitJita craft data only.`);
             }
           }
@@ -254,15 +270,18 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
         raw.regionStatus = regionPayload;
         raw.tradeVolume = tradeVolumePayload;
-        React.startTransition(() => setState({ loading: false, error: null, data: raw }));
+        pageNavigationCache.set(cacheKey, { data: raw, updatedAt: Date.now() });
+        if (!cancelled) React.startTransition(() => setState({ loading: false, error: null, data: raw }));
       } catch (err) {
-        if (!controller.signal.aborted) {
+        if (!cancelled) {
           setState((prev) => ({ loading: false, error: err instanceof Error ? err.message : String(err), data: prev.data }));
         }
       }
     }
     load();
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, [activePanel, claimId, refreshToken]);
 
   return state;

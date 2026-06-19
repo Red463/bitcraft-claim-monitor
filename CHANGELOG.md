@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.61] - 2026-06-19
+
+### Changed
+
+- Improved page switching performance by briefly reusing recently loaded page data while live refreshes continue normally.
+- Removed the floating page refresh notice so refresh state is shown only in the sidebar.
+
 ## [1.0.0-beta.60] - 2026-06-19
 
 ### Changed

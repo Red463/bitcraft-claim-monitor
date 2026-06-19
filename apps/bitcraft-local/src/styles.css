@@ -206,38 +206,6 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .refresh-breakdown { left: calc(100% + 10px); bottom: 0; transform: translateX(-6px); }
 .sidebar-collapsed .refresh-status:hover .refresh-breakdown, .sidebar-collapsed .refresh-status:focus-within .refresh-breakdown { transform: translateX(0); }
 main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: flex; flex-direction: column; }
-.page-loading-indicator {
-  position: fixed;
-  top: 14px;
-  right: 28px;
-  z-index: calc(var(--z-sticky) + 1);
-  width: max-content;
-  max-width: min(520px, calc(100vw - 320px));
-  margin: 0;
-  min-height: 38px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid rgba(240,198,79,.3);
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(18,24,32,.94), rgba(8,11,16,.96));
-  color: var(--text);
-  box-shadow: 0 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
-  animation: page-loading-enter .16s ease-out both;
-}
-.page-loading-indicator svg {
-  color: var(--gold);
-  animation: busy-spin .85s linear infinite;
-}
-.page-loading-indicator span {
-  font-weight: 800;
-  font-size: 13px;
-}
-.page-loading-indicator small {
-  color: var(--muted);
-  font-size: 12px;
-}
 .page-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; animation: page-enter .17s ease-out both; }
 .panel { padding: 26px; display: grid; gap: 20px; }
 .app-footer { margin-top: auto; border-top: 1px solid rgba(108,123,145,.24); padding: 11px 16px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 100% 0, rgba(240,198,79,.06), transparent 34%), linear-gradient(180deg, rgba(8,12,18,.96), rgba(3,5,8,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 -12px 28px rgba(0,0,0,.24); }
@@ -316,7 +284,6 @@ main { min-width: 0; height: 100vh; max-height: 100vh; overflow: auto; display: 
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 @keyframes toast-enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes page-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes page-loading-enter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 @keyframes refresh-pulse { 50% { opacity: .35; transform: scale(.84); } }
 .leaderboard-page {
@@ -938,9 +905,6 @@ body:has(.admin-loading-panel) .floating-actions {
 .app-shell.sidebar-collapsed .api-status-banner {
   left: 92px;
 }
-.app-shell:has(.api-status-banner) .page-loading-indicator {
-  top: 68px;
-}
 .api-status-main {
   min-width: 0;
   display: grid;
@@ -1068,9 +1032,6 @@ body:has(.admin-loading-panel) .floating-actions {
   }
   .app-shell.sidebar-collapsed .api-status-banner {
     left: 10px;
-  }
-  .app-shell:has(.api-status-banner) .page-loading-indicator {
-    top: 72px;
   }
   .api-status-main {
     grid-template-columns: 30px minmax(0, 1fr);
@@ -6427,8 +6388,6 @@ body .market-page tbody tr:hover td {
   .discord-cta { margin-top: 8px; }
   .refresh-status { display: none; }
   .refresh { margin-top: 0; }
-  .page-loading-indicator { top: 10px; right: 10px; max-width: calc(100vw - 20px); }
-  .page-loading-indicator small { display: none; }
   main { max-height: none; }
   .stat-grid, .detail-grid, .summary-grid, .skills-summary, .metric-grid, .rank-grid, .production-grid, .gather-grid, .material-grid, .material-watch-grid, .two-col, .highlight-grid, .admin-grid, .theme-grid, .overview-hero, .overview-pulse, .ops-grid, .overview-layout, .overview-kpi-row, .overview-dashboard-grid, .overview-detail-grid, .skills-dashboard, .coverage-list, .adventure-skill-grid, .equipment-grid, .research-summary, .region-context, .admin-metrics, .analytics-admin .analytics-metrics, .status-detail, .diagnostics, .skeleton-grid, .activity-overview, .discord-rule-grid, .bot-layout, .members-summary-grid, .leaderboard-grid, .settings-shell { grid-template-columns: 1fr; }
   .scheduled-job-row { grid-template-columns: 1fr; }
