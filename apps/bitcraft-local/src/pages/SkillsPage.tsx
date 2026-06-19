@@ -85,6 +85,13 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusedProfession))), 0);
   const focusT3 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 3).length;
   const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 5).length;
+  const focusTierCounts = Object.keys(TIER_COLORS).map((tier) => {
+    const tierNumber = Number(tier);
+    return {
+      tier: tierNumber,
+      count: citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) === tierNumber).length,
+    };
+  });
   const summarizeCoverage = (ids: number[]) => ids.map((id) => {
     const levels = citizens.map((c) => getSkill(c, id));
     const max = Math.max(...levels, 0);
@@ -134,10 +141,25 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             <Info label="T3+" value={`${focusT3} members`} />
             <Info label="T5+" value={`${focusT5} members`} />
           </div>
+          <div className="focus-tier-strip" aria-label={`${skillLabel(focusedProfession)} tier distribution`}>
+            {focusTierCounts.map(({ tier, count }) => (
+              <div key={tier} className={`focus-tier-segment tier-framed tier-${tier}`} title={`T${tier}: ${count} member${count === 1 ? "" : "s"}`}>
+                <span>T{tier}</span>
+                <strong>{count}</strong>
+              </div>
+            ))}
+          </div>
           <div className="focus-list">
-            {focusRows.map((citizen) => {
+            {focusRows.map((citizen, index) => {
               const level = getSkill(citizen, focusedProfession);
-              return <div key={citizen.entityId ?? getName(citizen)}><span>{getName(citizen)}</span><strong>Lv {level}</strong></div>;
+              const tier = skillTier(level);
+              return (
+                <div key={citizen.entityId ?? getName(citizen)}>
+                  <small>#{index + 1}</small>
+                  <span>{getName(citizen)}</span>
+                  <strong className={`focus-level-pill tier-framed tier-${tier || 1}`}>Lv {level}</strong>
+                </div>
+              );
             })}
           </div>
         </section>

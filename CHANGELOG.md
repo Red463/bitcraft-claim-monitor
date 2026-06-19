@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.60] - 2026-06-19
+
+### Changed
+
+- Improved the profession focus card with tier-coloured level pills, rank markers, and a compact tier distribution view.
+
 ## [1.0.0-beta.59] - 2026-06-19
 
 ### Fixed

@@ -1943,6 +1943,38 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
   background: rgba(5,8,12,.78);
   padding: 10px 12px;
 }
+.skills-page .focus-tier-strip {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(42px, 1fr));
+  gap: 6px;
+}
+.skills-page .focus-tier-segment {
+  min-height: 34px;
+  border: 1px solid var(--tier-border);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tier-bg) 88%, rgba(255,255,255,.05)), rgba(5,8,12,.82));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  color: var(--tier-text);
+}
+.skills-page .focus-tier-segment span {
+  color: var(--tier-text);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+.skills-page .focus-tier-segment strong {
+  color: #fff;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+}
 .skills-page .focus-list div,
 .skills-page .coverage-list button,
 .skills-page .adventure-skill-grid article {
@@ -1953,6 +1985,15 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .skills-page .focus-list div {
   min-height: 38px;
   padding: 0 12px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  justify-content: stretch;
+}
+.skills-page .focus-list small {
+  color: #7f8b9c;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
 }
 .skills-page .focus-list span,
 .skills-page .coverage-list span,
@@ -2013,6 +2054,22 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .skills-page .focus-list strong,
 .skills-page .coverage-list b {
   color: #f0c64f;
+}
+.skills-page .focus-list .focus-level-pill {
+  min-width: 52px;
+  min-height: 24px;
+  border: 1px solid var(--tier-border);
+  border-radius: 999px;
+  background: var(--tier-bg);
+  color: var(--tier-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
 .skills-page .skill-table tbody tr:hover td,
 .skills-page .skill-table tbody tr:hover .sticky-col {
