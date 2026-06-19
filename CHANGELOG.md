@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.63] - 2026-06-19
+
+### Fixed
+
+- Fixed the top refresh progress line causing a brief horizontal scrollbar during refresh cycles.
+
 ## [1.0.0-beta.62] - 2026-06-19
 
 ### Changed
