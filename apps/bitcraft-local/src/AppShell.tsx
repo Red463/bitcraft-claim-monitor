@@ -579,6 +579,24 @@ function bytesLabel(value: unknown) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const COLLECTOR_PURPOSES: Record<string, string> = {
+  claim: "Keeps settlement snapshots, treasury/supply history, and status diagnostics current.",
+  members: "Tracks roster changes and supports member-derived history and diagnostics.",
+  players: "Refreshes player detail history such as online state, playtime, and equipment.",
+  professions: "Records profession snapshots used by comparisons and historical diagnostics.",
+  production: "Feeds craft contribution history, production notifications, and related diagnostics.",
+  inventory: "Supports inventory history, storage diagnostics, and stock-related change records.",
+  construction: "Records construction project and material-change history.",
+  research: "Keeps research progress snapshots available for diagnostics and history.",
+  market: "Tracks settlement market listings and market notification inputs.",
+  buyOrders: "Updates the cached regional buy-order finder data.",
+  region: "Refreshes regional settlement comparison data and region status diagnostics.",
+  mapCatalog: "Updates map resource/catalog metadata used by map tools.",
+  snapshotHistory: "Writes periodic settlement snapshots for trend charts and history.",
+  storageActivity: "Records storage deposit/withdrawal events when BitJita exposes them.",
+  marketTrades: "Imports member market trade history for sales/activity views.",
+};
+
 /**
  * Admin console for installation-wide settings and diagnostics.
  *
@@ -1975,8 +1993,22 @@ function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <div>
-                <h3><RefreshCw size={17} /> Domain Collectors</h3>
-                <p className="legend">The server collects background history and notification data. Main pages refresh live BitJita data through the local proxy while users view them.</p>
+                <h3><RefreshCw size={17} /> Background Collection</h3>
+                <p className="legend">These jobs do not power live page rendering. They quietly maintain history, notifications, cached tools, analytics, and diagnostics while users browse live BitJita data through the local proxy.</p>
+              </div>
+            </div>
+            <div className="collector-summary">
+              <div>
+                <strong>Live pages</strong>
+                <span>Refresh through the local BitJita proxy while viewed.</span>
+              </div>
+              <div>
+                <strong>Background jobs</strong>
+                <span>Record history, notifications, cached tools, and diagnostics.</span>
+              </div>
+              <div>
+                <strong>Disabling a job</strong>
+                <span>Leaves pages usable, but related history or alerts may stop updating.</span>
               </div>
             </div>
             <div className="collector-settings-list">
@@ -1984,10 +2016,13 @@ function AdminPanel({
                 <div className="collector-setting-row" key={key}>
                   <label className="toggle-line collector-toggle">
                     <input type="checkbox" checked={collector.enabled !== false} onChange={(event) => updateCollectorSetting(key, { enabled: event.target.checked })} />
-                    <span><strong>{collector.label ?? key}</strong><small>{collector.enabled === false ? "Collector disabled" : "Collector enabled"}</small></span>
+                    <span>
+                      <strong>{collector.label ?? key}</strong>
+                      <small>{COLLECTOR_PURPOSES[key] ?? "Maintains background data for history, notifications, cached tools, or diagnostics."}</small>
+                    </span>
                   </label>
                   <label className="field compact-field collector-interval-field">
-                    <span>Interval</span>
+                    <span>{collector.enabled === false ? "Disabled" : "Runs every"}</span>
                     <div className="unit-input"><input type="number" min={15} max={3600} value={collector.intervalSeconds} onChange={(event) => updateCollectorSetting(key, { intervalSeconds: Number(event.target.value) })} /><em>sec</em></div>
                   </label>
                 </div>

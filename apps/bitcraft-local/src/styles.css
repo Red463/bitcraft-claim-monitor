@@ -5203,21 +5203,68 @@ input[type="checkbox"]:focus-visible { outline: 2px solid rgba(240,198,79,.45); 
   text-transform: uppercase;
   border-left: 1px solid rgba(108,123,145,.24);
 }
-.collector-settings-list { display: grid; gap: 9px; }
+.collector-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+.collector-summary > div {
+  min-height: 86px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, rgba(18,25,36,.82), rgba(8,12,18,.92));
+}
+.collector-summary strong {
+  color: var(--gold);
+  font-size: var(--font-micro);
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.collector-summary span {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.collector-settings-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .collector-setting-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 132px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 128px;
+  gap: 12px;
   align-items: stretch;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(108,123,145,.22);
+  border-radius: var(--radius-card);
+  background: rgba(8,12,18,.58);
 }
-.collector-setting-row .toggle-line { min-height: 46px; }
+.collector-setting-row .toggle-line {
+  min-height: 58px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+}
+.collector-setting-row .toggle-line:hover { border-color: transparent; background: transparent; }
 .collector-toggle > span { display: grid; gap: 2px; min-width: 0; }
 .collector-toggle strong { color: #fff; font-size: 13px; }
-.collector-toggle small { color: #8793a4; font-size: 11px; }
+.collector-toggle small { color: #8793a4; font-size: 11px; line-height: 1.35; }
 .collector-setting-row .compact-field { gap: 5px; }
 .collector-setting-row .compact-field input { text-align: center; }
 .collector-interval-field .unit-input { min-height: var(--control-height); }
 .collector-interval-field .unit-input em { min-width: 42px; }
+@media (max-width: 1180px) {
+  .collector-summary,
+  .collector-settings-list { grid-template-columns: 1fr; }
+}
 .admin-page .status-detail .info-row {
   min-height: 76px;
   display: grid;

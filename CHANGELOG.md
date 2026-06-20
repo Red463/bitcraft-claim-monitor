@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.65] - 2026-06-20
+
+### Changed
+
+- Improved the admin background collection settings with clearer wording and a less crowded layout.
+
 ## [1.0.0-beta.64] - 2026-06-19
 
 ### Changed
