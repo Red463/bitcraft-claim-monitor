@@ -2949,7 +2949,7 @@ function DashboardApp() {
       <footer className="app-footer">
           <div className="footer-links">
             <span className="footer-copy">
-              &copy; {new Date().getFullYear()} Timbersteel Claim Monitor â€” unofficial fan-made tool.
+              &copy; {new Date().getFullYear()} Timbersteel Claim Monitor - unofficial fan-made tool.
             </span>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer">Data: BitJita API</a>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
