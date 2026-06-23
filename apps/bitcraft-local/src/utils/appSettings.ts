@@ -133,6 +133,12 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
     additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
     theme: { ...DEFAULT_THEME, ...((config as AnyRecord)?.theme ?? {}) },
     toastSettings: { ...DEFAULT_SETTINGS.toastSettings, ...((config as AnyRecord)?.toastSettings ?? {}) },
+    marketDealWatch: {
+      maxWatchesPerUser: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.maxWatchesPerUser) || DEFAULT_SETTINGS.marketDealWatch.maxWatchesPerUser, 1), 100),
+      thresholdPercent: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.thresholdPercent) || DEFAULT_SETTINGS.marketDealWatch.thresholdPercent, 1), 95),
+      minConfirmedSales: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.minConfirmedSales) || DEFAULT_SETTINGS.marketDealWatch.minConfirmedSales, 1), 100),
+      discordDmEnabled: (config as AnyRecord)?.marketDealWatch?.discordDmEnabled !== false,
+    },
     branding: (config as AnyRecord)?.branding ?? {},
     visitorSecurity: {
       fullIpRetentionDays: Math.min(Math.max(toNumber((config as AnyRecord)?.visitorSecurity?.fullIpRetentionDays) || DEFAULT_SETTINGS.visitorSecurity.fullIpRetentionDays, 1), 30),
@@ -163,3 +169,4 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
     },
   } as AppSettings;
 }
+

@@ -255,6 +255,60 @@ db.exec(`
     last_error TEXT,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS market_deal_watches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    discord_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    item_type TEXT NOT NULL DEFAULT '0',
+    item_name TEXT NOT NULL,
+    tier INTEGER,
+    rarity TEXT,
+    icon_asset_name TEXT,
+    threshold_percent REAL NOT NULL DEFAULT 30,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_checked_at TEXT,
+    last_alert_at TEXT,
+    last_baseline_window_days INTEGER,
+    last_baseline_average REAL,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, claim_id, region_id, item_id, item_type)
+  );
+  CREATE TABLE IF NOT EXISTS market_deal_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    watch_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    discord_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    item_type TEXT NOT NULL DEFAULT '0',
+    item_name TEXT NOT NULL,
+    tier INTEGER,
+    rarity TEXT,
+    icon_asset_name TEXT,
+    listing_key TEXT NOT NULL,
+    market_claim_id TEXT,
+    market_claim_name TEXT,
+    seller_name TEXT,
+    quantity REAL,
+    unit_price REAL,
+    total_value REAL,
+    baseline_window_days INTEGER NOT NULL,
+    baseline_average REAL NOT NULL,
+    sales_count INTEGER NOT NULL DEFAULT 0,
+    discount_percent REAL NOT NULL,
+    dm_status TEXT NOT NULL DEFAULT 'pending',
+    dm_error TEXT,
+    created_at TEXT NOT NULL,
+    read_at TEXT,
+    raw_json TEXT NOT NULL,
+    UNIQUE (watch_id, listing_key)
+  );
   CREATE TABLE IF NOT EXISTS production_jobs (
     job_key TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
@@ -427,6 +481,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
   CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
   CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
+  CREATE INDEX IF NOT EXISTS idx_market_deal_watches_user ON market_deal_watches (user_id, enabled, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_deal_watches_scan ON market_deal_watches (claim_id, region_id, enabled, item_id, item_type);
+  CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_user ON market_deal_alerts (user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_watch ON market_deal_alerts (watch_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
@@ -512,6 +570,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "dashboard", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_region", "", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
+db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("market_deal_watch_json", JSON.stringify({ maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true }), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
 db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), now);
@@ -579,6 +638,39 @@ const statements = {
     INSERT OR IGNORE INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
     VALUES (?, ?, ?, ?, ?, ?)
   `),
+  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
+  dealWatchByUserItem: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?"),
+  dealWatchByIdForUser: db.prepare("SELECT * FROM market_deal_watches WHERE id = ? AND user_id = ?"),
+  listDealWatchesForUser: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? ORDER BY enabled DESC, updated_at DESC"),
+  listEnabledDealWatches: db.prepare("SELECT * FROM market_deal_watches WHERE enabled = 1 ORDER BY region_id ASC, item_name ASC"),
+  insertDealWatch: db.prepare(`
+    INSERT INTO market_deal_watches (
+      user_id, discord_id, claim_id, region_id, item_id, item_type, item_name, tier, rarity, icon_asset_name,
+      threshold_percent, enabled, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `),
+  updateDealWatch: db.prepare(`
+    UPDATE market_deal_watches
+    SET enabled = COALESCE(?, enabled), threshold_percent = COALESCE(?, threshold_percent), updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `),
+  deleteDealWatch: db.prepare("DELETE FROM market_deal_watches WHERE id = ? AND user_id = ?"),
+  updateDealWatchChecked: db.prepare(`
+    UPDATE market_deal_watches
+    SET last_checked_at = ?, last_baseline_window_days = ?, last_baseline_average = ?, last_error = ?, updated_at = ?
+    WHERE id = ?
+  `),
+  updateDealWatchAlerted: db.prepare("UPDATE market_deal_watches SET last_alert_at = ?, updated_at = ? WHERE id = ?"),
+  insertDealAlert: db.prepare(`
+    INSERT OR IGNORE INTO market_deal_alerts (
+      watch_id, user_id, discord_id, claim_id, region_id, item_id, item_type, item_name, tier, rarity, icon_asset_name,
+      listing_key, market_claim_id, market_claim_name, seller_name, quantity, unit_price, total_value,
+      baseline_window_days, baseline_average, sales_count, discount_percent, dm_status, dm_error, created_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  listDealAlertsForUser: db.prepare("SELECT * FROM market_deal_alerts WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"),
+  updateDealAlertDm: db.prepare("UPDATE market_deal_alerts SET dm_status = ?, dm_error = ? WHERE id = ?"),
+  unreadDealAlertCount: db.prepare("SELECT COUNT(*) AS count FROM market_deal_alerts WHERE user_id = ? AND read_at IS NULL"),
   activeProductionJobs: db.prepare("SELECT * FROM production_jobs WHERE claim_id = ? AND status = 'active'"),
   productionJobCount: db.prepare("SELECT COUNT(*) AS count FROM production_jobs WHERE claim_id = ?"),
   markProductionStartNotified: db.prepare("UPDATE production_jobs SET start_notified = 1 WHERE job_key = ?"),
@@ -848,6 +940,9 @@ function nextDailyMidnightIso(from = new Date()) {
 function parseScheduledJobSchedule(schedule) {
   const raw = String(schedule ?? "").trim();
   if (!raw || raw === "daily_midnight") return { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
+  if (raw.startsWith("interval@")) {
+    return { frequency: "interval", intervalSeconds: Math.min(Math.max(Math.floor(toNumber(raw.split("@")[1]) || 1800), 60), 86400), time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
+  }
   const parts = raw.split("@");
   const frequency = ["daily", "weekly", "monthly"].includes(parts[0]) ? parts[0] : "daily";
   if (frequency === "weekly") {
@@ -864,8 +959,9 @@ function validScheduleTime(value) {
 }
 
 function serializeScheduledJobSchedule(input = {}) {
-  const frequency = ["daily", "weekly", "monthly"].includes(String(input.frequency)) ? String(input.frequency) : "daily";
+  const frequency = ["daily", "weekly", "monthly", "interval"].includes(String(input.frequency)) ? String(input.frequency) : "daily";
   const time = validScheduleTime(input.time) ? String(input.time) : "00:00";
+  if (frequency === "interval") return `interval@${Math.min(Math.max(Math.floor(toNumber(input.intervalSeconds) || 1800), 60), 86400)}`;
   if (frequency === "weekly") {
     const dayOfWeek = Math.min(6, Math.max(0, Math.floor(toNumber(input.dayOfWeek) || 1)));
     return `weekly@${dayOfWeek}@${time}`;
@@ -879,6 +975,7 @@ function serializeScheduledJobSchedule(input = {}) {
 
 function nextScheduledRunIso(schedule, from = new Date()) {
   const config = parseScheduledJobSchedule(schedule);
+  if (config.frequency === "interval") return new Date(from.getTime() + (toNumber(config.intervalSeconds) || 1800) * 1000).toISOString();
   const [hours, minutes] = config.time.split(":").map((part) => Number(part));
   const next = new Date(from);
   next.setSeconds(0, 0);
@@ -906,11 +1003,11 @@ function nextScheduledRunIso(schedule, from = new Date()) {
 function scheduledJobScheduleLabel(schedule) {
   const config = parseScheduledJobSchedule(schedule);
   const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  if (config.frequency === "interval") return `Every ${Math.round((toNumber(config.intervalSeconds) || 1800) / 60)} minutes`;
   if (config.frequency === "weekly") return `Weekly on ${weekdays[config.dayOfWeek]} at ${config.time}`;
   if (config.frequency === "monthly") return `Monthly on day ${config.dayOfMonth} at ${config.time}`;
   return `Daily at ${config.time}`;
 }
-
 function recipeCatalogKey(kind, id) {
   const normalizedKind = String(kind ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
   return `${normalizedKind}:${String(id ?? "").trim()}`;
@@ -1149,6 +1246,13 @@ const scheduledJobRegistry = {
     schedule: "daily_midnight",
     enabled: true,
     run: runRegionalBuyOrderSaleBaselineRefreshJob,
+  },
+  market_deal_watch: {
+    label: "Market deal watch",
+    description: "Checks watched Price Finder items for sell listings below confirmed regional sale averages.",
+    schedule: "interval@1800",
+    enabled: true,
+    run: runMarketDealWatchJob,
   },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
@@ -1915,6 +2019,17 @@ function migrateBuyOrderCollectorInterval() {
 
 migrateBuyOrderCollectorInterval();
 
+function marketDealWatchSettings() {
+  const saved = safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {});
+  const config = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  return {
+    maxWatchesPerUser: Math.min(Math.max(Math.floor(toNumber(config.maxWatchesPerUser) || 10), 1), 100),
+    thresholdPercent: Math.min(Math.max(toNumber(config.thresholdPercent) || 30, 1), 95),
+    minConfirmedSales: Math.min(Math.max(Math.floor(toNumber(config.minConfirmedSales) || 3), 1), 100),
+    discordDmEnabled: config.discordDmEnabled !== false,
+  };
+}
+
 function getSettings() {
   const theme = safeJson(statements.getSetting.get("theme_json")?.value, defaultTheme);
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
@@ -1933,6 +2048,7 @@ function getSettings() {
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
+    marketDealWatch: marketDealWatchSettings(),
     branding,
     snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
     visitorSecurity: visitorSecuritySettings(),
@@ -5352,6 +5468,280 @@ function normalizeRegionalBuyOrder(listing, regionId, regionName, fallbackClaim 
   };
 }
 
+function dealWatchRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    discordId: row.discord_id,
+    claimId: row.claim_id,
+    regionId: row.region_id,
+    itemId: row.item_id,
+    itemType: row.item_type,
+    itemName: row.item_name,
+    tier: row.tier,
+    rarity: row.rarity,
+    iconAssetName: row.icon_asset_name,
+    thresholdPercent: toNumber(row.threshold_percent),
+    enabled: Boolean(toNumber(row.enabled)),
+    lastCheckedAt: row.last_checked_at,
+    lastAlertAt: row.last_alert_at,
+    lastBaselineWindowDays: row.last_baseline_window_days,
+    lastBaselineAverage: row.last_baseline_average,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function dealAlertRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    watchId: row.watch_id,
+    userId: row.user_id,
+    discordId: row.discord_id,
+    claimId: row.claim_id,
+    regionId: row.region_id,
+    itemId: row.item_id,
+    itemType: row.item_type,
+    itemName: row.item_name,
+    tier: row.tier,
+    rarity: row.rarity,
+    iconAssetName: row.icon_asset_name,
+    listingKey: row.listing_key,
+    marketClaimId: row.market_claim_id,
+    marketClaimName: row.market_claim_name,
+    sellerName: row.seller_name,
+    quantity: toNumber(row.quantity),
+    unitPrice: toNumber(row.unit_price),
+    totalValue: toNumber(row.total_value),
+    baselineWindowDays: toNumber(row.baseline_window_days),
+    baselineAverage: toNumber(row.baseline_average),
+    salesCount: toNumber(row.sales_count),
+    discountPercent: toNumber(row.discount_percent),
+    dmStatus: row.dm_status,
+    dmError: row.dm_error,
+    createdAt: row.created_at,
+    readAt: row.read_at,
+    raw: safeJson(row.raw_json, {}),
+  };
+}
+
+function normalizeRegionalSellListing(listing, regionId, regionName, fallbackClaim = {}) {
+  const base = normalizeListing(listing);
+  const marketClaimId = String(listing.claimEntityId ?? listing.claimId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
+  const itemTypeRaw = listing.itemType ?? listing.item_type ?? base.itemType ?? 0;
+  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
+  return {
+    listingKey: base.key,
+    regionId: String(listing.regionId ?? regionId ?? "").trim(),
+    regionName: String(listing.regionName ?? regionName ?? ""),
+    marketClaimId,
+    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
+    sellerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown seller"),
+    itemId: String(listing.itemId ?? listing.item_id ?? base.itemId ?? "").trim(),
+    itemType,
+    itemName: base.itemName,
+    tier: base.tier,
+    rarity: base.rarity,
+    iconAssetName: listing.iconAssetName ?? null,
+    quantity: base.quantity,
+    unitPrice: base.price,
+    totalValue: base.totalValue,
+    listedAt: base.listedAt,
+    raw: listing,
+  };
+}
+
+function priceHistoryWindowAverage(payload, windowDays, minSales) {
+  const buckets = unwrap(payload, "buckets", []);
+  const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
+  const statsAverage = toNumber(windowDays === 7 ? stats.avg7d : stats.avg30d);
+  const statsSales = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
+  if (statsAverage > 0 && statsSales >= minSales) {
+    return { averageUnitPrice: statsAverage, salesCount: statsSales, windowDays, raw: { source: `priceStats.avg${windowDays}d`, priceStats: stats } };
+  }
+  const relevantBuckets = windowDays === 7 ? buckets.slice(-7) : buckets.slice(-30);
+  let salesCount = 0;
+  let unitsSold = 0;
+  let totalValue = 0;
+  for (const bucket of relevantBuckets) {
+    const totals = priceHistoryBucketTotals(bucket);
+    salesCount += totals.salesCount;
+    unitsSold += totals.unitsSold;
+    totalValue += totals.totalValue;
+  }
+  if (salesCount < minSales || unitsSold <= 0 || totalValue <= 0) return null;
+  return {
+    averageUnitPrice: totalValue / unitsSold,
+    salesCount,
+    unitsSold,
+    totalValue,
+    windowDays,
+    firstBucketAt: relevantBuckets[0]?.bucket ?? relevantBuckets[0]?.date ?? relevantBuckets[0]?.start ?? null,
+    lastBucketAt: relevantBuckets.at(-1)?.bucket ?? relevantBuckets.at(-1)?.date ?? relevantBuckets.at(-1)?.start ?? null,
+    raw: { source: "bucketTotals", bucketCount: relevantBuckets.length, priceStats: stats },
+  };
+}
+
+async function dealBaselineForItem(regionId, itemId, itemType, minSales) {
+  const historyKind = marketPriceHistoryKind(itemType);
+  const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: 10000 });
+  return priceHistoryWindowAverage(payload, 7, minSales) ?? priceHistoryWindowAverage(payload, 30, minSales);
+}
+
+function dealAlertDiscordPayload(alert) {
+  const discount = Math.round(toNumber(alert.discountPercent));
+  const baseline = `${formatGold(alert.baselineAverage)} ${alert.baselineWindowDays}-day average`;
+  return {
+    embeds: [{
+      author: { name: "Timbersteel Trade" },
+      title: "Market Deal Found",
+      description: `**${alert.itemName}** is listed ${discount}% below the confirmed regional average.`,
+      color: 0x4ee28a,
+      fields: [
+        { name: "Listing price", value: formatGold(alert.unitPrice), inline: true },
+        { name: "Baseline", value: baseline, inline: true },
+        { name: "Quantity", value: toNumber(alert.quantity).toLocaleString(), inline: true },
+        { name: "Market", value: String(alert.marketClaimName ?? "Unknown settlement"), inline: true },
+        { name: "Region", value: `R${alert.regionId}`, inline: true },
+      ],
+      timestamp: alert.createdAt,
+      footer: { text: "Deal watch alert" },
+    }],
+  };
+}
+
+async function runMarketDealWatchJob({ jobKey } = {}) {
+  const settings = getSettings();
+  const dealSettings = settings.marketDealWatch ?? marketDealWatchSettings();
+  const watches = statements.listEnabledDealWatches.all();
+  if (!watches.length) return { checked: 0, alerts: 0, regions: 0, reason: "No enabled deal watches" };
+  const byRegion = new Map();
+  for (const watch of watches) {
+    const key = `${watch.claim_id}:${watch.region_id}`;
+    if (!byRegion.has(key)) byRegion.set(key, []);
+    byRegion.get(key).push(watch);
+  }
+  const now = new Date().toISOString();
+  let checked = 0;
+  let alerts = 0;
+  const failures = [];
+  for (const [groupKey, groupWatches] of byRegion.entries()) {
+    const [, regionId] = groupKey.split(":");
+    if (jobKey) updateScheduledJobProgress(jobKey, { step: `Loading R${regionId} markets`, regionId, checked, alerts });
+    let claimPayload;
+    try {
+      claimPayload = await fetchRegionClaimList(regionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`R${regionId}: ${message}`);
+      for (const watch of groupWatches) statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+      continue;
+    }
+    const claims = unwrap(claimPayload, "claims", []);
+    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
+    const watchedKeys = new Set(groupWatches.map((watch) => `${watch.item_type}:${watch.item_id}`));
+    let completedClaims = 0;
+    const listingPages = await mapWithConcurrency(claims, 3, async (claim) => {
+      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
+      if (!marketClaimId) return [];
+      try {
+        const payload = await fetchAllClaimListings(marketClaimId, { side: "sell" });
+        completedClaims += 1;
+        if (jobKey) updateScheduledJobProgress(jobKey, { step: `Scanning R${regionId} markets`, regionId, current: completedClaims, total: claims.length, checked, alerts });
+        return unwrap(payload, "listings", [])
+          .map((listing) => normalizeRegionalSellListing(listing, regionId, regionName, claim))
+          .filter((listing) => watchedKeys.has(`${listing.itemType}:${listing.itemId}`));
+      } catch (error) {
+        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
+        completedClaims += 1;
+        return [];
+      }
+    });
+    const listings = listingPages.flat();
+    const baselineCache = new Map();
+    for (const watch of groupWatches) {
+      checked += 1;
+      const baselineKey = `${watch.region_id}:${watch.item_type}:${watch.item_id}`;
+      let baseline = baselineCache.get(baselineKey);
+      try {
+        if (!baselineCache.has(baselineKey)) {
+          baseline = await dealBaselineForItem(watch.region_id, watch.item_id, watch.item_type, dealSettings.minConfirmedSales);
+          baselineCache.set(baselineKey, baseline ?? null);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+        failures.push(`${watch.item_name}: ${message}`);
+        continue;
+      }
+      if (!baseline) {
+        statements.updateDealWatchChecked.run(now, null, null, `Not enough confirmed regional sales (${dealSettings.minConfirmedSales}+ required)`, now, watch.id);
+        continue;
+      }
+      statements.updateDealWatchChecked.run(now, baseline.windowDays, baseline.averageUnitPrice, null, now, watch.id);
+      const maxPrice = baseline.averageUnitPrice * (1 - (toNumber(watch.threshold_percent) || dealSettings.thresholdPercent) / 100);
+      for (const listing of listings.filter((entry) => entry.itemId === String(watch.item_id) && entry.itemType === String(watch.item_type) && toNumber(entry.unitPrice) > 0 && toNumber(entry.unitPrice) <= maxPrice)) {
+        const discountPercent = Math.max(0, ((baseline.averageUnitPrice - listing.unitPrice) / baseline.averageUnitPrice) * 100);
+        const createdAt = new Date().toISOString();
+        const result = statements.insertDealAlert.run(
+          watch.id, watch.user_id, watch.discord_id, watch.claim_id, watch.region_id, watch.item_id, watch.item_type, watch.item_name,
+          watch.tier ?? listing.tier, watch.rarity ?? listing.rarity, watch.icon_asset_name ?? listing.iconAssetName,
+          listing.listingKey, listing.marketClaimId, listing.marketClaimName, listing.sellerName, listing.quantity, listing.unitPrice, listing.totalValue,
+          baseline.windowDays, baseline.averageUnitPrice, baseline.salesCount, discountPercent, "pending", null, createdAt,
+          JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
+        );
+        if (!result.changes) continue;
+        alerts += 1;
+        statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
+        const alert = dealAlertRow({
+          id: result.lastInsertRowid,
+          watch_id: watch.id,
+          user_id: watch.user_id,
+          discord_id: watch.discord_id,
+          claim_id: watch.claim_id,
+          region_id: watch.region_id,
+          item_id: watch.item_id,
+          item_type: watch.item_type,
+          item_name: watch.item_name,
+          tier: watch.tier ?? listing.tier,
+          rarity: watch.rarity ?? listing.rarity,
+          icon_asset_name: watch.icon_asset_name ?? listing.iconAssetName,
+          listing_key: listing.listingKey,
+          market_claim_id: listing.marketClaimId,
+          market_claim_name: listing.marketClaimName,
+          seller_name: listing.sellerName,
+          quantity: listing.quantity,
+          unit_price: listing.unitPrice,
+          total_value: listing.totalValue,
+          baseline_window_days: baseline.windowDays,
+          baseline_average: baseline.averageUnitPrice,
+          sales_count: baseline.salesCount,
+          discount_percent: discountPercent,
+          dm_status: "pending",
+          dm_error: null,
+          created_at: createdAt,
+          read_at: null,
+          raw_json: JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
+        });
+        if (dealSettings.discordDmEnabled) {
+          try {
+            await sendDiscordDirectMessage(watch.discord_id, dealAlertDiscordPayload(alert));
+            statements.updateDealAlertDm.run("sent", null, result.lastInsertRowid);
+          } catch (error) {
+            statements.updateDealAlertDm.run("failed", error instanceof Error ? error.message : String(error), result.lastInsertRowid);
+            recordDiscordDeliverySafe({ status: "failed", eventType: "market_deal_watch", summary: `Deal alert: ${watch.item_name}`, error: error instanceof Error ? error.message : String(error), metadata: { userId: watch.discord_id, regionId: watch.region_id, itemId: watch.item_id } });
+          }
+        } else {
+          statements.updateDealAlertDm.run("skipped", "Discord DM alerts disabled", result.lastInsertRowid);
+        }
+      }
+    }
+  }
+  return { checked, alerts, regions: byRegion.size, failures: failures.slice(0, 20) };
+}
 async function fetchRegionalBuyOrders(claimId, regionIds) {
   const uniqueRegionIds = [...new Set(regionIds.map((id) => String(id ?? "").trim()).filter((id) => /^\d+$/.test(id)))];
   const failures = [];
@@ -8603,6 +8993,12 @@ const server = createServer(async (req, res) => {
           marketSales: body.toastSettings?.marketSales !== false,
           production: body.toastSettings?.production !== false,
         };
+        const marketDealWatch = {
+          maxWatchesPerUser: Math.min(Math.max(Math.floor(toNumber(body.marketDealWatch?.maxWatchesPerUser) || 10), 1), 100),
+          thresholdPercent: Math.min(Math.max(toNumber(body.marketDealWatch?.thresholdPercent) || 30, 1), 95),
+          minConfirmedSales: Math.min(Math.max(Math.floor(toNumber(body.marketDealWatch?.minConfirmedSales) || 3), 1), 100),
+          discordDmEnabled: body.marketDealWatch?.discordDmEnabled !== false,
+        };
         const discordSettings = normalizeDiscordSettings(body.discord ?? {});
         const discordToken = String(body.discord?.botToken ?? "").trim();
         if (discordSettings.enabled) {
@@ -8624,6 +9020,7 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("visitor_security_json", JSON.stringify(visitorSecurity), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
+        statements.upsertSetting.run("market_deal_watch_json", JSON.stringify(marketDealWatch), updatedAt);
         statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
@@ -8819,7 +9216,75 @@ const server = createServer(async (req, res) => {
       if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
       return send(res, 200, await enqueueSnapshot(await readJson(req, BODY_LIMITS.snapshot)));
     }
-    if (req.method === "GET" && url.pathname === "/api/local/market/history") {
+    if (url.pathname === "/api/local/market/deal-watches") {
+      const appUser = requireAppUser(req, res);
+      if (!appUser) return;
+      const claimId = String(url.searchParams.get("claimId") ?? getSettings().claimId ?? "").trim();
+      if (req.method === "GET") {
+        const watches = statements.listDealWatchesForUser.all(appUser.id, claimId).map(dealWatchRow);
+        return send(res, 200, { watches, settings: getSettings().marketDealWatch });
+      }
+      if (req.method === "POST") {
+        const body = await readJson(req, BODY_LIMITS.json);
+        const dealSettings = getSettings().marketDealWatch;
+        const count = toNumber(statements.dealWatchCountForUser.get(appUser.id, claimId)?.count);
+        if (count >= dealSettings.maxWatchesPerUser) return send(res, 409, { error: `Watch limit reached (${dealSettings.maxWatchesPerUser})` });
+        const regionId = String(body.regionId ?? "").trim();
+        const itemId = String(body.itemId ?? "").trim();
+        const itemType = String(body.itemType ?? 0).trim() || "0";
+        const itemName = String(body.itemName ?? "").trim();
+        if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Choose a single region before watching an item" });
+        if (!itemId || !itemName) return send(res, 400, { error: "Item details are required" });
+        if (statements.dealWatchByUserItem.get(appUser.id, claimId, regionId, itemId, itemType)) return send(res, 409, { error: "This item is already on your deal watchlist for that region" });
+        const nowIso = new Date().toISOString();
+        const threshold = Math.min(Math.max(toNumber(body.thresholdPercent) || dealSettings.thresholdPercent, 1), 95);
+        const result = statements.insertDealWatch.run(
+          appUser.id,
+          String(appUser.discord_id ?? ""),
+          claimId,
+          regionId,
+          itemId,
+          itemType,
+          itemName,
+          body.tier == null ? null : toNumber(body.tier),
+          body.rarity == null ? null : String(body.rarity),
+          body.iconAssetName == null ? null : String(body.iconAssetName),
+          threshold,
+          nowIso,
+          nowIso,
+        );
+        return send(res, 201, { watch: dealWatchRow(statements.dealWatchByIdForUser.get(result.lastInsertRowid, appUser.id)) });
+      }
+    }
+    if (url.pathname.startsWith("/api/local/market/deal-watches/")) {
+      const appUser = requireAppUser(req, res);
+      if (!appUser) return;
+      const id = Number(url.pathname.split("/").at(-1));
+      if (!Number.isFinite(id)) return send(res, 400, { error: "Invalid watch id" });
+      if (req.method === "PATCH") {
+        const body = await readJson(req, BODY_LIMITS.json);
+        const enabled = typeof body.enabled === "boolean" ? (body.enabled ? 1 : 0) : null;
+        const threshold = body.thresholdPercent == null ? null : Math.min(Math.max(toNumber(body.thresholdPercent), 1), 95);
+        statements.updateDealWatch.run(enabled, threshold, new Date().toISOString(), id, appUser.id);
+        const row = statements.dealWatchByIdForUser.get(id, appUser.id);
+        if (!row) return send(res, 404, { error: "Watch not found" });
+        return send(res, 200, { watch: dealWatchRow(row) });
+      }
+      if (req.method === "DELETE") {
+        const result = statements.deleteDealWatch.run(id, appUser.id);
+        if (!result.changes) return send(res, 404, { error: "Watch not found" });
+        return send(res, 200, { ok: true });
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/deal-alerts") {
+      const appUser = requireAppUser(req, res);
+      if (!appUser) return;
+      const limit = Math.min(Math.max(toNumber(url.searchParams.get("limit")) || 50, 1), 100);
+      return send(res, 200, {
+        alerts: statements.listDealAlertsForUser.all(appUser.id, limit).map(dealAlertRow),
+        unread: toNumber(statements.unreadDealAlertCount.get(appUser.id)?.count),
+      });
+    }    if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/buy-orders") {

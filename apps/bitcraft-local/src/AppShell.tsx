@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import {
   Activity,
   AlertTriangle,
@@ -53,7 +53,7 @@ import {
 } from "lucide-react";
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
-import { useLocalHistory, useNotificationActivity } from "./api/localHistory";
+import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import type { BotSection } from "./components/bot/BotSectionNav";
 import {
   BotSectionNav,
@@ -764,7 +764,7 @@ function AdminPanel({
     if (metadata?.locationRows) parts.push(`${formatNumber(metadata.locationRows)} locations indexed`);
     if (metadata?.rangeRows) parts.push(`${formatNumber(metadata.rangeRows)} ranges written`);
     if (metadata?.entries) parts.push(`${formatNumber(metadata.entries)} entries`);
-    return `${stage}${parts.length ? ` (${parts.join(" Â· ")})` : ""}`;
+    return `${stage}${parts.length ? ` (${parts.join(" · ")})` : ""}`;
   }
 
   function scheduledJobConfig(job: AnyRecord) {
@@ -905,6 +905,14 @@ function AdminPanel({
       visitorSecurity: { ...current.visitorSecurity, ...patch },
     }));
   }
+
+  function updateMarketDealWatchSetting(patch: Partial<AppSettings["marketDealWatch"]>) {
+    setDraft((current) => ({
+      ...current,
+      marketDealWatch: { ...current.marketDealWatch, ...patch },
+    }));
+  }
+
 
   function setMemberTracking(member: AnyRecord, tracked: boolean) {
     const id = memberTrackingId(member);
@@ -1727,8 +1735,8 @@ function AdminPanel({
                 <div className="endpoint-summary-grid">
                   <Info label="Checks run" value={formatNumber(endpointChecks.length)} />
                   <Info label="Failures" value={formatNumber(endpointFailures.length)} />
-                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} Â· ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
-                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} Â· ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} · ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} · ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
                 </div>
                 <DataTable
                   rows={endpointChecks}
@@ -1791,7 +1799,7 @@ function AdminPanel({
               <Stat icon={<Activity />} label="Requests" value={formatNumber(visitorSecurityData?.totals?.requests)} />
               <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(visitorSecurityData?.totals?.uniqueVisitors)} />
               <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(visitorSecurityData?.totals?.errors)} />
-              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} Â· ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
+              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} · ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
               <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
             </div>
           </section>
@@ -1987,6 +1995,28 @@ function AdminPanel({
                 </>
               ) : null}
               {draft.visitorSecurity.geoipProvider === "disabled" ? <p className="legend">Location statistics will show Unknown while request logging and abuse-prevention records continue.</p> : null}
+            </div>
+            <div className="form-card nested-card">
+              <h3><ShoppingCart size={17} /> Market Deal Watch</h3>
+              <p className="legend">Discord-signed-in users can watch Price Finder items. A scheduled job checks regional sell listings and alerts when prices are below confirmed sale averages.</p>
+              <div className="configuration-timing-grid compact-grid">
+                <label className="field unit-field">
+                  <span>Max watches per user</span>
+                  <div className="unit-input"><input type="number" min={1} max={100} value={draft.marketDealWatch.maxWatchesPerUser} onChange={(event) => updateMarketDealWatchSetting({ maxWatchesPerUser: Number(event.target.value) })} /><em>items</em></div>
+                </label>
+                <label className="field unit-field">
+                  <span>Default deal threshold</span>
+                  <div className="unit-input"><input type="number" min={1} max={95} value={draft.marketDealWatch.thresholdPercent} onChange={(event) => updateMarketDealWatchSetting({ thresholdPercent: Number(event.target.value) })} /><em>% below average</em></div>
+                </label>
+                <label className="field unit-field">
+                  <span>Minimum confirmed sales</span>
+                  <div className="unit-input"><input type="number" min={1} max={100} value={draft.marketDealWatch.minConfirmedSales} onChange={(event) => updateMarketDealWatchSetting({ minConfirmedSales: Number(event.target.value) })} /><em>sales</em></div>
+                </label>
+              </div>
+              <label className="toggle-line">
+                <input type="checkbox" checked={draft.marketDealWatch.discordDmEnabled !== false} onChange={(event) => updateMarketDealWatchSetting({ discordDmEnabled: event.target.checked })} />
+                <span><strong>Send Discord DMs when possible</strong><small>In-app alerts are still recorded if a DM cannot be delivered.</small></span>
+              </label>
             </div>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
@@ -2533,6 +2563,7 @@ function DashboardApp() {
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
   const notificationSourceKeysRef = React.useRef<Set<string>>(new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]));
   const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
+  const dealAlertIdsRef = React.useRef<Set<string> | null>(null);
   const activityNoticeClaimRef = React.useRef(claimId);
   const craftQueueRef = React.useRef<{ claimId: string; jobs: Map<string, AnyRecord> } | null>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
@@ -2546,6 +2577,7 @@ function DashboardApp() {
   }, [state.data, excludedMemberIds]);
   const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
   const notificationActivity = useNotificationActivity(refreshToken, claimId);
+  const dealAlerts = useDealAlerts(refreshToken);
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
@@ -2778,6 +2810,34 @@ function DashboardApp() {
       });
     }
   }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
+  React.useEffect(() => {
+    if (!dealAlerts.refreshToken) return;
+    const knownIds = dealAlerts.alerts.map((alert) => String(alert.id));
+    if (dealAlertIdsRef.current == null) {
+      dealAlertIdsRef.current = new Set(knownIds);
+      return;
+    }
+    const unseen = dealAlerts.alerts
+      .filter((alert) => !dealAlertIdsRef.current?.has(String(alert.id)))
+      .slice(0, 3)
+      .reverse();
+    for (const id of knownIds) dealAlertIdsRef.current.add(id);
+    for (const alert of unseen) {
+      const discount = Math.round(toNumber(alert.discountPercent));
+      const price = `${formatNumber(alert.unitPrice)}g`;
+      const baseline = `${formatNumber(Math.round(toNumber(alert.baselineAverage)))}g ${alert.baselineWindowDays}-day average`;
+      pushToast("Market deal found", `${alert.itemName}: ${price} at ${alert.marketClaimName ?? "a regional market"} (${discount}% below ${baseline})`, "market", {
+        name: alert.itemName,
+        itemName: alert.itemName,
+        tier: alert.tier,
+        rarity: alert.rarity,
+        iconAssetName: alert.iconAssetName,
+      }, {
+        occurredAt: alert.createdAt,
+        sourceKey: `deal-alert:${alert.id}`,
+      });
+    }
+  }, [dealAlerts.alerts, dealAlerts.refreshToken, pushToast]);
   React.useEffect(() => {
     if (!state.data) return;
     const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
@@ -3031,5 +3091,8 @@ export default function App() {
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }
+
+
+
 
 

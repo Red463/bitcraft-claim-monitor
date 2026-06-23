@@ -1,6 +1,6 @@
 import React from "react";
 
-import { toNumber } from "../main-app-data";
+import { toNumber, type AnyRecord } from "../main-app-data";
 import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
 
 const LOCAL_API = "/api/local";
@@ -79,6 +79,44 @@ export function useNotificationActivity(refreshToken: number, claimId: string): 
       controller.abort();
     };
   }, [claimId, refreshToken]);
+
+  return state;
+}
+
+export type DealAlertsState = {
+  alerts: AnyRecord[];
+  unread: number;
+  error: string | null;
+  refreshToken: number;
+};
+
+export function useDealAlerts(refreshToken: number): DealAlertsState {
+  const [state, setState] = React.useState<DealAlertsState>({ alerts: [], unread: 0, error: null, refreshToken: 0 });
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const response = await fetch(`${LOCAL_API}/market/deal-alerts?limit=80`, { signal: controller.signal });
+        if (response.status === 401) {
+          setState((prev) => ({ ...prev, alerts: [], unread: 0, error: null, refreshToken: prev.refreshToken + 1 }));
+          return;
+        }
+        if (!response.ok) throw new Error(`deal alerts HTTP ${response.status}`);
+        const payload = await response.json();
+        setState((prev) => ({
+          alerts: payload.alerts ?? [],
+          unread: toNumber(payload.unread),
+          error: null,
+          refreshToken: prev.refreshToken + 1,
+        }));
+      } catch (err) {
+        if (!controller.signal.aborted) setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
+      }
+    }
+    load();
+    return () => controller.abort();
+  }, [refreshToken]);
 
   return state;
 }

@@ -22,6 +22,12 @@ export type AppUser = {
   lastLoginAt?: string;
 };
 export type UserAuthState = { user: AppUser | null; discordLoginEnabled: boolean };
+export type MarketDealWatchSettings = {
+  maxWatchesPerUser: number;
+  thresholdPercent: number;
+  minConfirmedSales: number;
+  discordDmEnabled: boolean;
+};
 export type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };
 export type DiscordRoleOption = { key: string; label: string; roleId: string; emoji: string };
 export type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; showHelperText: boolean; options: DiscordRoleOption[] };
@@ -68,9 +74,12 @@ export type AppSettings = {
   defaultRegion: string;
   additionalActiveRegions: string;
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
+  marketDealWatch: MarketDealWatchSettings;
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   snapshotRetentionDays: number;
   visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipProvider: string; geoipCacheDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
   browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
+
+

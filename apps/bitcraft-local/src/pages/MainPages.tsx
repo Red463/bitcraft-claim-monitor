@@ -2,6 +2,7 @@ import React from "react";
 import {
   Activity,
   AlertTriangle,
+  Bell,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -932,6 +933,9 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
   const [regionChoice, setRegionChoice] = usePersistedState("market.price.region", defaultRegion);
   const activeRegions = useActiveRegions(defaultRegion);
   const [priceState, setPriceState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
+  const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
+  const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
+  const [watchBusy, setWatchBusy] = React.useState("");
   const activeRegion = regionChoice === "All" ? "" : regionChoice;
 
   React.useEffect(() => {
@@ -993,6 +997,97 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     return () => controller.abort();
   }, [selectedItem, activeRegion, regionChoice]);
 
+  const refreshDealWatches = React.useCallback(() => {
+    const controller = new AbortController();
+    setWatchState((current) => ({ ...current, error: null, loading: true }));
+    fetch(`${LOCAL_API}/market/deal-watches`, { signal: controller.signal })
+      .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
+      .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setWatchState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+      });
+    return () => controller.abort();
+  }, []);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${LOCAL_API}/auth/me`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
+      .then((payload) => setAuthState(payload ?? { user: null, discordLoginEnabled: false }))
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthState({ user: null, discordLoginEnabled: false });
+      });
+    return () => controller.abort();
+  }, []);
+
+  React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
+
+  async function addDealWatch() {
+    if (!selectedItem || !activeRegion) return;
+    setWatchBusy("add");
+    try {
+      const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          regionId: activeRegion,
+          itemId: selectedItem.id,
+          itemType: toNumber(selectedItem.itemType),
+          itemName: selectedItem.name,
+          tier: selectedItem.tier ?? selectedItem.itemTier,
+          rarity: selectedItem.rarityStr ?? selectedItem.rarity ?? selectedItem.itemRarityStr,
+          iconAssetName: selectedItem.iconAssetName ?? selectedItem.assetName ?? selectedItem.itemIconAssetName,
+        }),
+      });
+      if (response.status === 401) {
+        window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
+        return;
+      }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error ?? `deal watch HTTP ${response.status}`);
+      }
+      refreshDealWatches();
+    } catch (error) {
+      setWatchState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setWatchBusy("");
+    }
+  }
+
+  async function updateDealWatch(watch: AnyRecord, patch: AnyRecord) {
+    const id = String(watch.id ?? "");
+    if (!id) return;
+    setWatchBusy(id);
+    try {
+      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
+      refreshDealWatches();
+    } catch (error) {
+      setWatchState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setWatchBusy("");
+    }
+  }
+
+  async function deleteDealWatch(watch: AnyRecord) {
+    const id = String(watch.id ?? "");
+    if (!id) return;
+    setWatchBusy(id);
+    try {
+      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
+      refreshDealWatches();
+    } catch (error) {
+      setWatchState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setWatchBusy("");
+    }
+  }
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
     setQuery(String(item.name));
@@ -1014,6 +1109,13 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     regionChoice !== "All" ? regionChoice : "",
     ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
+  const dealWatches: AnyRecord[] = Array.isArray(watchState.data?.watches) ? watchState.data.watches : [];
+  const dealSettings = watchState.data?.settings ?? {};
+  const selectedWatch = selectedItem && activeRegion
+    ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && toNumber(watch.itemType) === toNumber(selectedItem.itemType))
+    : null;
+  const signInHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
+  const maxWatches = toNumber(dealSettings.maxWatchesPerUser) || 10;
   return (
     <section className="price-finder">
       <div className="market-command-header price-finder-header">
@@ -1060,6 +1162,18 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
               <strong>{suggestedPrice == null ? "-" : `${formatNumber(suggestedPrice)}g`}</strong>
                 <small>{suggestedWindow ? `Based on ${suggestedWindow.toLowerCase()} average` : "No completed trades in this selection"}</small>
               </div>
+              <div className="deal-watch-action">
+                {!authState.user ? (
+                  <a className="toolbar-button" href={signInHref}><Bell size={15} /> Sign in to watch</a>
+                ) : selectedWatch ? (
+                  <button className="toolbar-button" type="button" disabled><CheckCircle2 size={15} /> Watching deals</button>
+                ) : (
+                  <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!activeRegion || watchBusy === "add"} title={!activeRegion ? "Choose a single region before watching an item." : "Watch this item for below-average regional sell listings."}>
+                    <Bell size={15} /> {watchBusy === "add" ? "Adding..." : "Watch for deals"}
+                  </button>
+                )}
+                <small>{activeRegion ? `${formatNumber(dealWatches.length)} / ${formatNumber(maxWatches)} watches used` : "Choose one region to watch for deals."}</small>
+              </div>
             </div>
             <div className="metric-grid">
             <MiniStat icon={<Activity />} label="Last 24 Hours" value={stats.avg24h == null ? "-" : `${formatNumber(Math.round(stats.avg24h))}g`} title="Average completed-trade unit price during the last 24 hours." />
@@ -1069,6 +1183,33 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
             <MiniStat icon={<CheckCircle2 />} label="Price Confidence" value={confidence} />
           </div>
           <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
+          <section className="deal-watchlist-section">
+            <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
+            {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
+            {!authState.user ? (
+              <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><a className="toolbar-button" href={signInHref}>Sign in with Discord</a></div>
+            ) : dealWatches.length ? (
+              <div className="deal-watch-list">
+                {dealWatches.map((watch) => (
+                  <article className="deal-watch-row" key={String(watch.id)}>
+                    <ItemLabel item={{ ...watch, name: watch.itemName, tier: watch.tier, rarity: watch.rarity, iconAssetName: watch.iconAssetName }} name={String(watch.itemName ?? "Unknown item")} />
+                    <div className="deal-watch-meta">
+                      <span>R{watch.regionId}</span>
+                      <span>{formatNumber(toNumber(watch.thresholdPercent))}% below average</span>
+                      <span>Last checked {watch.lastCheckedAt ? timeAgo(watch.lastCheckedAt) : "not yet"}</span>
+                      <span>Last alert {watch.lastAlertAt ? timeAgo(watch.lastAlertAt) : "none"}</span>
+                    </div>
+                    <div className="deal-watch-actions">
+                      <button className="toolbar-button" type="button" disabled={watchBusy === String(watch.id)} onClick={() => updateDealWatch(watch, { enabled: !watch.enabled })}>{watch.enabled ? "Disable" : "Enable"}</button>
+                      <button className="toolbar-button danger" type="button" disabled={watchBusy === String(watch.id)} onClick={() => deleteDealWatch(watch)}><X size={14} /> Remove</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="deal-watch-empty"><span>No watched items yet. Search an item and choose a single region, then click Watch for deals.</span></div>
+            )}
+          </section>
           <section>
             <h3><ShoppingBag size={17} /> Recent Trades <small>{formatNumber(stats.totalTrades)} total trades</small></h3>
             <DataTable rows={recentTrades.slice(0, 15)} columns={[
@@ -2753,6 +2894,12 @@ export function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
 export function activityNoticeKey(event: AnyRecord): string {
   return String(event.source_key ?? event.sourceKey ?? `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`);
 }
+
+
+
+
+
+
 
 
 

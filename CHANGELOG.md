@@ -8,6 +8,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.67] - 2026-06-23
+
+### Added
+
+- Added Discord-linked Market Deal Watchlists so users can watch Price Finder items for below-average regional sell listings.
+- Added scheduled deal scanning, in-app deal alerts, and best-effort Discord direct messages for watched market items.
+
+### Changed
+
+- Added admin controls for deal watch limits, alert thresholds, minimum confirmed sale baselines, and Discord direct message alerts.
 ## [1.0.0-beta.66] - 2026-06-21
 
 ### Fixed

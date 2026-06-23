@@ -164,6 +164,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultRegion: "",
   additionalActiveRegions: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
+  marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true },
   branding: {},
   snapshotRetentionDays: 365,
   visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
@@ -198,3 +199,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true };
+
