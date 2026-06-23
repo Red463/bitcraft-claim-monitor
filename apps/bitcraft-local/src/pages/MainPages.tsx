@@ -1088,6 +1088,12 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
       setWatchBusy("");
     }
   }
+
+  function saveDealWatchThreshold(watch: AnyRecord, value: string) {
+    const thresholdPercent = Math.min(Math.max(Number(value) || toNumber(watch.thresholdPercent) || 30, 1), 95);
+    if (Math.abs(thresholdPercent - toNumber(watch.thresholdPercent)) < 0.01) return;
+    updateDealWatch(watch, { thresholdPercent });
+  }
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
     setQuery(String(item.name));
@@ -1195,7 +1201,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
                     <ItemLabel item={{ ...watch, name: watch.itemName, tier: watch.tier, rarity: watch.rarity, iconAssetName: watch.iconAssetName }} name={String(watch.itemName ?? "Unknown item")} />
                     <div className="deal-watch-meta">
                       <span>R{watch.regionId}</span>
-                      <span>{formatNumber(toNumber(watch.thresholdPercent))}% below average</span>
+                      <label className="deal-watch-threshold"><span>Alert at</span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>% below average</em></label>
                       <span>Last checked {watch.lastCheckedAt ? timeAgo(watch.lastCheckedAt) : "not yet"}</span>
                       <span>Last alert {watch.lastAlertAt ? timeAgo(watch.lastAlertAt) : "none"}</span>
                     </div>

@@ -8,6 +8,11 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.68] - 2026-06-23
+
+### Changed
+
+- Added per-item deal watch thresholds so users can choose how far below average a watched market item must be before alerting.
 ## [1.0.0-beta.67] - 2026-06-23
 
 ### Added

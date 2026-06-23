@@ -6627,6 +6627,35 @@ body .market-page tbody tr:hover td {
   justify-content: flex-end;
 }
 
+.deal-watch-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.deal-watch-threshold input {
+  width: 58px;
+  height: 28px;
+  border: 1px solid rgba(154, 168, 190, .24);
+  border-radius: 7px;
+  background: rgba(3, 6, 10, .72);
+  color: var(--text);
+  padding: 0 8px;
+  font: inherit;
+}
+
+.deal-watch-threshold input:focus {
+  border-color: var(--gold);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--gold-dim);
+}
+
+.deal-watch-threshold em {
+  color: var(--muted);
+  font-style: normal;
+}
+
 .deal-watch-empty {
   border: 1px dashed rgba(154, 168, 190, .22);
   border-radius: 8px;
