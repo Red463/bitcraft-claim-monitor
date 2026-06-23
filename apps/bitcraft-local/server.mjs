@@ -3,11 +3,14 @@ import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { setDefaultResultOrder } from "node:dns";
 import { inflateRawSync } from "node:zlib";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
+
+setDefaultResultOrder("ipv4first");
 
 // This server is the local app boundary: it serves the built frontend, proxies
 // BitJita requests, owns SQLite history/configuration, validates admin sessions,
@@ -43,6 +46,21 @@ mkdirSync(dataDir, { recursive: true });
 mkdirSync(brandingDir, { recursive: true });
 mkdirSync(backupDir, { recursive: true });
 mkdirSync(geoipDir, { recursive: true });
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Scheduled jobs and Discord/background tasks intentionally run outside request
+// lifetimes. A transient upstream timeout must be logged and surfaced in admin
+// diagnostics, but it must not terminate the whole Node process.
+process.on("unhandledRejection", (reason) => {
+  console.error(`Unhandled async task failed: ${errorMessage(reason)}`);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error(`Uncaught exception: ${errorMessage(error)}`);
+});
 
 const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
 const db = new DatabaseSync(databasePath);
@@ -5401,6 +5419,10 @@ async function fetchBitjita(pathname, options = {}) {
     if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
+    if (error instanceof TypeError && String(error.message ?? "").toLowerCase().includes("fetch failed")) {
+      const cause = error.cause instanceof Error ? `: ${error.cause.message}` : "";
+      throw new Error(`${pathname}: BitJita network request failed${cause}`);
+    }
     throw error;
   }
   if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
@@ -9398,3 +9420,4 @@ server.listen(port, host, () => {
     setInterval(checkScheduledJobs, 60 * 1000);
   }
 });
+
