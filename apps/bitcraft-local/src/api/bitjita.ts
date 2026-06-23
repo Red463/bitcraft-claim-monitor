@@ -81,7 +81,7 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
   if (!activePanel) return endpoints;
   if (activePanel === "activity" || activePanel === "admin") return {};
 
-  const keys = new Set<keyof typeof endpoints>(["claim", "members", "crafts"]);
+  const keys = new Set<keyof typeof endpoints>(["claim", "members"]);
   const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
 
   switch (activePanel) {
@@ -95,7 +95,7 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
       add("citizens", "skills");
       break;
     case "production":
-      add("citizens");
+      add("citizens", "crafts");
       break;
     case "leaderboard":
       add("citizens", "skills");
@@ -281,6 +281,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
     load();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [activePanel, claimId, refreshToken]);
 

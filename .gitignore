@@ -64,3 +64,4 @@ Thumbs.db
 # local Codex metadata
 .agents/
 .codex-dev/
+outputs/

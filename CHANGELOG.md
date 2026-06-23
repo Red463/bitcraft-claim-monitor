@@ -8,6 +8,11 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.69] - 2026-06-23
+
+### Changed
+
+- Improved page switching performance by aborting stale page refreshes and avoiding unnecessary production data requests on non-production pages.
 ## [1.0.0-beta.68] - 2026-06-23
 
 ### Changed
