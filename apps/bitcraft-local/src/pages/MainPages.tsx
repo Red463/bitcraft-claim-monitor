@@ -667,6 +667,103 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
     </div>
   );
 }
+type BestSellerSortKey = "units" | "revenue" | "sales" | "average" | "recent";
+
+const BEST_SELLER_SORTS: Array<{ key: BestSellerSortKey; label: string }> = [
+  { key: "units", label: "Units sold" },
+  { key: "revenue", label: "Revenue" },
+  { key: "sales", label: "Sales" },
+  { key: "average", label: "Avg price" },
+  { key: "recent", label: "Recent" },
+];
+
+function bestSellerSortValue(row: AnyRecord, sort: BestSellerSortKey): number {
+  switch (sort) {
+    case "revenue":
+      return toNumber(row.totalValue);
+    case "sales":
+      return toNumber(row.salesCount);
+    case "average":
+      return toNumber(row.avgUnitPrice);
+    case "recent":
+      return timestampMs(row.lastSoldAt);
+    case "units":
+    default:
+      return toNumber(row.unitsSold);
+  }
+}
+
+function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMeta: Map<string, AnyRecord> }) {
+  const [sort, setSort] = React.useState<BestSellerSortKey>("units");
+  const sortedRows = React.useMemo(
+    () => [...rows].sort((a, b) => bestSellerSortValue(b, sort) - bestSellerSortValue(a, sort)),
+    [rows, sort],
+  );
+  const featured = sortedRows.slice(0, 3);
+  const remaining = sortedRows.slice(3);
+
+  if (!sortedRows.length) {
+    return (
+      <div className="market-best-empty">
+        <Star size={24} />
+        <strong>No confirmed best sellers yet</strong>
+        <span>API-confirmed sales will appear here once BitJita reports completed trades for this selection.</span>
+      </div>
+    );
+  }
+
+  const renderItem = (row: AnyRecord, index: number, variant: "featured" | "compact") => {
+    const itemName = String(row.itemName ?? row.item_name ?? row.name ?? "Unknown item");
+    const meta = itemMeta.get(itemName) ?? {};
+    const item: AnyRecord = { ...meta, ...row, name: itemName, itemName };
+    const tier = item.itemTier ?? item.tier;
+    const rarity = item.itemRarityStr ?? item.rarity;
+    const rank = index + 1;
+    return (
+      <article className={`market-best-row ${variant}`} key={`${itemName}-${rank}`}>
+        <span className={`market-best-rank rank-${rank}`}>#{rank}</span>
+        <ItemIcon item={item} />
+        <div className="market-best-name">
+          <strong>{itemName}</strong>
+          <span>
+            {tier ? <TierBadge tier={tier} /> : null}
+            {rarity ? <RarityBadge rarity={rarity} /> : null}
+            <small title={dateLabel(row.lastSoldAt)}>Last trade {timeAgo(row.lastSoldAt)}</small>
+          </span>
+        </div>
+        <div className="market-best-stats">
+          <span><b>{formatNumber(row.unitsSold)}</b><small>units</small></span>
+          <span><b>{formatCompactNumber(row.totalValue)}</b><small>revenue</small></span>
+          <span><b>{formatNumber(row.avgUnitPrice)}g</b><small>avg</small></span>
+          <span><b>{formatNumber(row.salesCount)}</b><small>sales</small></span>
+        </div>
+      </article>
+    );
+  };
+
+  return (
+    <div className="market-best-leaderboard">
+      <div className="market-best-toolbar" aria-label="Best sellers ranking controls">
+        <span>Ranked by</span>
+        <div>
+          {BEST_SELLER_SORTS.map((option) => (
+            <button key={option.key} type="button" className={sort === option.key ? "active" : ""} onClick={() => setSort(option.key)} aria-pressed={sort === option.key}>
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="market-best-featured">
+        {featured.map((row, index) => renderItem(row, index, "featured"))}
+      </div>
+      {remaining.length ? (
+        <div className="market-best-compact">
+          {remaining.map((row, index) => renderItem(row, index + featured.length, "compact"))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 export function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders">("market.view", "live");
@@ -833,15 +930,8 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
           <div className="two-col market-analytics">
             <section>
               <h3><Star size={17} /> Best Sellers</h3>
-              <p className="legend">Ranked by units sold in API-confirmed sales.</p>
-              <DataTable rows={topItems} columns={[
-                ["Item", r => <ItemLabel item={{ ...marketItemMeta.get(String(r.itemName)), name: r.itemName, itemName: r.itemName }} name={r.itemName} />],
-                ["Units Sold", r => formatNumber(r.unitsSold)],
-                ["Sales", r => formatNumber(r.salesCount)],
-                ["Revenue", r => `${formatNumber(r.totalValue)}g`],
-                ["Avg Unit Price", r => `${formatNumber(r.avgUnitPrice)}g`],
-                ["Last Trade", r => dateLabel(r.lastSoldAt)],
-              ]} />
+              <p className="legend">Top confirmed sellers from recorded BitJita trade history.</p>
+              <BestSellersLeaderboard rows={topItems} itemMeta={marketItemMeta} />
             </section>
             <section>
               <h3><TrendingUp size={17} /> Revenue By Day</h3>

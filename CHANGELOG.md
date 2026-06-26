@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.71] - 2026-06-26
+
+### Changed
+
+- Redesigned the Market Analytics best sellers section as a visual leaderboard with ranking controls.
+- Hardened the local smoke server workflow so frontend testing can reuse the running server without unreliable restarts.
+
 ## [1.0.0-beta.70] - 2026-06-23
 
 ### Fixed

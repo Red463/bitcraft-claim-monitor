@@ -293,7 +293,7 @@ Build the frontend:
 corepack pnpm --filter @workspace/bitcraft-local run build
 ```
 
-Restart the stable local smoke server:
+Ensure the stable local smoke server is running:
 
 ```powershell
 node scripts/start-bitcraft-local-smoke.mjs --restart
@@ -322,10 +322,12 @@ http://127.0.0.1:18449/bot
 If the page is stale after code changes:
 
 1. rerun the build,
-2. restart the smoke server,
+2. rerun the smoke launcher with `--restart` to ensure the server is running,
 3. reload the browser tab.
 
-The smoke launcher must return quickly. If `--restart` does not return within 15 seconds, stop retrying. Inspect:
+The smoke server serves built frontend files from disk, so UI/CSS/frontend changes do not require killing and restarting the Node process after every build. Use `--force-restart` only after backend/server changes that require a new Node process: `node scripts/start-bitcraft-local-smoke.mjs --force-restart`.
+
+The smoke launcher must return quickly. If `--restart` does not return within 15 seconds, stop retrying. Do not repeatedly use `--force-restart` unless backend code changed. Inspect:
 
 ```txt
 .codex-dev/bitcraft-local-smoke.err.log

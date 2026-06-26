@@ -11,19 +11,27 @@ const pidFile = path.join(logDir, "bitcraft-local-smoke.pid");
 const port = String(process.env.APP_PORT ?? process.env.PORT ?? "18449");
 const healthUrl = `http://127.0.0.1:${port}/api/local/health`;
 const shouldRestart = process.argv.includes("--restart");
+const shouldForceRestart = process.argv.includes("--force-restart");
 
 mkdirSync(logDir, { recursive: true });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const log = (message) => console.log(message);
+const fail = (message) => console.error(message);
 
 function execFileWithTimeout(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const child = execFile(command, args, { windowsHide: true }, (error) => {
-      if (timer) clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (error) reject(error);
       else resolve();
     });
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       child.kill();
       reject(new Error(`${command} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
@@ -68,66 +76,91 @@ async function stopRecordedServer() {
     rmSync(pidFile, { force: true });
     return false;
   }
+
+  log(`Stopping recorded smoke server PID ${pid}...`);
   try {
-    if (process.platform === "win32") {
-      await execFileWithTimeout("taskkill.exe", ["/PID", String(pid), "/T", "/F"], 3_000);
-    } else {
-      process.kill(pid);
-    }
+    process.kill(pid);
   } catch (error) {
-    if (error?.code !== "ESRCH") console.warn(`Could not stop recorded smoke server PID ${pid}: ${error.message ?? error}`);
+    if (error?.code !== "ESRCH") fail(`Could not stop recorded smoke server PID ${pid}: ${error.message ?? error}`);
   }
+
   const stopped = await waitForStopped();
-  if (stopped) rmSync(pidFile, { force: true });
+  if (stopped) {
+    rmSync(pidFile, { force: true });
+    log("Recorded smoke server stopped.");
+  }
   return stopped;
 }
 
-if (shouldRestart) {
-  const stopped = await stopRecordedServer();
-  if (!stopped && await healthOk()) {
-    console.error(`A server is still responding at ${healthUrl}. Stop it manually, then rerun this command.`);
+async function main() {
+  const hardTimeout = setTimeout(() => {
+    fail(`Smoke launcher timed out after 30s while waiting for ${healthUrl}.`);
+    fail(`Check logs in ${logDir}.`);
     process.exit(1);
+  }, 30_000);
+
+  try {
+    if (shouldForceRestart) {
+      const stopped = await stopRecordedServer();
+      if (!stopped && await healthOk()) {
+        fail(`A server is still responding at ${healthUrl}. Stop it manually, then rerun this command.`);
+        return 1;
+      }
+    }
+
+    if (shouldRestart && !shouldForceRestart && await healthOk()) {
+      log(`BitCraft local smoke server already running: http://127.0.0.1:${port}/`);
+      log("Latest built frontend files are served from disk; no process restart needed for UI changes.");
+      log("Use --force-restart only after backend/server changes.");
+      return 0;
+    }
+
+    if (await healthOk()) {
+      log(`BitCraft local smoke server already running: http://127.0.0.1:${port}/`);
+      return 0;
+    }
+
+    if (!existsSync(distIndex)) {
+      fail("Missing apps/bitcraft-local/dist/index.html. Run this first:");
+      fail("corepack pnpm --filter @workspace/bitcraft-local run build");
+      return 1;
+    }
+
+    const out = openSync(path.join(logDir, "bitcraft-local-smoke.out.log"), "a");
+    const err = openSync(path.join(logDir, "bitcraft-local-smoke.err.log"), "a");
+
+    log(`Starting smoke server on http://127.0.0.1:${port}/...`);
+    const child = spawn(process.execPath, ["server.mjs"], {
+      cwd: appDir,
+      detached: true,
+      stdio: ["ignore", out, err],
+      env: {
+        ...process.env,
+        APP_HOST: "127.0.0.1",
+        APP_PORT: port,
+        SERVE_STATIC: "true",
+        ENABLE_SERVER_POLLING: "false",
+        ENABLE_DISCORD_STARTUP: "false",
+        BITCRAFT_LOCAL_DATA_DIR: path.join(repoRoot, ".dev-data"),
+      },
+    });
+
+    writeFileSync(pidFile, `${child.pid}\n`);
+    child.unref();
+
+    log(`Waiting for health at ${healthUrl}...`);
+    if (await waitForHealth()) {
+      log(`BitCraft local smoke server running: http://127.0.0.1:${port}/`);
+      log(`Logs: ${path.join(logDir, "bitcraft-local-smoke.out.log")}`);
+      return 0;
+    }
+
+    fail(`BitCraft local smoke server did not become healthy at ${healthUrl}.`);
+    fail(`Check logs in ${logDir}.`);
+    return 1;
+  } finally {
+    clearTimeout(hardTimeout);
   }
 }
 
-if (await healthOk()) {
-  console.log(`BitCraft local smoke server already running: http://127.0.0.1:${port}/`);
-  process.exit(0);
-}
-
-if (!existsSync(distIndex)) {
-  console.error("Missing apps/bitcraft-local/dist/index.html. Run this first:");
-  console.error("corepack pnpm --filter @workspace/bitcraft-local run build");
-  process.exit(1);
-}
-
-const out = openSync(path.join(logDir, "bitcraft-local-smoke.out.log"), "a");
-const err = openSync(path.join(logDir, "bitcraft-local-smoke.err.log"), "a");
-
-const child = spawn(process.execPath, ["server.mjs"], {
-  cwd: appDir,
-  detached: true,
-  stdio: ["ignore", out, err],
-  env: {
-    ...process.env,
-    APP_HOST: "127.0.0.1",
-    APP_PORT: port,
-    SERVE_STATIC: "true",
-    ENABLE_SERVER_POLLING: "false",
-    ENABLE_DISCORD_STARTUP: "false",
-    BITCRAFT_LOCAL_DATA_DIR: path.join(repoRoot, ".dev-data"),
-  },
-});
-
-writeFileSync(pidFile, `${child.pid}\n`);
-child.unref();
-
-if (await waitForHealth()) {
-  console.log(`BitCraft local smoke server running: http://127.0.0.1:${port}/`);
-  console.log(`Logs: ${path.join(logDir, "bitcraft-local-smoke.out.log")}`);
-  process.exit(0);
-}
-
-console.error(`BitCraft local smoke server did not become healthy at ${healthUrl}.`);
-console.error(`Check logs in ${logDir}.`);
-process.exit(1);
+process.exitCode = await main();
