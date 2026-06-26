@@ -604,6 +604,12 @@ body:has(.admin-loading-panel) .floating-actions {
 .theme-preview-progress { grid-column: 1 / -1; height: 8px; border-radius: 999px; overflow: hidden; padding: 0; }
 .theme-preview-progress i { display: block; width: 72%; height: 100%; border-radius: inherit; }
 .theme-preview-card small, .theme-preview-card em { font-style: normal; }
+.notification-sound-settings { gap: 12px; }
+.notification-sound-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr); gap: 12px; align-items: end; }
+.notification-volume-field > div { min-height: 39px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px; align-items: center; padding: 0 11px; }
+.notification-volume-field input[type="range"] { width: 100%; accent-color: var(--active-color); }
+.notification-volume-field strong { color: var(--text); font-size: 12px; text-align: right; }
+@media (max-width: 760px) { .notification-sound-grid { grid-template-columns: 1fr; } }
 .settings-dialog .toggle-row { border-color: rgba(108,123,145,.26); background: linear-gradient(180deg, rgba(10,15,23,.94), rgba(6,10,16,.94)); min-height: 42px; border-radius: 8px; }
 .settings-dialog .toggle-row input[type="checkbox"] { appearance: none; width: 40px; height: 22px; border: 1px solid rgba(108,123,145,.38); border-radius: 999px; background: rgba(95,105,120,.22); position: relative; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
 .settings-dialog .toggle-row input[type="checkbox"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #aab3c2; box-shadow: 0 2px 6px rgba(0,0,0,.35); transition: transform .16s ease, background .16s ease; }

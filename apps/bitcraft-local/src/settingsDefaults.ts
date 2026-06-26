@@ -198,5 +198,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
 };
 
-export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true };
+export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true, soundEnabled: true, soundId: "alert-pop", soundVolume: 0.55 };
+
+
 

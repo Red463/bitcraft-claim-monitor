@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,16 +40,26 @@ function execFileWithTimeout(command, args, timeoutMs) {
 }
 
 async function healthOk() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1_000);
-  try {
-    const response = await fetch(healthUrl, { signal: controller.signal });
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const req = request(new URL(healthUrl), { method: "GET", timeout: 1_000 }, (res) => {
+      res.resume();
+      finish(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 500));
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      finish(false);
+    });
+    req.on("error", () => finish(false));
+    req.end();
+  });
 }
 
 async function waitForHealth() {

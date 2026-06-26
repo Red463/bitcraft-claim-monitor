@@ -115,6 +115,7 @@ import { unique } from "./utils/array";
 import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "./utils/memberTracking";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
 import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey } from "./utils/appSettings";
+import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound, previewNotificationSound } from "./utils/notificationSounds";
 import { craftDisplayName, craftOutputItem, listingTrackingKey, safeDisplayJson } from "./utils/displayHelpers";
 import { urlMapFocus } from "./utils/mapFocus";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "./utils/professions";
@@ -313,6 +314,7 @@ function UserSettingsDialog({
     }
   };
   const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
+  const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
   const statusLabel = auth.user?.characterStatus === "approved"
     ? "Approved"
@@ -557,6 +559,32 @@ function UserSettingsDialog({
             {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
               <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
             ))}
+          </section> : null}
+          {settingsSection === "preferences" ? <section className="notification-sound-settings">
+            <div className="settings-section-heading">
+              <div>
+                <h3>Notification Sound</h3>
+                <p className="legend">Optional browser-only sound for new toast notifications. Preview unlocks browser audio if needed.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => previewNotificationSound({ soundId: toastSettings.soundId, soundVolume: toastSettings.soundVolume })}><Bell size={14} /> Preview</button>
+            </div>
+            <label className="toggle-row"><input type="checkbox" checked={toastSettings.soundEnabled} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundEnabled: event.target.checked })} /><span>Play a sound for new notifications</span></label>
+            <div className="notification-sound-grid">
+              <label className="field">
+                <span>Sound</span>
+                <select value={toastSettings.soundId} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundId: event.target.value as UserToastSettings["soundId"] })}>
+                  {NOTIFICATION_SOUND_OPTIONS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
+                </select>
+              </label>
+              <label className="field notification-volume-field">
+                <span>Volume</span>
+                <div>
+                  <input type="range" min="0" max="100" step="1" value={soundVolumePercent} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.target.value) / 100 })} />
+                  <strong>{soundVolumePercent}%</strong>
+                </div>
+              </label>
+            </div>
+            <p className="legend">{NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === toastSettings.soundId)?.description ?? "Generated notification sound."}</p>
           </section> : null}
           {settingsSection === "data" ? <section>
             <h3>Reset</h3>
@@ -2665,6 +2693,7 @@ function DashboardApp() {
     if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
     const id = `${Date.now()}-${Math.random()}`;
     const notice: ToastNotice = { id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null, sourceKey: options.sourceKey };
+    playNotificationSound(userToastSettings);
     setToasts((current) => [...current, notice].slice(-4));
     setNotificationLog((current) => [notice, ...dedupeNotifications(current)].slice(0, 80));
     const timer = window.setTimeout(() => {
@@ -2672,7 +2701,7 @@ function DashboardApp() {
       setToasts((current) => current.filter((notice) => notice.id !== id));
     }, 7000);
     toastTimersRef.current.set(id, timer);
-  }, [setNotificationLog]);
+  }, [setNotificationLog, userToastSettings]);
   React.useEffect(() => () => {
     for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
     toastTimersRef.current.clear();

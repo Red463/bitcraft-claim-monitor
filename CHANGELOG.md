@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.72] - 2026-06-26
+
+### Added
+
+- Added optional notification sounds with selectable tones, preview, and volume controls in user settings.
+
+### Changed
+
+- Enabled the Alert Pop notification sound by default for new browser settings.
+- Reworked the local smoke server health check so the launcher returns reliably during frontend testing.
+
 ## [1.0.0-beta.71] - 2026-06-26
 
 ### Changed
