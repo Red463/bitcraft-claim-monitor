@@ -9,6 +9,7 @@ import {
   Hammer,
   Home,
   KeyRound,
+  Landmark,
   Map as MapIcon,
   Package,
   Search,
@@ -46,6 +47,7 @@ export const NAV_GROUPS = [
   { id: "economy", label: "Economy & Region", items: [
     ["market", "Market", CircleDollarSign],
     ["empire", "Region", Globe2],
+    ["empires", "Empires", Landmark],
     ["map", "Map", MapIcon],
     ["activity", "Activity", Activity],
   ] },

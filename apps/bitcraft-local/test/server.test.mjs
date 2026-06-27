@@ -178,7 +178,7 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/claims") {
       const regionId = url.searchParams.get("regionId");
-      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", treasury: 300 }], count: 1 });
+      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", treasury: 300, empireEntityId: "empire-1" }], count: 1 });
       if (regionId === "3") return json(res, { claims: [{ entityId: seasonalClaimId, name: "Seasonal Market", regionId: "3", regionName: "Region 3", treasury: 100 }], count: 1 });
       return json(res, { claims: [], count: 0 });
     }
@@ -229,7 +229,21 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
     if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
-    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
+    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);    if (url.pathname === "/api/empires") return json(res, [
+      { entityId: "empire-1", name: "Test Empire", leader: "Leader One", leaderEntityId: "leader-1", memberCount: 3, territoryChunks: 12, numClaims: 4, empireCurrencyTreasury: 5000, locationX: 120, locationZ: 240, updatedAt: "2026-05-20T12:00:00.000Z" },
+      { entityId: "empire-foreign", name: "Foreign Empire", leader: "Other", leaderEntityId: "leader-2", memberCount: 8, territoryChunks: 99, numClaims: 9, empireCurrencyTreasury: 9000, updatedAt: "2026-05-20T12:00:00.000Z" },
+    ]);
+    if (url.pathname === "/api/empires/empire-1") return json(res, {
+      empire: { entityId: "empire-1", name: "Test Empire", leaderEntityId: "leader-1" },
+      members: [
+        { entityId: "leader-1", playerName: "Leader One", rankTitle: "The Earth King", lastLoginTimestamp: "2026-05-01T12:00:00.000Z" },
+        { entityId: "citizen-1", playerName: "Citizen One", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-20T12:00:00.000Z" },
+      ],
+      count: 2,
+    });
+    if (url.pathname === "/api/empires/empire-1/towers") return json(res, [
+      { entityId: "tower-1", locationX: 111, locationZ: 222, locationDimension: 0, energy: 75, upkeep: 10, active: true, nickname: "North Tower", siege: [] },
+    ]);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
       items: [{ id: "item-1", name: "Bronze Ingot" }],
@@ -401,7 +415,15 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(creatureCatalogRequests, 1);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
-  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");
+  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");  const regionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
+  assert.equal(regionalEmpires.summary.empires, 1);
+  assert.equal(regionalEmpires.empires[0].name, "Test Empire");
+  assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
+  const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
+  assert.equal(regionalWatchtowers.summary.towerCount, 1);
+  assert.equal(regionalWatchtowers.towers[0].nickname, "North Tower");
+  assert.equal(regionalWatchtowers.towers[0].inactiveRisk, true);
+  assert.equal(regionalWatchtowers.unclaimedAvailable, false);
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   assert.equal(recipeDetailOne.detail.item.name, "Simple Plank");

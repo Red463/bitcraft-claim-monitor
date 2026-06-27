@@ -112,6 +112,8 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
     case "market":
       add("market");
       break;
+    case "empires":
+      break;
     default:
       break;
   }

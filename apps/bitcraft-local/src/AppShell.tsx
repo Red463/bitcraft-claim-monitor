@@ -123,6 +123,7 @@ import type { ActivePanel, LocalHistoryState, LoadState } from "./types/app";
 import type { ActiveRegion, AppSettings, AppUser, ColourRoleDefinition, DiscordPresence, DiscordRoleOption, DiscordRolePanel, DiscordSettings, DiscordWelcomeFlow, UserAuthState, UserToastSettings } from "./types/settings";
 import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { Construction } from "./pages/ConstructionPage";
+import { Empires } from "./pages/EmpiresPage";
 import { CraftCalculatorPage } from "./pages/CraftCalculatorPage";
 import { Members } from "./pages/MembersPage";
 import { Research } from "./pages/ResearchPage";
@@ -2934,6 +2935,7 @@ function DashboardApp() {
     research: <Research data={data} />,
     market: <Market data={data} history={localHistory.market} claimId={claimId} />,
     empire: <Region data={data} />,
+    empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
