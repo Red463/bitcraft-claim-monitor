@@ -141,6 +141,8 @@ test("server collection paginates listings and protects production mutations", a
   let playerCraftRequests = 0;
   let recipeDetailRequests = 0;
   let priceHistoryRequests = 0;
+  let claimDetailRequests = 0;
+  let memberListRequests = 0;
   let slowPriceHistoryResponded = false;
   let geoipDownloadRequests = 0;
   let ipapiRequests = 0;
@@ -186,10 +188,14 @@ test("server collection paginates listings and protects production mutations", a
       return json(res, { claims: [], count: 0 });
     }
     if (url.pathname === `/api/claims/${claimId}`) {
+      claimDetailRequests += 1;
       if (failClaimRefresh) return json(res, { error: "rate limited" }, 429);
       return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300, regionName: "Zephra" } });
     }
-    if (url.pathname === `/api/claims/${claimId}/members`) return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
+    if (url.pathname === `/api/claims/${claimId}/members`) {
+      memberListRequests += 1;
+      return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
+    }
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
     if (url.pathname === `/api/claims/${claimId}/inventories`) return json(res, {
@@ -429,7 +435,7 @@ test("server collection paginates listings and protects production mutations", a
   const mapCatalogTwo = await fetch(`${origin}/api/local/map/catalog`).then((response) => response.json());
   assert.deepEqual(mapCatalogOne.resources, [{ id: 21, name: "Oak Tree", tier: 2 }]);
   assert.deepEqual(mapCatalogTwo.creatures, [{ enemyType: 42, name: "Sagi Bird", huntable: true }]);
-  assert.equal(resourceCatalogRequests, 2);
+  assert.equal(resourceCatalogRequests, 1);
   assert.equal(creatureCatalogRequests, 1);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
@@ -440,11 +446,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalEmpires.empires[0].name, "Test Empire");
   assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
   failEmpireList = true;
-  const failedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=99`).then((response) => response.json());
-  assert.equal(failedRegionalEmpires.stale, true);
-  assert.equal(failedRegionalEmpires.partial, true);
-  assert.equal(failedRegionalEmpires.summary.empires, 0);
-  assert.match(failedRegionalEmpires.errors.join(" "), /empire unavailable|HTTP 500/);
+  const cachedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=99`).then((response) => response.json());
+  assert.equal(cachedRegionalEmpires.summary.empires, 0);
+  assert.deepEqual(cachedRegionalEmpires.empires, []);
   failEmpireList = false;
   const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
   assert.equal(regionalWatchtowers.summary.towerCount, 1);
@@ -487,12 +491,18 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(missingPlayerDetails.failed, 1);
   assert.equal(playerDetailRequests, 1);
   const dashboardDataOne = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
+  const claimRequestsAfterDashboardOne = claimDetailRequests;
+  const memberRequestsAfterDashboardOne = memberListRequests;
+  const marketPageRequestsAfterDashboardOne = requestedPages.length;
   const dashboardDataTwo = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
   assert.equal(dashboardDataOne.players[0].username, "Tester");
   assert.equal(dashboardDataOne.market.listings.length, 2);
   assert.equal(dashboardDataOne.region.claims.length >= 0, true);
   assert.equal(Array.isArray(dashboardDataOne.contributions["public-craft-0"]), true);
   assert.equal(Array.isArray(dashboardDataTwo.contributions["public-craft-0"]), true);
+  assert.equal(claimDetailRequests, claimRequestsAfterDashboardOne);
+  assert.equal(memberListRequests, memberRequestsAfterDashboardOne);
+  assert.equal(requestedPages.length, marketPageRequestsAfterDashboardOne);
   assert.equal(playerDetailRequests, 1);
   assert.equal(craftContributionRequests, 1);
   const passivePayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };

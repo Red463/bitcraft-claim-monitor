@@ -2330,6 +2330,8 @@ const craftContributionCache = new Map();
 const passiveCraftsCache = new Map();
 const productionCraftsCache = new Map();
 let mapCatalogCache = null;
+const dashboardDataCache = new Map();
+const dashboardDataInflight = new Map();
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
@@ -2340,6 +2342,8 @@ const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
 const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
+const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
+const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const BITJITA_PROXY_CACHE_POLICIES = [
   { pattern: /^\/api\/(?:resources|creatures|skills|items|cargos|recipes|crafting-recipes)(?:\/|$)/, ttlMs: 60 * 60 * 1000 },
   { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
@@ -5416,11 +5420,16 @@ async function fetchBitjita(pathname, options = {}) {
   // prefer adding resilience here instead of duplicating fetch logic in callers.
   const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
   const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
-  const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
-  if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
   let response;
   try {
-    response = await fetch(url, fetchOptions);
+    if (options.cache === false) {
+      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
+      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
+      response = await fetch(url, fetchOptions);
+      if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
+      return response.json();
+    }
+    response = await fetchUpstreamCached(url, { timeoutMs });
   } catch (error) {
     if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
@@ -5431,18 +5440,22 @@ async function fetchBitjita(pathname, options = {}) {
     }
     throw error;
   }
-  if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
-  return response.json();
+  if (response.status < 200 || response.status >= 300) throw new Error(`${pathname}: HTTP ${response.status}`);
+  try {
+    return JSON.parse(Buffer.from(response.body).toString("utf8"));
+  } catch {
+    throw new Error(`${pathname}: BitJita returned invalid JSON`);
+  }
 }
 
 async function fetchAllClaimListings(claimId, options = {}) {
   const side = String(options.side ?? "").toLowerCase();
   const sideParam = side === "buy" || side === "sell" ? `&side=${side}` : "";
   const base = `/claims/${claimId}/market/listings?limit=200${sideParam}`;
-  const first = await fetchBitjita(`${base}&page=1`);
+  const first = await fetchBitjita(`${base}&page=1`, { cache: options.cache !== false });
   const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
   const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { cache: options.cache !== false }))
     : [];
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
 }
@@ -6740,7 +6753,7 @@ async function settlementProductionCrafts(body) {
   if (!body?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
 
   let publicFetchError = "";
-  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS }).catch((error) => {
+  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }).catch((error) => {
     publicFetchError = error instanceof Error ? error.message : String(error);
     return { craftResults: [] };
   });
@@ -6749,7 +6762,7 @@ async function settlementProductionCrafts(body) {
   const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     try {
-      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS }) };
+      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }) };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -6800,7 +6813,52 @@ async function settlementProductionCrafts(body) {
   return value;
 }
 
-async function dashboardData(claimId) {
+async function dashboardData(claimId, options = {}) {
+  const id = String(claimId ?? "").trim();
+  if (!/^\d{8,}$/.test(id)) {
+    const error = new Error("Choose a valid BitCraft settlement ID");
+    error.statusCode = 400;
+    throw error;
+  }
+  const now = Date.now();
+  const cached = dashboardDataCache.get(id);
+  if (!options.forceRefresh && cached && cached.expiresAt > now) {
+    return { ...cached.value, serverFreshness: { ...(cached.value.serverFreshness ?? {}), cacheState: "hit", cachedAt: cached.cachedAt } };
+  }
+  const inflight = dashboardDataInflight.get(id);
+  if (!options.forceRefresh && inflight) return inflight;
+  const stale = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
+  const request = (async () => {
+    try {
+      const value = await dashboardDataFresh(id);
+      const cachedAt = new Date().toISOString();
+      dashboardDataCache.set(id, {
+        value,
+        cachedAt,
+        expiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS,
+        staleExpiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS + DASHBOARD_DATA_STALE_IF_ERROR_MS,
+      });
+      return { ...value, serverFreshness: { ...(value.serverFreshness ?? {}), cacheState: "miss", cachedAt } };
+    } catch (error) {
+      if (stale) {
+        const message = error instanceof Error ? error.message : String(error);
+        const partialErrors = Array.isArray(stale.value.partialErrors) ? stale.value.partialErrors : [];
+        return {
+          ...stale.value,
+          stale: true,
+          partialErrors: [...partialErrors, `Dashboard refresh failed: ${message}`],
+          serverFreshness: { ...(stale.value.serverFreshness ?? {}), cacheState: "stale-if-error", cachedAt: stale.cachedAt },
+        };
+      }
+      throw error;
+    } finally {
+      dashboardDataInflight.delete(id);
+    }
+  })();
+  dashboardDataInflight.set(id, request);
+  return request;
+}
+async function dashboardDataFresh(claimId) {
   const id = String(claimId ?? "").trim();
   if (!/^\d{8,}$/.test(id)) {
     const error = new Error("Choose a valid BitCraft settlement ID");
@@ -7203,7 +7261,7 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "construction", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
     collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => timedCollectorFetch(metrics, "construction", "construction", () => fetchBitjita(`/claims/${id}/construction`))) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
     collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => timedCollectorFetch(metrics, "research", "research", () => fetchBitjita(`/claims/${id}/research`))) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
-    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
+    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id, { cache: options.force !== true }))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
     collectorDue(id, "production", "crafts", options)
       ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
         const fallback = previousPayload(previous, "crafts", { craftResults: [] });
@@ -7452,18 +7510,37 @@ function marketBuyOrders(claimId, params = {}) {
   const pageSize = [25, 50, 100].includes(Number(params.pageSize)) ? Number(params.pageSize) : 50;
   const direction = String(params.direction ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const sort = String(params.sort ?? "unitPrice");
+  const where = ["claim_id = ?", "active = 1"];
+  const args = [id];
+  if (regionId) {
+    where.push("region_id = ?");
+    args.push(regionId);
+  }
+  if (query) {
+    const pattern = `%${escapeSqlLike(query)}%`;
+    where.push(`(
+      lower(item_name) LIKE ? ESCAPE '\\'
+      OR lower(COALESCE(buyer_name, '')) LIKE ? ESCAPE '\\'
+      OR lower(COALESCE(market_claim_name, '')) LIKE ? ESCAPE '\\'
+      OR lower(COALESCE(region_name, '')) LIKE ? ESCAPE '\\'
+      OR lower(COALESCE(rarity, '')) LIKE ? ESCAPE '\\'
+    )`);
+    args.push(pattern, pattern, pattern, pattern, pattern);
+  }
   const rows = db.prepare(`
     SELECT * FROM market_buy_orders_current
-    WHERE claim_id = ? AND active = 1
-      ${regionId ? "AND region_id = ?" : ""}
+    WHERE ${where.join(" AND ")}
     ORDER BY last_seen DESC
-  `).all(...(regionId ? [id, regionId] : [id]));
+  `).all(...args);
   const salesByItem = new Map();
+  const salesArgs = [id];
+  const salesRegionClause = regionId ? " AND region_id = ?" : "";
+  if (regionId) salesArgs.push(regionId);
   for (const row of db.prepare(`
     SELECT region_id, item_id, item_type, sales_count AS salesCount, units_sold AS unitsSold, total_value AS totalValue, average_unit_price AS averageUnitPrice
     FROM market_regional_sale_averages_current
-    WHERE claim_id = ? AND window_days = 7
-  `).all(id)) {
+    WHERE claim_id = ? AND window_days = 7${salesRegionClause}
+  `).all(...salesArgs)) {
     const units = toNumber(row.unitsSold);
     const total = toNumber(row.totalValue);
     if (!row.item_id || units <= 0 || toNumber(row.salesCount) < 3) continue;
@@ -7504,10 +7581,6 @@ function marketBuyOrders(claimId, params = {}) {
       premiumPercent,
       opportunityEligible: premiumPercent != null && premiumPercent > 0,
     };
-  }).filter((row) => {
-    if (!query) return true;
-    return [row.itemName, row.buyerName, row.marketClaimName, row.regionName, row.rarity]
-      .some((value) => String(value ?? "").toLowerCase().includes(query));
   });
   const sorters = {
     item: (row) => row.itemName ?? "",
@@ -8773,7 +8846,7 @@ function staleUpstreamResponse(cached) {
   return cached ? { ...cached, cacheState: "stale-if-error", stale: true } : null;
 }
 
-async function fetchUpstreamCached(upstream) {
+async function fetchUpstreamCached(upstream, options = {}) {
   const key = upstream.toString();
   const now = Date.now();
   const ttlMs = bitjitaProxyCacheTtl(upstream);
@@ -8795,10 +8868,10 @@ async function fetchUpstreamCached(upstream) {
 
   const request = (async () => {
     try {
-      const response = await fetch(upstream, {
-        headers: { accept: "application/json", "x-app-identifier": appIdentifier },
-        signal: AbortSignal.timeout(BITJITA_PROXY_TIMEOUT_MS),
-      });
+      const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_PROXY_TIMEOUT_MS));
+      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
+      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
+      const response = await fetch(upstream, fetchOptions);
       const body = Buffer.from(await response.arrayBuffer());
       const headers = {
         "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
