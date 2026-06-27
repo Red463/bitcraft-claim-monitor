@@ -2571,6 +2571,9 @@ function DashboardApp() {
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
   const [refreshToken, setRefreshToken] = React.useState(0);
+  const [historyAutoRefreshToken, setHistoryAutoRefreshToken] = React.useState(0);
+  const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
+  const [dealRefreshToken, setDealRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
   const [mapFocus, setMapFocus] = usePersistedState<MapFocus>("map.focus", urlMapFocus());
@@ -2604,9 +2607,9 @@ function DashboardApp() {
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
-  const localHistory = useLocalHistory(refreshToken + historyRefreshToken, claimId, active);
-  const notificationActivity = useNotificationActivity(refreshToken, claimId);
-  const dealAlerts = useDealAlerts(refreshToken);
+  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active);
+  const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
+  const dealAlerts = useDealAlerts(dealRefreshToken);
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
@@ -2793,8 +2796,23 @@ function DashboardApp() {
     window.scrollTo(0, 0);
   }, [active]);
   React.useEffect(() => {
-    const timer = window.setInterval(() => setRefreshToken((x) => x + 1), appSettings.refreshSeconds * 1000);
-    return () => window.clearInterval(timer);
+    const intervalMs = appSettings.refreshSeconds * 1000;
+    const visibleBump = (setter: React.Dispatch<React.SetStateAction<number>>) => {
+      if (document.visibilityState !== "hidden") setter((x) => x + 1);
+    };
+    const timers: number[] = [];
+    const schedule = (setter: React.Dispatch<React.SetStateAction<number>>, delayMs: number) => {
+      const start = window.setTimeout(() => {
+        visibleBump(setter);
+        timers.push(window.setInterval(() => visibleBump(setter), intervalMs));
+      }, delayMs);
+      timers.push(start);
+    };
+    schedule(setRefreshToken, 0);
+    schedule(setHistoryAutoRefreshToken, Math.min(5000, Math.floor(intervalMs * 0.25)));
+    schedule(setNotificationRefreshToken, Math.min(10000, Math.floor(intervalMs * 0.5)));
+    schedule(setDealRefreshToken, Math.min(15000, Math.floor(intervalMs * 0.75)));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [appSettings.refreshSeconds]);
   React.useEffect(() => {
     const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");

@@ -846,6 +846,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
     if (rarity !== "All" && (m.itemRarityStr ?? m.rarity) !== rarity) return false;
     return true;
   });
+  const renderedRows = rows.slice(0, 500);
   const highest = [...all].sort((a, b) => toNumber(b.price) * toNumber(b.quantity || 1) - toNumber(a.price) * toNumber(a.quantity || 1)).slice(0, 3);
   const saleEvents = apiTrades.map((trade: AnyRecord) => ({
     itemName: trade.itemName,
@@ -996,7 +997,8 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
           </label>
         </div>
       </section>
-      <DataTable rows={rows} columns={[
+      {rows.length > renderedRows.length ? <p className="legend market-legend">Showing the first {formatNumber(renderedRows.length)} of {formatNumber(rows.length)} matching listings. Narrow the filters to inspect more specific results.</p> : null}
+      <DataTable rows={renderedRows} columns={[
         ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
         ["Qty", r => formatNumber(r.quantity)],
