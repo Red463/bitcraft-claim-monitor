@@ -55,11 +55,12 @@ function errorMessage(error) {
 // lifetimes. A transient upstream timeout must be logged and surfaced in admin
 // diagnostics, but it must not terminate the whole Node process.
 process.on("unhandledRejection", (reason) => {
-  console.error(`Unhandled async task failed: ${errorMessage(reason)}`);
+  const detail = reason instanceof Error && reason.stack ? reason.stack : errorMessage(reason);
+  console.error(`Unhandled async task failed: ${detail}`);
 });
 
 process.on("uncaughtException", (error) => {
-  console.error(`Uncaught exception: ${errorMessage(error)}`);
+  console.error(`Uncaught exception: ${error.stack ?? errorMessage(error)}`);
 });
 
 const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
@@ -2318,6 +2319,7 @@ function audit(user, action, details = {}) {
 const loginAttempts = new Map();
 const upstreamCache = new Map();
 const upstreamInflight = new Map();
+const empireScoutInflight = new Map();
 const regionCache = new Map();
 const regionClaimListCache = new Map();
 const empireScoutCache = new Map();
@@ -2330,10 +2332,12 @@ const productionCraftsCache = new Map();
 let mapCatalogCache = null;
 const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
+const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
-const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 20000));
+const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 15000));
 const EMPIRE_SCOUT_CACHE_TTL_MS = Math.max(30_000, Number(process.env.EMPIRE_SCOUT_CACHE_TTL_MS ?? 2 * 60 * 1000));
-const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 20000));
+const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 12000));
+const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
 const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
 const BITJITA_PROXY_CACHE_POLICIES = [
@@ -5470,9 +5474,25 @@ function empireCacheGetAny(key) {
 async function empireCacheLoad(key, loader) {
   const cached = empireCacheGet(key);
   if (cached) return cached;
-  const value = await loader();
-  empireScoutCache.set(key, { value, expiresAt: Date.now() + EMPIRE_SCOUT_CACHE_TTL_MS });
-  return value;
+  const inflight = empireScoutInflight.get(key);
+  if (inflight) return inflight;
+  const stale = empireCacheGetAny(key);
+  const request = (async () => {
+    try {
+      const value = await loader();
+      empireScoutCache.set(key, { value, expiresAt: Date.now() + EMPIRE_SCOUT_CACHE_TTL_MS });
+      return value;
+    } catch (error) {
+      if (stale) {
+        return { ...stale, stale: true, partial: true, errors: [...(stale.errors ?? []), errorMessage(error)] };
+      }
+      throw error;
+    } finally {
+      empireScoutInflight.delete(key);
+    }
+  })();
+  empireScoutInflight.set(key, request);
+  return request;
 }
 
 function empireIdFromClaim(claim) {
@@ -8728,7 +8748,7 @@ async function serveBuiltFrontend(url, method, res) {
 
 function pruneUpstreamCache(now = Date.now()) {
   for (const [key, value] of upstreamCache) {
-    if (value.expiresAt <= now) upstreamCache.delete(key);
+    if ((value.staleExpiresAt ?? value.expiresAt) <= now) upstreamCache.delete(key);
   }
   while (upstreamCache.size > UPSTREAM_CACHE_MAX_ENTRIES) {
     const oldestKey = upstreamCache.keys().next().value;
@@ -8749,42 +8769,60 @@ function hasFreshUpstreamCache(upstream) {
   return Boolean(cached && cached.expiresAt > Date.now());
 }
 
+function staleUpstreamResponse(cached) {
+  return cached ? { ...cached, cacheState: "stale-if-error", stale: true } : null;
+}
+
 async function fetchUpstreamCached(upstream) {
   const key = upstream.toString();
   const now = Date.now();
   const ttlMs = bitjitaProxyCacheTtl(upstream);
   const cached = upstreamCache.get(key);
   if (cached && cached.expiresAt > now) return { ...cached, cacheState: "hit" };
-  if (cached) upstreamCache.delete(key);
+  const staleCandidate = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
 
   const inflight = upstreamInflight.get(key);
   if (inflight) {
-    const value = await inflight;
-    return { ...value, cacheState: "deduped" };
+    try {
+      const value = await inflight;
+      return { ...value, cacheState: "deduped" };
+    } catch (error) {
+      const stale = staleUpstreamResponse(staleCandidate);
+      if (stale) return stale;
+      throw error;
+    }
   }
 
   const request = (async () => {
-    const response = await fetch(upstream, {
-      headers: { accept: "application/json", "x-app-identifier": appIdentifier },
-      signal: AbortSignal.timeout(BITJITA_PROXY_TIMEOUT_MS),
-    });
-    const body = Buffer.from(await response.arrayBuffer());
-    const headers = {
-      "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
-      "cache-control": `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
-    };
-    const value = { status: response.status, headers, body, expiresAt: Date.now() + ttlMs, ttlMs };
-    if (response.ok) {
-      upstreamCache.set(key, value);
-      pruneUpstreamCache();
+    try {
+      const response = await fetch(upstream, {
+        headers: { accept: "application/json", "x-app-identifier": appIdentifier },
+        signal: AbortSignal.timeout(BITJITA_PROXY_TIMEOUT_MS),
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      const headers = {
+        "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
+        "cache-control": `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
+      };
+      const value = { status: response.status, headers, body, expiresAt: Date.now() + ttlMs, staleExpiresAt: Date.now() + ttlMs + UPSTREAM_STALE_IF_ERROR_MS, ttlMs };
+      if (response.ok) {
+        upstreamCache.set(key, value);
+        pruneUpstreamCache();
+      } else if (staleCandidate && response.status >= 500) {
+        return staleUpstreamResponse(staleCandidate);
+      }
+      return value;
+    } catch (error) {
+      const stale = staleUpstreamResponse(staleCandidate);
+      if (stale) return stale;
+      throw error;
     }
-    return value;
   })();
 
   upstreamInflight.set(key, request);
   try {
     const value = await request;
-    return { ...value, cacheState: "miss" };
+    return { ...value, cacheState: value.cacheState ?? "miss" };
   } finally {
     upstreamInflight.delete(key);
   }
@@ -8800,7 +8838,7 @@ async function proxyBitjita(req, url, res) {
   const cacheKey = upstream.toString();
   if (!hasFreshUpstreamCache(upstream) && !upstreamInflight.has(cacheKey) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
   const response = await fetchUpstreamCached(upstream);
-  res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState }));
+  res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
   res.end(response.body);
 }
 
@@ -8810,6 +8848,20 @@ const server = createServer(async (req, res) => {
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const requestStartedAt = Date.now();
+    let requestFinished = false;
+    res.once("finish", () => {
+      requestFinished = true;
+      const durationMs = Date.now() - requestStartedAt;
+      if (!isTestRuntime && durationMs >= SLOW_REQUEST_LOG_MS) {
+        console.warn(`Slow request completed: ${req.method} ${url.pathname}${url.search} status=${res.statusCode} durationMs=${durationMs}`);
+      }
+    });
+    res.once("close", () => {
+      if (requestFinished || isTestRuntime) return;
+      const durationMs = Date.now() - requestStartedAt;
+      console.warn(`Request connection closed before completion: ${req.method} ${url.pathname}${url.search} durationMs=${durationMs}`);
+    });
     if (shouldLogVisitor(url.pathname)) {
       res.once("finish", () => {
         try {
@@ -9533,7 +9585,23 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "empires", RATE_LIMITS.expensiveLocal)) return;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      return send(res, 200, await regionalEmpireOverview(regionId));
+      try {
+        return send(res, 200, await regionalEmpireOverview(regionId));
+      } catch (error) {
+        const cached = empireCacheGetAny(`overview:${regionId}`);
+        if (cached) return send(res, 200, { ...cached, stale: true, partial: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
+        return send(res, 200, {
+          regionId,
+          fetchedAt: new Date().toISOString(),
+          stale: true,
+          partial: true,
+          totalRegionalClaims: 0,
+          empireClaimCount: 0,
+          empires: [],
+          errors: [errorMessage(error)],
+          summary: { empires: 0, regionalClaims: 0, totalMembers: 0, largestEmpireName: null },
+        });
+      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/watchtowers") {
       if (!rateLimit(req, res, "empire-watchtowers", RATE_LIMITS.expensiveLocal)) return;
@@ -9628,6 +9696,11 @@ const server = createServer(async (req, res) => {
     send(res, 404, { error: "Not found" });
   } catch (error) {
     const status = Number(error?.statusCode) || 500;
+    if (!isTestRuntime) {
+      const detail = error instanceof Error && error.stack ? error.stack : errorMessage(error);
+      console.warn(`Request failed: ${req.method} ${req.url ?? "/"} status=${status} ${detail}`);
+    }
+    if (res.headersSent) return res.end();
     send(res, status, { error: error instanceof Error ? error.message : String(error) });
   }
 });

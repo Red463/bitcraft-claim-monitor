@@ -132,6 +132,7 @@ test("server collection paginates listings and protects production mutations", a
   const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
   let trades = [historicalTrade];
   let proxyCacheRequests = 0;
+  let failCacheTest = false;
   let resourceCatalogRequests = 0;
   let creatureCatalogRequests = 0;
   let passiveCraftRequests = 0;
@@ -147,10 +148,12 @@ test("server collection paginates listings and protects production mutations", a
   let craftOwnerUsername = "Tester";
   let failClaimRefresh = false;
   let failResearchRefresh = false;
+  let failEmpireList = false;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
       proxyCacheRequests += 1;
+      if (failCacheTest) return json(res, { error: "upstream unavailable" }, 500);
       return setTimeout(() => json(res, { ok: true, request: proxyCacheRequests }), 75);
     }
     if (url.pathname === "/geoip/GeoLite2-City-CSV.zip") {
@@ -230,10 +233,13 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
     if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
     if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
-    if (url.pathname === "/api/empires") return json(res, [
+    if (url.pathname === "/api/empires") {
+      if (failEmpireList) return json(res, { error: "empire unavailable" }, 500);
+      return json(res, [
       { entityId: "empire-1", name: "Test Empire", leader: "Leader One", leaderEntityId: "leader-1", memberCount: 3, territoryChunks: 12, numClaims: 4, empireCurrencyTreasury: 5000, locationX: 120, locationZ: 240, updatedAt: "2026-05-20T12:00:00.000Z" },
       { entityId: "empire-foreign", name: "Foreign Empire", leader: "Other", leaderEntityId: "leader-2", memberCount: 8, territoryChunks: 99, numClaims: 9, empireCurrencyTreasury: 9000, updatedAt: "2026-05-20T12:00:00.000Z" },
     ]);
+    }
     if (url.pathname === "/api/empires/empire-1") return json(res, {
       empire: { entityId: "empire-1", name: "Test Empire", leaderEntityId: "leader-1" },
       members: [
@@ -373,6 +379,9 @@ test("server collection paginates listings and protects production mutations", a
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      BITJITA_PROXY_CACHE_MS: "100",
+      BITJITA_PROXY_STALE_IF_ERROR_MS: "5000",
+      EMPIRE_SCOUT_CACHE_TTL_MS: "100",
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
@@ -403,6 +412,14 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(proxyTwo.headers.get("x-bitjita-cache"), "deduped");
   assert.deepEqual(await proxyOne.json(), { ok: true, request: 1 });
   assert.deepEqual(await proxyTwo.json(), { ok: true, request: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  failCacheTest = true;
+  const staleProxy = await fetch(`${origin}/api/bitjita/cache-test?same=1`);
+  assert.equal(staleProxy.status, 200);
+  assert.equal(staleProxy.headers.get("x-bitjita-cache"), "stale-if-error");
+  assert.equal(staleProxy.headers.get("x-bitjita-stale"), "1");
+  assert.deepEqual(await staleProxy.json(), { ok: true, request: 1 });
+  failCacheTest = false;
   const proxiedResourcesOne = await fetch(`${origin}/api/bitjita/resources`);
   const proxiedResourcesTwo = await fetch(`${origin}/api/bitjita/resources`);
   assert.equal(proxiedResourcesOne.headers.get("cache-control"), "public, max-age=3600");
@@ -422,6 +439,13 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalEmpires.summary.empires, 1);
   assert.equal(regionalEmpires.empires[0].name, "Test Empire");
   assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
+  failEmpireList = true;
+  const failedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=99`).then((response) => response.json());
+  assert.equal(failedRegionalEmpires.stale, true);
+  assert.equal(failedRegionalEmpires.partial, true);
+  assert.equal(failedRegionalEmpires.summary.empires, 0);
+  assert.match(failedRegionalEmpires.errors.join(" "), /empire unavailable|HTTP 500/);
+  failEmpireList = false;
   const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
   assert.equal(regionalWatchtowers.summary.towerCount, 1);
   assert.equal(regionalWatchtowers.towers[0].nickname, "North Tower");
@@ -1096,6 +1120,9 @@ test("background polling failures keep the server online", async (t) => {
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      BITJITA_PROXY_CACHE_MS: "100",
+      BITJITA_PROXY_STALE_IF_ERROR_MS: "5000",
+      EMPIRE_SCOUT_CACHE_TTL_MS: "100",
     },
     stdio: "ignore",
   });

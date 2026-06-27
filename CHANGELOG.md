@@ -8,6 +8,11 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.75] - 2026-06-27
+
+### Fixed
+
+- Improved live stability during BitJita outages by serving recent cached data where possible, deduplicating heavy empire scans, and logging slow or failed requests with more detail.
 ## [1.0.0-beta.74] - 2026-06-27
 
 ### Added
