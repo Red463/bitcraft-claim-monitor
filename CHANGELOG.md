@@ -8,6 +8,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.74] - 2026-06-27
+
+### Added
+
+- Added clickable watchtower coordinates and watchtower access details on the Empires page.
+
+### Fixed
+
+- Fixed Empires watchtower scans timing out by returning partial or cached data when BitJita is slow.
+
 ## [1.0.0-beta.73] - 2026-06-27
 
 ### Added

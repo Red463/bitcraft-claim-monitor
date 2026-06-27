@@ -120,12 +120,12 @@ test("server collection paginates listings and protects production mutations", a
     { entityId: "listing-2", itemName: "Oak Plank", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 20, itemType: "item", quantity: 8, price: 6, side: "sell" },
   ];
   const buyListings = [
-    { entityId: "buy-listing-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 10, price: 12, storedCoins: 120, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
-    { entityId: "buy-listing-2", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 31, itemType: "0", itemName: "Slow Gem", itemTier: 3, itemRarityStr: "Common", iconAssetName: "gem.png", quantity: 1, price: 100, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
-    { entityId: "buy-listing-3", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 32, itemType: "1", itemName: "Fine Timber Package", itemTier: 4, itemRarityStr: "Common", iconAssetName: "timber.png", quantity: 2, price: 50, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
+    { entityId: "buy-listing-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 10, price: 12, storedCoins: 120, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
+    { entityId: "buy-listing-2", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 31, itemType: "0", itemName: "Slow Gem", itemTier: 3, itemRarityStr: "Common", iconAssetName: "gem.png", quantity: 1, price: 100, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
+    { entityId: "buy-listing-3", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 32, itemType: "1", itemName: "Fine Timber Package", itemTier: 4, itemRarityStr: "Common", iconAssetName: "timber.png", quantity: 2, price: 50, storedCoins: 100, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
   ];
   const seasonalBuyListings = [
-    { entityId: "buy-listing-r3", claimEntityId: seasonalClaimId, claimName: "Seasonal Market", regionId: 3, regionName: "Region 3", ownerUsername: "Regional Buyer", ownerEntityId: "buyer-r3", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 5, price: 12, storedCoins: 60, side: "buy", timestamp: "2026-05-20T12:00:00.000Z" },
+    { entityId: "buy-listing-r3", claimEntityId: seasonalClaimId, claimName: "Seasonal Market", regionId: 3, regionName: "Region 3", ownerUsername: "Regional Buyer", ownerEntityId: "buyer-r3", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 5, price: 12, storedCoins: 60, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
   ];
   let currentListings = listings;
   const historicalTrade = { id: "historic-1", orderEntityId: "historic-order", itemId: 30, itemType: "0", itemName: "Leather", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 5, unitPrice: 10, totalPrice: 50, createdAt: "2026-05-20T12:00:00.000Z" };
@@ -229,15 +229,16 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
     if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
-    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);    if (url.pathname === "/api/empires") return json(res, [
+    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
+    if (url.pathname === "/api/empires") return json(res, [
       { entityId: "empire-1", name: "Test Empire", leader: "Leader One", leaderEntityId: "leader-1", memberCount: 3, territoryChunks: 12, numClaims: 4, empireCurrencyTreasury: 5000, locationX: 120, locationZ: 240, updatedAt: "2026-05-20T12:00:00.000Z" },
       { entityId: "empire-foreign", name: "Foreign Empire", leader: "Other", leaderEntityId: "leader-2", memberCount: 8, territoryChunks: 99, numClaims: 9, empireCurrencyTreasury: 9000, updatedAt: "2026-05-20T12:00:00.000Z" },
     ]);
     if (url.pathname === "/api/empires/empire-1") return json(res, {
       empire: { entityId: "empire-1", name: "Test Empire", leaderEntityId: "leader-1" },
       members: [
-        { entityId: "leader-1", playerName: "Leader One", rankTitle: "The Earth King", lastLoginTimestamp: "2026-05-01T12:00:00.000Z" },
-        { entityId: "citizen-1", playerName: "Citizen One", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-20T12:00:00.000Z" },
+        { entityId: "leader-1", playerName: "Leader One", rankTitle: "The Earth King", lastLoginTimestamp: "2026-05-01T12:00:00.000Z", buildPermission: true },
+        { entityId: "citizen-1", playerName: "Citizen One", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
       ],
       count: 2,
     });
@@ -415,7 +416,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(creatureCatalogRequests, 1);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
-  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");  const regionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
+  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");
+
+  const regionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
   assert.equal(regionalEmpires.summary.empires, 1);
   assert.equal(regionalEmpires.empires[0].name, "Test Empire");
   assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
@@ -423,6 +426,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.summary.towerCount, 1);
   assert.equal(regionalWatchtowers.towers[0].nickname, "North Tower");
   assert.equal(regionalWatchtowers.towers[0].inactiveRisk, true);
+  assert.equal(regionalWatchtowers.towers[0].locationX, 111);
+  assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
+  assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);
+  assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.hasStorage), true);
+  assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.canAddHexite), true);
   assert.equal(regionalWatchtowers.unclaimedAvailable, false);
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
@@ -619,8 +627,8 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(duplicateDealWatch.status, 409);
   currentListings = [
-    { entityId: "deal-sell-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 2, price: 6, side: "sell", timestamp: "2026-05-20T12:00:00.000Z" },
-    { entityId: "deal-sell-filler", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 20, itemType: "0", itemName: "Oak Plank", quantity: 1, price: 100, side: "sell", timestamp: "2026-05-20T12:00:00.000Z" },
+    { entityId: "deal-sell-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 2, price: 6, side: "sell", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
+    { entityId: "deal-sell-filler", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 20, itemType: "0", itemName: "Oak Plank", quantity: 1, price: 100, side: "sell", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
   ];
   const dealJob = await fetch(`${origin}/api/local/admin/jobs/run`, {
     method: "POST",
@@ -1104,6 +1112,10 @@ test("background polling failures keep the server online", async (t) => {
   assert.equal(health.ok, true);
   assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
 });
+
+
+
+
 
 
 

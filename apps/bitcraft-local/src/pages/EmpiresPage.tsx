@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, Castle, Clock, Copy, Crown, Landmark, MapPin, RadioTower, Shield, Users, Zap } from "lucide-react";
+import { AlertTriangle, Castle, Clock, Copy, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
@@ -39,10 +39,25 @@ function regionLabel(region: ActiveRegion, monitoredRegionId?: string) {
   return `R${region.regionId}${region.regionName ? ` - ${region.regionName}` : ""}${suffix}`;
 }
 
+function rawCoordinate(row: AnyRecord, axis: "x" | "z"): number | null {
+  const value = axis === "x" ? row.locationX ?? row.x : row.locationZ ?? row.z;
+  if (value == null || value === "") return null;
+  const number = toNumber(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function coordinates(row: AnyRecord): string {
-  const x = row.locationX ?? row.x;
-  const z = row.locationZ ?? row.z;
+  const x = rawCoordinate(row, "x");
+  const z = rawCoordinate(row, "z");
   return x == null || z == null ? "-" : `${formatNumber(x, 0)}, ${formatNumber(z, 0)}`;
+}
+
+function mapHref(row: AnyRecord): string | null {
+  const x = rawCoordinate(row, "x");
+  const z = rawCoordinate(row, "z");
+  if (x == null || z == null) return null;
+  const name = `${row.nickname ?? "Watchtower"} - ${row.empireName ?? "Empire"}`;
+  return `/?page=map&mapName=${encodeURIComponent(name)}&mapX=${encodeURIComponent(String(x))}&mapZ=${encodeURIComponent(String(z))}`;
 }
 
 function statusPill(active: boolean, label: string) {
@@ -54,6 +69,50 @@ function compactDate(value: unknown): string {
   return `${timeAgo(value)} (${dateLabel(value)})`;
 }
 
+function permissionLabel(member: AnyRecord): string {
+  const labels = [];
+  if (member.hasStorage) labels.push("Storage");
+  if (member.canAddHexite) labels.push("Can add hexite");
+  return labels.join(", ") || "No relevant access";
+}
+
+function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () => void }) {
+  const accessMembers: AnyRecord[] = Array.isArray(tower.accessMembers) ? tower.accessMembers : [];
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div><RadioTower /><h2 id="tower-access-title">{tower.nickname ?? "Watchtower"}</h2></div>
+          <button type="button" onClick={onClose} aria-label="Close tower details"><X size={16} /></button>
+        </header>
+        <div className="tower-dialog-summary">
+          <span><Landmark size={14} /> {tower.empireName ?? "Unknown empire"}</span>
+          <span><MapPin size={14} /> {coordinates(tower)}</span>
+          {mapHref(tower) ? <a className="toolbar-button" href={mapHref(tower) ?? "#"}><MapPin size={14} /> Open on map</a> : null}
+        </div>
+        <div className="tower-access-note">
+          Showing empire members BitJita reports with storage access or likely claim-management access for adding hexite.
+        </div>
+        <div className="tower-access-list">
+          {accessMembers.length ? accessMembers.map((member) => (
+            <article key={member.entityId || member.username}>
+              <div>
+                <strong>{member.username ?? "Unknown"}</strong>
+                <small>{member.rankTitle ?? "Citizen"}</small>
+              </div>
+              <div className="tower-access-flags">
+                {member.hasStorage ? <span><Package size={13} /> Storage</span> : null}
+                {member.canAddHexite ? <span><Hammer size={13} /> Add hexite</span> : null}
+              </div>
+              <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
+            </article>
+          )) : <div className="empty-state compact">No storage or hexite-capable members were returned for this empire.</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
@@ -62,6 +121,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const regions = useEmpireRegions(monitoredRegionId);
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
+  const [selectedTower, setSelectedTower] = React.useState<AnyRecord | null>(null);
 
   React.useEffect(() => {
     if (regions.length && !regions.some((region) => region.regionId === regionId)) setRegionId(initialRegion);
@@ -97,6 +157,13 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const overviewSummary = overview.data?.summary ?? {};
   const towerSummary = watchtowers.data?.summary ?? {};
   const largestEmpire = overviewSummary.largestEmpireName ?? "-";
+  const accessMembersByEmpire = React.useMemo(() => {
+    const map = new Map<string, AnyRecord[]>();
+    for (const empire of (watchtowers.data?.empires ?? []) as AnyRecord[]) {
+      map.set(String(empire.entityId ?? empire.empireId ?? ""), Array.isArray(empire.accessMembers) ? empire.accessMembers : []);
+    }
+    return map;
+  }, [watchtowers.data]);
 
   const overviewColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
     ["Empire", (row) => <strong>{row.name}</strong>],
@@ -110,8 +177,14 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   ];
   const towerColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
     ["Empire", (row) => <strong>{row.empireName}</strong>],
-    ["Tower", (row) => row.nickname ?? "Watchtower"],
-    ["Coordinates", (row) => <span className="coordinate-cell"><MapPin size={13} /> {coordinates(row)} <button className="icon-inline-button" type="button" title="Copy coordinates" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(coordinates(row)); }}><Copy size={13} /></button></span>],
+    ["Tower", (row) => {
+      const accessMembers = accessMembersByEmpire.get(String(row.empireId ?? "")) ?? [];
+      return <span className="tower-name-cell"><strong>{row.nickname ?? "Watchtower"}</strong><small>{accessMembers.length ? `${formatNumber(accessMembers.length)} access members` : "No access members returned"}</small></span>;
+    }],
+    ["Coordinates", (row) => {
+      const href = mapHref(row);
+      return <span className="coordinate-cell"><MapPin size={13} /> {href ? <a href={href} onClick={(event) => event.stopPropagation()}>{coordinates(row)}</a> : coordinates(row)} <button className="icon-inline-button" type="button" title="Copy coordinates" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(coordinates(row)); }}><Copy size={13} /></button></span>;
+    }],
     ["Energy", (row) => formatNumber(row.energy)],
     ["Upkeep", (row) => formatNumber(row.upkeep)],
     ["Active", (row) => statusPill(Boolean(row.active), row.active ? "Active" : "Inactive")],
@@ -172,10 +245,11 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : `${formatNumber(towerRows.length)} shown`}</span></div>
-            <DataTable rows={towerRows} columns={towerColumns} />
+            <DataTable rows={towerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, accessMembers: accessMembersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
           </section>
         </>
       )}
+      {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
     </div>
   );
 }

@@ -5463,6 +5463,10 @@ function empireCacheGet(key) {
   return cached && cached.expiresAt > Date.now() ? cached.value : null;
 }
 
+function empireCacheGetAny(key) {
+  return empireScoutCache.get(key)?.value ?? null;
+}
+
 async function empireCacheLoad(key, loader) {
   const cached = empireCacheGet(key);
   if (cached) return cached;
@@ -5561,16 +5565,51 @@ function empireInactivity(empire, members, inactiveDays) {
   };
 }
 
+function nestedCoordinate(source, axis) {
+  const directKeys = axis === "x" ? ["locationX", "x", "coordX", "coordinateX", "worldX"] : ["locationZ", "z", "coordZ", "coordinateZ", "worldZ"];
+  for (const key of directKeys) {
+    if (source?.[key] != null) return source[key];
+  }
+  const nested = source?.location ?? source?.position ?? source?.coordinates ?? source?.coord ?? source?.coords;
+  if (Array.isArray(nested)) return axis === "x" ? nested[0] : nested[1];
+  if (nested && typeof nested === "object") {
+    for (const key of directKeys) {
+      if (nested[key] != null) return nested[key];
+    }
+  }
+  return null;
+}
+
+function normalizeEmpireAccessMember(member) {
+  const permissions = parseMemberPermissions(member);
+  const rawHexiteAccess = member?.canAddHexite ?? member?.addHexitePermission ?? member?.hexitePermission ?? member?.canContributeHexite ?? member?.claimHexitePermission;
+  const canAddHexite = rawHexiteAccess != null ? Boolean(rawHexiteAccess === true || rawHexiteAccess === 1 || String(rawHexiteAccess).toLowerCase() === "true") : Boolean(permissions.coOwnerPermission || permissions.officerPermission || permissions.buildPermission);
+  const hasStorage = Boolean(permissions.inventoryPermission);
+  return {
+    entityId: String(member?.entityId ?? member?.playerEntityId ?? member?.id ?? ""),
+    username: String(member?.username ?? member?.userName ?? member?.playerName ?? "Unknown"),
+    rankTitle: String(member?.rankTitle ?? member?.rank ?? "Citizen"),
+    lastLoginTimestamp: member?.lastLoginTimestamp ?? member?.lastSeenAt ?? member?.lastSeen ?? null,
+    signedIn: member?.signedIn === true || member?.online === true,
+    hasStorage,
+    canAddHexite,
+    permissions,
+  };
+}
+
 function normalizeEmpireTower(tower, empire, inactivity) {
   const siege = Array.isArray(tower?.siege) ? tower.siege : [];
+  const locationX = nestedCoordinate(tower, "x");
+  const locationZ = nestedCoordinate(tower, "z");
   return {
+    id: String(tower?.entityId ?? tower?.id ?? ""),
     towerId: String(tower?.entityId ?? tower?.id ?? ""),
     empireId: empire.entityId,
     empireName: empire.name,
-    nickname: String(tower?.nickname ?? "Watchtower"),
-    locationX: tower?.locationX ?? null,
-    locationZ: tower?.locationZ ?? null,
-    locationDimension: tower?.locationDimension ?? null,
+    nickname: String(tower?.nickname ?? tower?.name ?? "Watchtower"),
+    locationX,
+    locationZ,
+    locationDimension: tower?.locationDimension ?? tower?.dimension ?? tower?.location?.dimension ?? null,
     energy: toNumber(tower?.energy),
     upkeep: toNumber(tower?.upkeep),
     active: tower?.active === true,
@@ -5588,32 +5627,43 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
   return empireCacheLoad(key, async () => {
     const overview = await regionalEmpireOverview(regionId);
     const errors = [];
-    const empireRows = await mapWithConcurrency(overview.empires, 4, async (empire) => {
+    const startedAt = Date.now();
+    const deadlineMs = Math.max(5000, Math.min(BITJITA_FETCH_TIMEOUT_MS - 1500, 14_000));
+    let deadlineHit = false;
+    const empireRows = await mapWithConcurrency(overview.empires, 2, async (empire) => {
+      if (Date.now() - startedAt > deadlineMs) {
+        deadlineHit = true;
+        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Skipped because the watchtower scan deadline was reached", accessMembers: [], towerCount: 0, towers: [] };
+      }
       try {
         const [detailPayload, towerPayload] = await Promise.all([
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`),
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`),
+          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
         ]);
         const detailEmpire = detailPayload?.empire ?? empire;
         const members = unwrap(detailPayload, "members", []);
         const towers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
         const inactivity = empireInactivity({ ...empire, ...detailEmpire }, members, days);
+        const accessMembers = members.map(normalizeEmpireAccessMember).filter((member) => member.hasStorage || member.canAddHexite);
         return {
           ...empire,
           ...inactivity,
+          accessMembers,
           towerCount: towers.length,
           towers: towers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId),
         };
       } catch (error) {
         errors.push(`${empire.name}: ${error instanceof Error ? error.message : String(error)}`);
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", towerCount: 0, towers: [] };
+        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", accessMembers: [], towerCount: 0, towers: [] };
       }
     });
+    if (deadlineHit) errors.push("Watchtower scan stopped early to avoid timing out. Showing partial results; retry after the cache refreshes.");
     const towers = empireRows.flatMap((empire) => empire.towers);
     return {
       regionId: String(regionId),
       inactiveDays: days,
       fetchedAt: new Date().toISOString(),
+      partial: deadlineHit,
       unclaimedAvailable: false,
       unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
       empires: empireRows,
@@ -9489,7 +9539,27 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "empire-watchtowers", RATE_LIMITS.expensiveLocal)) return;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      return send(res, 200, await regionalEmpireWatchtowers(regionId, url.searchParams.get("inactiveDays") ?? 14));
+      const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
+      try {
+        return send(res, 200, await regionalEmpireWatchtowers(regionId, inactiveDays));
+      } catch (error) {
+        const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
+        const cached = empireCacheGetAny(`watchtowers:${regionId}:${days}`);
+        if (cached) return send(res, 200, { ...cached, stale: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
+        return send(res, 200, {
+          regionId,
+          inactiveDays: days,
+          fetchedAt: new Date().toISOString(),
+          stale: true,
+          partial: true,
+          unclaimedAvailable: false,
+          unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
+          empires: [],
+          towers: [],
+          errors: [errorMessage(error)],
+          summary: { towerCount: 0, inactiveRiskEmpires: 0, underSiege: 0, activeTowers: 0 },
+        });
+      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
@@ -9605,4 +9675,6 @@ server.listen(port, host, () => {
     setInterval(checkScheduledJobs, 60 * 1000);
   }
 });
+
+
 
