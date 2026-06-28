@@ -56,3 +56,14 @@ export function dedupeNotifications(notices: ToastNotice[]): ToastNotice[] {
     return true;
   });
 }
+export function appendToastStack(current: ToastNotice[], notice: ToastNotice, limit = 4): ToastNotice[] {
+  return [...current, notice].slice(-limit);
+}
+
+export function appendNotificationLog(current: ToastNotice[], notice: ToastNotice, limit = 80): ToastNotice[] {
+  return dedupeNotifications([notice, ...current]).slice(0, limit);
+}
+
+export function markNotificationsRead(notices: ToastNotice[]): ToastNotice[] {
+  return notices.map((notice) => ({ ...notice, read: true }));
+}

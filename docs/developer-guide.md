@@ -13,7 +13,8 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/api/` contains frontend fetch hooks and API helpers. Keep network timing, stale-data metadata, and response normalization out of JSX where practical.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
-- `src/styles.css` is the current global stylesheet. `src/styles/` is for incremental focused stylesheet modules.
+- `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as notification UI.
+- `src/styles/notifications.css` owns toast, notification drawer, notification badge, and notification sound setting styles.
 
 ## Data Flow
 
@@ -77,7 +78,7 @@ Adding a notification type requires a test-first pure draft helper, a stable `so
 - Keep button text compact and use lucide icons where an icon exists.
 - Do not hide layout issues with high-specificity CSS hacks. Fix the component structure first when possible.
 - Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified.
-- Any new stylesheet module under `src/styles/` must be imported by `src/main.tsx` and documented here if it establishes a reusable convention.
+- Any new stylesheet module under `src/styles/` must be imported by `src/main.tsx` and documented here if it establishes a reusable convention. Keep feature-owned modules narrow; shared layout primitives stay in `styles.css`.
 
 ## Commands
 

@@ -77,8 +77,8 @@ import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./componen
 import { DataTable } from "./components/main/DataTable";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "./components/main/ItemDisplay";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
-import { dealAlertToastDraft, marketActivityToastDraft, productionCraftToastDraft, selectUnseenNotificationItems } from "./notifications/notificationSources";
-import { createToastNotice, dedupeNotifications, type ToastKind, type ToastNotice } from "./notifications/toastNotices";
+import { dealAlertQueueToastDrafts, marketActivityQueueToastDrafts, productionCraftQueueToastDrafts, type MarketActivityToastSnapshot, type ProductionCraftQueueSnapshot } from "./notifications/notificationSources";
+import { appendNotificationLog, appendToastStack, createToastNotice, markNotificationsRead, type ToastKind, type ToastNotice } from "./notifications/toastNotices";
 import { SearchBox } from "./components/main/SearchBox";
 import { Segmented } from "./components/main/Segmented";
 import { Info, LiveValue, MiniStat, Stat } from "./components/main/Stats";
@@ -2598,10 +2598,9 @@ function DashboardApp() {
   const [commandOpen, setCommandOpen] = React.useState(false);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
   const notificationSourceKeysRef = React.useRef<Set<string>>(new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]));
-  const activityNoticeIdsRef = React.useRef<Set<string> | null>(null);
+  const activityNoticeIdsRef = React.useRef<MarketActivityToastSnapshot | null>(null);
   const dealAlertIdsRef = React.useRef<Set<string> | null>(null);
-  const activityNoticeClaimRef = React.useRef(claimId);
-  const craftQueueRef = React.useRef<{ claimId: string; jobs: Map<string, AnyRecord> } | null>(null);
+  const craftQueueRef = React.useRef<ProductionCraftQueueSnapshot | null>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
@@ -2702,8 +2701,8 @@ function DashboardApp() {
     const id = `${Date.now()}-${Math.random()}`;
     const notice: ToastNotice = createToastNotice({ id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), item, sourceKey: options.sourceKey });
     playNotificationSound(userToastSettings);
-    setToasts((current) => [...current, notice].slice(-4));
-    setNotificationLog((current) => [notice, ...dedupeNotifications(current)].slice(0, 80));
+    setToasts((current) => appendToastStack(current, notice));
+    setNotificationLog((current) => appendNotificationLog(current, notice));
     const timer = window.setTimeout(() => {
       toastTimersRef.current.delete(id);
       setToasts((current) => current.filter((notice) => notice.id !== id));
@@ -2834,76 +2833,41 @@ function DashboardApp() {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
   }, [selectedMemberId, selectedProductionMember, state.data]);
   React.useEffect(() => {
-    if (activityNoticeClaimRef.current !== claimId) {
-      activityNoticeClaimRef.current = claimId;
-      activityNoticeIdsRef.current = null;
-    }
     if (!notificationActivity.refreshToken) return;
-    const notable = new Set(["market_new_listing", "market_sale", "market_sale_confirmed"]);
-    const activitySelection = selectUnseenNotificationItems(
-      activityNoticeIdsRef.current,
-      notificationActivity.events.filter((event) => notable.has(String(event.event_type))),
-      (event) => String(event.id),
-    );
-    activityNoticeIdsRef.current = activitySelection.knownIds;
-    if (activitySelection.seeded) return;
-    const unseen = activitySelection.unseen;
-    for (const event of unseen) {
-      const draft = marketActivityToastDraft(event, {
-        marketListings: appSettings.toastSettings.marketListings && userToastSettings.marketListings,
-        marketSales: appSettings.toastSettings.marketSales && userToastSettings.marketSales,
-      }, {
-        summary: activitySummary,
-        item: toastItemFromActivity,
-        key: activityNoticeKey,
-      });
-      if (!draft) continue;
+    const result = marketActivityQueueToastDrafts(activityNoticeIdsRef.current, claimId, notificationActivity.events, {
+      marketListings: appSettings.toastSettings.marketListings && userToastSettings.marketListings,
+      marketSales: appSettings.toastSettings.marketSales && userToastSettings.marketSales,
+    }, {
+      summary: activitySummary,
+      item: toastItemFromActivity,
+      key: activityNoticeKey,
+    });
+    activityNoticeIdsRef.current = result.snapshot;
+    for (const draft of result.drafts) {
       pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
     }
   }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
     if (!dealAlerts.refreshToken) return;
-    const dealSelection = selectUnseenNotificationItems(dealAlertIdsRef.current, dealAlerts.alerts, (alert) => String(alert.id));
-    dealAlertIdsRef.current = dealSelection.knownIds;
-    if (dealSelection.seeded) return;
-    const unseen = dealSelection.unseen;
-    for (const alert of unseen) {
-      const draft = dealAlertToastDraft(alert);
+    const result = dealAlertQueueToastDrafts(dealAlertIdsRef.current, dealAlerts.alerts);
+    dealAlertIdsRef.current = result.knownIds;
+    for (const draft of result.drafts) {
       pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
     }
   }, [dealAlerts.alerts, dealAlerts.refreshToken, pushToast]);
   React.useEffect(() => {
     if (!state.data) return;
-    const current = new Map<string, AnyRecord>(data.crafts.map((job: AnyRecord) => [String(job.entityId ?? `${job.buildingName}-${job.recipeId}`), job]));
-    const previous = craftQueueRef.current;
-    if (!previous || previous.claimId !== claimId) {
-      // Establish the initial craft baseline per claim. Only jobs that appear
-      // after this point should produce local toast notifications.
-      craftQueueRef.current = { claimId, jobs: current };
-      return;
-    }
-    if (!appSettings.toastSettings.production || !userToastSettings.production) {
-      craftQueueRef.current = { claimId, jobs: current };
-      return;
-    }
-    const started = [...current.entries()].filter(([id]) => !previous.jobs.has(id)).slice(0, 2);
-    const completed = [...previous.jobs.entries()].filter(([id]) => !current.has(id)).slice(0, 2);
-    for (const [id, job] of started) {
-      const draft = productionCraftToastDraft("started", claimId, id, job, {
-        displayName: (craftJob) => craftDisplayName(craftJob, data.raw?.crafts),
-        item: (craftJob) => craftOutputItem(craftJob, data.raw?.crafts),
-      });
+    const result = productionCraftQueueToastDrafts(craftQueueRef.current, claimId, data.crafts, {
+      displayName: (craftJob) => craftDisplayName(craftJob, data.raw?.crafts ?? state.data?.crafts),
+      item: (craftJob) => craftOutputItem(craftJob, data.raw?.crafts ?? state.data?.crafts),
+    }, {
+      enabled: appSettings.toastSettings.production && userToastSettings.production,
+    });
+    craftQueueRef.current = result.snapshot;
+    for (const draft of result.drafts) {
       pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
     }
-    for (const [id, job] of completed) {
-      const draft = productionCraftToastDraft("completed", claimId, id, job, {
-        displayName: (craftJob) => craftDisplayName(craftJob, state.data?.crafts),
-        item: (craftJob) => craftOutputItem(craftJob, state.data?.crafts),
-      });
-      pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
-    }
-    craftQueueRef.current = { claimId, jobs: current };
-  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);
+  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data?.crafts, userToastSettings.production]);
   React.useEffect(() => {
     if (active !== "dashboard" || !appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -3080,7 +3044,7 @@ function DashboardApp() {
         </a> : null}
         <button onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
         <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
-        <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
+        <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog(markNotificationsRead); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
       </div>
       <ToastStack notices={toasts} onDismiss={dismissToast} />

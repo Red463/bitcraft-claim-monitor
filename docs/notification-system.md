@@ -58,11 +58,11 @@ Deal-alert toasts are tied to the signed-in user's deal-alert feed.
 Automated coverage exists for:
 
 - Toast notice creation and destination mapping.
-- Deduplication by `sourceKey` and legacy title/body keys.
+- Deduplication by `sourceKey` and legacy title/body keys, including persisted log duplicate replacement.
 - Market activity draft generation and settings gating.
-- Deal-alert draft generation.
-- Production craft draft generation.
-- Initial known-ID seeding and unseen item selection.
+- Deal-alert draft generation and signed-in deal-alert source queue seeding.
+- Production craft draft generation and production queue diffing.
+- Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, and drawer read-state marking.
 
 Required release verification still includes a manual or browser-driven matrix proving that every supported in-app notification type can appear while each app page is active, unless a page restriction is intentional and documented.
 

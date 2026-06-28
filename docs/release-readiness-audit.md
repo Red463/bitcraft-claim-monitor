@@ -12,13 +12,14 @@ This audit tracks public-release readiness for the maintained app at `apps/bitcr
 | `src/AppShell.tsx` | About 3,057 lines. Owns app chrome, global refresh, admin shell, auth, settings, analytics, and notifications. | Still large, but acceptable as top-level orchestration while page/admin internals are gradually extracted. Avoid adding page-specific logic here. |
 | `src/pages/MainPages.tsx` | About 2,697 lines after extracting activity, map, member identity, and market analytics helpers. Still contains Dashboard, Inventory, Market, Production, Public Craft Finder, Leaderboard, Map, and Activity components. | Continue shrinking it. Keep it temporarily as shared legacy page glue until individual pages can be extracted safely. |
 | `server.mjs` | Single large Node service, about 504 KB. Owns static serving, BitJita proxy, SQLite schema, prepared statements, local/admin APIs, auth, Discord, analytics, collectors, backups, and scheduled jobs. | Needs a deliberate server-module split, but risky to split casually. Prioritize tests around route/auth/persistence boundaries before moving code. |
-| `src/styles.css` | About 6,998 lines. Contains tokens, layout, navigation, notifications, tables, page-specific sections, responsive rules, and admin/bot styles. | Needs CSS audit and incremental extraction. Avoid broad formatting churn; split only stable sections with clear ownership. |
-| `src/styles/phase6.css` | Small focused module for setup/workflow polish. | Keep as an example of focused incremental stylesheet modules, but the name is not descriptive enough for future modules. |
+| `src/styles.css` | Large global stylesheet containing tokens, layout, navigation, tables, page-specific sections, responsive rules, and admin/bot styles. Notification UI styles have been extracted. | Needs continued CSS audit and incremental extraction. Avoid broad formatting churn; split only stable sections with clear ownership. |
+| `src/styles/phase6.css` | Small focused module for setup/workflow polish. | Keep as an existing focused module, but the name is not descriptive enough for future modules. |
+| `src/styles/notifications.css` | Focused module for toast stack, notification drawer, notification badge, notification sound settings, and responsive notification overrides. | Keep as the pattern for feature-owned stylesheet modules with clear ownership. |
 | Notifications | Rendering and generation have been split into `src/components/main/Notifications.tsx` and `src/notifications/`. | Architecture is improved, but full browser/page matrix verification is still required. |
 
 ## Completed Release-Readiness Improvements
 
-- Extracted pure notification creation, dedupe, source drafting, and unseen selection helpers.
+- Extracted pure notification creation, dedupe, source drafting, unseen selection, market activity source, signed-in deal-alert source, production queue diff, toast-stack, persisted-log, and drawer read-state helpers.
 - Extracted activity summary/diff/toast helpers into `src/pages/activity/activityUtils.ts`.
 - Extracted map URL and resource-token helpers into `src/pages/map/mapUtils.ts`.
 - Extracted market analytics transforms into `src/pages/market/marketAnalytics.ts`.
@@ -28,6 +29,7 @@ This audit tracks public-release readiness for the maintained app at `apps/bitcr
 - Added this audit and the developer guide to make the current architecture and remaining release blockers explicit.
 - Replaced the generic `.env.example` with app-specific environment variables and secret placeholders.
 - Fixed the `admin` role permission set so non-owner administrators can access admin-user management routes that require `users.manage`, while viewer-level users remain denied.
+- Extracted notification UI styles into `src/styles/notifications.css` so toast, drawer, badge, sound-setting, and responsive notification rules have clear ownership.
 
 ## Architecture Decisions
 
@@ -40,7 +42,7 @@ This audit tracks public-release readiness for the maintained app at `apps/bitcr
 
 ## CSS And UX Audit Notes
 
-Evidence from the current stylesheet shows reusable tokens and focus rules already exist, including CSS variables for colors, radii, control heights, focus rings, and z-indexes. Notification toast/drawer, sidebar, tables, market, responsive, and admin/bot styles are all still bundled in `styles.css`.
+Evidence from the current stylesheet shows reusable tokens and focus rules already exist, including CSS variables for colors, radii, control heights, focus rings, and z-indexes. Sidebar, tables, market, responsive, and admin/bot styles are still bundled in `styles.css`; notification toast/drawer/sound styles now live in `src/styles/notifications.css`.
 
 Remaining CSS work:
 
@@ -59,7 +61,7 @@ Supported browser in-app notification types are documented in `docs/notification
 - Market deal alert toasts.
 - Production started and completed toasts.
 
-Current automated coverage verifies pure generation, settings gating, source-key dedupe, and unseen selection. Browser smoke verification now also proves market listing and market sale toasts plus drawer persistence on Dashboard, Leaderboard, Members, Professions, Production, Inventory, Construction, Research, Market, Region, Map, Sync, Activity, Public Craft Finder, Craft Calculator, and Admin. The dedicated `/bot` route intentionally mounts `BotControlApp` without the main app notification chrome, so bot-route browser notifications are not currently supported. Remaining notification blockers are production started/completed notifications, market deal alerts with a signed-in Discord-linked user, settings/sound/dismissed-state verification, and drawer open/closed verification across representative pages.
+Current automated coverage verifies pure generation, settings gating, source-key dedupe, unseen selection, market activity source queueing, signed-in deal-alert source queueing, production queue diffing, visible toast-stack caps, persisted notification-log caps, duplicate replacement, and drawer read-state marking. Browser smoke verification now also proves market listing and market sale toasts plus drawer persistence on Dashboard, Leaderboard, Members, Professions, Production, Inventory, Construction, Research, Market, Region, Map, Sync, Activity, Public Craft Finder, Craft Calculator, and Admin. The dedicated `/bot` route intentionally mounts `BotControlApp` without the main app notification chrome, so bot-route browser notifications are not currently supported. Remaining notification blockers are production started/completed notifications, market deal alerts with a signed-in Discord-linked user, settings/sound/dismissed-state verification, and drawer open/closed verification across representative pages.
 
 ## Security And Config Notes
 
@@ -87,13 +89,13 @@ Remaining security/config work:
 
 Most recent verified checks in this release-readiness pass:
 
-- Focused helper tests: 18 passed before the previous release-readiness structure commit.
+- Focused notification source tests: `node --experimental-strip-types --test test/notifications.test.mjs` passed with 14 tests after extracting market activity, deal-alert, production source queue, toast-stack, persisted-log, and drawer read-state helpers.
 - Focused server integration test: `node --experimental-strip-types --test test/server.test.mjs` passed after the admin-role permission fix.
 - Full production build: `corepack pnpm --filter @workspace/bitcraft-local run build` passed.
-- Full app test suite: `corepack pnpm --filter @workspace/bitcraft-local test` passed with 38 tests.
+- Full app test suite: `corepack pnpm --filter @workspace/bitcraft-local test` passed with 46 tests.
 - `git diff --check` passed for this slice, with only Windows CRLF warnings from Git.
 - Targeted secret/config checks covered tracked runtime data, ignored local data/env files, documented secret placeholders, and private-key/token-shaped literals.
-- Browser smoke notification probe verified market listing and market sale toasts plus drawer persistence across 16 main app pages and Admin; `/bot` was verified as a documented exception because it does not mount `DashboardApp`.
+- Browser smoke notification probe verified market listing and market sale toasts plus drawer persistence across 16 main app pages and Admin; `/bot` was verified as a documented exception because it does not mount `DashboardApp`. Later built-app smoke checks loaded Dashboard, Activity, Market, and Production with notification chrome present and no browser console errors after the AppShell notification-source extraction, and verified the split notification stylesheet still applies drawer overlay, drawer panel, notification button, and toast-stack styles.
 
 Run the full app build and full test suite again before the next push or final release claim if additional code changes are made.
 

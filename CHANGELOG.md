@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.78] - 2026-06-28
+
+### Changed
+
+- Improved notification reliability by centralising market, deal alert, production craft, toast stack, and notification log handling in tested helpers.
+- Moved notification-specific UI rules into a focused stylesheet and documented the styling boundary for future release work.
+
+### Fixed
+
+- Fixed duplicate persisted notifications replacing newer entries by ensuring the newest matching notice wins before the notification log is capped.
+
 ## [1.0.0-beta.77] - 2026-06-28
 
 ### Added

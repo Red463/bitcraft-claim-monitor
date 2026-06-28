@@ -1,6 +1,7 @@
-﻿import { createRoot } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import "./styles/phase6.css";
 import "./styles.css";
+import "./styles/notifications.css";
 import App from "./AppShell";
 
 // Keep this file as the React bootstrapping boundary only. App-level routing,
