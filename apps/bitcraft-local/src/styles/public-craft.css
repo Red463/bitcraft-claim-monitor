@@ -1,0 +1,112 @@
+.public-craft-page {
+  background: #030303;
+  background: var(--command-page-gradient);
+  min-height: 100%;
+  color: #f4f7fb;
+}
+
+.public-craft-finder { display: grid; gap: 12px; }
+.public-craft-topbar { align-items: center; }
+
+.public-craft-page .dashboard-top-meta {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+
+.public-craft-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.public-craft-page .mini-stat {
+  min-height: 112px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  padding: 18px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 4px 14px;
+}
+
+.public-craft-page .mini-stat div {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+  color: #f3c532;
+}
+
+.public-craft-page .mini-stat svg { width: 20px; height: 20px; }
+
+.public-craft-page .mini-stat > span {
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.public-craft-page .mini-stat strong {
+  color: #fff;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.public-craft-command-panel .production-command-main .inline-field {
+  flex: 1 1 260px;
+}
+
+.public-craft-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(154,168,190,.12);
+  color: #a6afbd;
+  font-size: 13px;
+}
+
+.public-craft-hint svg { color: #f0c64f; }
+
+.public-craft-finder .table-wrap {
+  border-color: rgba(108,123,145,.24);
+  border-radius: 7px;
+  background-color: #090e15;
+  background-image: none;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
+}
+
+.public-craft-finder .table-wrap table { min-width: 960px; }
+
+.public-craft-finder th {
+  background: linear-gradient(180deg, rgba(15,22,31,.98), rgba(9,14,21,.99));
+  color: #aeb8c6;
+}
+
+.public-craft-finder td {
+  background: rgba(6,10,15,.78);
+}
+
+.public-craft-finder tbody tr:nth-child(even) td {
+  background: rgba(8,13,20,.82);
+}
+
+.public-craft-finder tbody tr:hover td {
+  background: rgba(240,198,79,.045);
+}
+
+.public-craft-finder td:nth-child(4),
+.public-craft-finder td:nth-child(5) {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.public-craft-page .select-control {
+  border-color: rgba(154,168,190,.28);
+  background: #080d14;
+}

@@ -54,9 +54,9 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 | `/?page=members` | Members | Settlement roster, online state, equipment, details. | `src/pages/MembersPage.tsx` | Public |
 | `/?page=skills` | Professions | Profession levels, tiers, coverage. | `src/pages/SkillsPage.tsx` | Public |
 | `/?page=production` | Production | Current crafts, member eligibility, passive crafts. | `src/main.tsx` (`Production`) | Public |
-| `/?page=publiccrafts` | Public Craft Finder | Find public crafts by profession/region. | `src/main.tsx` (`PublicCraftFinder`) | Public |
+| `/?page=publiccrafts` | Public Craft Finder | Find public crafts by profession/region. | `src/pages/MainPages.tsx` (`PublicCraftFinder`) | Public |
 | `/?page=craftcalc` | Craft Calculator | Build recipe trees and material steps. | `src/pages/CraftCalculatorPage.tsx`, `src/utils/recipeTree.ts` | Public |
-| `/?page=inventory` | Inventory | Containers and core material stock. | `src/main.tsx` (`Inventory`) | Public |
+| `/?page=inventory` | Inventory | Containers and core material stock. | `src/pages/MainPages.tsx` (`Inventory`) | Public |
 | `/?page=construction` | Construction | Active construction projects and material needs. | `src/pages/ConstructionPage.tsx` | Public |
 | `/?page=research` | Research | Research/unlock state. | `src/pages/ResearchPage.tsx` | Public |
 | `/?page=market` | Market | Listings, analytics, price finder, buy order finder. | `src/main.tsx` (`Market`), `src/utils/marketOrders.ts` | Public |
@@ -138,7 +138,7 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=publiccrafts`
 - Purpose: locate public crafts by profession and region.
-- Key components/functions: `PublicCraftFinder` in `src/main.tsx`.
+- Key components/functions: `PublicCraftFinder` in `src/pages/MainPages.tsx`.
 - Data needs: public craft list, active region options, profession filter, settlement/map focus metadata.
 - Data source: BitJita craft endpoints through `/api/bitjita/*`, active regions through `/api/local/regions/active`.
 - Fetching/transformation: component filters public crafts by selected profession/region and can pass settlement focus to `MapPanel`.
@@ -165,7 +165,7 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=inventory`
 - Purpose: display container contents and core material stock.
-- Key components/functions: `Inventory` in `src/main.tsx`; material and item image helpers in `src/utils/items.ts`.
+- Key components/functions: `Inventory` in `src/pages/MainPages.tsx`; material and item image helpers in `src/utils/items.ts`.
 - Data needs: inventories/containers, item quantities, core material identification.
 - Data source: `/claims/:claimId/inventories` through `useBitjitaData`.
 - Fetching/transformation: inventory data is normalized from BitJita wrappers, grouped by container, and filtered by selected material/category controls.

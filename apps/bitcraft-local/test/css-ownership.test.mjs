@@ -90,3 +90,84 @@ test("production page styles live in the production stylesheet", () => {
     assert.equal(productionCss.includes(selector), true, `${selector} should live in production.css`);
   }
 });
+test("public craft finder page styles live in the public craft stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const publicCraftCssUrl = new URL("../src/styles/public-craft.css", import.meta.url);
+  assert.equal(existsSync(publicCraftCssUrl), true);
+  const publicCraftCss = readFileSync(publicCraftCssUrl, "utf8");
+  const publicCraftSelectors = [
+    ".public-craft-page",
+    ".public-craft-finder",
+    ".public-craft-topbar",
+    ".public-craft-summary",
+    ".public-craft-command-panel",
+    ".public-craft-hint",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/public-craft\.css";/);
+  for (const selector of publicCraftSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(publicCraftCss.includes(selector), true, `${selector} should live in public-craft.css`);
+  }
+});
+test("inventory page styles live in the inventory stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const inventoryCssUrl = new URL("../src/styles/inventory.css", import.meta.url);
+  assert.equal(existsSync(inventoryCssUrl), true);
+  const inventoryCss = readFileSync(inventoryCssUrl, "utf8");
+  const inventorySelectors = [
+    ".inventory-page",
+    ".inventory-topbar",
+    ".inventory-summary",
+    ".inventory-command-header",
+    ".inventory-command-actions",
+    ".inventory-filter-grid",
+    ".inventory-filter-field",
+    ".inventory-inline-toggle",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/inventory\.css";/);
+  for (const selector of inventorySelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(inventoryCss.includes(selector), true, `${selector} should live in inventory.css`);
+  }
+});
+test("construction page styles live in the construction stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const constructionCssUrl = new URL("../src/styles/construction.css", import.meta.url);
+  assert.equal(existsSync(constructionCssUrl), true);
+  const constructionCss = readFileSync(constructionCssUrl, "utf8");
+  const constructionSelectors = [
+    ".construction-page",
+    ".construction-topbar",
+    ".construction-summary",
+    ".construction-section-heading",
+    ".construction-need-card",
+    ".construction-controls",
+    ".construction-sort-field",
+    ".construction-material-list",
+    ".construction-material-row",
+    ".construction-complete-toggle",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/construction\.css";/);
+  for (const selector of constructionSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(constructionCss.includes(selector), true, `${selector} should live in construction.css`);
+  }
+});
