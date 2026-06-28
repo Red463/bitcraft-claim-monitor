@@ -1003,11 +1003,42 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
   assert.equal(baselineActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
+  const notificationSecretDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  notificationSecretDb.prepare(`
+    INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    claimId,
+    "market_new_listing",
+    "New market listing: Secret sentinel",
+    "2099-01-01T00:00:00.000Z",
+    JSON.stringify({
+      itemName: "Secret Sentinel",
+      itemId: 9001,
+      tier: 1,
+      discordBotToken: "test-discord-bot-token",
+      adminSetupKey: "test-setup-key",
+      nested: { client_secret: "test-discord-oauth-secret" },
+    }),
+    "release-secret-sentinel",
+  );
+  notificationSecretDb.close();
   const notificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(notificationActivity.events.length >= 2, true);
   assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed"].includes(event.event_type)), true);
   assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
   assert.equal(notificationActivity.events.some((event) => event.event_type === "storage"), false);
+  const secretNotification = notificationActivity.events.find((event) => event.source_key === "release-secret-sentinel");
+  assert.ok(secretNotification);
+  assert.deepEqual(JSON.parse(secretNotification.metadata_json), {
+    itemName: "Secret Sentinel",
+    itemId: 9001,
+    tier: 1,
+    nested: {},
+  });
+  assert.equal(JSON.stringify(notificationActivity).includes("test-discord-bot-token"), false);
+  assert.equal(JSON.stringify(notificationActivity).includes("test-setup-key"), false);
+  assert.equal(JSON.stringify(notificationActivity).includes("test-discord-oauth-secret"), false);
   const listingMutationDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   listingMutationDb.prepare("DELETE FROM market_listings WHERE listing_key = ?").run("listing-1");
   listingMutationDb.close();

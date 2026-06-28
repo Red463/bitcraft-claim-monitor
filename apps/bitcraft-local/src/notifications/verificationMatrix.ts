@@ -1,4 +1,5 @@
 import type { ActivePanel } from "../types/app";
+import { dealAlertToastDraft, marketActivityToastDraft, productionCraftToastDraft, type ToastNoticeDraft } from "./notificationSources.ts";
 
 export type BrowserNotificationTypeId =
   | "market-listing"
@@ -91,4 +92,84 @@ export function verificationRowsForStatus(status: NotificationVerificationStatus
   return NOTIFICATION_MATRIX_PAGES.flatMap((page) => (
     SUPPORTED_BROWSER_NOTIFICATION_TYPES.map((type) => ({ page, type, status }))
   ));
+}
+
+export function sampleBrowserNotificationDraft(typeId: BrowserNotificationTypeId): ToastNoticeDraft {
+  if (typeId === "market-listing") {
+    const draft = marketActivityToastDraft(
+      {
+        id: "matrix-market-listing",
+        event_type: "market_new_listing",
+        occurred_at: "2026-06-28T10:00:00.000Z",
+        summary: "New market listing: Matrix Plank",
+        metadata_json: JSON.stringify({ itemName: "Matrix Plank", itemId: 1001, tier: 2 }),
+      },
+      { marketListings: true, marketSales: true },
+      {
+        summary: (event) => String(event.summary ?? ""),
+        item: (event) => JSON.parse(String(event.metadata_json ?? "{}")),
+        key: (event) => `activity:${event.id}`,
+      },
+    );
+    if (!draft) throw new Error("Market listing sample did not produce a notification draft");
+    return draft;
+  }
+
+  if (typeId === "market-sale") {
+    const draft = marketActivityToastDraft(
+      {
+        id: "matrix-market-sale",
+        event_type: "market_sale_confirmed",
+        occurred_at: "2026-06-28T10:05:00.000Z",
+        summary: "Market sale confirmed: Matrix Plank",
+        metadata_json: JSON.stringify({ itemName: "Matrix Plank", itemId: 1001, tier: 2 }),
+      },
+      { marketListings: true, marketSales: true },
+      {
+        summary: (event) => String(event.summary ?? ""),
+        item: (event) => JSON.parse(String(event.metadata_json ?? "{}")),
+        key: (event) => `activity:${event.id}`,
+      },
+    );
+    if (!draft) throw new Error("Market sale sample did not produce a notification draft");
+    return draft;
+  }
+
+  if (typeId === "market-deal-alert") {
+    return dealAlertToastDraft({
+      id: "matrix-deal-alert",
+      itemName: "Matrix Hide",
+      unitPrice: 6,
+      marketClaimName: "Timbersteel Trade",
+      discountPercent: 40,
+      baselineAverage: 10,
+      baselineWindowDays: 7,
+      tier: 3,
+      createdAt: "2026-06-28T10:10:00.000Z",
+    });
+  }
+
+  if (typeId === "production-started") {
+    return productionCraftToastDraft(
+      "started",
+      "matrix-claim",
+      "matrix-craft-started",
+      { entityId: "matrix-craft-started", buildingName: "Matrix Workshop", itemName: "Matrix Beam", tier: 4 },
+      {
+        displayName: (job) => String(job.itemName ?? "Matrix craft"),
+        item: (job) => ({ itemName: job.itemName, tier: job.tier }),
+      },
+    );
+  }
+
+  return productionCraftToastDraft(
+    "completed",
+    "matrix-claim",
+    "matrix-craft-completed",
+    { entityId: "matrix-craft-completed", buildingName: "Matrix Workshop", itemName: "Matrix Beam", tier: 4 },
+    {
+      displayName: (job) => String(job.itemName ?? "Matrix craft"),
+      item: (job) => ({ itemName: job.itemName, tier: job.tier }),
+    },
+  );
 }

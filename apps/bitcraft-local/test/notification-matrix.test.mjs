@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { NAV } from "../src/navigation.ts";
+import { appendNotificationLog, appendToastStack, createToastNotice } from "../src/notifications/toastNotices.ts";
 import {
   BOT_NOTIFICATION_EXCEPTION,
   NOTIFICATION_MATRIX_PAGES,
   SUPPORTED_BROWSER_NOTIFICATION_TYPES,
+  sampleBrowserNotificationDraft,
   verificationRowsForStatus,
 } from "../src/notifications/verificationMatrix.ts";
 
@@ -44,4 +46,18 @@ test("verificationRowsForStatus produces one row for every page and type combina
     type: SUPPORTED_BROWSER_NOTIFICATION_TYPES[0],
     status: "manual-required",
   });
+});
+
+test("every supported notification type can produce a page-independent toast notice", () => {
+  for (const type of SUPPORTED_BROWSER_NOTIFICATION_TYPES) {
+    const draft = sampleBrowserNotificationDraft(type.id);
+    const notice = createToastNotice({ id: `matrix-${type.id}`, ...draft });
+    const stack = appendToastStack([], notice);
+    const log = appendNotificationLog([], notice);
+
+    assert.equal(notice.destination, type.expectedDestination);
+    assert.equal(notice.sourceKey.length > 0, true);
+    assert.deepEqual(stack, [notice]);
+    assert.deepEqual(log, [notice]);
+  }
 });

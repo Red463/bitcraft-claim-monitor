@@ -20,7 +20,7 @@ Notification behavior is intentionally split into rendering, pure notification l
 - `src/components/main/Notifications.tsx` renders the toast stack and notification drawer.
 - `src/notifications/toastNotices.ts` owns toast notice types, destination mapping, notice creation, and deduplication keys.
 - `src/notifications/notificationSources.ts` turns market activity, deal alerts, and production craft events into toast drafts.
-- `src/notifications/verificationMatrix.ts` is the tested release-verification checklist for supported browser notification types, every routed main-app page, and the intentional `/bot` exception.
+- `src/notifications/verificationMatrix.ts` is the tested release-verification checklist for supported browser notification types, every routed main-app page, the intentional `/bot` exception, and page-independent sample drafts for every supported browser notification type.
 - `src/AppShell.tsx` owns global polling hooks, known-ID refs, toast state, notification log state, browser sound playback, and route navigation from drawer items.
 - `src/api/localHistory.ts` keeps market activity and deal-alert polling page-independent.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization before notification gating, account save, and account load.
@@ -65,9 +65,9 @@ Automated coverage exists for:
 - Deal-alert draft generation and signed-in deal-alert source queue seeding.
 - Production craft draft generation and production queue diffing.
 - Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
-- The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, and the current `/bot` exception.
+- The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, the current `/bot` exception, and sample draft-to-toast/log creation for every supported type.
 
-Required release verification still includes a manual or browser-driven run of the matrix from `src/notifications/verificationMatrix.ts`, proving that every supported in-app notification type can appear while each main-app page is active unless a page restriction is intentional and documented.
+Required release verification still includes a manual or browser-driven run of the matrix from `src/notifications/verificationMatrix.ts`, proving that every supported in-app notification type can visibly appear while each main-app page is active unless a page restriction is intentional and documented.
 
 ## Browser Verification Matrix Progress
 
@@ -99,5 +99,5 @@ Still required before release completion:
 
 - Verify production started and production completed browser notifications across the same page matrix.
 - Verify market deal alert notifications with a signed-in Discord-linked user.
-- Browser/manual sound checks across representative pages are still required; automated coverage now verifies disabled sound does not create browser audio and enabled sound schedules the selected generated tone at the configured volume.
+- Browser sound Preview has been smoke-verified on representative Dashboard, Production, and Market pages with the real Preferences controls visible and no captured console errors; automated coverage also verifies disabled sound does not create browser audio and enabled sound schedules the selected generated tone at the configured volume.
 - Extend visible toast dismissal verification beyond market-listing toasts to production notifications and market deal alerts.

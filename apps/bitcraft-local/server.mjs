@@ -17,6 +17,7 @@ import { csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
+import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -7637,7 +7638,7 @@ function notificationActivity(claimId, limit = 120) {
     WHERE claim_id = ? AND event_type IN (${placeholders})
     ORDER BY occurred_at DESC, id DESC
     LIMIT ?
-  `).all(claimId, ...notableTypes, eventLimit);
+  `).all(claimId, ...notableTypes, eventLimit).map((event) => publicNotificationActivityEvent(event));
   const total = toNumber(db.prepare(`
     SELECT COUNT(*) AS count
     FROM activity_events
