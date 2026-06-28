@@ -2328,7 +2328,12 @@ const claimDetailCache = new Map();
 const playerDetailCache = new Map();
 const craftContributionCache = new Map();
 const passiveCraftsCache = new Map();
+const playerDetailSummariesCache = new Map();
+const playerDetailSummariesInflight = new Map();
+const passiveCraftSummariesCache = new Map();
+const passiveCraftSummariesInflight = new Map();
 const productionCraftsCache = new Map();
+const productionCraftsInflight = new Map();
 let mapCatalogCache = null;
 const dashboardDataCache = new Map();
 const dashboardDataInflight = new Map();
@@ -2342,6 +2347,10 @@ const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
 const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
+const PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PLAYER_DETAIL_SUMMARY_CACHE_MS ?? 30_000));
+const PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PASSIVE_CRAFT_SUMMARY_CACHE_MS ?? 60_000));
+const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTION_CRAFT_CACHE_MS ?? 30_000));
+const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const BITJITA_PROXY_CACHE_POLICIES = [
@@ -6649,58 +6658,114 @@ async function fetchCachedPassiveCrafts(member) {
   return value;
 }
 
-async function passiveCraftSummaries(body) {
-  const members = Array.isArray(body?.members) ? body.members : [];
-  const uniqueMembers = [...new Map(members
-    .filter((member) => member && (member.playerEntityId ?? member.entityId))
-    .slice(0, 50)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
-  const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
+function withServerFreshness(value, cacheState, cachedAt, stale = false) {
+  const serverFreshness = { ...(value?.serverFreshness ?? {}), cacheState, cachedAt };
+  if (stale) serverFreshness.stale = true;
+  return { ...value, ...(stale ? { stale: true } : {}), serverFreshness };
+}
+
+async function loadHelperCached(cache, inflight, key, ttlMs, loader, options = {}) {
+  const now = Date.now();
+  const cached = cache.get(key);
+  if (!options.forceRefresh && cached && cached.expiresAt > now) return withServerFreshness(cached.value, "hit", cached.cachedAt);
+  const pending = !options.forceRefresh ? inflight.get(key) : null;
+  if (pending) {
+    const entry = await pending;
+    return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "deduped", entry.cachedAt, entry.stale);
+  }
+  const stale = !options.forceRefresh && cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
+  const request = (async () => {
     try {
-      return await fetchCachedPassiveCrafts(member);
-    } catch (error) {
-      return {
-        ok: false,
-        playerId: String(member.playerEntityId ?? member.entityId ?? ""),
-        memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
-        error: error instanceof Error ? error.message : String(error),
+      const value = await loader();
+      const cachedAt = new Date().toISOString();
+      const entry = {
+        value,
+        cachedAt,
+        expiresAt: Date.now() + ttlMs,
+        staleExpiresAt: Date.now() + ttlMs + LOCAL_HELPER_STALE_IF_ERROR_MS,
       };
+      cache.set(key, entry);
+      return entry;
+    } catch (error) {
+      if (stale) {
+        const partialErrors = Array.isArray(stale.value?.partialErrors) ? stale.value.partialErrors : [];
+        return {
+          ...stale,
+          stale: true,
+          value: { ...stale.value, partialErrors: [...partialErrors, `Refresh failed: ${errorMessage(error)}`] },
+        };
+      }
+      throw error;
+    } finally {
+      inflight.delete(key);
     }
+  })();
+  inflight.set(key, request);
+  const entry = await request;
+  return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "miss", entry.cachedAt, entry.stale);
+}
+
+function uniqueSummaryMembers(body, maxMembers) {
+  const members = Array.isArray(body?.members) ? body.members : [];
+  return [...new Map(members
+    .filter((member) => member && (member.playerEntityId ?? member.entityId))
+    .slice(0, maxMembers)
+    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+}
+
+function summaryMemberCacheKey(members) {
+  return members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort().join(",") || "empty";
+}
+
+async function passiveCraftSummaries(body) {
+  const uniqueMembers = uniqueSummaryMembers(body, 50);
+  const cacheKey = summaryMemberCacheKey(uniqueMembers);
+  return loadHelperCached(passiveCraftSummariesCache, passiveCraftSummariesInflight, cacheKey, PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS, async () => {
+    const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
+      try {
+        return await fetchCachedPassiveCrafts(member);
+      } catch (error) {
+        return {
+          ok: false,
+          playerId: String(member.playerEntityId ?? member.entityId ?? ""),
+          memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    const rows = results
+      .flatMap((result) => result.ok ? result.rows.map((row) => ({ ...row, playerId: result.playerId, memberName: result.memberName })) : [])
+      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+      .slice(0, 18);
+    return {
+      rows,
+      requested: uniqueMembers.length,
+      failed: results.filter((result) => !result.ok).length,
+    };
   });
-  const rows = results
-    .flatMap((result) => result.ok ? result.rows.map((row) => ({ ...row, playerId: result.playerId, memberName: result.memberName })) : [])
-    .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
-    .slice(0, 18);
-  return {
-    rows,
-    requested: uniqueMembers.length,
-    failed: results.filter((result) => !result.ok).length,
-  };
 }
 
 async function playerDetailSummaries(body) {
-  const members = Array.isArray(body?.members) ? body.members : [];
-  const uniqueMembers = [...new Map(members
-    .filter((member) => member && (member.playerEntityId ?? member.entityId))
-    .slice(0, 100)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
-  const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
-    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-    try {
-      const player = await fetchCachedPlayerDetail(playerId);
-      return { ok: true, player: { ...player, detailAvailable: true } };
-    } catch (error) {
-      return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
-    }
+  const uniqueMembers = uniqueSummaryMembers(body, 100);
+  const cacheKey = summaryMemberCacheKey(uniqueMembers);
+  return loadHelperCached(playerDetailSummariesCache, playerDetailSummariesInflight, cacheKey, PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS, async () => {
+    const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
+      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+      try {
+        const player = await fetchCachedPlayerDetail(playerId);
+        return { ok: true, player: { ...player, detailAvailable: true } };
+      } catch (error) {
+        return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    return {
+      players: results.map((result) => result.player),
+      requested: uniqueMembers.length,
+      failed: results.filter((result) => !result.ok).length,
+      failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
+    };
   });
-  return {
-    players: results.map((result) => result.player),
-    requested: uniqueMembers.length,
-    failed: results.filter((result) => !result.ok).length,
-    failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
-  };
 }
-
 function itemCatalogKey(item) {
   const id = item?.id ?? item?.entityId ?? item?.itemId;
   return id == null ? "" : String(id);
@@ -6742,77 +6807,69 @@ function productionCraftCacheKey(claimId, members) {
 
 async function settlementProductionCrafts(body) {
   const claimId = String(body?.claimId ?? "").trim();
-  if (!claimId) return { craftResults: [], items: [], cargos: [], claims: [], count: 0, publicCount: 0, privateCount: 0, failedMemberRequests: 0 };
-  const members = Array.isArray(body?.members) ? body.members : [];
-  const uniqueMembers = [...new Map(members
-    .filter((member) => member && (member.playerEntityId ?? member.entityId))
-    .slice(0, 50)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
+  if (!claimId) return withServerFreshness({ craftResults: [], items: [], cargos: [], claims: [], count: 0, publicCount: 0, privateCount: 0, failedMemberRequests: 0 }, "miss", new Date().toISOString());
+  const uniqueMembers = uniqueSummaryMembers(body, 50);
   const cacheKey = productionCraftCacheKey(claimId, uniqueMembers);
-  const cached = productionCraftsCache.get(cacheKey);
-  if (!body?.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  return loadHelperCached(productionCraftsCache, productionCraftsInflight, cacheKey, PRODUCTION_CRAFT_CACHE_TTL_MS, async () => {
+    let publicFetchError = "";
+    const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }).catch((error) => {
+      publicFetchError = error instanceof Error ? error.message : String(error);
+      return { craftResults: [] };
+    });
+    const publicCrafts = unwrap(publicPayload, "craftResults", []);
+    const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
+    const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
+      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+      try {
+        return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    const memberPayloads = memberResults.filter((result) => result.ok).map((result) => result.payload);
+    const merged = new Map();
 
-  let publicFetchError = "";
-  const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }).catch((error) => {
-    publicFetchError = error instanceof Error ? error.message : String(error);
-    return { craftResults: [] };
-  });
-  const publicCrafts = unwrap(publicPayload, "craftResults", []);
-  const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
-  const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
-    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-    try {
-      return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }) };
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
-  });
-  const memberPayloads = memberResults.filter((result) => result.ok).map((result) => result.payload);
-  const merged = new Map();
-
-  for (const craft of publicCrafts) {
-    if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-    merged.set(String(craft.entityId), { ...craft, isPublic: craft.isPublic !== false, visibilitySource: "claim-public" });
-  }
-
-  for (const payload of memberPayloads) {
-    for (const craft of unwrap(payload, "craftResults", [])) {
+    for (const craft of publicCrafts) {
       if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-      const id = String(craft.entityId);
-      const existing = merged.get(id) ?? {};
-      const isPublic = craft.isPublic === false ? false : publicIds.has(id) || craft.isPublic === true;
-      merged.set(id, {
-        ...existing,
-        ...craft,
-        isPublic,
-        visibilitySource: isPublic ? existing.visibilitySource ?? "player-public" : "player-private",
-      });
+      merged.set(String(craft.entityId), { ...craft, isPublic: craft.isPublic !== false, visibilitySource: "claim-public" });
     }
-  }
 
-  const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
-  const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
-  const partialErrors = [
-    publicFetchError ? `Public craft refresh failed: ${publicFetchError}` : "",
-    ...memberResults.filter((result) => !result.ok).map((result) => `Member craft refresh failed: ${result.error}`),
-  ].filter(Boolean);
-  if (publicFetchError && !memberPayloads.length) {
-    throw new Error(`Production refresh failed: ${publicFetchError}`);
-  }
-  const value = {
-    craftResults,
-    ...catalog,
-    count: craftResults.length,
-    publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
-    privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
-    failedMemberRequests: memberResults.filter((result) => !result.ok).length,
-    partialError: partialErrors[0] ?? null,
-    partialErrors,
-  };
-  productionCraftsCache.set(cacheKey, { value, expiresAt: Date.now() + 30 * 1000 });
-  return value;
+    for (const payload of memberPayloads) {
+      for (const craft of unwrap(payload, "craftResults", [])) {
+        if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
+        const id = String(craft.entityId);
+        const existing = merged.get(id) ?? {};
+        const isPublic = craft.isPublic === false ? false : publicIds.has(id) || craft.isPublic === true;
+        merged.set(id, {
+          ...existing,
+          ...craft,
+          isPublic,
+          visibilitySource: isPublic ? existing.visibilitySource ?? "player-public" : "player-private",
+        });
+      }
+    }
+
+    const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
+    const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
+    const partialErrors = [
+      publicFetchError ? `Public craft refresh failed: ${publicFetchError}` : "",
+      ...memberResults.filter((result) => !result.ok).map((result) => `Member craft refresh failed: ${result.error}`),
+    ].filter(Boolean);
+    if (publicFetchError && !memberPayloads.length) {
+      throw new Error(`Production refresh failed: ${publicFetchError}`);
+    }
+    return {
+      craftResults,
+      ...catalog,
+      count: craftResults.length,
+      publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
+      privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
+      failedMemberRequests: memberResults.filter((result) => !result.ok).length,
+      partialError: partialErrors[0] ?? null,
+      partialErrors,
+    };
+  }, { forceRefresh: body?.forceRefresh === true });
 }
-
 async function dashboardData(claimId, options = {}) {
   const id = String(claimId ?? "").trim();
   if (!/^\d{8,}$/.test(id)) {
