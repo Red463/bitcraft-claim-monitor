@@ -90,8 +90,11 @@ Browser smoke verification on the built local app at `http://127.0.0.1:18449/` i
 
 The dedicated `/bot` route is intentionally different: `AppShell.tsx` mounts `BotControlApp` directly for `/bot` and bot subdomains so the bot console does not initialise public dashboard data. That route currently has no floating notification button, toast stack, or notification drawer. Treat `/bot` browser notifications as intentionally not supported unless the bot route is redesigned to share the main app chrome.
 
+A follow-up built-app smoke pass on 2026-06-28 verified the drawer/read-state path with live app controls: a smoke-only market listing inserted into `.dev-data` produced a visible Dashboard toast, unread badge, drawer entry, and drawer-to-Market navigation. The same drawer was opened on Production and contained market plus production started/completed entries. Disabling the user-level `New market listings` preference prevented a later smoke listing from creating a visible toast or unread drawer entry until the setting was restored. A separate Production-page dismissal attempt remains inconclusive: two later smoke listings entered the unread drawer log, but no visible `.toast-stack` item was observed before dismissal could be tested.
+
 Still required before release completion:
 
 - Verify production started and production completed browser notifications across the same page matrix.
 - Verify market deal alert notifications with a signed-in Discord-linked user.
-- Verify drawer open/closed behavior, dismissed state, sounds enabled/disabled, and user/app notification settings across representative pages.
+- Verify visible toast dismissal and sound enabled/disabled behavior across representative pages.
+- Re-check the Production-page toast visibility path for refresh-triggered market notifications, because the drawer/log updated during the 2026-06-28 follow-up while the visible toast stack was not observed.
