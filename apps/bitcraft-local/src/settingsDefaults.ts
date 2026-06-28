@@ -1,5 +1,6 @@
 import { DEFAULT_THEME } from "./theme";
-import type { AppSettings, DiscordPresence, DiscordRolePanel, DiscordWelcomeFlow, UserToastSettings } from "./types/settings";
+import type { AppSettings, DiscordPresence, DiscordRolePanel, DiscordWelcomeFlow } from "./types/settings";
+export { DEFAULT_USER_TOAST_SETTINGS } from "./notifications/userToastSettings";
 
 /*
  * Installation defaults shared by the browser and admin UI.
@@ -197,8 +198,3 @@ export const DEFAULT_SETTINGS: AppSettings = {
     interactionUrl: "/api/discord/interactions",
   },
 };
-
-export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = { marketListings: true, marketSales: true, production: true, soundEnabled: true, soundId: "alert-pop", soundVolume: 0.55 };
-
-
-

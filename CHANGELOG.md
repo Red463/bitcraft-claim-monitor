@@ -8,6 +8,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.79] - 2026-06-28
+
+### Changed
+
+- Improved browser notification settings reliability by normalizing saved toast and sound preferences before account sync, UI rendering, and sound playback.
+- Moved browser user-settings styles into a focused stylesheet so settings, account-linking, and theme-editor rules are easier to maintain.
+
+### Fixed
+
+- Fixed corrupted or outdated browser notification settings from disabling important notification gates or selecting invalid sound/volume values.
 ## [1.0.0-beta.78] - 2026-06-28
 
 ### Changed
@@ -1725,5 +1735,3 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-
-

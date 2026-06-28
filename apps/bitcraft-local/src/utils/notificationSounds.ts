@@ -1,5 +1,7 @@
 import type { NotificationSoundId, UserToastSettings } from "../types/settings";
+import { normalizeNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings";
 
+export type { NotificationSoundSettings };
 export type NotificationSoundOption = { id: NotificationSoundId; label: string; description: string };
 
 export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
@@ -39,18 +41,15 @@ function getAudioContext(): AudioContext | null {
   return audioContext;
 }
 
-function clampVolume(value: unknown): number {
-  const number = typeof value === "number" && Number.isFinite(value) ? value : 0.55;
-  return Math.max(0, Math.min(1, number));
-}
-
 export function playNotificationSound(settings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume">) {
-  if (!settings.soundEnabled) return;
-  void playGeneratedSound(settings.soundId, settings.soundVolume);
+  const normalized = normalizeNotificationSoundSettings(settings);
+  if (!normalized.soundEnabled) return;
+  void playGeneratedSound(normalized.soundId, normalized.soundVolume);
 }
 
 export function previewNotificationSound(settings: Pick<UserToastSettings, "soundId" | "soundVolume">) {
-  void playGeneratedSound(settings.soundId, settings.soundVolume);
+  const normalized = normalizeNotificationSoundSettings({ soundEnabled: true, ...settings });
+  void playGeneratedSound(normalized.soundId, normalized.soundVolume);
 }
 
 async function playGeneratedSound(soundId: NotificationSoundId, volume: number) {
@@ -60,10 +59,10 @@ async function playGeneratedSound(soundId: NotificationSoundId, volume: number) 
     if (context.state === "suspended") await context.resume();
     const now = context.currentTime;
     const master = context.createGain();
-    master.gain.setValueAtTime(clampVolume(volume), now);
+    master.gain.setValueAtTime(volume, now);
     master.connect(context.destination);
 
-    for (const step of SOUND_PATTERNS[soundId] ?? SOUND_PATTERNS["soft-chime"]) {
+    for (const step of SOUND_PATTERNS[soundId]) {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       const start = now + step.start;

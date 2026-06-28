@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "./styles/phase6.css";
 import "./styles.css";
+import "./styles/user-settings.css";
 import "./styles/notifications.css";
 import App from "./AppShell";
 

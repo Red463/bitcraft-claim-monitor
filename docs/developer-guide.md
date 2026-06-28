@@ -13,7 +13,8 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/api/` contains frontend fetch hooks and API helpers. Keep network timing, stale-data metadata, and response normalization out of JSX where practical.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
-- `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as notification UI.
+- `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as notification UI and user settings UI.
+- `src/styles/user-settings.css` owns the browser settings dialog, account-linking cards, theme editor, and settings-specific responsive rules.
 - `src/styles/notifications.css` owns toast, notification drawer, notification badge, and notification sound setting styles.
 
 ## Data Flow
@@ -46,7 +47,7 @@ Browser notification architecture is documented in [`notification-system.md`](./
 - `src/notifications/toastNotices.ts` owns notice shape, destination mapping, and dedupe keys.
 - `src/notifications/notificationSources.ts` turns data events into toast drafts.
 - `AppShell.tsx` keeps notification sources mounted globally so route changes do not disable toasts.
-- `src/utils/notificationSounds.ts` handles optional generated browser sounds and silently tolerates browser audio blocking.
+- `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization; `src/utils/notificationSounds.ts` handles optional generated browser sounds and silently tolerates browser audio blocking.
 
 Adding a notification type requires a test-first pure draft helper, a stable `sourceKey`, settings checks, global wiring, and browser verification across pages before claiming release readiness.
 

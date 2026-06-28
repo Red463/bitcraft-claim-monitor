@@ -22,7 +22,8 @@ Notification behavior is intentionally split into rendering, pure notification l
 - `src/notifications/notificationSources.ts` turns market activity, deal alerts, and production craft events into toast drafts.
 - `src/AppShell.tsx` owns global polling hooks, known-ID refs, toast state, notification log state, browser sound playback, and route navigation from drawer items.
 - `src/api/localHistory.ts` keeps market activity and deal-alert polling page-independent.
-- `src/utils/notificationSounds.ts` owns browser-only generated notification sounds.
+- `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization before notification gating, account save, and account load.
+- `src/utils/notificationSounds.ts` owns browser-only generated notification sounds and normalizes sound inputs before preview or playback.
 
 This keeps notification trigger logic central to the mounted app shell rather than tying notifications to whichever page component happens to be visible.
 
@@ -39,7 +40,7 @@ Browser toast settings are controlled by app/admin settings and user settings:
 - Market listing toasts require both app-level and user-level listing notifications to be enabled.
 - Market sale toasts require both app-level and user-level sale notifications to be enabled.
 - Production toasts require both app-level and user-level production notifications to be enabled.
-- Sounds are browser-only and are skipped when disabled or blocked by the browser.
+- Sounds are browser-only and are skipped when disabled or blocked by the browser. Persisted browser toast settings are normalized to boolean notification gates, known tone IDs, and a 0-1 volume range before preview, playback, account save, or account load.
 
 Deal-alert toasts are tied to the signed-in user's deal-alert feed.
 
@@ -62,7 +63,7 @@ Automated coverage exists for:
 - Market activity draft generation and settings gating.
 - Deal-alert draft generation and signed-in deal-alert source queue seeding.
 - Production craft draft generation and production queue diffing.
-- Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, and drawer read-state marking.
+- Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
 
 Required release verification still includes a manual or browser-driven matrix proving that every supported in-app notification type can appear while each app page is active, unless a page restriction is intentional and documented.
 

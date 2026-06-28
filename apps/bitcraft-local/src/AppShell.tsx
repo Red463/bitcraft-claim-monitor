@@ -118,6 +118,7 @@ import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
 import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey } from "./utils/appSettings";
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound, previewNotificationSound } from "./utils/notificationSounds";
+import { normalizeUserToastSettings } from "./notifications/userToastSettings";
 import { craftDisplayName, craftOutputItem, listingTrackingKey, safeDisplayJson } from "./utils/displayHelpers";
 import { urlMapFocus } from "./utils/mapFocus";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "./utils/professions";
@@ -2585,6 +2586,7 @@ function DashboardApp() {
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
+  const normalizedUserToastSettings = React.useMemo(() => normalizeUserToastSettings(userToastSettings), [userToastSettings]);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
   const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
@@ -2657,16 +2659,16 @@ function DashboardApp() {
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, []);
   const saveAccountSettings = React.useCallback(async () => {
-    const settings = { density, toastSettings: userToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
+    const settings = { density, toastSettings: normalizedUserToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
     const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save account settings");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [browserTheme, density, selectedMemberId, sidebarCollapsed, sidebarGroups, userToastSettings]);
+  }, [browserTheme, density, normalizedUserToastSettings, selectedMemberId, sidebarCollapsed, sidebarGroups]);
   const loadAccountSettings = React.useCallback(() => {
     const saved = userAuth.user?.settings ?? {};
     if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
-    if (saved.toastSettings && typeof saved.toastSettings === "object") setUserToastSettings({ ...DEFAULT_USER_TOAST_SETTINGS, ...saved.toastSettings });
+    if (saved.toastSettings && typeof saved.toastSettings === "object") setUserToastSettings(normalizeUserToastSettings(saved.toastSettings));
     const savedTheme = normalizeThemeCandidate(saved.theme)?.theme;
     if (savedTheme) setBrowserTheme(savedTheme);
     if (typeof saved.sidebarCollapsed === "boolean") setSidebarCollapsed(saved.sidebarCollapsed);
@@ -2700,7 +2702,7 @@ function DashboardApp() {
     if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
     const id = `${Date.now()}-${Math.random()}`;
     const notice: ToastNotice = createToastNotice({ id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), item, sourceKey: options.sourceKey });
-    playNotificationSound(userToastSettings);
+    playNotificationSound(normalizedUserToastSettings);
     setToasts((current) => appendToastStack(current, notice));
     setNotificationLog((current) => appendNotificationLog(current, notice));
     const timer = window.setTimeout(() => {
@@ -2708,7 +2710,7 @@ function DashboardApp() {
       setToasts((current) => current.filter((notice) => notice.id !== id));
     }, 7000);
     toastTimersRef.current.set(id, timer);
-  }, [setNotificationLog, userToastSettings]);
+  }, [normalizedUserToastSettings, setNotificationLog]);
   React.useEffect(() => () => {
     for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
     toastTimersRef.current.clear();
@@ -2835,8 +2837,8 @@ function DashboardApp() {
   React.useEffect(() => {
     if (!notificationActivity.refreshToken) return;
     const result = marketActivityQueueToastDrafts(activityNoticeIdsRef.current, claimId, notificationActivity.events, {
-      marketListings: appSettings.toastSettings.marketListings && userToastSettings.marketListings,
-      marketSales: appSettings.toastSettings.marketSales && userToastSettings.marketSales,
+      marketListings: appSettings.toastSettings.marketListings && normalizedUserToastSettings.marketListings,
+      marketSales: appSettings.toastSettings.marketSales && normalizedUserToastSettings.marketSales,
     }, {
       summary: activitySummary,
       item: toastItemFromActivity,
@@ -2846,7 +2848,7 @@ function DashboardApp() {
     for (const draft of result.drafts) {
       pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
     }
-  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
+  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, normalizedUserToastSettings.marketListings, normalizedUserToastSettings.marketSales]);
   React.useEffect(() => {
     if (!dealAlerts.refreshToken) return;
     const result = dealAlertQueueToastDrafts(dealAlertIdsRef.current, dealAlerts.alerts);
@@ -2861,13 +2863,13 @@ function DashboardApp() {
       displayName: (craftJob) => craftDisplayName(craftJob, data.raw?.crafts ?? state.data?.crafts),
       item: (craftJob) => craftOutputItem(craftJob, data.raw?.crafts ?? state.data?.crafts),
     }, {
-      enabled: appSettings.toastSettings.production && userToastSettings.production,
+      enabled: appSettings.toastSettings.production && normalizedUserToastSettings.production,
     });
     craftQueueRef.current = result.snapshot;
     for (const draft of result.drafts) {
       pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
     }
-  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data?.crafts, userToastSettings.production]);
+  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data?.crafts, normalizedUserToastSettings.production]);
   React.useEffect(() => {
     if (active !== "dashboard" || !appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -3051,7 +3053,7 @@ function DashboardApp() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={NAV} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={{ ...DEFAULT_USER_TOAST_SETTINGS, ...userToastSettings }} onToastSettingsChange={setUserToastSettings} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
