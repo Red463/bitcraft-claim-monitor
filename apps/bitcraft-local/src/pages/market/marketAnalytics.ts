@@ -1,4 +1,31 @@
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data.ts";
+import { timestampMs } from "../../utils/format.ts";
+
+export type BestSellerSortKey = "units" | "revenue" | "sales" | "average" | "recent";
+
+export const BEST_SELLER_SORTS: Array<{ key: BestSellerSortKey; label: string }> = [
+  { key: "units", label: "Units sold" },
+  { key: "revenue", label: "Revenue" },
+  { key: "sales", label: "Sales" },
+  { key: "average", label: "Avg price" },
+  { key: "recent", label: "Recent" },
+];
+
+export function bestSellerSortValue(row: AnyRecord, sort: BestSellerSortKey): number {
+  switch (sort) {
+    case "revenue":
+      return toNumber(row.totalValue);
+    case "sales":
+      return toNumber(row.salesCount);
+    case "average":
+      return toNumber(row.avgUnitPrice);
+    case "recent":
+      return timestampMs(row.lastSoldAt);
+    case "units":
+    default:
+      return toNumber(row.unitsSold);
+  }
+}
 
 export function buildMarketTopItems(events: AnyRecord[]) {
   const grouped = new Map<string, { itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();

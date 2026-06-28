@@ -10,7 +10,7 @@ This audit tracks public-release readiness for the maintained app at `apps/bitcr
 | --- | --- | --- |
 | `src/main.tsx` | Small bootstrap file that imports styles and renders `AppShell`. | Keep as-is. It is already the right boundary. |
 | `src/AppShell.tsx` | About 3,057 lines. Owns app chrome, global refresh, admin shell, auth, settings, analytics, and notifications. | Still large, but acceptable as top-level orchestration while page/admin internals are gradually extracted. Avoid adding page-specific logic here. |
-| `src/pages/MainPages.tsx` | About 2,697 lines after extracting activity, map, member identity, and market analytics helpers. Still contains Dashboard, Inventory, Market, Production, Public Craft Finder, Leaderboard, Map, and Activity components. | Continue shrinking it. Keep it temporarily as shared legacy page glue until individual pages can be extracted safely. |
+| `src/pages/MainPages.tsx` | About 2,661 lines after extracting activity, map, member identity, market analytics, best-seller sorting, market listing, and production craft helpers. Still contains Dashboard, Inventory, Market, Production, Public Craft Finder, Leaderboard, Map, and Activity components. | Continue shrinking it. Keep it temporarily as shared legacy page glue until individual pages can be extracted safely. |
 | `server.mjs` | Single large Node service, about 504 KB / 9,390 lines after extracting route classification. Owns static serving, BitJita proxy/cache, SQLite schema/migrations, prepared statements, local/admin APIs, app/admin auth, Discord, analytics, collectors, backups, and scheduled jobs. | Needs further deliberate server-module splits. The first safe extraction is `src/server/httpRoutes.mjs`; route/auth/persistence boundaries must remain under test before moving larger code. |
 | `src/styles.css` | Large global stylesheet, now 6,741 lines, containing tokens, layout, navigation, tables, page-specific sections, responsive rules, and admin/bot styles. Notification, app-chrome, and user-settings UI styles have been extracted. | Needs continued CSS audit and incremental extraction. Avoid broad formatting churn; split only stable sections with clear ownership. |
 | `src/styles/phase6.css` | Small focused module for setup/workflow polish. | Keep as an existing focused module, but the name is not descriptive enough for future modules. |
@@ -22,11 +22,12 @@ This audit tracks public-release readiness for the maintained app at `apps/bitcr
 ## Completed Release-Readiness Improvements
 
 - Extracted pure notification creation, dedupe, source drafting, unseen selection, market activity source, signed-in deal-alert source, production queue diff, toast-stack, persisted-log, and drawer read-state helpers.
-- Extracted activity summary/diff/toast helpers into `src/pages/activity/activityUtils.ts`.
+- Extracted activity summary, diff, toast, and activity-log cleanup helpers into `src/pages/activity/activityUtils.ts`.
+- Extracted production craft activity-window, progress-key, and metrics helpers into `src/pages/production/productionUtils.ts`.
 - Extracted map URL and resource-token helpers into `src/pages/map/mapUtils.ts`.
-- Extracted market analytics transforms into `src/pages/market/marketAnalytics.ts`.
+- Extracted market analytics transforms and best-seller sort helpers into `src/pages/market/marketAnalytics.ts`, plus market listing display, age, and tracking helpers into `src/pages/market/listingUtils.ts`.
 - Extracted member identity helpers into `src/utils/memberIdentity.ts`.
-- Added focused tests for notification, activity, map, member identity, and market analytics behavior.
+- Added focused tests for notification, activity, map, member identity, market analytics, and market listing helper behavior.
 - Added notification architecture documentation in `docs/notification-system.md`.
 - Added this audit and the developer guide to make the current architecture and remaining release blockers explicit.
 - Replaced the generic `.env.example` with app-specific environment variables and secret placeholders.
@@ -129,8 +130,12 @@ Remaining security/config work:
 
 Most recent verified checks in this release-readiness pass:
 
+- Focused activity helper test: `node --experimental-strip-types --test test/activity-utils.test.mjs` passed after extracting activity-log cleanup into the activity utility module.
+- Focused production helper test: `node --experimental-strip-types --test test/production-utils.test.mjs` passed after extracting production craft activity-window, progress-key, and metrics helpers.
 - Focused notification source tests: `node --experimental-strip-types --test test/notifications.test.mjs` passed with 14 tests after extracting market activity, deal-alert, production source queue, toast-stack, persisted-log, and drawer read-state helpers.
 - Focused notification sound/settings tests: `node --experimental-strip-types --test test/notification-sounds.test.mjs` passed with 5 tests after adding persisted setting normalization plus generated-audio coverage for disabled sound and selected enabled tones.
+- Focused market analytics test: `node --experimental-strip-types --test test/market-analytics.test.mjs` passed after extracting best-seller sort helpers into the market analytics module.
+- Focused market listing helper test: `node --experimental-strip-types --test test/market-listing-utils.test.mjs` passed after extracting market listing display, date, age, JSON, and tracking-key helpers.
 - Focused server route helper test: `node --experimental-strip-types --test test/server-route-groups.test.mjs` passed after the route classification extraction.
 - Focused server integration test: `node --experimental-strip-types --test test/server.test.mjs` passed after the admin-role permission fix and route-helper import wiring.
 - Full production build: `corepack pnpm --filter @workspace/bitcraft-local run build` passed.

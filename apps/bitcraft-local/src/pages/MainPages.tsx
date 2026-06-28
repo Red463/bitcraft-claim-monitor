@@ -82,9 +82,11 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import type { ActivePanel, LoadState } from "../types/app";
-import { activityActorName, activityContainerName, activityMetadata, activitySummary, compactActivity, signedDelta } from "./activity/activityUtils";
+import { activityActorName, activityContainerName, activityMetadata, activitySummary, compactActivity, sanitizeActivityLog, signedDelta } from "./activity/activityUtils";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
-import { buildMarketDaily, buildMarketTopItems, formatMarketDay } from "./market/marketAnalytics";
+import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
+import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "./market/listingUtils";
+import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
 
 /*
  * Main application pages that still share a large amount of display logic.
@@ -141,25 +143,6 @@ function updateQueryState(values: Record<string, string | null>) {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function safeDisplayJson(value: unknown): AnyRecord {
-  try {
-    const parsed = JSON.parse(String(value ?? "{}"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function displayItemName(value: unknown): string | null {
-  const text = String(value ?? "").trim();
-  if (!text || text.toLowerCase() === "unknown item") return null;
-  return text;
-}
-
-function listingTrackingKey(listing: AnyRecord): string {
-  return String(listing.entityId ?? listing.id ?? listing.marketListingId ?? listing.listingId ?? "");
-}
-
 function activeRegionLabel(region: ActiveRegion, settlementRegionId?: string): string {
   const suffixes = [
     String(region.regionId) === String(settlementRegionId ?? "") ? "settlement" : "",
@@ -188,23 +171,6 @@ function useActiveRegions(includeRegionId?: string): ActiveRegion[] {
     return () => controller.abort();
   }, [includeRegionId]);
   return regions;
-}
-
-function liveDaysSince(value: unknown): string {
-  const date = parseDateValue(value);
-  if (!date) return "-";
-  const elapsed = Date.now() - date.getTime();
-  if (!Number.isFinite(elapsed) || elapsed < 0) return "-";
-  const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
-  return days === 0 ? "<1 day" : `${days} day${days === 1 ? "" : "s"}`;
-}
-
-/*
- * BitJita active market listings expose their original listing time as
- * `timestamp`; persisted first-seen time is used for older/fallback payloads.
- */
-function listingDate(listing: AnyRecord, firstSeen: unknown): unknown {
-  return listing.timestamp ?? firstSeen;
 }
 
 export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
@@ -644,31 +610,6 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
       </div>
     </div>
   );
-}
-type BestSellerSortKey = "units" | "revenue" | "sales" | "average" | "recent";
-
-const BEST_SELLER_SORTS: Array<{ key: BestSellerSortKey; label: string }> = [
-  { key: "units", label: "Units sold" },
-  { key: "revenue", label: "Revenue" },
-  { key: "sales", label: "Sales" },
-  { key: "average", label: "Avg price" },
-  { key: "recent", label: "Recent" },
-];
-
-function bestSellerSortValue(row: AnyRecord, sort: BestSellerSortKey): number {
-  switch (sort) {
-    case "revenue":
-      return toNumber(row.totalValue);
-    case "sales":
-      return toNumber(row.salesCount);
-    case "average":
-      return toNumber(row.avgUnitPrice);
-    case "recent":
-      return timestampMs(row.lastSoldAt);
-    case "units":
-    default:
-      return toNumber(row.unitsSold);
-  }
 }
 
 function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMeta: Map<string, AnyRecord> }) {
@@ -1646,17 +1587,6 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
   );
 }
 
-const ACTIVE_CRAFT_WINDOW_MS = 30 * 1000;
-
-function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
-  return contributors.some((person) => {
-    const lastContribution = parseDateValue(person.lastContributedAt);
-    if (!lastContribution) return false;
-    const age = Date.now() - lastContribution.getTime();
-    return age >= -5 * 1000 && age <= ACTIVE_CRAFT_WINDOW_MS;
-  });
-}
-
 export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
   const [state, setState] = React.useState<LoadState<AnyRecord[]>>({ data: null, error: null, loading: true });
   const memberKey = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean).join(",");
@@ -1735,9 +1665,6 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === String(selectedMember.userName ?? selectedMember.username)) ?? null : null;
-  function craftProgressKey(job: AnyRecord) {
-    return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.buildingName ?? "structure"}:${job.recipeId ?? ""}:${job.craftedItem?.[0]?.item_id ?? ""}`);
-  }
   const craftProgressSignature = React.useMemo(() => data.crafts.map((job: AnyRecord) => [
     craftProgressKey(job),
     toNumber(job.progress),
@@ -1782,27 +1709,6 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
     return () => controller.abort();
   }, [selectedMember?.playerEntityId, refreshToken]);
-  function metrics(job: AnyRecord) {
-    const item = itemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
-    const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
-    const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
-    const total = toNumber(job.totalActionsRequired);
-    const progress = toNumber(job.progress);
-    const remaining = Math.max(0, total - progress);
-    return {
-      item,
-      skillId,
-      experiencePerEffort,
-      total,
-      progress,
-      remaining,
-      tier: toNumber(item.tier ?? job.tier),
-      totalXp: total * experiencePerEffort,
-      remainingXp: remaining * experiencePerEffort,
-      completion: total > 0 ? progress / total : 0,
-      name: String(item.name ?? job.recipeName ?? ""),
-    };
-  }
   function eligibility(job: AnyRecord) {
     if (!selectedMember) return null;
     const requirement = job.levelRequirements?.[0] ?? {};
@@ -1829,8 +1735,8 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   const privateCrafts = data.crafts.filter((job) => job.isPublic === false);
   const visibleCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);
   const jobs = [...visibleCrafts].sort((a, b) => {
-    const aMetrics = metrics(a);
-    const bMetrics = metrics(b);
+    const aMetrics = productionMetrics(a, itemLookup);
+    const bMetrics = productionMetrics(b, itemLookup);
     const aValue = sortKey === "remainingEffort" ? aMetrics.remaining : aMetrics[sortKey];
     const bValue = sortKey === "remainingEffort" ? bMetrics.remaining : bMetrics[sortKey];
     const comparison = sortKey === "name"
@@ -1850,9 +1756,9 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     const total = toNumber(job.totalActionsRequired);
     return total > toNumber(job.progress) && isCraftWorking(job, data.contributions[String(job.entityId)] ?? []);
   }).length;
-  const totalProductionXp = jobs.reduce((sum, job) => sum + metrics(job).totalXp, 0);
-  const remainingProductionXp = jobs.reduce((sum, job) => sum + metrics(job).remainingXp, 0);
-  const highestTier = Math.max(...jobs.map((job) => metrics(job).tier), 0);
+  const totalProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).totalXp, 0);
+  const remainingProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).remainingXp, 0);
+  const highestTier = Math.max(...jobs.map((job) => productionMetrics(job, itemLookup).tier), 0);
 
   return (
     <div className="panel production-page">
@@ -1922,7 +1828,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       <div className="production-grid">
         {jobs.map((job, index) => {
           const first = job.craftedItem?.[0] ?? {};
-          const { item, skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier } = metrics(job);
+          const { item, skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier } = productionMetrics(job, itemLookup);
           const skillName = SKILL_NAMES[skillId] ?? job.levelRequirements?.[0]?.skillName ?? (skillId ? `Skill ${skillId}` : null);
           const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
           const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
@@ -2593,14 +2499,6 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
       </div>
     </div>
   );
-}
-
-function sanitizeActivityLog(items: unknown): string[] {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((item) => String(item).replaceAll("\u00c2\u00b7", "-").replaceAll("\u00e2\u20ac\u201d", "-"))
-    .filter((item) => !/changed from \d+ to 0$/.test(item) && !/changed from 0 to \d+$/.test(item))
-    .slice(0, 100);
 }
 
 const ACTIVITY_FILTERS = [

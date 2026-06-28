@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.81] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving market listing, best-seller sorting, production craft, and activity-log helpers into focused page utility modules.
+- Updated developer and release-readiness documentation with the latest page-helper extraction boundaries.
+
 ## [1.0.0-beta.80] - 2026-06-28
 
 ### Added

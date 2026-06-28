@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   activityNoticeKey,
+  sanitizeActivityLog,
   activitySummary,
   compactActivity,
   diffSnapshot,
@@ -73,4 +74,23 @@ test("diffSnapshot reports tracked settlement changes", () => {
     "Supplies changed to 80",
     "Treasury changed to 75g",
   ]);
+});
+test("sanitizeActivityLog normalizes mojibake separators and hides zero transition noise", () => {
+  const items = [
+    "Storage\u00c2\u00b7Bronze Ingot",
+    "Treasury\u00e2\u20ac\u201dUpdated",
+    "members changed from 4 to 0",
+    "members changed from 0 to 4",
+    "market changed from 4 to 5",
+    null,
+  ];
+
+  assert.deepEqual(sanitizeActivityLog(items), [
+    "Storage-Bronze Ingot",
+    "Treasury-Updated",
+    "market changed from 4 to 5",
+    "null",
+  ]);
+  assert.deepEqual(sanitizeActivityLog("not-array"), []);
+  assert.equal(sanitizeActivityLog(Array.from({ length: 105 }, (_, index) => `event ${index}`)).length, 100);
 });

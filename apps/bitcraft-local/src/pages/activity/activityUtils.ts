@@ -109,3 +109,10 @@ export function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
 export function activityNoticeKey(event: AnyRecord): string {
   return String(event.source_key ?? event.sourceKey ?? `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`);
 }
+export function sanitizeActivityLog(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => String(item).replaceAll("\u00c2\u00b7", "-").replaceAll("\u00e2\u20ac\u201d", "-"))
+    .filter((item) => !/changed from \d+ to 0$/.test(item) && !/changed from 0 to \d+$/.test(item))
+    .slice(0, 100);
+}

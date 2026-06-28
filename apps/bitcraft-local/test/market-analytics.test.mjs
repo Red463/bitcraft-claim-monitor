@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildMarketDaily, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
+import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
 
 test("buildMarketTopItems aggregates sales by item and sorts by units then value", () => {
   const topItems = buildMarketTopItems([
@@ -35,4 +35,27 @@ test("buildMarketDaily groups sales into chronological day buckets", () => {
 test("formatMarketDay formats ISO days and preserves unknown labels", () => {
   assert.match(formatMarketDay("2026-06-28"), /28|Jun/);
   assert.equal(formatMarketDay("Unknown"), "Unknown");
+});
+
+test("best seller sort helpers expose stable ranking options and values", () => {
+  assert.deepEqual(BEST_SELLER_SORTS, [
+    { key: "units", label: "Units sold" },
+    { key: "revenue", label: "Revenue" },
+    { key: "sales", label: "Sales" },
+    { key: "average", label: "Avg price" },
+    { key: "recent", label: "Recent" },
+  ]);
+  const row = {
+    unitsSold: "12",
+    totalValue: "240",
+    salesCount: "3",
+    avgUnitPrice: "20",
+    lastSoldAt: "2026-06-28T12:30:00.000Z",
+  };
+
+  assert.equal(bestSellerSortValue(row, "units"), 12);
+  assert.equal(bestSellerSortValue(row, "revenue"), 240);
+  assert.equal(bestSellerSortValue(row, "sales"), 3);
+  assert.equal(bestSellerSortValue(row, "average"), 20);
+  assert.equal(bestSellerSortValue(row, "recent"), new Date("2026-06-28T12:30:00.000Z").getTime());
 });
