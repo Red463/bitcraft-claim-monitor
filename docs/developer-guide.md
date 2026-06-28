@@ -21,6 +21,10 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/server/visitorIp.mjs` contains dependency-free visitor IP normalization, coarse anonymization, and app-salted hash helpers for visitor-security analytics.
 - `src/server/notificationActivity.mjs` contains public notification-activity metadata redaction helpers so local notification history does not leak secret-shaped fields.
 - `src/server/dealAlerts.mjs` contains public market deal-alert row shaping and Discord DM payload formatting.
+- `src/server/marketActivity.mjs` contains dependency-free market listing normalization, BitJita timestamp coercion, trade/listing matching, and market event source-key helpers.
+- `src/server/productionActivity.mjs` contains dependency-free production craft identity, output lookup, metrics, and profession-key helpers used by activity history and Discord notifications.
+- `src/server/recipeCatalog.mjs` contains dependency-free recipe catalog key, item-kind, and target-normalization helpers used by cached recipe detail storage.
+- `src/server/scheduledJobs.mjs` contains dependency-free scheduled-job schedule parsing, serialization, next-run calculation, and admin-facing labels.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
 - `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections that have not yet moved to a focused owner. `src/styles/` is for incremental focused stylesheet modules such as app chrome, notification UI, user settings UI, and page-owned styles with clear boundaries.

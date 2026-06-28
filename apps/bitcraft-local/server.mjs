@@ -19,6 +19,10 @@ import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/htt
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
+import { nextScheduledRunIso, parseScheduledJobSchedule, scheduledJobScheduleLabel, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
+import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
+import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -963,120 +967,6 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function nextDailyMidnightIso(from = new Date()) {
-  const next = new Date(from);
-  next.setHours(24, 0, 0, 0);
-  return next.toISOString();
-}
-
-function parseScheduledJobSchedule(schedule) {
-  const raw = String(schedule ?? "").trim();
-  if (!raw || raw === "daily_midnight") return { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-  if (raw.startsWith("interval@")) {
-    return { frequency: "interval", intervalSeconds: Math.min(Math.max(Math.floor(toNumber(raw.split("@")[1]) || 1800), 60), 86400), time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-  }
-  const parts = raw.split("@");
-  const frequency = ["daily", "weekly", "monthly"].includes(parts[0]) ? parts[0] : "daily";
-  if (frequency === "weekly") {
-    return { frequency, dayOfWeek: Math.min(6, Math.max(0, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfMonth: 1 };
-  }
-  if (frequency === "monthly") {
-    return { frequency, dayOfMonth: Math.min(28, Math.max(1, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfWeek: 1 };
-  }
-  return { frequency: "daily", time: validScheduleTime(parts[1]) ? parts[1] : "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-}
-
-function validScheduleTime(value) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? ""));
-}
-
-function serializeScheduledJobSchedule(input = {}) {
-  const frequency = ["daily", "weekly", "monthly", "interval"].includes(String(input.frequency)) ? String(input.frequency) : "daily";
-  const time = validScheduleTime(input.time) ? String(input.time) : "00:00";
-  if (frequency === "interval") return `interval@${Math.min(Math.max(Math.floor(toNumber(input.intervalSeconds) || 1800), 60), 86400)}`;
-  if (frequency === "weekly") {
-    const dayOfWeek = Math.min(6, Math.max(0, Math.floor(toNumber(input.dayOfWeek) || 1)));
-    return `weekly@${dayOfWeek}@${time}`;
-  }
-  if (frequency === "monthly") {
-    const dayOfMonth = Math.min(28, Math.max(1, Math.floor(toNumber(input.dayOfMonth) || 1)));
-    return `monthly@${dayOfMonth}@${time}`;
-  }
-  return `daily@${time}`;
-}
-
-function nextScheduledRunIso(schedule, from = new Date()) {
-  const config = parseScheduledJobSchedule(schedule);
-  if (config.frequency === "interval") return new Date(from.getTime() + (toNumber(config.intervalSeconds) || 1800) * 1000).toISOString();
-  const [hours, minutes] = config.time.split(":").map((part) => Number(part));
-  const next = new Date(from);
-  next.setSeconds(0, 0);
-  if (config.frequency === "weekly") {
-    const dayDelta = (config.dayOfWeek - next.getDay() + 7) % 7;
-    next.setDate(next.getDate() + dayDelta);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) next.setDate(next.getDate() + 7);
-    return next.toISOString();
-  }
-  if (config.frequency === "monthly") {
-    next.setDate(config.dayOfMonth);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) {
-      next.setMonth(next.getMonth() + 1, config.dayOfMonth);
-      next.setHours(hours, minutes, 0, 0);
-    }
-    return next.toISOString();
-  }
-  next.setHours(hours, minutes, 0, 0);
-  if (next <= from) next.setDate(next.getDate() + 1);
-  return next.toISOString();
-}
-
-function scheduledJobScheduleLabel(schedule) {
-  const config = parseScheduledJobSchedule(schedule);
-  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  if (config.frequency === "interval") return `Every ${Math.round((toNumber(config.intervalSeconds) || 1800) / 60)} minutes`;
-  if (config.frequency === "weekly") return `Weekly on ${weekdays[config.dayOfWeek]} at ${config.time}`;
-  if (config.frequency === "monthly") return `Monthly on day ${config.dayOfMonth} at ${config.time}`;
-  return `Daily at ${config.time}`;
-}
-function recipeCatalogKey(kind, id) {
-  const normalizedKind = String(kind ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-  return `${normalizedKind}:${String(id ?? "").trim()}`;
-}
-
-function recipeKindFromItemType(value) {
-  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-}
-
-function recipeTargetFromDetail(detail, fallback = {}) {
-  const source = detail?.item ?? detail?.cargo ?? detail ?? {};
-  const kind = detail?.cargo ? "cargo" : recipeKindFromItemType(source.itemType ?? source.item_type ?? fallback.itemType ?? fallback.kind);
-  return {
-    id: String(source.id ?? source.itemId ?? fallback.id ?? ""),
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    name: String(source.name ?? fallback.name ?? "Unknown item"),
-    tier: Number.isFinite(Number(source.tier ?? fallback.tier)) ? Number(source.tier ?? fallback.tier) : null,
-    rarity: source.rarityStr ?? source.rarity ?? fallback.rarity ?? null,
-    tag: source.tag ?? fallback.tag ?? null,
-    iconAssetName: source.iconAssetName ?? fallback.iconAssetName ?? null,
-  };
-}
-
-function recipeTargetFromRow(row) {
-  return {
-    id: String(row.target_id),
-    kind: String(row.kind) === "cargo" ? "cargo" : "items",
-    itemType: toNumber(row.item_type),
-    name: row.name ?? "Unknown item",
-    tier: row.tier == null ? null : toNumber(row.tier),
-    rarity: row.rarity ?? null,
-    tag: row.tag ?? null,
-    iconAssetName: row.icon_asset_name ?? null,
-  };
-}
-
 function upsertRecipeCatalogDetail(target, detail, source = "bitjita") {
   const normalized = recipeTargetFromDetail(detail, target);
   const now = new Date().toISOString();
@@ -1423,136 +1313,6 @@ function currentAppReleaseKey() {
 function unwrap(payload, key, fallback) {
   if (Array.isArray(payload)) return payload;
   return payload?.[key] ?? fallback;
-}
-
-function listingKey(row) {
-  const id = row.entityId ?? row.id ?? row.marketListingId ?? row.listingId;
-  if (id) return String(id);
-  return [
-    row.itemName ?? "unknown",
-    row.ownerUsername ?? row.owner ?? "",
-    row.side ?? row.orderType ?? "sell",
-    row.quantity ?? "",
-    row.price ?? "",
-  ].join("|");
-}
-
-function bitjitaTimestampIso(value) {
-  if (!value) return null;
-  const text = String(value);
-  if (!/^\d+$/.test(text)) {
-    const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  const numeric = Number(text);
-  const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
-  const date = new Date(millis);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function normalizeListing(row) {
-  const quantity = toNumber(row.quantity);
-  const price = toNumber(row.price);
-  return {
-    key: listingKey(row),
-    itemName: String(row.itemName ?? row.name ?? "Unknown item"),
-    side: String(row.side ?? row.orderType ?? "sell"),
-    owner: row.ownerUsername ?? row.ownerName ?? row.owner ?? null,
-    ownerEntityId: row.ownerEntityId ?? row.owner_entity_id ?? null,
-    itemId: row.itemId ?? row.item_id ?? null,
-    itemType: row.itemType ?? row.item_type ?? null,
-    quantity,
-    price,
-    totalValue: quantity * price,
-    tier: row.itemTier ?? row.tier ?? null,
-    rarity: row.itemRarityStr ?? row.rarity ?? null,
-    listedAt: bitjitaTimestampIso(row.timestamp ?? row.createdAt),
-    tradeId: row.tradeId ?? row.id ?? null,
-    raw: row,
-  };
-}
-
-function stableCraftPart(value, fallback = "") {
-  return String(value ?? fallback).trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function craftJobKey(job) {
-  const output = job.craftedItem?.[0] ?? {};
-  const claim = stableCraftPart(job.claimEntityId ?? job.claimId, "claim");
-  const structure = stableCraftPart(
-    job.buildingEntityId ?? job.structureEntityId ?? job.stationEntityId ?? job.craftingStationEntityId ?? job.buildingId ?? job.buildingName ?? job.structureName,
-  );
-  const recipe = stableCraftPart(job.recipeId ?? job.recipeEntityId ?? job.recipe_entity_id ?? job.craftingRecipeId ?? job.recipeName ?? job.name);
-  const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId);
-  const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType);
-  const visibility = job.isPublic === false ? "private" : "public";
-  // BitJita can report the same public craft with a different current/last crafter as work continues.
-  // Crafter is notification metadata, not stable craft identity, otherwise starts can fire again.
-  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|"));
-}
-
-function craftOutputItem(job, craftsPayload = {}) {
-  const itemId = String(job.craftedItem?.[0]?.item_id ?? job.outputItemId ?? job.itemId ?? "");
-  return [...(craftsPayload.items ?? []), ...(craftsPayload.cargos ?? [])].find((candidate) => String(candidate.id) === itemId) ?? null;
-}
-
-function craftDisplayName(job, craftsPayload = {}) {
-  const item = craftOutputItem(job, craftsPayload);
-  return String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`);
-}
-
-function normalizeProductionJob(job, craftsPayload = {}) {
-  const metrics = productionMetrics(job);
-  const item = craftOutputItem(job, craftsPayload);
-  return {
-    key: craftJobKey(job),
-    label: String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`),
-    tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
-    buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
-    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
-    ...metrics,
-    raw: job,
-  };
-}
-
-const skillNames = {
-  2: "Forestry",
-  3: "Carpentry",
-  4: "Masonry",
-  5: "Mining",
-  6: "Smithing",
-  7: "Scholar",
-  8: "Leatherworking",
-  9: "Hunting",
-  10: "Tailoring",
-  11: "Farming",
-  12: "Fishing",
-  13: "Cooking",
-  14: "Foraging",
-};
-
-function productionMetrics(job) {
-  const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
-  const skillName = job.levelRequirements?.[0]?.skillName ?? skillNames[skillId] ?? "";
-  const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
-  const totalEffort = toNumber(job.totalActionsRequired ?? job.totalCraftWork ?? job.requiredCraftWork ?? job.craftWorkRequired ?? job.effortRequired ?? job.totalEffort);
-  const completedEffort = toNumber(job.progress ?? job.completedCraftWork ?? job.completedEffort ?? job.actionsCompleted);
-  const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? (totalEffort ? totalEffort - completedEffort : 0));
-  const progressPct = totalEffort > 0 ? Math.max(0, Math.min(100, ((totalEffort - remainingEffort) / totalEffort) * 100)) : Math.max(0, Math.min(100, toNumber(job.progressPct ?? job.progressPercent ?? job.progress)));
-  return {
-    skillId,
-    skillName,
-    professionKey: String(skillName || "").toLowerCase().replace(/[^a-z]/g, ""),
-    totalEffort,
-    remainingEffort,
-    progressPct,
-    totalXp: totalEffort * xpPerEffort,
-  };
-}
-
-function normalizeProfessionKey(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
 }
 
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
@@ -4927,14 +4687,6 @@ function signedChange(after, before, suffix = "") {
   return `${sign}${Math.abs(delta).toLocaleString()}${suffix}`;
 }
 
-function tradeMatchesListing(trade, listing) {
-  const orderId = String(trade.orderEntityId ?? trade.order_entity_id ?? "");
-  if (orderId && orderId === String(listing.key)) return true;
-  const sameItem = String(trade.itemId ?? "") === String(listing.itemId ?? "") && String(trade.itemType ?? "") === String(listing.itemType ?? "");
-  const sameSeller = !listing.ownerEntityId || String(trade.sellerEntityId ?? "") === String(listing.ownerEntityId);
-  return sameItem && sameSeller;
-}
-
 function usedTradeIdsForListing(listingKey) {
   const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
   return new Set(rows.flatMap((row) => String(row.trade_id).split(",")).filter(Boolean));
@@ -5021,15 +4773,6 @@ function applyPendingMarketConfirmations(claimId, now, confirmations) {
       `market_sale_confirmed:${listing.key}:${trade.id ?? ""}`,
     );
   }
-}
-
-function marketEventSourceKey(eventType, listing) {
-  const key = listing?.key ?? "unknown";
-  const tradeId = listing?.tradeId ? String(listing.tradeId) : "";
-  if (eventType === "new_listing") return `market_event:${eventType}:${key}`;
-  if (eventType === "sale" || eventType === "partial_sale") return `market_event:${eventType}:${key}:${tradeId}`;
-  if (eventType === "removed_or_cancelled") return `market_event:${eventType}:${key}`;
-  return `market_event:${eventType}:${key}:${tradeId || `${toNumber(listing?.quantity)}:${toNumber(listing?.totalValue)}`}`;
 }
 
 function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {

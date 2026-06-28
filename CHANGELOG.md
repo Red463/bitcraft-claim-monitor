@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.84] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving scheduled job, market activity, production activity, and recipe catalog helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries.
+
 ## [1.0.0-beta.83] - 2026-06-28
 
 ### Added
