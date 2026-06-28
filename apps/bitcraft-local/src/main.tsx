@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "./styles/setup-workflow.css";
 import "./styles.css";
+import "./styles/bot-dashboard.css";
 import "./styles/empires.css";
 import "./styles/app-chrome.css";
 import "./styles/user-settings.css";

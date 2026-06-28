@@ -34,11 +34,11 @@ flowchart LR
 
 | Layer | Primary files | Responsibilities |
 | --- | --- | --- |
-| Frontend shell | `apps/bitcraft-local/src/main.tsx` | Route selection, app settings, sidebar, dashboard, market, production, leaderboard, map, activity, admin shell, local settings, help, toasts. |
-| Extracted main pages | `apps/bitcraft-local/src/pages/*` | Members, professions, construction, research, region, sync, craft calculator. |
-| Bot dashboard components | `apps/bitcraft-local/src/components/bot/*` | Individual `/bot` dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management. |
-| Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers. |
-| Backend | `apps/bitcraft-local/server.mjs` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs. |
+| Frontend shell | `apps/bitcraft-local/src/main.tsx`, `src/AppShell.tsx` | React bootstrap, route selection, global refresh, app settings, admin shell, auth, local settings, help/legal chrome, analytics consent, toasts, and notification drawer orchestration. |
+| Main pages | `apps/bitcraft-local/src/pages/*`, `src/pages/MainPages.tsx` | Extracted pages plus remaining legacy page glue for dashboard, inventory, market, production, public craft finder, leaderboard, map, admin, and activity until each page boundary is split safely. |
+| Bot dashboard components | `apps/bitcraft-local/src/components/bot/*`, `src/styles/bot-dashboard.css` | Individual `/bot` dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated shell/navigation styles. |
+| Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts`, `src/notifications/*` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers, notification generation, dedupe, settings normalization, and smoke-verification helpers. |
+| Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, notification activity redaction, and deal-alert payload formatting. |
 | Deployment | `deploy/*`, `DEPLOYMENT.md`, `LOCAL_DEV.md` | Caddy/systemd examples and local development guidance. |
 
 ## Page-by-Page Breakdown

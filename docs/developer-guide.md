@@ -19,9 +19,13 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/server/httpBodies.mjs` contains dependency-free body-size limits, raw request-body reading, JSON parsing, and 413 body-too-large errors.
 - `src/server/httpRateLimit.mjs` contains dependency-free rate-limit policies, request-address extraction, and the app 429 limiter factory.
 - `src/server/visitorIp.mjs` contains dependency-free visitor IP normalization, coarse anonymization, and app-salted hash helpers for visitor-security analytics.
+- `src/server/notificationActivity.mjs` contains public notification-activity metadata redaction helpers so local notification history does not leak secret-shaped fields.
+- `src/server/dealAlerts.mjs` contains public market deal-alert row shaping and Discord DM payload formatting.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
 - `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections that have not yet moved to a focused owner. `src/styles/` is for incremental focused stylesheet modules such as app chrome, notification UI, user settings UI, and page-owned styles with clear boundaries.
+- `src/styles/setup-workflow.css` owns setup checklist, admin message state, and bot workflow polish styles. It replaces phase-numbered stylesheet naming.
+- `src/styles/bot-dashboard.css` owns the dedicated `/bot` dashboard shell, overview metrics, section navigation, and related responsive shell rules.
 - `src/styles/app-chrome.css` owns floating app tools, shared help/legal dialogs, Discord sign-in dialog, cookie consent, command palette shell, and related mobile overrides.
 - `src/styles/user-settings.css` owns the browser settings dialog, account-linking cards, theme editor, and settings-specific responsive rules.
 - `src/styles/notifications.css` owns toast, notification drawer, notification badge, and notification sound setting styles.
@@ -59,6 +63,7 @@ Browser notification architecture is documented in [`notification-system.md`](./
 - `src/notifications/toastNotices.ts` owns notice shape, destination mapping, and dedupe keys.
 - `src/notifications/notificationSources.ts` turns data events into toast drafts.
 - `src/notifications/verificationMatrix.ts` defines the release notification page/type matrix and the intentional `/bot` exception; update it whenever a page or browser notification type changes.
+- `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers and the `smokeNotification` query trigger for built-app smoke checks.
 - `AppShell.tsx` keeps notification sources mounted globally so route changes do not disable toasts.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization; `src/utils/notificationSounds.ts` handles optional generated browser sounds and silently tolerates browser audio blocking.
 
@@ -91,7 +96,7 @@ Adding a notification type requires a test-first pure draft helper, a stable `so
 - Use existing CSS variables for color, borders, radius, focus, and z-index.
 - Keep button text compact and use lucide icons where an icon exists.
 - Do not hide layout issues with high-specificity CSS hacks. Fix the component structure first when possible.
-- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified. Shared app-chrome overlays belong in `app-chrome.css`; notification UI belongs in `notifications.css`; user settings UI belongs in `user-settings.css`; stable routed page styles can move to a page-named stylesheet such as `empires.css`.
+- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified. Setup/workflow styles belong in `setup-workflow.css`; bot dashboard shell/navigation styles belong in `bot-dashboard.css`; shared app-chrome overlays belong in `app-chrome.css`; notification UI belongs in `notifications.css`; user settings UI belongs in `user-settings.css`; stable routed page styles can move to a page-named stylesheet such as `empires.css`.
 - Any new stylesheet module under `src/styles/` must be imported by `src/main.tsx` and documented here if it establishes a reusable convention. Keep feature-owned modules narrow; shared layout primitives stay in `styles.css`.
 
 ## Commands
@@ -109,5 +114,14 @@ Default local URLs:
 
 - Frontend: `http://localhost:18428`
 - Local API: `http://127.0.0.1:18430`
+
+For built-app browser smoke checks:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+node scripts/start-bitcraft-local-smoke.mjs --restart
+```
+
+The smoke server serves `http://127.0.0.1:18449/`. Notification matrix probes can use `?page=<panel>&smokeNotification=<type>&smokeRun=<id>` on loopback only; this verifies the normal toast/drawer UI path with sample notices, not live BitJita production queue diffs or signed-in deal-alert source rows.
 
 For VPS deployment and updates, use [`DEPLOYMENT.md`](../DEPLOYMENT.md).

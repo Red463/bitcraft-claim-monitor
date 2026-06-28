@@ -157,29 +157,6 @@
     justify-self: start;
   }
 
-  aside {
-    max-height: none;
-    overflow: visible;
-  }
-
-  nav,
-  .sidebar-collapsed nav,
-  .bot-section-nav {
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--active-color) 50%, transparent) transparent;
-  }
-
-  nav::-webkit-scrollbar,
-  .bot-section-nav::-webkit-scrollbar {
-    height: 6px;
-  }
-
-  nav::-webkit-scrollbar-thumb,
-  .bot-section-nav::-webkit-scrollbar-thumb {
-    border-radius: 99px;
-    background: color-mix(in srgb, var(--active-color) 45%, transparent);
-  }
-
   .admin-page .dashboard-top-meta {
     width: 100%;
     align-items: stretch;
