@@ -1,24 +1,10 @@
 import { Bell, Factory, ShoppingCart, X } from "lucide-react";
 
 import { toNumber, type AnyRecord } from "../../main-app-data";
+import { dedupeNotifications, type ToastNotice } from "../../notifications/toastNotices";
 import { timeAgo } from "../../utils/format";
 import { bitjitaIconUrl } from "../../utils/items";
-import type { ActivePanel } from "../../types/app";
 import { ItemIcon } from "./ItemDisplay";
-
-export type ToastKind = "market" | "production";
-
-export type ToastNotice = {
-  id: string;
-  title: string;
-  body: string;
-  kind: ToastKind;
-  occurredAt?: string;
-  read?: boolean;
-  destination?: ActivePanel;
-  item?: AnyRecord | null;
-  sourceKey?: string;
-};
 
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
@@ -48,20 +34,6 @@ export function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onD
       ))}
     </section>
   );
-}
-
-function notificationDedupeKey(notice: ToastNotice): string {
-  return notice.sourceKey ? `source:${notice.sourceKey}` : `legacy:${notice.kind}:${notice.title}:${notice.body}`;
-}
-
-export function dedupeNotifications(notices: ToastNotice[]): ToastNotice[] {
-  const seen = new Set<string>();
-  return notices.filter((notice) => {
-    const key = notificationDedupeKey(notice);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 export function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices: ToastNotice[]; onClose: () => void; onOpenNotice: (notice: ToastNotice) => void }) {

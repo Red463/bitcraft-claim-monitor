@@ -77,10 +77,14 @@ import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
 import { getTrackedOwnerName } from "../utils/ownership";
 import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
+import { memberDisplayName, memberTrackingId, memberTrackingKeys } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import type { ActivePanel, LoadState } from "../types/app";
+import { activityActorName, activityContainerName, activityMetadata, activitySummary, compactActivity, signedDelta } from "./activity/activityUtils";
+import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
+import { buildMarketDaily, buildMarketTopItems, formatMarketDay } from "./market/marketAnalytics";
 
 /*
  * Main application pages that still share a large amount of display logic.
@@ -96,9 +100,6 @@ const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent_v2";
 const ANALYTICS_VISITOR_COOKIE = "claim_monitor_analytics_visitor";
 const ANALYTICS_SESSION_KEY = "claim-monitor.analytics.session";
 
-const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
-
-export type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 type ActiveRegion = { regionId: string; regionName?: string; active?: boolean; syncing?: boolean; signedInPlayers?: number; playersInQueue?: number; updatedAt?: string | null; source?: string };
 
 function getCookie(name: string): string {
@@ -157,29 +158,6 @@ function displayItemName(value: unknown): string | null {
 
 function listingTrackingKey(listing: AnyRecord): string {
   return String(listing.entityId ?? listing.id ?? listing.marketListingId ?? listing.listingId ?? "");
-}
-
-function memberTrackingId(member: AnyRecord | null | undefined): string {
-  return String(
-    member?.playerEntityId
-      ?? member?.player_entity_id
-      ?? member?.playerId
-      ?? member?.player_id
-      ?? member?.entityId
-      ?? member?.entity_id
-      ?? member?.id
-      ?? "",
-  ).trim();
-}
-
-function memberDisplayName(member: AnyRecord | null | undefined): string {
-  return String(member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? "").trim();
-}
-
-function memberTrackingKeys(member: AnyRecord | null | undefined): string[] {
-  const id = memberTrackingId(member);
-  const name = memberDisplayName(member);
-  return unique([id, name].filter(Boolean).map((value) => value.toLowerCase()));
 }
 
 function activeRegionLabel(region: ActiveRegion, settlementRegionId?: string): string {
@@ -1515,44 +1493,6 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
   );
 }
 
-function buildMarketTopItems(events: AnyRecord[]) {
-  const grouped = new Map<string, { itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();
-  for (const event of events) {
-    const itemName = String(event.item_name ?? event.itemName ?? "Unknown Item");
-    const current = grouped.get(itemName) ?? { itemName, salesCount: 0, unitsSold: 0, totalValue: 0, lastSoldAt: "" };
-    current.salesCount += 1;
-    current.unitsSold += toNumber(event.quantity);
-    current.totalValue += toNumber(event.total_value ?? event.totalValue);
-    current.lastSoldAt = String(current.lastSoldAt && current.lastSoldAt > String(event.occurred_at) ? current.lastSoldAt : event.occurred_at ?? "");
-    grouped.set(itemName, current);
-  }
-  return [...grouped.values()]
-    .map((item) => ({ ...item, avgUnitPrice: item.unitsSold ? item.totalValue / item.unitsSold : 0 }))
-    .sort((a, b) => b.unitsSold - a.unitsSold || b.totalValue - a.totalValue)
-    .slice(0, 20);
-}
-
-function buildMarketDaily(events: AnyRecord[]) {
-  const grouped = new Map<string, { day: string; salesCount: number; unitsSold: number; totalValue: number }>();
-  for (const event of events) {
-    const occurredAt = event.occurred_at ?? event.occurredAt;
-    const parsed = parseDateValue(occurredAt);
-    const day = parsed ? parsed.toISOString().slice(0, 10) : String(occurredAt ?? "").slice(0, 10) || "Unknown";
-    const current = grouped.get(day) ?? { day, salesCount: 0, unitsSold: 0, totalValue: 0 };
-    current.salesCount += 1;
-    current.unitsSold += toNumber(event.quantity);
-    current.totalValue += toNumber(event.total_value ?? event.totalValue);
-    grouped.set(day, current);
-  }
-  return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
-}
-
-function formatMarketDay(value: string): string {
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-
 export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName, defaultRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
@@ -2415,64 +2355,6 @@ export function Leaderboard({
   );
 }
 
-function bitcraftMapUrl(playerIds: string[], mapMarker: MapFocus, flyTo = false, resourceIds: string[] = [], regionIds: string[] = [], enemyIds: string[] = []) {
-  const params = new URLSearchParams();
-  const sortedPlayers = playerIds.filter(Boolean).sort();
-  const sortedResources = resourceIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
-  const sortedEnemies = enemyIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
-  const sortedRegions = regionIds.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
-  if (sortedPlayers.length) params.set("playerId", sortedPlayers.join(","));
-  if (sortedResources.length) params.set("resourceId", sortedResources.join(","));
-  if (sortedEnemies.length) params.set("enemyId", sortedEnemies.join(","));
-  if (sortedRegions.length) params.set("regionId", sortedRegions.join(","));
-  const queryString = params.toString().replaceAll("%2C", ",");
-  const query = queryString ? `?${queryString}` : "";
-  const waypoint = mapMarker ? {
-    type: "FeatureCollection",
-    features: [{
-      type: "Feature",
-      properties: {
-        popupText: mapMarker.name,
-        iconName: "waypoint",
-        turnLayerOn: MAP_DEFAULT_LAYERS,
-        ...(flyTo ? { flyTo: [mapMarker.locationZ, mapMarker.locationX], zoomTo: 2 } : { noPan: true }),
-      },
-      geometry: { type: "Point", coordinates: [mapMarker.locationX, mapMarker.locationZ] },
-    }],
-  } : null;
-  return `https://bitcraftmap.com/${query}${waypoint ? `#${encodeURIComponent(JSON.stringify(waypoint))}` : ""}`;
-}
-
-function parseBitcraftMapUrl(url: string): AnyRecord {
-  try {
-    const parsed = new URL(url);
-    return {
-      playerId: parsed.searchParams.get("playerId") ?? "",
-      resourceId: parsed.searchParams.get("resourceId") ?? "",
-      enemyId: parsed.searchParams.get("enemyId") ?? "",
-      regionId: parsed.searchParams.get("regionId") ?? "",
-      hasWaypoint: Boolean(parsed.hash),
-    };
-  } catch {
-    return {};
-  }
-}
-
-function mapResourceToken(entry: AnyRecord): string {
-  const kind = String(entry.mapKind ?? "resource");
-  return kind === "enemy" ? `enemy:${entry.mapId ?? entry.enemyType ?? entry.id}` : `resource:${entry.mapId ?? entry.id}`;
-}
-
-function normalizeMapResourceToken(token: string): string {
-  const value = String(token ?? "").trim();
-  if (!value) return "";
-  return value.includes(":") ? value : `resource:${value}`;
-}
-
-function mapResourceCategory(resource: AnyRecord): string {
-  return String(resource.tag ?? resource.category ?? resource.resourceType ?? resource.type ?? "").trim();
-}
-
 export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
@@ -2731,49 +2613,6 @@ const ACTIVITY_FILTERS = [
   ["buildings", "Structures"],
 ] as const;
 
-function signedDelta(after: unknown, before: unknown, suffix = ""): string {
-  const delta = toNumber(after) - toNumber(before);
-  const sign = delta >= 0 ? "+" : "-";
-  return `${sign}${formatNumber(Math.abs(delta))}${suffix}`;
-}
-
-export function activitySummary(item: AnyRecord): string {
-  if (item.event_type === "storage") return item.summary ?? "-";
-  let metadata: AnyRecord = {};
-  try {
-    metadata = JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
-  } catch {
-    metadata = {};
-  }
-  if (metadata.before != null && metadata.after != null) {
-    if (item.event_type === "treasury") return `${signedDelta(metadata.after, metadata.before, "g")} to treasury`;
-    if (item.event_type === "supplies") return `${signedDelta(metadata.after, metadata.before)} supplies`;
-    if (item.event_type === "members") return `${signedDelta(metadata.after, metadata.before)} members`;
-    if (item.event_type === "buildings") return `${signedDelta(metadata.after, metadata.before)} structures`;
-    if (item.event_type === "market") return `${signedDelta(metadata.after, metadata.before)} market listings`;
-  }
-  return item.summary ?? "-";
-}
-
-export function activityMetadata(item: AnyRecord): AnyRecord {
-  try {
-    return JSON.parse(item.metadata_json ?? item.metadataJson ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-export function activityActorName(item: AnyRecord): string {
-  const metadata = activityMetadata(item);
-  if (metadata.actorName) return String(metadata.actorName);
-  if (!String(item.event_type ?? "").includes("market")) return "";
-  return String(metadata.ownerUsername ?? metadata.owner ?? metadata.sellerUsername ?? "");
-}
-
-export function activityContainerName(item: AnyRecord): string {
-  return String(activityMetadata(item).containerName ?? "");
-}
-
 export function activityStyle(item: AnyRecord): { label: string; tone: string; icon: React.ReactNode } {
   const eventType = String(item.event_type ?? "");
   if (eventType.includes("market")) return { label: "Market", tone: "market", icon: <ShoppingCart size={18} /> };
@@ -2921,83 +2760,4 @@ export function ActivityPanel({ activity, activityTotal, claimId, error }: { act
     </div>
   );
 }
-
-export function compactActivity(items: AnyRecord[]): AnyRecord[] {
-  const output: AnyRecord[] = [];
-  let treasuryGroup: AnyRecord[] = [];
-  const flush = () => {
-    if (!treasuryGroup.length) return;
-    if (treasuryGroup.length === 1) {
-      output.push(treasuryGroup[0]);
-      treasuryGroup = [];
-      return;
-    }
-    const first = treasuryGroup[0];
-    const last = treasuryGroup[treasuryGroup.length - 1];
-    const total = treasuryGroup.reduce((sum, item) => {
-      try {
-        const meta = JSON.parse(item.metadata_json ?? "{}");
-        return sum + (toNumber(meta.after) - toNumber(meta.before));
-      } catch {
-        return sum;
-      }
-    }, 0);
-    output.push({ id: `treasury-${first.id}-${last.id}`, event_type: "treasury", occurred_at: first.occurred_at, summary: `${total >= 0 ? "+" : "-"}${formatNumber(Math.abs(total))}g to treasury across ${treasuryGroup.length} refreshes` });
-    treasuryGroup = [];
-  };
-  for (const item of items) {
-    if (item.event_type === "treasury") treasuryGroup.push(item);
-    else {
-      flush();
-      output.push(item);
-    }
-  }
-  flush();
-  return output;
-}
-
-export function diffSnapshot(prev: AnyRecord, curr: AnyRecord): string[] {
-  const changes = [];
-  for (const key of ["members", "buildings", "market"]) {
-    if (prev[key] !== curr[key]) changes.push(`${key} changed from ${prev[key]} to ${curr[key]}`);
-  }
-  if (toNumber(prev.claim?.supplies) !== toNumber(curr.claim?.supplies)) changes.push(`Supplies changed to ${formatNumber(curr.claim?.supplies)}`);
-  if (toNumber(prev.claim?.treasury) !== toNumber(curr.claim?.treasury)) changes.push(`Treasury changed to ${formatNumber(curr.claim?.treasury)}g`);
-  return changes.length ? changes : ["No tracked changes detected"];
-}
-
-export function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
-  const metadata = activityMetadata(event);
-  const raw = metadata.raw && typeof metadata.raw === "object" ? metadata.raw as AnyRecord : {};
-  const itemName = metadata.itemName ?? metadata.item_name ?? raw.itemName ?? raw.name ?? event.item_name;
-  const itemId = metadata.itemId ?? metadata.item_id ?? raw.itemId ?? raw.item_id;
-  const iconAssetName = metadata.iconAssetName ?? metadata.icon_asset_name ?? raw.iconAssetName ?? raw.icon_asset_name ?? raw.iconAddress ?? raw.icon_address;
-  if (!itemName && !itemId && !iconAssetName) return null;
-  const tier = metadata.tier ?? metadata.itemTier ?? raw.tier ?? raw.itemTier;
-  const rarity = metadata.rarity ?? metadata.itemRarityStr ?? raw.rarity ?? raw.itemRarityStr;
-  return {
-    id: itemId,
-    itemId,
-    itemType: metadata.itemType ?? metadata.item_type ?? raw.itemType ?? raw.item_type,
-    name: itemName ?? "Market item",
-    itemName: itemName ?? "Market item",
-    tier,
-    itemTier: tier,
-    rarity,
-    itemRarityStr: rarity,
-    iconAssetName,
-  };
-}
-
-export function activityNoticeKey(event: AnyRecord): string {
-  return String(event.source_key ?? event.sourceKey ?? `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`);
-}
-
-
-
-
-
-
-
-
 

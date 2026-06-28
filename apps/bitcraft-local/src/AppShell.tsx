@@ -76,7 +76,9 @@ import { CommandPalette } from "./components/main/CommandPalette";
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./components/main/DashboardWidgets";
 import { DataTable } from "./components/main/DataTable";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "./components/main/ItemDisplay";
-import { NotificationDrawer, ToastStack, dedupeNotifications, type ToastKind, type ToastNotice } from "./components/main/Notifications";
+import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
+import { dealAlertToastDraft, marketActivityToastDraft, productionCraftToastDraft, selectUnseenNotificationItems } from "./notifications/notificationSources";
+import { createToastNotice, dedupeNotifications, type ToastKind, type ToastNotice } from "./notifications/toastNotices";
 import { SearchBox } from "./components/main/SearchBox";
 import { Segmented } from "./components/main/Segmented";
 import { Info, LiveValue, MiniStat, Stat } from "./components/main/Stats";
@@ -130,7 +132,9 @@ import { Research } from "./pages/ResearchPage";
 import { Region } from "./pages/RegionPage";
 import { Skills } from "./pages/SkillsPage";
 import { SyncPanel } from "./pages/SyncPage";
-import { ActivityPanel, Dashboard, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder, activityNoticeKey, activitySummary, toastItemFromActivity, type MapFocus } from "./pages/MainPages";
+import { ActivityPanel, Dashboard, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder } from "./pages/MainPages";
+import type { MapFocus } from "./pages/map/mapUtils";
+import { activityNoticeKey, activitySummary, toastItemFromActivity } from "./pages/activity/activityUtils";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {
   DEFAULT_COLLECTOR_SETTINGS,
@@ -2696,7 +2700,7 @@ function DashboardApp() {
     if (options.sourceKey && notificationSourceKeysRef.current.has(options.sourceKey)) return;
     if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
     const id = `${Date.now()}-${Math.random()}`;
-    const notice: ToastNotice = { id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), read: false, destination: kind === "market" ? "market" : "production", item: item ?? null, sourceKey: options.sourceKey };
+    const notice: ToastNotice = createToastNotice({ id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), item, sourceKey: options.sourceKey });
     playNotificationSound(userToastSettings);
     setToasts((current) => [...current, notice].slice(-4));
     setNotificationLog((current) => [notice, ...dedupeNotifications(current)].slice(0, 80));
@@ -2835,55 +2839,37 @@ function DashboardApp() {
       activityNoticeIdsRef.current = null;
     }
     if (!notificationActivity.refreshToken) return;
-    const knownIds = notificationActivity.events.map((event) => String(event.id));
-    if (activityNoticeIdsRef.current == null) {
-      // Seed from existing history so opening the app does not replay old market
-      // or activity rows as fresh toast notifications.
-      activityNoticeIdsRef.current = new Set(knownIds);
-      return;
-    }
     const notable = new Set(["market_new_listing", "market_sale", "market_sale_confirmed"]);
-    const unseen = notificationActivity.events
-      .filter((event) => !activityNoticeIdsRef.current?.has(String(event.id)) && notable.has(String(event.event_type)))
-      .slice(0, 3)
-      .reverse();
-    for (const id of knownIds) activityNoticeIdsRef.current.add(id);
+    const activitySelection = selectUnseenNotificationItems(
+      activityNoticeIdsRef.current,
+      notificationActivity.events.filter((event) => notable.has(String(event.event_type))),
+      (event) => String(event.id),
+    );
+    activityNoticeIdsRef.current = activitySelection.knownIds;
+    if (activitySelection.seeded) return;
+    const unseen = activitySelection.unseen;
     for (const event of unseen) {
-      const isListing = event.event_type === "market_new_listing";
-      if (isListing && (!appSettings.toastSettings.marketListings || !userToastSettings.marketListings)) continue;
-      if (!isListing && (!appSettings.toastSettings.marketSales || !userToastSettings.marketSales)) continue;
-      pushToast(isListing ? "New market listing" : "Market sale", activitySummary(event), "market", toastItemFromActivity(event), {
-        occurredAt: event.occurred_at ?? event.occurredAt,
-        sourceKey: activityNoticeKey(event),
+      const draft = marketActivityToastDraft(event, {
+        marketListings: appSettings.toastSettings.marketListings && userToastSettings.marketListings,
+        marketSales: appSettings.toastSettings.marketSales && userToastSettings.marketSales,
+      }, {
+        summary: activitySummary,
+        item: toastItemFromActivity,
+        key: activityNoticeKey,
       });
+      if (!draft) continue;
+      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
     }
   }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, userToastSettings.marketListings, userToastSettings.marketSales]);
   React.useEffect(() => {
     if (!dealAlerts.refreshToken) return;
-    const knownIds = dealAlerts.alerts.map((alert) => String(alert.id));
-    if (dealAlertIdsRef.current == null) {
-      dealAlertIdsRef.current = new Set(knownIds);
-      return;
-    }
-    const unseen = dealAlerts.alerts
-      .filter((alert) => !dealAlertIdsRef.current?.has(String(alert.id)))
-      .slice(0, 3)
-      .reverse();
-    for (const id of knownIds) dealAlertIdsRef.current.add(id);
+    const dealSelection = selectUnseenNotificationItems(dealAlertIdsRef.current, dealAlerts.alerts, (alert) => String(alert.id));
+    dealAlertIdsRef.current = dealSelection.knownIds;
+    if (dealSelection.seeded) return;
+    const unseen = dealSelection.unseen;
     for (const alert of unseen) {
-      const discount = Math.round(toNumber(alert.discountPercent));
-      const price = `${formatNumber(alert.unitPrice)}g`;
-      const baseline = `${formatNumber(Math.round(toNumber(alert.baselineAverage)))}g ${alert.baselineWindowDays}-day average`;
-      pushToast("Market deal found", `${alert.itemName}: ${price} at ${alert.marketClaimName ?? "a regional market"} (${discount}% below ${baseline})`, "market", {
-        name: alert.itemName,
-        itemName: alert.itemName,
-        tier: alert.tier,
-        rarity: alert.rarity,
-        iconAssetName: alert.iconAssetName,
-      }, {
-        occurredAt: alert.createdAt,
-        sourceKey: `deal-alert:${alert.id}`,
-      });
+      const draft = dealAlertToastDraft(alert);
+      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
     }
   }, [dealAlerts.alerts, dealAlerts.refreshToken, pushToast]);
   React.useEffect(() => {
@@ -2903,14 +2889,18 @@ function DashboardApp() {
     const started = [...current.entries()].filter(([id]) => !previous.jobs.has(id)).slice(0, 2);
     const completed = [...previous.jobs.entries()].filter(([id]) => !current.has(id)).slice(0, 2);
     for (const [id, job] of started) {
-      pushToast("Craft started", `${craftDisplayName(job, data.raw?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, data.raw?.crafts), {
-        sourceKey: `production-started:${claimId}:${id}`,
+      const draft = productionCraftToastDraft("started", claimId, id, job, {
+        displayName: (craftJob) => craftDisplayName(craftJob, data.raw?.crafts),
+        item: (craftJob) => craftOutputItem(craftJob, data.raw?.crafts),
       });
+      pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
     }
     for (const [id, job] of completed) {
-      pushToast("Craft completed", `${craftDisplayName(job, state.data?.crafts)} - ${job.buildingName ?? "Settlement production"}`, "production", craftOutputItem(job, state.data?.crafts), {
-        sourceKey: `production-completed:${claimId}:${id}`,
+      const draft = productionCraftToastDraft("completed", claimId, id, job, {
+        displayName: (craftJob) => craftDisplayName(craftJob, state.data?.crafts),
+        item: (craftJob) => craftOutputItem(craftJob, state.data?.crafts),
       });
+      pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
     }
     craftQueueRef.current = { claimId, jobs: current };
   }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data, userToastSettings.production]);
