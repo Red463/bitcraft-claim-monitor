@@ -9,7 +9,11 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
-import { routeGroup, shouldLogVisitor } from "./src/server/httpRoutes.mjs";
+import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
+import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
+import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
+import { originFromRequest as requestOriginFromRequest, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
+import { csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -2287,13 +2291,6 @@ function tokenHash(token) {
   return createHash("sha256").update(String(token)).digest("hex");
 }
 
-function parseCookies(req) {
-  return Object.fromEntries(String(req.headers.cookie ?? "").split(";").map((part) => {
-    const [key, ...value] = part.trim().split("=");
-    return [key, decodeURIComponent(value.join("=") ?? "")];
-  }).filter(([key]) => key));
-}
-
 function getSessionUser(req) {
   const token = parseCookies(req).bitcraft_admin_session;
   if (!token) return null;
@@ -3135,21 +3132,7 @@ function requireAdminPermission(req, res, user, permission) {
 }
 
 function sameOriginRequest(req) {
-  const origin = String(req.headers.origin ?? "").trim();
-  if (!origin) return true;
-  try {
-    const originUrl = new URL(origin);
-    const host = String(req.headers.host ?? "");
-    if (originUrl.host === host) return true;
-    return !isProduction && ["127.0.0.1", "localhost"].includes(originUrl.hostname) && /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(host);
-  } catch {
-    return false;
-  }
-}
-
-function csrfToken(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
-  return token ? createHash("sha256").update(`csrf:${token}`).digest("base64url") : null;
+  return requestSameOriginRequest(req, { isProduction });
 }
 
 function requireAdminMutation(req, res, user) {
@@ -3160,7 +3143,7 @@ function requireAdminMutation(req, res, user) {
   }
   const expected = csrfToken(req);
   const actual = String(req.headers["x-csrf-token"] ?? "");
-  if (!expected || actual.length !== expected.length || !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) {
+  if (!validCsrfHeader(expected, actual)) {
     send(res, 403, { error: "Invalid administrator request token" });
     return false;
   }
@@ -3174,20 +3157,18 @@ function createSession(userId) {
   statements.insertSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
   return {
     token,
-    cookie: `bitcraft_admin_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
+    cookie: serializeHttpOnlyCookie("bitcraft_admin_session", token, { maxAge: 7 * 24 * 60 * 60, secure: isProduction }),
   };
 }
 
 function clearSession(req) {
   const token = parseCookies(req).bitcraft_admin_session;
   if (token) statements.deleteSession.run(tokenHash(token));
-  return `bitcraft_admin_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  return serializeHttpOnlyCookie("bitcraft_admin_session", "", { maxAge: 0, secure: isProduction });
 }
 
 function originFromRequest(req) {
-  const proto = String(req.headers["x-forwarded-proto"] ?? (isProduction ? "https" : "http")).split(",")[0].trim();
-  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim();
-  return `${proto || "http"}://${host}`;
+  return requestOriginFromRequest(req, { isProduction });
 }
 
 function discordOAuthConfig(req) {
@@ -3198,12 +3179,6 @@ function discordOAuthConfig(req) {
   const clientSecret = envSecret || storedSecret;
   const redirectUri = String(process.env.DISCORD_OAUTH_REDIRECT_URI ?? "").trim() || `${originFromRequest(req)}/api/local/auth/discord/callback`;
   return { clientId, clientSecret, redirectUri, enabled: Boolean(clientId && clientSecret) };
-}
-
-function safeReturnPath(value) {
-  const text = String(value ?? "/?page=dashboard").trim() || "/?page=dashboard";
-  if (!text.startsWith("/") || text.startsWith("//") || text.includes("\\")) return "/?page=dashboard";
-  return text.slice(0, 500);
 }
 
 function userAvatarUrl(row) {
@@ -3243,14 +3218,14 @@ function createAppUserSession(userId) {
   statements.insertUserSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
   return {
     token,
-    cookie: `bitcraft_user_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
+    cookie: serializeHttpOnlyCookie("bitcraft_user_session", token, { maxAge: 30 * 24 * 60 * 60, secure: isProduction }),
   };
 }
 
 function clearAppUserSession(req) {
   const token = parseCookies(req).bitcraft_user_session;
   if (token) statements.deleteAppUserSession.run(tokenHash(token));
-  return `bitcraft_user_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  return serializeHttpOnlyCookie("bitcraft_user_session", "", { maxAge: 0, secure: isProduction });
 }
 
 function authStatus(req) {
@@ -3306,11 +3281,11 @@ function verifySignedOAuthStateValue(value) {
 
 function authStateCookie(state, returnTo) {
   const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
-  return `bitcraft_discord_oauth_state=${encodeURIComponent(signedOAuthStateValue(payload))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${isProduction ? "; Secure" : ""}`;
+  return serializeHttpOnlyCookie("bitcraft_discord_oauth_state", signedOAuthStateValue(payload), { maxAge: 600, secure: isProduction });
 }
 
 function clearAuthStateCookie() {
-  return `bitcraft_discord_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  return serializeHttpOnlyCookie("bitcraft_discord_oauth_state", "", { maxAge: 0, secure: isProduction });
 }
 
 function readAuthStateCookie(req) {
@@ -8121,16 +8096,6 @@ function csvValue(value) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-function sendText(res, status, text, contentType, headers = {}) {
-  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-store", ...headers }));
-  res.end(text);
-}
-
-function sendBinary(res, status, content, contentType, headers = {}) {
-  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-cache", ...headers }));
-  res.end(content);
-}
-
 const brandingFormats = {
   "image/png": { extension: ".png", contentType: "image/png" },
   "image/jpeg": { extension: ".jpg", contentType: "image/jpeg" },
@@ -8794,55 +8759,6 @@ async function registerDiscordCommands() {
   return response.json();
 }
 
-function securityHeaders(headers = {}) {
-  return {
-    "content-security-policy": [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data: https://fonts.gstatic.com",
-      "connect-src 'self' https://bitjita.com https://discord.com",
-      "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "frame-ancestors 'self'",
-    ].join("; "),
-    "cross-origin-opener-policy": "same-origin",
-    "referrer-policy": "strict-origin-when-cross-origin",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "SAMEORIGIN",
-    ...headers,
-  };
-}
-
-function send(res, status, body, headers = {}) {
-  const json = JSON.stringify(body);
-  res.writeHead(status, securityHeaders({
-    "content-type": "application/json",
-    ...headers,
-  }));
-  res.end(json);
-}
-
-function mimeType(filePath) {
-  const types = {
-    ".css": "text/css; charset=utf-8",
-    ".html": "text/html; charset=utf-8",
-    ".ico": "image/x-icon",
-    ".jpg": "image/jpeg",
-    ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-    ".webp": "image/webp",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-  };
-  return types[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
-}
-
 async function serveBuiltFrontend(url, method, res) {
   if (!serveFrontend || !["GET", "HEAD"].includes(method ?? "")) return false;
   const pathname = decodeURIComponent(url.pathname);
@@ -8857,7 +8773,7 @@ async function serveBuiltFrontend(url, method, res) {
   const content = await readFile(candidate);
   res.writeHead(200, securityHeaders({
     "content-type": mimeType(candidate),
-    "cache-control": candidate.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "cache-control": staticCacheControl(candidate),
   }));
   if (method === "HEAD") return res.end();
   res.end(content);

@@ -8,6 +8,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.82] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving HTTP response, cookie, request-origin, and CSRF helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries.
+
+### Fixed
+
+- Confirmed admin settings responses keep submitted Discord bot tokens redacted while preserving configured-token status.
 ## [1.0.0-beta.81] - 2026-06-28
 
 ### Changed

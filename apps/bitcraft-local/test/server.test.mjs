@@ -823,6 +823,28 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(productionNotificationSettings.status, 200);
   const updatedConfig = await productionNotificationSettings.json();
   assert.deepEqual(updatedConfig.excludedMemberIds, ["1369094286756659093"]);
+  const secretDiscordSettings = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...updatedConfig,
+      discord: {
+        ...updatedConfig.discord,
+        botToken: "test-discord-bot-token",
+      },
+    }),
+  });
+  assert.equal(secretDiscordSettings.status, 200);
+  const redactedDiscordSettings = await secretDiscordSettings.json();
+  assert.equal(redactedDiscordSettings.discord.botToken, undefined);
+  assert.equal(redactedDiscordSettings.discord.botTokenConfigured, true);
+  assert.equal(JSON.stringify(redactedDiscordSettings).includes("test-discord-bot-token"), false);
+  const persistedDiscordSettings = await fetch(`${origin}/api/local/admin/settings`, {
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(persistedDiscordSettings.discord.botToken, undefined);
+  assert.equal(persistedDiscordSettings.discord.botTokenConfigured, true);
+  assert.equal(JSON.stringify(persistedDiscordSettings).includes("test-discord-bot-token"), false);
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
   assert.equal(authStatus.discordLoginEnabled, true);
   assert.equal(authStatus.user, null);

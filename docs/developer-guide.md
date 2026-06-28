@@ -11,7 +11,11 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/components/main/` contains reusable dashboard UI, app chrome, tables, badges, legal dialogs, search, segmentation, stats, and notification rendering.
 - `src/components/bot/` contains Discord bot/admin sections. Keep bot dashboard UI in this folder rather than moving it back into `AppShell.tsx`.
 - `src/api/` contains frontend fetch hooks and API helpers. Keep network timing, stale-data metadata, and response normalization out of JSX where practical.
-- `src/server/httpRoutes.mjs` contains dependency-free server route classification helpers used by request logging and visitor-security decisions.
+- `src/server/httpRoutes.mjs` contains dependency-free HTTP policy helpers: route classification, visitor logging classification, security headers, static cache policy, and frontend MIME type mapping.
+- `src/server/httpResponses.mjs` contains dependency-free response writers for JSON, text, and binary payloads.
+- `src/server/httpCookies.mjs` contains dependency-free cookie parsing and HttpOnly session cookie serialization helpers.
+- `src/server/httpRequests.mjs` contains dependency-free request-origin, same-origin, and safe-return-path helpers used by auth and OAuth flows.
+- `src/server/httpCsrf.mjs` contains dependency-free admin CSRF token derivation and constant-time header matching helpers.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
 - `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as app chrome, notification UI, and user settings UI.

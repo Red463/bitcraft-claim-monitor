@@ -1,3 +1,48 @@
+import path from "node:path";
+
+export function securityHeaders(headers = {}) {
+  return {
+    "content-security-policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "connect-src 'self' https://bitjita.com https://discord.com",
+      "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+    ].join("; "),
+    "cross-origin-opener-policy": "same-origin",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    ...headers,
+  };
+}
+
+export function mimeType(filePath) {
+  const types = {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+  };
+  return types[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+}
+
+export function staticCacheControl(filePath) {
+  return String(filePath).endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable";
+}
 export function routeGroup(pathname) {
   if (pathname.startsWith("/api/local/admin")) return "admin";
   if (pathname.startsWith("/api/local/auth") || pathname.startsWith("/api/local/user")) return "auth";

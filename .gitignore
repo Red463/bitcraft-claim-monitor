@@ -31,8 +31,12 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
+/.env
 /.env.local
 /.env.*.local
+apps/bitcraft-local/.env
+apps/bitcraft-local/.env.local
+apps/bitcraft-local/.env.*.local
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
@@ -49,6 +53,14 @@ apps/bitcraft-local/data/
 apps/bitcraft-local/.test-data-*/
 apps/bitcraft-local/.preview-data*/
 preview-server*.log
+apps/bitcraft-local/branding/
+apps/bitcraft-local/uploads/
+apps/bitcraft-local/backups/
+uploads/
+backups/
+*.db
+*.sqlite3
+*.sqlite
 
 # System Files
 .DS_Store

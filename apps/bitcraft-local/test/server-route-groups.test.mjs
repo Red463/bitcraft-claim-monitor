@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { routeGroup, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
+import { mimeType, securityHeaders, staticCacheControl, routeGroup, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
 
 test("routeGroup classifies public API, admin, auth, Discord, static, and app routes", () => {
   assert.equal(routeGroup("/api/local/admin/settings"), "admin");
@@ -21,4 +21,27 @@ test("shouldLogVisitor skips only static assets", () => {
   assert.equal(shouldLogVisitor("/favicon.ico"), false);
   assert.equal(shouldLogVisitor("/api/local/health"), true);
   assert.equal(shouldLogVisitor("/"), true);
+});
+test("securityHeaders applies public release browser protections and preserves explicit response headers", () => {
+  const headers = securityHeaders({ "content-type": "application/json", "cache-control": "no-store" });
+
+  assert.equal(headers["content-type"], "application/json");
+  assert.equal(headers["cache-control"], "no-store");
+  assert.equal(headers["x-content-type-options"], "nosniff");
+  assert.equal(headers["x-frame-options"], "SAMEORIGIN");
+  assert.equal(headers["referrer-policy"], "strict-origin-when-cross-origin");
+  assert.equal(headers["cross-origin-opener-policy"], "same-origin");
+  assert.match(headers["content-security-policy"], /default-src 'self'/);
+  assert.match(headers["content-security-policy"], /connect-src 'self' https:\/\/bitjita\.com https:\/\/discord\.com/);
+  assert.match(headers["content-security-policy"], /frame-ancestors 'self'/);
+});
+
+test("mimeType and staticCacheControl keep frontend asset responses predictable", () => {
+  assert.equal(mimeType("index.html"), "text/html; charset=utf-8");
+  assert.equal(mimeType("assets/index.js"), "text/javascript; charset=utf-8");
+  assert.equal(mimeType("assets/index.css"), "text/css; charset=utf-8");
+  assert.equal(mimeType("branding/logo.webp"), "image/webp");
+  assert.equal(mimeType("download.unknown"), "application/octet-stream");
+  assert.equal(staticCacheControl("index.html"), "no-cache");
+  assert.equal(staticCacheControl("assets/index.js"), "public, max-age=31536000, immutable");
 });
