@@ -14,8 +14,13 @@ import { sendBinary, sendJson as send, sendText } from "./src/server/httpRespons
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
 import { originFromRequest as requestOriginFromRequest, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
 import { csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
+import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
+import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
+import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 
 setDefaultResultOrder("ipv4first");
+
+const rateLimit = createRateLimiter({ sendJson: send });
 
 // This server is the local app boundary: it serves the built frontend, proxies
 // BitJita requests, owns SQLite history/configuration, validates admin sessions,
@@ -38,6 +43,7 @@ const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
+const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
@@ -2335,7 +2341,6 @@ const productionCraftsInflight = new Map();
 let mapCatalogCache = null;
 const dashboardDataCache = new Map();
 const dashboardDataInflight = new Map();
-const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
@@ -2361,58 +2366,7 @@ const BITJITA_PROXY_CACHE_POLICIES = [
   { pattern: /^\/api\/logs\/storage$/, ttlMs: 10 * 1000 },
 ];
 
-const BODY_LIMITS = {
-  auth: 8 * 1024,
-  analytics: 8 * 1024,
-  json: 64 * 1024,
-  settings: 256 * 1024,
-  branding: 2 * 1024 * 1024,
-  snapshot: 1024 * 1024,
-  discordInteraction: 256 * 1024,
-};
 
-class RequestBodyTooLargeError extends Error {
-  constructor(limit) {
-    super(`Request body is too large; maximum size is ${limit} bytes`);
-    this.statusCode = 413;
-  }
-}
-
-const RATE_LIMITS = {
-  auth: { windowMs: 15 * 60 * 1000, max: 30 },
-  analytics: { windowMs: 60 * 1000, max: 120 },
-  discordInteraction: { windowMs: 60 * 1000, max: 120 },
-  proxy: { windowMs: 60 * 1000, max: 600 },
-  expensiveLocal: { windowMs: 60 * 1000, max: 60 },
-};
-
-function requestAddress(req) {
-  return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
-}
-
-function normalizeIpAddress(value) {
-  let ip = String(value ?? "").trim();
-  if (!ip) return "";
-  if (ip.startsWith("::ffff:")) ip = ip.slice("::ffff:".length);
-  if (ip === "::1") return "127.0.0.1";
-  return ip;
-}
-
-function anonymizeIpAddress(value) {
-  const ip = normalizeIpAddress(value);
-  const parts = ip.split(".");
-  if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
-    return `${parts[0]}.${parts[1]}.${parts[2]}.0`;
-  }
-  if (ip.includes(":")) {
-    return ip.split(":").slice(0, 4).join(":") + "::";
-  }
-  return "unknown";
-}
-
-function ipHash(value) {
-  return createHash("sha256").update(`${appIdentifier}|${normalizeIpAddress(value)}`).digest("hex");
-}
 
 function visitorSecuritySettings(includeSecrets = false) {
   const saved = safeJson(statements.getSetting.get("visitor_security_json")?.value, {});
@@ -2994,22 +2948,6 @@ function visitorSecurityDashboard(params = new URLSearchParams()) {
   };
 }
 
-function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
-  const now = Date.now();
-  const key = `${name}:${requestAddress(req) || "unknown"}`;
-  const current = rateLimitBuckets.get(key);
-  const bucket = current && current.resetAt > now ? current : { count: 0, resetAt: now + policy.windowMs };
-  bucket.count += 1;
-  rateLimitBuckets.set(key, bucket);
-  if (bucket.count <= policy.max) return true;
-  const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-  send(res, 429, {
-    error: "Too many requests. Please slow down and try again shortly.",
-    source: "local-rate-limit",
-    retryAfter,
-  }, { "retry-after": String(retryAfter), "x-rate-limit-source": "local" });
-  return false;
-}
 
 function loginAttemptKey(req, username) {
   return `${requestAddress(req)}|${String(username).toLowerCase()}`;
@@ -8157,20 +8095,6 @@ function createBackup() {
   return { name, size: info.size, createdAt: info.mtime.toISOString() };
 }
 
-async function readRawBody(req, limit = BODY_LIMITS.json) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > limit) throw new RequestBodyTooLargeError(limit);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-async function readJson(req, limit = BODY_LIMITS.json) {
-  return JSON.parse((await readRawBody(req, limit)).toString("utf8") || "{}");
-}
 
 const discordCommands = [
   { name: "help", description: "Show Timbersteel Trade bot commands and app links." },

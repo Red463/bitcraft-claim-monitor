@@ -20,6 +20,7 @@ Notification behavior is intentionally split into rendering, pure notification l
 - `src/components/main/Notifications.tsx` renders the toast stack and notification drawer.
 - `src/notifications/toastNotices.ts` owns toast notice types, destination mapping, notice creation, and deduplication keys.
 - `src/notifications/notificationSources.ts` turns market activity, deal alerts, and production craft events into toast drafts.
+- `src/notifications/verificationMatrix.ts` is the tested release-verification checklist for supported browser notification types, every routed main-app page, and the intentional `/bot` exception.
 - `src/AppShell.tsx` owns global polling hooks, known-ID refs, toast state, notification log state, browser sound playback, and route navigation from drawer items.
 - `src/api/localHistory.ts` keeps market activity and deal-alert polling page-independent.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization before notification gating, account save, and account load.
@@ -64,12 +65,13 @@ Automated coverage exists for:
 - Deal-alert draft generation and signed-in deal-alert source queue seeding.
 - Production craft draft generation and production queue diffing.
 - Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
+- The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, and the current `/bot` exception.
 
-Required release verification still includes a manual or browser-driven matrix proving that every supported in-app notification type can appear while each app page is active, unless a page restriction is intentional and documented.
+Required release verification still includes a manual or browser-driven run of the matrix from `src/notifications/verificationMatrix.ts`, proving that every supported in-app notification type can appear while each main-app page is active unless a page restriction is intentional and documented.
 
 ## Browser Verification Matrix Progress
 
-Browser smoke verification on the built local app at `http://127.0.0.1:18449/` inserted smoke-only `activity_events` rows into the local `.dev-data` SQLite database, then used the real Refresh button, toast stack, notification button, and drawer. This verified that market listing and market sale browser notifications can appear while these pages are active, and that the same entries persist in the notification drawer:
+Browser smoke verification on the built local app at `http://127.0.0.1:18449/` inserted smoke-only `activity_events` rows into the local `.dev-data` SQLite database, then used the real Refresh button, toast stack, notification button, and drawer. This verified that market listing and market sale browser notifications can appear while these pages are active, and that the same entries persist in the notification drawer. The tested matrix also includes the routed `Empires` page, which still needs browser verification alongside the remaining notification types:
 
 - Dashboard
 - Leaderboard
@@ -81,6 +83,7 @@ Browser smoke verification on the built local app at `http://127.0.0.1:18449/` i
 - Research
 - Market
 - Region
+- Empires
 - Map
 - Sync
 - Activity

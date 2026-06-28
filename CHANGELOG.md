@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.83] - 2026-06-28
+
+### Added
+
+- Added a tested release notification matrix covering routed pages, supported browser notification types, and the intentional bot-dashboard exception.
+
+### Changed
+
+- Improved release-readiness structure by moving request-body parsing, rate limiting, visitor IP privacy helpers, and Empires page styles into focused modules with tests where applicable.
+- Updated developer and release-readiness documentation with the latest server, notification, and stylesheet boundaries.
+
 ## [1.0.0-beta.82] - 2026-06-28
 
 ### Changed
