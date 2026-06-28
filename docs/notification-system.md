@@ -9,7 +9,7 @@ The browser UI currently creates these toast/drawer notifications:
 - Market listings from `/api/local/notification-activity` events with `event_type = market_new_listing`.
 - Market sales from `/api/local/notification-activity` events with `event_type = market_sale` or `market_sale_confirmed`.
 - Market deal alerts from `/api/local/market/deal-alerts` for the signed-in user.
-- Production started and completed notifications from the global craft queue diff in `AppShell`.
+- Production started and completed notifications from the global craft queue diff in `src/notifications/useBrowserNotificationSources.ts`.
 
 Discord-only/admin diagnostics, low-supply alerts, app-update messages, supply reports, and character-link requests are server-side delivery paths. They are not currently surfaced as browser toast/drawer notifications unless a dedicated in-app source is added.
 
@@ -21,8 +21,9 @@ Notification behavior is intentionally split into rendering, pure notification l
 - `src/notifications/toastNotices.ts` owns toast notice types, destination mapping, notice creation, and deduplication keys.
 - `src/notifications/notificationSources.ts` turns market activity, deal alerts, and production craft events into toast drafts.
 - `src/notifications/verificationMatrix.ts` is the tested release-verification checklist for supported browser notification types, every routed main-app page, the intentional `/bot` exception, and page-independent sample drafts for every supported browser notification type.
-- `src/notifications/browserSmoke.ts` provides a loopback-only browser verification bridge and `smokeNotification` query trigger so the built local app can prove toast/drawer behavior for every supported type without depending on live BitJita timing or a signed-in account.
-- `src/AppShell.tsx` owns global polling hooks, known-ID refs, toast state, notification log state, browser sound playback, and route navigation from drawer items.
+- `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers, and `src/notifications/useBrowserNotificationSmoke.ts` wires the smoke event bridge plus `smokeNotification` query trigger into the mounted app so built local smoke checks can prove toast/drawer behavior for every supported type without depending on live BitJita timing or a signed-in account.
+- `src/notifications/useBrowserNotificationSources.ts` owns the mounted market activity, signed-in deal-alert, and production queue notification source baselines.
+- `src/notifications/useToastNotifications.ts` owns toast state, notification log state, source-key dedupe, auto-dismiss timers, read-state marking, and browser sound playback; `src/AppShell.tsx` owns route navigation from drawer items and calls notification-owned hooks.
 - `src/api/localHistory.ts` keeps market activity and deal-alert polling page-independent.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization before notification gating, account save, and account load.
 - `src/utils/notificationSounds.ts` owns browser-only generated notification sounds and normalizes sound inputs before preview or playback.
@@ -51,7 +52,7 @@ Deal-alert toasts are tied to the signed-in user's deal-alert feed.
 1. Add a pure draft helper in `src/notifications/notificationSources.ts`.
 2. Add tests in `test/notifications.test.mjs` before wiring the UI.
 3. Add or reuse a page-independent polling/source hook. Do not mount the source inside a page component unless the notification is intentionally page-specific.
-4. Wire the source from `AppShell` or a global notification hook so route changes do not disable notifications.
+4. Wire the source from `AppShell` or a global notification hook so route changes do not disable notifications; keep shared toast stack/log behavior in `useToastNotifications.ts`.
 5. Give every generated notification a stable `sourceKey`.
 6. Respect app-level and user-level settings before calling `pushToast`.
 7. Verify toast, drawer, sound, dedupe, dismiss, navigation, and history behavior.
@@ -67,7 +68,7 @@ Automated coverage exists for:
 - Production craft draft generation and production queue diffing.
 - Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
 - The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, the current `/bot` exception, and sample draft-to-toast/log creation for every supported type.
-- The loopback-only smoke bridge in `src/notifications/browserSmoke.ts` is covered for host gating, supported-type parsing, unique source keys, and dispatch into normal toast notices.
+- The loopback-only smoke helpers in `src/notifications/browserSmoke.ts` are covered for host gating, supported-type parsing, unique source keys, and dispatch into normal toast notices; AppShell boundary tests keep smoke wiring delegated through `src/notifications/useBrowserNotificationSmoke.ts`, live source effects delegated through `src/notifications/useBrowserNotificationSources.ts`, and toast stack/log/timer state delegated through `src/notifications/useToastNotifications.ts`.
 
 Required release verification still includes live-source checks for production queue diffs and signed-in deal-alert feeds. The local smoke bridge proves the global toast/drawer UI path for every supported type on every routed main-app page; it does not by itself prove that live BitJita production changes or a real signed-in user deal-alert feed produced the source rows.
 
@@ -97,7 +98,7 @@ The dedicated `/bot` route is intentionally different: `AppShell.tsx` mounts `Bo
 
 A follow-up built-app smoke pass on 2026-06-28 verified the drawer/read-state path with live app controls: a smoke-only market listing inserted into `.dev-data` produced a visible Dashboard toast, unread badge, drawer entry, and drawer-to-Market navigation. The same drawer was opened on Production and contained market plus production started/completed entries. Disabling the user-level `New market listings` preference prevented a later smoke listing from creating a visible toast or unread drawer entry until the setting was restored. Later controlled probes verified refresh-triggered market listing toasts appear, remain visible until their timer expires, can be dismissed manually, and persist in the drawer after dismissal on Dashboard, Market, Activity, Map, Production, and Admin. An Empires smoke pass on 2026-06-28 inserted `codex-empires-smoke-1782672570618`, loaded `/?page=empires`, used the real Refresh button, observed the market-listing toast and unread badge, opened the notification drawer, verified the entry persisted there, clicked it, and confirmed navigation to `/?page=market` with no browser console errors. Those probes also found and fixed a toast clickability issue: the floating Help button was stacked above the toast dismiss button, so `styles.css` now keeps the toast layer above floating tools while overlays still sit above both.
 
-A later built-app smoke pass used the loopback-only `smokeNotification` query trigger on `http://127.0.0.1:18449/` to verify all five supported notification types on every routed main-app page in the matrix: 85 visible toast checks passed, the smoke query parameters were removed after firing, the notification button remained present, and no browser console errors were captured. Additional probes dismissed a production-started toast and a market-deal-alert toast, then opened Recent notifications and verified those dismissed notices still persisted in the drawer alongside production-completed history.
+A later built-app smoke pass used the loopback-only `smokeNotification` query trigger on `http://127.0.0.1:18449/` to verify all five supported notification types on every routed main-app page in the matrix: 85 visible toast checks passed, the smoke query parameters were removed after firing, the notification button remained present, and no browser console errors were captured. Additional probes dismissed a production-started toast and a market-deal-alert toast, then opened Recent notifications and verified those dismissed notices still persisted in the drawer alongside production-completed history. A 2026-06-29 built-app smoke repeated the query-trigger path after moving smoke wiring into `src/notifications/useBrowserNotificationSmoke.ts`; a Dashboard market-deal sample produced a visible toast and unread badge, removed the smoke query parameters, and captured no browser console errors. After moving live source baselines into `src/notifications/useBrowserNotificationSources.ts`, a Dashboard production-started smoke confirmed the app mounted, displayed a production toast and unread badge, removed smoke query parameters, and captured no browser console errors. After moving toast stack/log/timer behavior into `src/notifications/useToastNotifications.ts`, a follow-up built-app smoke repeated the Dashboard market-sale query trigger and verified a visible toast, unread badge, query cleanup, and no browser console errors.
 
 Still required before release completion:
 

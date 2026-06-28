@@ -5,7 +5,7 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 ## App Structure
 
 - `src/main.tsx` is only the React bootstrap boundary. Keep startup imports and `createRoot` here.
-- `src/AppShell.tsx` owns top-level orchestration: route selection, global data refresh, admin shell, browser/user settings, auth state, analytics consent, notification state, and app chrome wiring.
+- `src/AppShell.tsx` owns top-level orchestration: route selection, global data refresh, admin shell, browser/user settings, auth state, analytics consent, notification hook orchestration, and app chrome wiring.
 - `src/pages/` contains page components. New page-specific transforms, constants, and hooks should live beside the page in a focused folder when they are not shared.
 - `src/pages/MainPages.tsx` still contains several legacy page components that share normalized dashboard data. Continue shrinking it by moving obvious page-owned helpers or components into folders such as `pages/activity/`, `pages/map/`, and `pages/market/`. Current activity-owned helpers live in `pages/activity/activityUtils.ts`; production craft status, identity, and metrics helpers live in `pages/production/productionUtils.ts`; current market-owned helpers include `pages/market/marketAnalytics.ts` for sales analytics and ranking helpers, plus `pages/market/listingUtils.ts` for listing display, age, and tracking helpers. Shared browser plumbing such as route query updates and analytics tracking belongs in `src/navigation.ts` and `src/utils/analytics.ts`, not in page bundles.
 - `src/components/main/` contains reusable dashboard UI, app chrome, tables, badges, legal dialogs, search, segmentation, stats, and notification rendering.
@@ -69,8 +69,9 @@ Browser notification architecture is documented in [`notification-system.md`](./
 - `src/notifications/toastNotices.ts` owns notice shape, destination mapping, and dedupe keys.
 - `src/notifications/notificationSources.ts` turns data events into toast drafts.
 - `src/notifications/verificationMatrix.ts` defines the release notification page/type matrix and the intentional `/bot` exception; update it whenever a page or browser notification type changes.
-- `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers and the `smokeNotification` query trigger for built-app smoke checks.
-- `AppShell.tsx` keeps notification sources mounted globally so route changes do not disable toasts.
+- `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers; `src/notifications/useBrowserNotificationSmoke.ts` wires the smoke event bridge and `smokeNotification` query trigger into the mounted app for built-app smoke checks.
+- `src/notifications/useBrowserNotificationSources.ts` keeps market activity, signed-in deal-alert, and production queue toast sources mounted globally so route changes do not disable toasts.
+- `src/notifications/useToastNotifications.ts` owns the browser toast stack, persisted notification log, source-key dedupe, auto-dismiss timers, read-state marking, and optional sound playback.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization; `src/utils/notificationSounds.ts` handles optional generated browser sounds and silently tolerates browser audio blocking.
 
 Adding a notification type requires a test-first pure draft helper, a stable `sourceKey`, settings checks, global wiring, and browser verification across pages before claiming release readiness.

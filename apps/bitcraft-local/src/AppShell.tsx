@@ -77,9 +77,9 @@ import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./componen
 import { DataTable } from "./components/main/DataTable";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "./components/main/ItemDisplay";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
-import { installBrowserNotificationSmokeBridge, isLocalNotificationSmokeHost, smokeBrowserNotificationDraft, smokeNotificationTypeFromSearch } from "./notifications/browserSmoke";
-import { dealAlertQueueToastDrafts, marketActivityQueueToastDrafts, productionCraftQueueToastDrafts, type MarketActivityToastSnapshot, type ProductionCraftQueueSnapshot } from "./notifications/notificationSources";
-import { appendNotificationLog, appendToastStack, createToastNotice, markNotificationsRead, type ToastKind, type ToastNotice } from "./notifications/toastNotices";
+import { useBrowserNotificationSmoke } from "./notifications/useBrowserNotificationSmoke";
+import { useBrowserNotificationSources } from "./notifications/useBrowserNotificationSources";
+import { useToastNotifications } from "./notifications/useToastNotifications";
 import { SearchBox } from "./components/main/SearchBox";
 import { Segmented } from "./components/main/Segmented";
 import { Info, LiveValue, MiniStat, Stat } from "./components/main/Stats";
@@ -118,9 +118,9 @@ import { unique } from "./utils/array";
 import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "./utils/memberTracking";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
 import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey } from "./utils/appSettings";
-import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound, previewNotificationSound } from "./utils/notificationSounds";
+import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "./utils/notificationSounds";
 import { normalizeUserToastSettings } from "./notifications/userToastSettings";
-import { craftDisplayName, craftOutputItem, listingTrackingKey, safeDisplayJson } from "./utils/displayHelpers";
+import { listingTrackingKey, safeDisplayJson } from "./utils/displayHelpers";
 import { urlMapFocus } from "./utils/mapFocus";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "./utils/professions";
 import type { ActivePanel, LocalHistoryState, LoadState } from "./types/app";
@@ -136,7 +136,6 @@ import { Skills } from "./pages/SkillsPage";
 import { SyncPanel } from "./pages/SyncPage";
 import { ActivityPanel, Dashboard, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder } from "./pages/MainPages";
 import type { MapFocus } from "./pages/map/mapUtils";
-import { activityNoticeKey, activitySummary, toastItemFromActivity } from "./pages/activity/activityUtils";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {
   DEFAULT_COLLECTOR_SETTINGS,
@@ -188,7 +187,6 @@ const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 
-type ToastOptions = { occurredAt?: string; sourceKey?: string };
 
 /**
  * Browser-local preferences dialog.
@@ -2584,10 +2582,9 @@ function DashboardApp() {
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
   const [mapFocus, setMapFocus] = usePersistedState<MapFocus>("map.focus", urlMapFocus());
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
-  const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
-  const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const normalizedUserToastSettings = React.useMemo(() => normalizeUserToastSettings(userToastSettings), [userToastSettings]);
+  const { toasts, notificationLog, dismissToast, pushToast, markNotificationLogRead } = useToastNotifications({ soundSettings: normalizedUserToastSettings });
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
   const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
@@ -2599,11 +2596,6 @@ function DashboardApp() {
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
-  const toastTimersRef = React.useRef<Map<string, number>>(new Map());
-  const notificationSourceKeysRef = React.useRef<Set<string>>(new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]));
-  const activityNoticeIdsRef = React.useRef<MarketActivityToastSnapshot | null>(null);
-  const dealAlertIdsRef = React.useRef<Set<string> | null>(null);
-  const craftQueueRef = React.useRef<ProductionCraftQueueSnapshot | null>(null);
   const state = useBitjitaData(refreshToken, claimId, active);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
@@ -2619,12 +2611,6 @@ function DashboardApp() {
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
-  const dismissToast = React.useCallback((id: string) => {
-    const timer = toastTimersRef.current.get(id);
-    if (timer != null) window.clearTimeout(timer);
-    toastTimersRef.current.delete(id);
-    setToasts((current) => current.filter((notice) => notice.id !== id));
-  }, []);
   const refreshUserAuth = React.useCallback(async () => {
     const response = await fetch(`${LOCAL_API}/auth/me`);
     if (!response.ok) return;
@@ -2695,53 +2681,8 @@ function DashboardApp() {
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
     });
   }, [mapFocus, setActive]);
-  React.useEffect(() => {
-    notificationSourceKeysRef.current = new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]);
-  }, [notificationLog]);
-  const pushToast = React.useCallback((title: string, body: string, kind: ToastKind, item?: AnyRecord | null, options: ToastOptions = {}) => {
-    if (options.sourceKey && notificationSourceKeysRef.current.has(options.sourceKey)) return;
-    if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
-    const id = `${Date.now()}-${Math.random()}`;
-    const notice: ToastNotice = createToastNotice({ id, title, body, kind, occurredAt: options.occurredAt ?? new Date().toISOString(), item, sourceKey: options.sourceKey });
-    playNotificationSound(normalizedUserToastSettings);
-    setToasts((current) => appendToastStack(current, notice));
-    setNotificationLog((current) => appendNotificationLog(current, notice));
-    const timer = window.setTimeout(() => {
-      toastTimersRef.current.delete(id);
-      setToasts((current) => current.filter((notice) => notice.id !== id));
-    }, 7000);
-    toastTimersRef.current.set(id, timer);
-  }, [normalizedUserToastSettings, setNotificationLog]);
-  React.useEffect(() => () => {
-    for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
-    toastTimersRef.current.clear();
-  }, []);
-  React.useEffect(() => installBrowserNotificationSmokeBridge({
-    hostname: window.location.hostname,
-    target: {
-      addEventListener: (type, listener) => window.addEventListener(type, listener as EventListener),
-      removeEventListener: (type, listener) => window.removeEventListener(type, listener as EventListener),
-    },
-    pushNotice: (notice) => pushToast(notice.title, notice.body, notice.kind, notice.item, {
-      occurredAt: notice.occurredAt,
-      sourceKey: notice.sourceKey,
-    }),
-    nextRunId: () => `${active}:${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  }), [active, pushToast]);  React.useEffect(() => {
-    const typeId = smokeNotificationTypeFromSearch(window.location.search);
-    if (!typeId || !isLocalNotificationSmokeHost(window.location.hostname)) return;
-    const params = new URLSearchParams(window.location.search);
-    const runId = params.get("smokeRun") ?? `${active}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const notice = smokeBrowserNotificationDraft(typeId, runId);
-    pushToast(notice.title, notice.body, notice.kind, notice.item, {
-      occurredAt: notice.occurredAt,
-      sourceKey: notice.sourceKey,
-    });
-    params.delete("smokeNotification");
-    params.delete("smokeRun");
-    const nextSearch = params.toString();
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
-  }, [active, pushToast]);
+  useBrowserNotificationSmoke({ active, pushToast });
+
 
   React.useEffect(() => {
     if (String(active) === "buildings" || String(active) === "overview") {
@@ -2862,42 +2803,17 @@ function DashboardApp() {
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
   }, [selectedMemberId, selectedProductionMember, state.data]);
-  React.useEffect(() => {
-    if (!notificationActivity.refreshToken) return;
-    const result = marketActivityQueueToastDrafts(activityNoticeIdsRef.current, claimId, notificationActivity.events, {
-      marketListings: appSettings.toastSettings.marketListings && normalizedUserToastSettings.marketListings,
-      marketSales: appSettings.toastSettings.marketSales && normalizedUserToastSettings.marketSales,
-    }, {
-      summary: activitySummary,
-      item: toastItemFromActivity,
-      key: activityNoticeKey,
-    });
-    activityNoticeIdsRef.current = result.snapshot;
-    for (const draft of result.drafts) {
-      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
-    }
-  }, [appSettings.toastSettings.marketListings, appSettings.toastSettings.marketSales, claimId, notificationActivity.events, notificationActivity.refreshToken, pushToast, normalizedUserToastSettings.marketListings, normalizedUserToastSettings.marketSales]);
-  React.useEffect(() => {
-    if (!dealAlerts.refreshToken) return;
-    const result = dealAlertQueueToastDrafts(dealAlertIdsRef.current, dealAlerts.alerts);
-    dealAlertIdsRef.current = result.knownIds;
-    for (const draft of result.drafts) {
-      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
-    }
-  }, [dealAlerts.alerts, dealAlerts.refreshToken, pushToast]);
-  React.useEffect(() => {
-    if (!state.data) return;
-    const result = productionCraftQueueToastDrafts(craftQueueRef.current, claimId, data.crafts, {
-      displayName: (craftJob) => craftDisplayName(craftJob, data.raw?.crafts ?? state.data?.crafts),
-      item: (craftJob) => craftOutputItem(craftJob, data.raw?.crafts ?? state.data?.crafts),
-    }, {
-      enabled: appSettings.toastSettings.production && normalizedUserToastSettings.production,
-    });
-    craftQueueRef.current = result.snapshot;
-    for (const draft of result.drafts) {
-      pushToast(draft.title, draft.body, draft.kind, draft.item, { sourceKey: draft.sourceKey });
-    }
-  }, [appSettings.toastSettings.production, claimId, data.crafts, data.raw?.crafts, pushToast, state.data?.crafts, normalizedUserToastSettings.production]);
+  useBrowserNotificationSources({
+    claimId,
+    appToastSettings: appSettings.toastSettings,
+    userToastSettings: normalizedUserToastSettings,
+    notificationActivity,
+    dealAlerts,
+    productionCrafts: data.crafts,
+    productionCraftCatalog: data.raw?.crafts ?? state.data?.crafts,
+    hasProductionData: Boolean(state.data),
+    pushToast,
+  });
   React.useEffect(() => {
     if (active !== "dashboard" || !appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
     const controller = new AbortController();
@@ -3074,7 +2990,7 @@ function DashboardApp() {
         </a> : null}
         <button onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
         <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
-        <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog(markNotificationsRead); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
+        <button className="notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
       </div>
       <ToastStack notices={toasts} onDismiss={dismissToast} />
