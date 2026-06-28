@@ -81,6 +81,8 @@ import { memberDisplayName, memberTrackingId, memberTrackingKeys } from "../util
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
+import { updateQueryState } from "../navigation";
+import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
 import { activityActorName, activityContainerName, activityMetadata, activitySummary, compactActivity, sanitizeActivityLog, signedDelta } from "./activity/activityUtils";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
@@ -98,50 +100,8 @@ import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from 
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
-const ANALYTICS_CONSENT_COOKIE = "claim_monitor_analytics_consent_v2";
-const ANALYTICS_VISITOR_COOKIE = "claim_monitor_analytics_visitor";
-const ANALYTICS_SESSION_KEY = "claim-monitor.analytics.session";
 
 type ActiveRegion = { regionId: string; regionName?: string; active?: boolean; syncing?: boolean; signedInPlayers?: number; playersInQueue?: number; updatedAt?: string | null; source?: string };
-
-function getCookie(name: string): string {
-  const entry = document.cookie.split("; ").find((cookie) => cookie.startsWith(`${name}=`));
-  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : "";
-}
-
-function analyticsSessionId(): string | null {
-  if (getCookie(ANALYTICS_CONSENT_COOKIE) !== "accepted") return null;
-  const visitorId = getCookie(ANALYTICS_VISITOR_COOKIE);
-  if (!visitorId) return null;
-  let sessionId = window.sessionStorage.getItem(ANALYTICS_SESSION_KEY) ?? "";
-  if (!sessionId) {
-    sessionId = crypto.randomUUID();
-    window.sessionStorage.setItem(ANALYTICS_SESSION_KEY, sessionId);
-  }
-  return sessionId;
-}
-
-function trackAnalyticsEvent(eventName: string, properties?: Record<string, string | number | boolean>, durationSeconds?: number, pageOverride?: ActivePanel) {
-  const sessionId = analyticsSessionId();
-  if (!sessionId) return;
-  const page = pageOverride ?? new URLSearchParams(window.location.search).get("page") as ActivePanel | null ?? "dashboard";
-  if (page === "admin") return;
-  void fetch(`${LOCAL_API}/analytics/event`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    keepalive: true,
-    body: JSON.stringify({ sessionId, eventName, page, properties, durationSeconds }),
-  }).catch(() => undefined);
-}
-
-function updateQueryState(values: Record<string, string | null>) {
-  const url = new URL(window.location.href);
-  for (const [key, value] of Object.entries(values)) {
-    if (value) url.searchParams.set(key, value);
-    else url.searchParams.delete(key);
-  }
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-}
 
 function activeRegionLabel(region: ActiveRegion, settlementRegionId?: string): string {
   const suffixes = [

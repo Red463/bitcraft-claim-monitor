@@ -1,0 +1,307 @@
+.crafter-pills { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; max-width: 390px; }
+.crafter-pills > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 9px; font-size: 12px; }
+.crafter-pills strong { color: var(--text); }
+.production-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.production-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; display: flex; flex-direction: column; min-height: 226px; }
+.production-card { transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.production-card:hover { transform: translateY(-1px); border-color: rgba(240,198,79,.34); }
+.production-card.active-work { border-color: rgba(78,226,138,.58); box-shadow: inset 0 0 0 1px rgba(78,226,138,.12); }
+.production-card.can-craft { border-color: rgba(78,226,138,.62); box-shadow: inset 0 0 0 1px rgba(78,226,138,.13), 0 0 16px rgba(78,226,138,.05); }
+.production-card header { display: flex; justify-content: space-between; gap: 12px; padding: 13px 14px; background: rgba(255,255,255,.025); border-bottom: 1px solid rgba(255,255,255,.06); }
+.production-card header div { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; align-items: center; }
+.production-card header svg { color: var(--gold); }
+.production-card header strong { color: var(--gold); overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.production-card header span { grid-column: 2; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.production-card header p { display: grid; justify-items: end; gap: 4px; margin: 0; flex-shrink: 0; }
+.production-card header small { color: var(--muted); font-size: var(--font-micro); }
+.production-card section { padding: 14px; display: grid; gap: 10px; }
+.production-card h3 { color: var(--text); font-size: 16px; }
+.production-card section p, .production-card section small { margin: 0; color: var(--muted); font-size: 12px; }
+.production-controls { justify-content: flex-end; }
+.craft-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; min-height: 36px; }
+.craft-title.has-icon { grid-template-columns: 36px minmax(0, 1fr) auto; }
+.craft-title h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.15; }
+.craft-title .item-thumb { width: 36px; height: 36px; border-radius: 8px; }
+.craft-title .tier-badge { justify-self: end; }
+.production-member-banner { min-height: 43px; border: 1px solid rgba(116,182,255,.32); background: rgba(116,182,255,.08); border-radius: 7px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.production-member-banner svg, .production-member-banner strong { color: var(--copper); }
+.production-member-banner small { margin-left: auto; color: var(--muted); }
+
+.settlement-passive-crafts { margin-top: 6px; padding-top: 20px; border-top: 1px solid var(--border); display: grid; gap: 14px; }
+.production-page {
+  background: #030303;
+  background: var(--command-page-gradient);
+  min-height: 100%;
+  color: #f4f7fb;
+}
+.production-topbar { align-items: center; }
+.production-page .dashboard-top-meta {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+.production-page .production-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.production-page .mini-stat {
+  min-height: 112px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  padding: 18px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 4px 14px;
+}
+.production-page .mini-stat div {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+  color: #f3c532;
+}
+.production-page .mini-stat svg { width: 20px; height: 20px; }
+.production-page .mini-stat > span {
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.production-page .mini-stat strong {
+  color: #fff;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.production-page .crafter-pills {
+  max-width: none;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.production-page .crafter-pills > span {
+  border-color: rgba(154,168,190,.18);
+  background: rgba(5,8,12,.78);
+  color: #aab5c4;
+  min-height: 30px;
+  padding: 0 6px 0 10px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
+}
+.production-page .crafter-pills strong { color: #fff; }
+.production-page .crafter-pills small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 1px;
+  border-radius: 999px;
+  border: 1px solid rgba(240,198,79,.2);
+  background: rgba(240,198,79,.08);
+  color: #dce5f2;
+  font-size: 11px;
+  font-weight: 800;
+}
+.production-page .select-control,
+.production-page .segmented button {
+  border-color: rgba(154,168,190,.28);
+  background: #080d14;
+}
+.production-page .segmented button.active {
+  color: #f0c64f;
+  border-color: rgba(240,198,79,.4);
+  background: rgba(240,198,79,.11);
+}
+.production-page .production-member-banner {
+  border-color: rgba(86,213,255,.22);
+  color: #aab5c4;
+}
+.production-page .production-member-banner svg,
+.production-page .production-member-banner strong { color: #56d5ff; }
+.production-page .production-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.production-page .production-card {
+  border-color: rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  min-height: 260px;
+}
+.production-page .production-card:hover {
+  border-color: rgba(240,198,79,.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 16px 34px rgba(0,0,0,.28);
+}
+.production-page .production-card.active-work {
+  border-color: rgba(99,235,165,.42);
+  box-shadow: inset 0 0 0 1px rgba(99,235,165,.08), 0 12px 28px rgba(0,0,0,.2);
+}
+.production-page .production-card.can-craft {
+  border-color: rgba(99,235,165,.5);
+  box-shadow: inset 0 0 0 1px rgba(99,235,165,.1), 0 0 18px rgba(99,235,165,.06);
+}
+.production-page .production-card header {
+  padding: 14px 16px;
+  background: rgba(255,255,255,.018);
+  border-bottom-color: rgba(154,168,190,.14);
+}
+.production-page .production-card header strong {
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.private-craft-pill {
+  flex: 0 0 auto;
+  min-height: 20px;
+  border: 1px solid rgba(240,198,79,.42);
+  border-radius: 999px;
+  background: rgba(240,198,79,.11);
+  color: #f0c64f;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.private-craft-pill svg { width: 11px; height: 11px; }
+.production-page .production-card header svg { color: #f0c64f; }
+.production-page .production-card header span,
+.production-page .production-card header small,
+.production-page .production-card section p,
+.production-page .production-card section small {
+  color: #8f9aaa;
+}
+.production-page .production-card section {
+  padding: 16px;
+  gap: 12px;
+}
+.production-page .craft-title { min-height: 42px; }
+.production-page .craft-title h3 {
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+}
+.production-page .craft-title .item-thumb {
+  width: 40px;
+  height: 40px;
+  border-color: rgba(154,168,190,.2);
+  background: rgba(5,8,12,.78);
+}
+.production-page .craft-title.has-icon { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.production-page .work-chips span {
+  border-color: rgba(154,168,190,.16);
+  background: rgba(5,8,12,.78);
+  color: #aab5c4;
+}
+.production-page .progress {
+  height: 8px;
+  border-color: rgba(154,168,190,.12);
+  background: #070b11;
+}
+.production-page .progress div {
+  background: linear-gradient(90deg, #f0c64f, #63eba5);
+  box-shadow: 0 0 12px rgba(240,198,79,.18);
+}
+.production-page .progress-meta {
+  color: #8f9aaa;
+  font-size: 12px;
+}
+.production-page .progress-meta strong { color: #f0c64f; }
+.production-page .eligibility-pill {
+  border-radius: 7px;
+  min-height: 31px;
+  font-weight: 700;
+}
+.production-page .contributors {
+  border-top-color: rgba(154,168,190,.14);
+  background: rgba(5,8,12,.4);
+  border-radius: 7px;
+  padding: 10px;
+}
+.production-page .contributors span strong { color: #fff; }
+.production-page .settlement-passive-crafts {
+  margin-top: 8px;
+  border-top: 0;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  padding: 18px;
+}
+.dashboard-section-heading {
+  display: grid;
+  gap: 6px;
+}
+.dashboard-section-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.dashboard-section-heading h3 svg {
+  color: #f0c64f;
+}
+.dashboard-section-heading p {
+  margin: 0;
+  color: #a6afbd;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.production-page .settlement-passive-crafts .table-wrap {
+  border-color: rgba(108,123,145,.24);
+  background-color: #090e15;
+  background-image: none;
+}
+.production-page .settlement-passive-crafts th {
+  background: linear-gradient(180deg, rgba(15,22,31,.98), rgba(9,14,21,.99));
+  color: #aeb8c6;
+}
+.production-page .settlement-passive-crafts td {
+  background: rgba(6,10,15,.78);
+}
+.production-page .settlement-passive-crafts tbody tr:nth-child(even) td {
+  background: rgba(8,13,20,.82);
+}
+.production-page .settlement-passive-crafts tbody tr:hover td {
+  background: rgba(240,198,79,.045);
+}
+.production-page .empty-state {
+  border-color: rgba(108,123,145,.24);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(22,32,43,.12), transparent 48%),
+    linear-gradient(180deg, rgba(11,16,22,.9), rgba(6,9,14,.96));
+}
+
+@media (max-width: 1250px) {
+  .production-page .production-summary,
+  .production-page .production-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .production-page .crafter-pills { justify-content: flex-start; }
+}
+
+@media (max-width: 900px) {
+  .production-grid { grid-template-columns: 1fr; }
+  .production-member-banner { flex-wrap: wrap; }
+  .production-member-banner small { margin-left: 0; width: 100%; }
+}

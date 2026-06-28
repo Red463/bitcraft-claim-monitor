@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.85] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving routed Leaderboard and Production page styles into focused page-owned stylesheets.
+- Reduced duplicated browser helper code in the main page bundle by reusing shared analytics and URL query helpers.
+- Updated developer and release-readiness documentation with the latest page-helper and stylesheet boundaries.
+
 ## [1.0.0-beta.84] - 2026-06-28
 
 ### Changed
