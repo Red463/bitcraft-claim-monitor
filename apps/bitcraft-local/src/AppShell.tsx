@@ -77,6 +77,7 @@ import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "./componen
 import { DataTable } from "./components/main/DataTable";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "./components/main/ItemDisplay";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
+import { installBrowserNotificationSmokeBridge, isLocalNotificationSmokeHost, smokeBrowserNotificationDraft, smokeNotificationTypeFromSearch } from "./notifications/browserSmoke";
 import { dealAlertQueueToastDrafts, marketActivityQueueToastDrafts, productionCraftQueueToastDrafts, type MarketActivityToastSnapshot, type ProductionCraftQueueSnapshot } from "./notifications/notificationSources";
 import { appendNotificationLog, appendToastStack, createToastNotice, markNotificationsRead, type ToastKind, type ToastNotice } from "./notifications/toastNotices";
 import { SearchBox } from "./components/main/SearchBox";
@@ -2715,6 +2716,33 @@ function DashboardApp() {
     for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
     toastTimersRef.current.clear();
   }, []);
+  React.useEffect(() => installBrowserNotificationSmokeBridge({
+    hostname: window.location.hostname,
+    target: {
+      addEventListener: (type, listener) => window.addEventListener(type, listener as EventListener),
+      removeEventListener: (type, listener) => window.removeEventListener(type, listener as EventListener),
+    },
+    pushNotice: (notice) => pushToast(notice.title, notice.body, notice.kind, notice.item, {
+      occurredAt: notice.occurredAt,
+      sourceKey: notice.sourceKey,
+    }),
+    nextRunId: () => `${active}:${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  }), [active, pushToast]);  React.useEffect(() => {
+    const typeId = smokeNotificationTypeFromSearch(window.location.search);
+    if (!typeId || !isLocalNotificationSmokeHost(window.location.hostname)) return;
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("smokeRun") ?? `${active}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const notice = smokeBrowserNotificationDraft(typeId, runId);
+    pushToast(notice.title, notice.body, notice.kind, notice.item, {
+      occurredAt: notice.occurredAt,
+      sourceKey: notice.sourceKey,
+    });
+    params.delete("smokeNotification");
+    params.delete("smokeRun");
+    const nextSearch = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+  }, [active, pushToast]);
+
   React.useEffect(() => {
     if (String(active) === "buildings" || String(active) === "overview") {
       setActive("dashboard");

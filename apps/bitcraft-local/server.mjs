@@ -18,6 +18,7 @@ import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs"
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
+import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -5682,40 +5683,6 @@ function dealWatchRow(row) {
   };
 }
 
-function dealAlertRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    watchId: row.watch_id,
-    userId: row.user_id,
-    discordId: row.discord_id,
-    claimId: row.claim_id,
-    regionId: row.region_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    itemName: row.item_name,
-    tier: row.tier,
-    rarity: row.rarity,
-    iconAssetName: row.icon_asset_name,
-    listingKey: row.listing_key,
-    marketClaimId: row.market_claim_id,
-    marketClaimName: row.market_claim_name,
-    sellerName: row.seller_name,
-    quantity: toNumber(row.quantity),
-    unitPrice: toNumber(row.unit_price),
-    totalValue: toNumber(row.total_value),
-    baselineWindowDays: toNumber(row.baseline_window_days),
-    baselineAverage: toNumber(row.baseline_average),
-    salesCount: toNumber(row.sales_count),
-    discountPercent: toNumber(row.discount_percent),
-    dmStatus: row.dm_status,
-    dmError: row.dm_error,
-    createdAt: row.created_at,
-    readAt: row.read_at,
-    raw: safeJson(row.raw_json, {}),
-  };
-}
-
 function normalizeRegionalSellListing(listing, regionId, regionName, fallbackClaim = {}) {
   const base = normalizeListing(listing);
   const marketClaimId = String(listing.claimEntityId ?? listing.claimId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
@@ -5777,28 +5744,6 @@ async function dealBaselineForItem(regionId, itemId, itemType, minSales) {
   const historyKind = marketPriceHistoryKind(itemType);
   const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: 10000 });
   return priceHistoryWindowAverage(payload, 7, minSales) ?? priceHistoryWindowAverage(payload, 30, minSales);
-}
-
-function dealAlertDiscordPayload(alert) {
-  const discount = Math.round(toNumber(alert.discountPercent));
-  const baseline = `${formatGold(alert.baselineAverage)} ${alert.baselineWindowDays}-day average`;
-  return {
-    embeds: [{
-      author: { name: "Timbersteel Trade" },
-      title: "Market Deal Found",
-      description: `**${alert.itemName}** is listed ${discount}% below the confirmed regional average.`,
-      color: 0x4ee28a,
-      fields: [
-        { name: "Listing price", value: formatGold(alert.unitPrice), inline: true },
-        { name: "Baseline", value: baseline, inline: true },
-        { name: "Quantity", value: toNumber(alert.quantity).toLocaleString(), inline: true },
-        { name: "Market", value: String(alert.marketClaimName ?? "Unknown settlement"), inline: true },
-        { name: "Region", value: `R${alert.regionId}`, inline: true },
-      ],
-      timestamp: alert.createdAt,
-      footer: { text: "Deal watch alert" },
-    }],
-  };
 }
 
 async function runMarketDealWatchJob({ jobKey } = {}) {
@@ -5884,7 +5829,7 @@ async function runMarketDealWatchJob({ jobKey } = {}) {
         if (!result.changes) continue;
         alerts += 1;
         statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
-        const alert = dealAlertRow({
+        const alert = publicDealAlertRow({
           id: result.lastInsertRowid,
           watch_id: watch.id,
           user_id: watch.user_id,
@@ -9536,7 +9481,7 @@ const server = createServer(async (req, res) => {
       if (!appUser) return;
       const limit = Math.min(Math.max(toNumber(url.searchParams.get("limit")) || 50, 1), 100);
       return send(res, 200, {
-        alerts: statements.listDealAlertsForUser.all(appUser.id, limit).map(dealAlertRow),
+        alerts: statements.listDealAlertsForUser.all(appUser.id, limit).map(publicDealAlertRow),
         unread: toNumber(statements.unreadDealAlertCount.get(appUser.id)?.count),
       });
     }
