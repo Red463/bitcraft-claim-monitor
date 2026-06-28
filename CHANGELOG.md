@@ -8,6 +8,21 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.80] - 2026-06-28
+
+### Added
+
+- Added focused server route-group tests and helper coverage for visitor logging route classification.
+
+### Changed
+
+- Improved release-readiness structure by moving shared app chrome styles and route classification helpers into focused modules.
+- Documented the remaining public-release browser notification and server architecture verification gaps.
+
+### Fixed
+
+- Fixed notification toasts appearing behind the floating help control and added browser sound helper coverage.
+
 ## [1.0.0-beta.79] - 2026-06-28
 
 ### Changed

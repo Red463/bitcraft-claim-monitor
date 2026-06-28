@@ -11,9 +11,11 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/components/main/` contains reusable dashboard UI, app chrome, tables, badges, legal dialogs, search, segmentation, stats, and notification rendering.
 - `src/components/bot/` contains Discord bot/admin sections. Keep bot dashboard UI in this folder rather than moving it back into `AppShell.tsx`.
 - `src/api/` contains frontend fetch hooks and API helpers. Keep network timing, stale-data metadata, and response normalization out of JSX where practical.
+- `src/server/httpRoutes.mjs` contains dependency-free server route classification helpers used by request logging and visitor-security decisions.
 - `src/notifications/` contains pure in-app notification generation, dedupe, and routing helpers.
 - `src/utils/` contains shared, cross-page helpers. Do not add page-only helpers here.
-- `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as notification UI and user settings UI.
+- `src/styles.css` is the global stylesheet for tokens, layout primitives, shared controls, and page sections. `src/styles/` is for incremental focused stylesheet modules such as app chrome, notification UI, and user settings UI.
+- `src/styles/app-chrome.css` owns floating app tools, shared help/legal dialogs, Discord sign-in dialog, cookie consent, command palette shell, and related mobile overrides.
 - `src/styles/user-settings.css` owns the browser settings dialog, account-linking cards, theme editor, and settings-specific responsive rules.
 - `src/styles/notifications.css` owns toast, notification drawer, notification badge, and notification sound setting styles.
 
@@ -38,6 +40,8 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - Background collectors and Discord jobs isolated from request lifetimes so upstream failures do not terminate the process.
 
 When adding an endpoint, prefer a thin route handler that delegates parsing, data shaping, and database work to focused helpers. Add a focused Node test when the endpoint changes auth, persistence, polling, notification, Discord, or cache behavior.
+
+Future server extraction should be incremental and dependency-injected. Continue with helpers that do not need the request dispatcher, then move schema/statements into a database module, then auth/session/permission helpers, BitJita proxy/cache, scheduled jobs/collectors, Discord services, and finally route groups. Keep the route order explicit: public health/proxy/config first, authenticated admin routes after session/CSRF/permission checks, user-private endpoints after app-user auth, and static frontend fallback last.
 
 ## Notifications
 
@@ -78,7 +82,7 @@ Adding a notification type requires a test-first pure draft helper, a stable `so
 - Use existing CSS variables for color, borders, radius, focus, and z-index.
 - Keep button text compact and use lucide icons where an icon exists.
 - Do not hide layout issues with high-specificity CSS hacks. Fix the component structure first when possible.
-- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified.
+- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified. Shared app-chrome overlays belong in `app-chrome.css`; notification UI belongs in `notifications.css`; user settings UI belongs in `user-settings.css`.
 - Any new stylesheet module under `src/styles/` must be imported by `src/main.tsx` and documented here if it establishes a reusable convention. Keep feature-owned modules narrow; shared layout primitives stay in `styles.css`.
 
 ## Commands

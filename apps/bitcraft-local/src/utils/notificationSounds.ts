@@ -1,5 +1,5 @@
 import type { NotificationSoundId, UserToastSettings } from "../types/settings";
-import { normalizeNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings";
+import { normalizeNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings.ts";
 
 export type { NotificationSoundSettings };
 export type NotificationSoundOption = { id: NotificationSoundId; label: string; description: string };
