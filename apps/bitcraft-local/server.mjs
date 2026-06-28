@@ -3074,6 +3074,7 @@ const ADMIN_ROLE_PERMISSIONS = {
     "data.view",
     "data.export",
     "data.manage",
+    "users.manage",
     "accounts.manage",
     "analytics.view",
     "analytics.manage",

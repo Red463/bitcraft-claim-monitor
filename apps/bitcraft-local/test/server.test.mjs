@@ -942,6 +942,23 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(viewerSettingsMutation.status, 403);
   const viewerUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: viewerCookie, origin } });
   assert.equal(viewerUserList.status, 403);
+  const createAdmin = await fetch(`${origin}/api/local/admin/users`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ username: "manager", password: "manager password ok", role: "admin" }),
+  });
+  assert.equal(createAdmin.status, 201);
+  const adminLogin = await fetch(`${origin}/api/local/admin/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ username: "manager", password: "manager password ok" }),
+  });
+  assert.equal(adminLogin.status, 200);
+  const adminAuth = await adminLogin.json();
+  const adminCookie = adminLogin.headers.get("set-cookie").split(";")[0];
+  assert.equal(adminAuth.user.role, "admin");
+  const adminUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: adminCookie, origin } });
+  assert.equal(adminUserList.status, 200);
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",

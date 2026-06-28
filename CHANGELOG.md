@@ -8,6 +8,23 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.77] - 2026-06-28
+
+### Added
+
+- Added maintainer documentation covering the current app structure, data flow, notifications, styling conventions, and release-readiness blockers.
+- Added focused tests for extracted notification, activity, map, market analytics, and member identity helpers.
+
+### Changed
+
+- Improved release-readiness structure by moving notification, activity, map, market analytics, and member identity logic into clearer focused modules.
+- Expanded the example environment file with the app's local, production, BitJita, Discord, background task, and GeoIP settings.
+- Documented browser notification smoke coverage for market listing and sale alerts across the main app pages.
+
+### Fixed
+
+- Fixed admin-role access to user-management routes while keeping viewer-level users blocked.
+
 ## [1.0.0-beta.76] - 2026-06-28
 
 ### Changed

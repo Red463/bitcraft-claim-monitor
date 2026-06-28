@@ -65,3 +65,32 @@ Automated coverage exists for:
 - Initial known-ID seeding and unseen item selection.
 
 Required release verification still includes a manual or browser-driven matrix proving that every supported in-app notification type can appear while each app page is active, unless a page restriction is intentional and documented.
+
+## Browser Verification Matrix Progress
+
+Browser smoke verification on the built local app at `http://127.0.0.1:18449/` inserted smoke-only `activity_events` rows into the local `.dev-data` SQLite database, then used the real Refresh button, toast stack, notification button, and drawer. This verified that market listing and market sale browser notifications can appear while these pages are active, and that the same entries persist in the notification drawer:
+
+- Dashboard
+- Leaderboard
+- Members
+- Professions
+- Production
+- Inventory
+- Construction
+- Research
+- Market
+- Region
+- Map
+- Sync
+- Activity
+- Public Craft Finder
+- Craft Calculator
+- Admin
+
+The dedicated `/bot` route is intentionally different: `AppShell.tsx` mounts `BotControlApp` directly for `/bot` and bot subdomains so the bot console does not initialise public dashboard data. That route currently has no floating notification button, toast stack, or notification drawer. Treat `/bot` browser notifications as intentionally not supported unless the bot route is redesigned to share the main app chrome.
+
+Still required before release completion:
+
+- Verify production started and production completed browser notifications across the same page matrix.
+- Verify market deal alert notifications with a signed-in Discord-linked user.
+- Verify drawer open/closed behavior, dismissed state, sounds enabled/disabled, and user/app notification settings across representative pages.

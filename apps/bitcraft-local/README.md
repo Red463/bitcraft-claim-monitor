@@ -24,6 +24,8 @@ In production, the Node server runs background collectors itself, so market, act
 
 Notification generation, deduplication, settings and verification notes are documented in [docs/notification-system.md](../../docs/notification-system.md).
 
+Maintainer architecture notes are in [docs/developer-guide.md](../../docs/developer-guide.md), and current public-release blockers are tracked in [docs/release-readiness-audit.md](../../docs/release-readiness-audit.md).
+
 The Admin page is protected by a local server-side session. Current deployments use Discord-backed administrator accounts, with the default owner Discord ID seeded by the server. Legacy password-based admin setup exists only as a compatibility path and should normally remain disabled. Administrator mutations additionally require a same-origin session token.
 
 For isolated testing, set `BITCRAFT_LOCAL_DATA_DIR` before running the dev server to point at a different database directory.

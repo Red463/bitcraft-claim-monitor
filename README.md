@@ -419,14 +419,20 @@ The database directory is outside the Git checkout, so ordinary code updates do 
 
 ```text
 apps/bitcraft-local/                 Maintained application
-  src/main.tsx                       React UI and dashboard pages
+  src/main.tsx                       React bootstrap only
+  src/AppShell.tsx                   App orchestration, routing, auth, settings, notifications
+  src/pages/                         Dashboard page components and page-owned helpers
   src/components/                    Extracted React components
   src/api/                           Frontend API hooks and fetch helpers
+  src/notifications/                 Browser notification generation and dedupe helpers
   src/styles/                        Incremental stylesheet modules
   server.mjs                         SQLite API, BitJita proxy, auth, production server
   dev.mjs                            Local frontend/API launcher
 deploy/                              systemd and Caddy production configuration
 DEPLOYMENT.md                        VPS installation and maintenance guide
+docs/developer-guide.md              Maintainer architecture and contribution guide
+docs/notification-system.md          Browser notification architecture and verification notes
+docs/release-readiness-audit.md      Current public-release readiness audit and blockers
 BITJITA_API_AUDIT.md                 Public API audit and integration notes
 ```
 
