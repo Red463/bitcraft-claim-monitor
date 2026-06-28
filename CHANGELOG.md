@@ -8,6 +8,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.76] - 2026-06-28
+
+### Changed
+
+- Improved large-page performance by caching heavy player, passive craft, and production craft helper responses with background refresh and stale-data indicators.
+
+### Fixed
+
+- Reduced duplicate BitJita and local helper work during overlapping refreshes to avoid 502s on API-heavy pages while preserving last known good data.
 ## [1.0.0-beta.75] - 2026-06-27
 
 ### Fixed

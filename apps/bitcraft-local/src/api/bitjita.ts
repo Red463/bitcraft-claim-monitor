@@ -122,8 +122,20 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
 }
 
 const PAGE_NAVIGATION_CACHE_TTL_MS = 20_000;
-const pageNavigationCache = new Map<string, { data: AnyRecord; updatedAt: number }>();
+type PageFreshness = { updatedAt: string; cacheState: string | null; stale: boolean };
+const pageNavigationCache = new Map<string, PageFreshness & { data: AnyRecord; cachedAt: number }>();
 
+function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now(), overrideCacheState?: string): PageFreshness {
+  const serverFreshness = data?.serverFreshness ?? {};
+  const updatedAt = String(serverFreshness.lastSuccessAt ?? serverFreshness.collectedAt ?? serverFreshness.cachedAt ?? new Date(fallbackMs).toISOString());
+  const cacheState = overrideCacheState ?? (serverFreshness.cacheState == null ? null : String(serverFreshness.cacheState));
+  const stale = Boolean(data?.stale || serverFreshness.stale || cacheState === "stale-if-error");
+  return { updatedAt, cacheState, stale };
+}
+
+function loadedState(data: AnyRecord, overrideCacheState?: string): LoadState<AnyRecord> {
+  return { loading: false, error: null, data, ...freshnessFromPayload(data, Date.now(), overrideCacheState) };
+}
 export function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
@@ -134,13 +146,13 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
   React.useEffect(() => {
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
-    const cachedAgeMs = cached ? Date.now() - cached.updatedAt : Number.POSITIVE_INFINITY;
+    const cachedAgeMs = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
     if (cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
-      setState({ loading: false, error: null, data: cached.data });
+      setState({ loading: false, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: "browser-cache", stale: cached.stale });
       return;
     }
     if (cached) {
-      setState({ loading: true, error: null, data: cached.data });
+      setState({ loading: true, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: cached.cacheState, stale: cached.stale });
     }
 
     let cancelled = false;
@@ -173,8 +185,9 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
           const raw = await response.json();
-          pageNavigationCache.set(cacheKey, { data: raw, updatedAt: Date.now() });
-          if (!cancelled) React.startTransition(() => setState({ loading: false, error: null, data: raw }));
+          const freshness = freshnessFromPayload(raw);
+          pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
+          if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
           return;
         }
         const entries = await Promise.all(
@@ -198,6 +211,10 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
             });
             if (response.ok) {
               raw.crafts = await response.json();
+              if (raw.crafts?.stale) {
+                raw.stale = true;
+                appendPartialError(raw, "Production craft details are using cached data while refresh recovers.");
+              }
             } else {
               appendPartialError(raw, `Unable to refresh full production details (HTTP ${response.status}). Showing direct BitJita craft data only.`);
             }
@@ -228,6 +245,10 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
                 failures: payload.failures ?? [],
               };
               if (payload.failed) appendPartialError(raw, `${payload.failed} player detail request${payload.failed === 1 ? "" : "s"} failed. Player names remain available, but online status may be incomplete.`);
+              if (payload.stale) {
+                raw.stale = true;
+                appendPartialError(raw, "Player detail data is using cached data while refresh recovers.");
+              }
               return unwrap<AnyRecord[]>(payload, "players", []).map((player) => ({ status: "fulfilled", value: player }) as PromiseFulfilledResult<AnyRecord>);
             })
             .catch((error): Array<PromiseFulfilledResult<AnyRecord>> => {
@@ -272,11 +293,12 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
         raw.regionStatus = regionPayload;
         raw.tradeVolume = tradeVolumePayload;
-        pageNavigationCache.set(cacheKey, { data: raw, updatedAt: Date.now() });
-        if (!cancelled) React.startTransition(() => setState({ loading: false, error: null, data: raw }));
+        const freshness = freshnessFromPayload(raw);
+        pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
+        if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
       } catch (err) {
         if (!cancelled) {
-          setState((prev) => ({ loading: false, error: err instanceof Error ? err.message : String(err), data: prev.data }));
+          setState((prev) => ({ ...prev, loading: false, error: err instanceof Error ? err.message : String(err), stale: Boolean(prev.data) || prev.stale }));
         }
       }
     }

@@ -480,6 +480,9 @@ test("server collection paginates listings and protects production mutations", a
   }).then((response) => response.json());
   assert.equal(playerDetailsOne.players[0].username, "Tester");
   assert.equal(playerDetailsTwo.players[0].signedIn, true);
+  assert.equal(playerDetailsOne.serverFreshness.cacheState, "miss");
+  assert.equal(playerDetailsTwo.serverFreshness.cacheState, "hit");
+  assert.match(playerDetailsOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
   const missingPlayerDetails = await fetch(`${origin}/api/local/player-details`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },
@@ -496,6 +499,9 @@ test("server collection paginates listings and protects production mutations", a
   const marketPageRequestsAfterDashboardOne = requestedPages.length;
   const dashboardDataTwo = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
   assert.equal(dashboardDataOne.players[0].username, "Tester");
+  assert.equal(dashboardDataOne.serverFreshness.cacheState, "miss");
+  assert.equal(dashboardDataTwo.serverFreshness.cacheState, "hit");
+  assert.match(dashboardDataOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(dashboardDataOne.market.listings.length, 2);
   assert.equal(dashboardDataOne.region.claims.length >= 0, true);
   assert.equal(Array.isArray(dashboardDataOne.contributions["public-craft-0"]), true);
@@ -517,6 +523,8 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify(passivePayload),
   }).then((response) => response.json());
   assert.equal(passiveOne.rows[0].recipe, "Collect Fine Timber");
+  assert.equal(passiveOne.serverFreshness.cacheState, "miss");
+  assert.equal(passiveTwo.serverFreshness.cacheState, "hit");
   assert.equal(passiveOne.rows[0].quantity, 5);
   assert.equal(passiveOne.rows[0].memberName, "Tester");
   assert.equal(passiveTwo.rows[0].recipe, "Collect Fine Timber");
@@ -533,6 +541,9 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify(productionCraftPayload),
   }).then((response) => response.json());
   assert.equal(productionOne.publicCount, 1);
+  assert.equal(productionOne.serverFreshness.cacheState, "miss");
+  assert.equal(productionTwo.serverFreshness.cacheState, "hit");
+  assert.match(productionOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(productionOne.privateCount, 1);
   assert.deepEqual(productionOne.craftResults.map((craft) => craft.entityId).sort(), ["private-craft", "public-craft-0"]);
   assert.equal(productionOne.craftResults.find((craft) => craft.entityId === "private-craft").isPublic, false);

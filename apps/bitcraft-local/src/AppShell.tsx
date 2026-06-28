@@ -2823,9 +2823,9 @@ function DashboardApp() {
   }, [appSettings.branding.favicon]);
   React.useEffect(() => {
     if (!state.data) return;
-    const serverTime = state.data.serverFreshness?.lastSuccessAt ?? state.data.serverFreshness?.collectedAt;
+    const serverTime = state.updatedAt ?? state.data.serverFreshness?.lastSuccessAt ?? state.data.serverFreshness?.collectedAt ?? state.data.serverFreshness?.cachedAt;
     setLastUpdated(serverTime ? new Date(serverTime) : new Date());
-  }, [state.data]);
+  }, [state.data, state.updatedAt]);
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
   }, [selectedMemberId, selectedProductionMember, state.data]);
@@ -2962,11 +2962,15 @@ function DashboardApp() {
   const activePanel = panels[active] ?? panels.dashboard;
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
+    const staleWarning = state.stale
+      ? `Showing cached data${lastUpdated ? ` from ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""} while refresh continues.`
+      : "";
     return [
       ...(state.error ? [`Main BitJita refresh failed: ${state.error}`] : []),
+      ...(staleWarning ? [staleWarning] : []),
       ...partialErrors,
     ];
-  }, [data.raw?.partialErrors, state.error]);
+  }, [data.raw?.partialErrors, lastUpdated, state.error, state.stale]);
   const apiDiagnostics = React.useMemo<ApiStatusDiagnostics>(() => ({
     appVersion: APP_VERSION,
     page: active,
@@ -3084,6 +3088,7 @@ function DashboardApp() {
         >
           <KeyRound size={18} />
         </a> : null}
+        <button onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
         <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
         <button className="notification-button" onClick={() => { setNoticeOpen(true); setNotificationLog((current) => current.map((notice) => ({ ...notice, read: true }))); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
