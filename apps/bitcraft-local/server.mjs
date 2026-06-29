@@ -11,7 +11,7 @@ import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
-import { originFromRequest as requestOriginFromRequest, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
+import { originFromRequest as requestOriginFromRequest, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
 import { csrfToken } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
@@ -36,6 +36,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
+import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -2478,14 +2479,11 @@ async function handleDiscordOAuthStart(req, res, url) {
   const config = discordOAuthConfig(req);
   if (!config.enabled) return send(res, 503, { error: "Discord login is not configured on this server" });
   const state = randomBytes(24).toString("base64url");
-  const returnTo = safeReturnPath(url.searchParams.get("returnTo"));
-  const authorize = new URL("https://discord.com/oauth2/authorize");
-  authorize.searchParams.set("client_id", config.clientId);
-  authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("redirect_uri", config.redirectUri);
-  authorize.searchParams.set("scope", "identify");
-  authorize.searchParams.set("state", state);
-  res.writeHead(302, { location: authorize.toString(), "set-cookie": authStateCookie(state, returnTo) });
+  const returnTo = url.searchParams.get("returnTo");
+  res.writeHead(302, {
+    location: buildDiscordAuthorizeUrl({ config, state }),
+    "set-cookie": authStateCookie(state, returnTo),
+  });
   res.end();
   return true;
 }
@@ -2496,45 +2494,35 @@ async function handleDiscordOAuthCallback(req, res, url) {
   const state = String(url.searchParams.get("state") ?? "");
   const code = String(url.searchParams.get("code") ?? "");
   const error = String(url.searchParams.get("error") ?? "");
-  const returnTo = safeReturnPath(stateCookie?.returnTo);
-  if (error) {
-    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-denied`, "set-cookie": clearAuthStateCookie() });
+  const callbackDecision = discordOAuthCallbackDecision({ config, stateCookie, state, code, error });
+  if (!callbackDecision.ok) {
+    res.writeHead(302, { location: callbackDecision.location, "set-cookie": clearAuthStateCookie() });
     res.end();
     return true;
   }
-  if (!config.enabled || !code || !stateCookie?.state || stateCookie.state !== state) {
-    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-error`, "set-cookie": clearAuthStateCookie() });
-    res.end();
-    return true;
-  }
-  const tokenBody = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: config.redirectUri,
-  });
-  const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: tokenBody,
-  });
+  const returnTo = callbackDecision.returnTo;
+  const tokenRequest = discordOAuthTokenRequest({ config, code: callbackDecision.code });
+  const tokenResponse = await fetch(tokenRequest.url, tokenRequest.init);
   if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed: ${tokenResponse.status}`);
   const tokenJson = await tokenResponse.json();
-  const profileResponse = await fetch("https://discord.com/api/v10/users/@me", {
-    headers: { authorization: `Bearer ${tokenJson.access_token}` },
-  });
+  const profileRequest = discordOAuthProfileRequest(tokenJson.access_token);
+  const profileResponse = await fetch(profileRequest.url, profileRequest.init);
   if (!profileResponse.ok) throw new Error(`Discord profile lookup failed: ${profileResponse.status}`);
   const profile = await profileResponse.json();
-  const discordId = String(profile.id ?? "").trim();
-  if (!/^\d+$/.test(discordId)) throw new Error("Discord profile did not include a usable id");
   const loginAt = new Date().toISOString();
-  statements.upsertUserAccount.run(discordId, String(profile.username ?? ""), String(profile.global_name ?? ""), String(profile.avatar ?? ""), loginAt, loginAt);
-  const user = statements.userByDiscordId.get(discordId);
+  const account = discordOAuthProfileAccount(profile, loginAt);
+  statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
+  const user = statements.userByDiscordId.get(account.discordId);
   statements.updateUserLastLogin.run(loginAt, user.id);
   const session = createAppUserSession(user.id);
   const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
-  res.writeHead(302, { location: returnTo, "set-cookie": [clearAuthStateCookie(), session.cookie, ...(adminSession ? [adminSession.cookie] : [])] });
+  const redirect = discordOAuthSuccessRedirect({
+    returnTo,
+    clearStateCookie: clearAuthStateCookie(),
+    userSessionCookie: session.cookie,
+    adminSessionCookie: adminSession?.cookie,
+  });
+  res.writeHead(302, { location: redirect.location, "set-cookie": redirect.setCookie });
   res.end();
   return true;
 }
