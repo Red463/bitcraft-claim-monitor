@@ -35,7 +35,7 @@ flowchart LR
 | Layer | Primary files | Responsibilities |
 | --- | --- | --- |
 | Frontend shell | `apps/bitcraft-local/src/main.tsx`, `src/AppShell.tsx` | React bootstrap, route selection, global refresh, app settings, admin shell, auth, local settings, help/legal chrome, analytics consent, toasts, and notification drawer orchestration. |
-| Main pages | `apps/bitcraft-local/src/pages/*`, `src/pages/MainPages.tsx` | Extracted pages plus remaining legacy page glue for dashboard, inventory, market, production, public craft finder, leaderboard, map, admin, and activity until each page boundary is split safely. |
+| Main pages | `apps/bitcraft-local/src/pages/*`, `src/pages/MainPages.tsx` | Extracted pages plus remaining legacy page glue for market, production, and admin until each page boundary is split safely. |
 | Bot dashboard components | `apps/bitcraft-local/src/components/bot/*`, `src/styles/bot-dashboard.css` | Individual `/bot` dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated shell/navigation styles. |
 | Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts`, `src/notifications/*` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers, notification generation, dedupe, settings normalization, and smoke-verification helpers. |
 | Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, notification activity redaction, deal-alert payload formatting, market activity normalization, production activity normalization, recipe catalog normalization, and scheduled-job schedule handling. |
@@ -54,14 +54,14 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 | `/?page=members` | Members | Settlement roster, online state, equipment, details. | `src/pages/MembersPage.tsx` | Public |
 | `/?page=skills` | Professions | Profession levels, tiers, coverage. | `src/pages/SkillsPage.tsx` | Public |
 | `/?page=production` | Production | Current crafts, member eligibility, passive crafts. | `src/main.tsx` (`Production`) | Public |
-| `/?page=publiccrafts` | Public Craft Finder | Find public crafts by profession/region. | `src/pages/MainPages.tsx` (`PublicCraftFinder`) | Public |
+| `/?page=publiccrafts` | Public Craft Finder | Find public crafts by profession/region. | `src/pages/PublicCraftFinderPage.tsx` (`PublicCraftFinder`) | Public |
 | `/?page=craftcalc` | Craft Calculator | Build recipe trees and material steps. | `src/pages/CraftCalculatorPage.tsx`, `src/utils/recipeTree.ts` | Public |
-| `/?page=inventory` | Inventory | Containers and core material stock. | `src/pages/MainPages.tsx` (`Inventory`) | Public |
+| `/?page=inventory` | Inventory | Containers and core material stock. | `src/pages/InventoryPage.tsx` (`Inventory`) | Public |
 | `/?page=construction` | Construction | Active construction projects and material needs. | `src/pages/ConstructionPage.tsx` | Public |
 | `/?page=research` | Research | Research/unlock state. | `src/pages/ResearchPage.tsx` | Public |
 | `/?page=market` | Market | Listings, analytics, price finder, buy order finder. | `src/main.tsx` (`Market`), `src/utils/marketOrders.ts` | Public |
 | `/?page=empire` | Region | Regional settlement context and rankings. | `src/pages/RegionPage.tsx` | Public |
-| `/?page=map` | Map | Embedded map with resource/player/region helpers. | `src/main.tsx` (`MapPanel`) | Public |
+| `/?page=map` | Map | Embedded map with resource/player/region helpers. | `src/pages/MapPage.tsx` (`MapPanel`) | Public |
 | `/?page=sync` | Sync | Optional BitCraft Sync embed. | `src/pages/SyncPage.tsx` | Public |
 | `/?page=activity` | Activity | Stored local settlement activity history. | `src/main.tsx` (`ActivityPanel`) | Public |
 | `/?page=admin` | Admin | Admin settings, jobs, users, data, analytics. | `src/main.tsx` (`AdminPanel`) | Admin session |
@@ -138,10 +138,10 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=publiccrafts`
 - Purpose: locate public crafts by profession and region.
-- Key components/functions: `PublicCraftFinder` in `src/pages/MainPages.tsx`.
+- Key components/functions: `PublicCraftFinder` in `src/pages/PublicCraftFinderPage.tsx`.
 - Data needs: public craft list, active region options, profession filter, settlement/map focus metadata.
 - Data source: BitJita craft endpoints through `/api/bitjita/*`, active regions through `/api/local/regions/active`.
-- Fetching/transformation: component filters public crafts by selected profession/region and can pass settlement focus to `MapPanel`.
+- Fetching/transformation: component filters public crafts by selected profession/region and can pass settlement focus to the routed Map page.
 - Actions: profession filter, region filter, click settlement/location to open map.
 - Auth: public.
 - Loading/error/empty states: local loading/error states in component.
@@ -165,7 +165,7 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=inventory`
 - Purpose: display container contents and core material stock.
-- Key components/functions: `Inventory` in `src/pages/MainPages.tsx`; material and item image helpers in `src/utils/items.ts`.
+- Key components/functions: `Inventory` in `src/pages/InventoryPage.tsx`; material and item image helpers in `src/utils/items.ts`.
 - Data needs: inventories/containers, item quantities, core material identification.
 - Data source: `/claims/:claimId/inventories` through `useBitjitaData`.
 - Fetching/transformation: inventory data is normalized from BitJita wrappers, grouped by container, and filtered by selected material/category controls.
@@ -232,7 +232,7 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=map`
 - Purpose: embedded map with active regions, resource finder, player/settlement focus.
-- Key components/functions: `MapPanel` in `src/main.tsx`.
+- Key components/functions: `MapPanel` in `src/pages/MapPage.tsx`.
 - Data needs: claim region, members/player IDs, resource/catalog data, active regions.
 - Data source: local `/api/local/map/catalog` and `/api/local/regions/active`, plus BitJita resource/creature data through server helpers.
 - Fetching/transformation: component builds an external map URL with `resourceId`, `playerId`, and `regionId` query parameters.

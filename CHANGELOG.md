@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.86] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving Inventory, Map, and Public Craft Finder pages out of the legacy main page bundle.
+- Moved shared active-region loading and labels into a tested hook so page components no longer own duplicate region helper logic.
+- Updated developer and release-readiness documentation with the latest page boundaries.
+
 ## [1.0.0-beta.85] - 2026-06-29
 
 ### Changed
