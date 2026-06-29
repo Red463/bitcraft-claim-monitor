@@ -167,6 +167,14 @@ test("market page styles live in the market stylesheet", () => {
     ".opportunity-strip",
     ".pagination-row",
     ".price-recommendation",
+    ".deal-watch-action",
+    ".deal-watchlist-section",
+    ".deal-watch-list",
+    ".deal-watch-row",
+    ".deal-watch-meta",
+    ".deal-watch-actions",
+    ".deal-watch-threshold",
+    ".deal-watch-empty",
   ];
 
   const startsOwnedSelector = (css, selector) => css
@@ -482,5 +490,87 @@ test("map page styles live in the map stylesheet", () => {
   for (const selector of mapSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(mapCss.includes(selector), true, `${selector} should live in map.css`);
+  }
+});
+
+
+test("admin page and loader styles live in the admin stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const adminCssUrl = new URL("../src/styles/admin.css", import.meta.url);
+  assert.equal(existsSync(adminCssUrl), true);
+  const adminCss = readFileSync(adminCssUrl, "utf8");
+  const adminSelectors = [
+    ".admin-loading-panel",
+    ".admin-session-loader",
+    ".admin-loader-orb",
+    ".admin-loader-track",
+    ".admin-loader-steps",
+    ".admin-grid",
+    ".admin-login",
+    ".admin-console",
+    ".admin-page",
+    ".admin-tabs",
+    ".admin-section",
+    ".admin-metrics",
+    ".collector-settings-list",
+    ".scheduled-job-list",
+    ".scheduled-job-row",
+    ".database-browser",
+    ".database-browser-header",
+    ".database-toolbar",
+    ".database-export-actions",
+    ".admin-users",
+    ".audit-list",
+    ".backup-list",
+    ".maintenance-card",
+    ".analytics-admin",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/admin\.css";/);
+  for (const selector of adminSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(adminCss.includes(selector), true, `${selector} should live in admin.css`);
+  }
+});
+
+test("Discord admin and bot section styles live in the Discord admin stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const discordAdminCssUrl = new URL("../src/styles/discord-admin.css", import.meta.url);
+  assert.equal(existsSync(discordAdminCssUrl), true);
+  const discordAdminCss = readFileSync(discordAdminCssUrl, "utf8");
+  const discordAdminSelectors = [
+    ".discord-admin",
+    ".bot-admin-section",
+    ".bot-section-setup",
+    ".discord-presence-card",
+    ".discord-rule-grid",
+    ".discord-channel-card",
+    ".craft-channel-grid",
+    ".colour-role-grid",
+    ".discord-panel-grid",
+    ".role-option-list",
+    ".discord-tool-actions",
+    ".moderation-grid",
+    ".discord-audit-report",
+    ".discord-report",
+    ".discord-test-grid",
+    ".role-manager-layout",
+    ".discord-terminal",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/discord-admin\.css";/);
+  for (const selector of discordAdminSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(discordAdminCss.includes(selector), true, `${selector} should live in discord-admin.css`);
   }
 });
