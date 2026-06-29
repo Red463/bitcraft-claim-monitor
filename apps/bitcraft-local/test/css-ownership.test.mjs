@@ -37,7 +37,36 @@ test("bot dashboard shell styles live in the bot dashboard stylesheet", () => {
     assert.equal(botCss.includes(selector), true, `${selector} should live in bot-dashboard.css`);
   }
 });
-test("leaderboard page styles live in the leaderboard stylesheet", () => {
+test("dashboard page styles live in the dashboard stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const dashboardCssUrl = new URL("../src/styles/dashboard.css", import.meta.url);
+  assert.equal(existsSync(dashboardCssUrl), true);
+  const dashboardCss = readFileSync(dashboardCssUrl, "utf8");
+  const dashboardSelectors = [
+    ".dashboard-page",
+    ".dashboard-topbar",
+    ".dashboard-kpis",
+    ".dashboard-metric",
+    ".dashboard-main-grid",
+    ".dashboard-feed",
+    ".dashboard-feed-row",
+    ".dashboard-member-list",
+    ".dashboard-production-list",
+    ".dashboard-alert-list",
+    ".dashboard-empty",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/dashboard\.css";/);
+  for (const selector of dashboardSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(dashboardCss.includes(selector), true, `${selector} should live in dashboard.css`);
+  }
+});test("leaderboard page styles live in the leaderboard stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
   const leaderboardCssUrl = new URL("../src/styles/leaderboard.css", import.meta.url);
