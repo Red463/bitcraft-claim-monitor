@@ -74,7 +74,7 @@
 
 .public-craft-hint svg { color: #f0c64f; }
 
-.map-location-link { margin-top: 3px; border: 0; background: transparent; color: var(--gold); padding: 0; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 11px; }
+.map-location-link { margin-top: 3px; min-height: 28px; border: 0; background: transparent; color: var(--gold); padding: 0 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 11px; }
 .map-location-link:hover { text-decoration: underline; }
 
 .public-craft-finder .table-wrap {

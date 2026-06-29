@@ -93,13 +93,21 @@ function dealAlertId(alert: AnyRecord): string | null {
   return normalized ? normalized : null;
 }
 
+function dealAlertKnownId(alert: AnyRecord, scopeKey = ""): string | null {
+  const id = dealAlertId(alert);
+  if (!id) return null;
+  const normalizedScope = String(scopeKey).trim();
+  return normalizedScope ? `${normalizedScope}:${id}` : id;
+}
+
 export function dealAlertQueueToastDrafts(
   knownIds: Set<string> | null,
   alerts: AnyRecord[],
   limit = 3,
+  scopeKey = "",
 ): { knownIds: Set<string>; drafts: ToastNoticeDraft[]; seeded: boolean } {
-  const identifiableAlerts = alerts.filter((alert) => dealAlertId(alert) != null);
-  const selection = selectUnseenNotificationItems(knownIds, identifiableAlerts, (alert) => dealAlertId(alert) as string, limit);
+  const identifiableAlerts = alerts.filter((alert) => dealAlertKnownId(alert, scopeKey) != null);
+  const selection = selectUnseenNotificationItems(knownIds, identifiableAlerts, (alert) => dealAlertKnownId(alert, scopeKey) as string, limit);
   if (selection.seeded) return { knownIds: selection.knownIds, drafts: [], seeded: true };
   return {
     knownIds: selection.knownIds,

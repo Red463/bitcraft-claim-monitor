@@ -68,7 +68,7 @@ Purpose: prove the signed-in user's deal-alert feed creates browser toasts throu
 9. Open Recent notifications and verify the deal-alert entry persists there.
 10. Dismiss the visible toast if it is still present, reopen Recent notifications, and verify the drawer entry remains.
 11. Click the drawer entry and verify it navigates to Market.
-12. Sign out or switch to a user without that alert and confirm the same private deal-alert row is not exposed as a browser notification to the wrong user.
+12. Sign out or switch to a user without that alert and confirm the same private deal-alert row is not exposed as a browser notification to the wrong user. Automated coverage now also verifies per-user deal-alert dedupe scoping, so this manual step should focus on the real signed-in feed and privacy boundary.
 
 Expected result:
 
@@ -80,5 +80,5 @@ Expected result:
 
 Do not mark release notification verification complete until:
 
-- `liveSourceNotificationVerificationComplete()` returns `true`, or every required item has dated evidence recorded in `docs/release-readiness-audit.md` and its status has been updated to `verified` with matching tests.
+- `liveSourceNotificationVerificationComplete()` returns `true`, or every required item has dated evidence recorded in `docs/release-readiness-audit.md`, its `LIVE_SOURCE_NOTIFICATION_CHECKS` row includes `liveEvidence` with a date/reference, and its status has been updated to `verified` with matching tests.
 - The full app build and test suite pass after any status update.

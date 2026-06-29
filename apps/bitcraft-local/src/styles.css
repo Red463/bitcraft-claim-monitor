@@ -66,7 +66,7 @@ aside::after { content: ""; position: absolute; inset: 0; pointer-events: none; 
 .brand svg { width: 29px; height: 29px; padding: 5px; border: 1px solid rgba(240,198,79,.42); background: linear-gradient(180deg, rgba(240,198,79,.15), rgba(240,198,79,.05)); border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 18px rgba(0,0,0,.3); }
 .brand > img { width: 30px; height: 30px; object-fit: contain; border-radius: 8px; filter: drop-shadow(0 8px 15px rgba(0,0,0,.36)); transition: width .22s ease, height .22s ease; }
 .brand > div { min-width: 0; transition: opacity .16s ease, transform .2s ease, max-width .24s ease; max-width: 160px; }
-.sidebar-toggle { margin-left: auto; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: #9aa6b6; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color .16s ease, background .16s ease, transform .16s ease, margin .22s ease, width .22s ease, height .22s ease; }
+.sidebar-toggle { margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #9aa6b6; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: color .16s ease, background .16s ease, transform .16s ease, margin .22s ease, width .22s ease, height .22s ease; }
 .sidebar-toggle svg { width: 16px; height: 16px; padding: 0; border: 0; background: transparent; border-radius: 0; }
 .sidebar-toggle:hover { color: var(--active-color); background: color-mix(in srgb, var(--active-bg) 42%, transparent); transform: translateY(-1px); }
 .sidebar-toggle:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; box-shadow: 0 0 0 3px var(--focus-ring); }
@@ -85,7 +85,7 @@ nav a.active, nav button.active { color: var(--active-color); background: linear
 nav a.active::before, nav button.active::before { content: ""; position: absolute; left: 5px; top: 9px; bottom: 9px; width: 2px; border-radius: 99px; background: var(--active-color); box-shadow: 0 0 10px color-mix(in srgb, var(--active-color) 42%, transparent); }
 nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-section { display: grid; gap: 4px; min-width: 0; }
-.sidebar-section-title { min-height: 24px; width: 100%; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #788596; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--font-micro); font-weight: 850; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; }
+.sidebar-section-title { min-height: 30px; width: 100%; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #788596; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--font-micro); font-weight: 850; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; }
 .sidebar-section-title:hover { color: #c0cad8; background: rgba(255,255,255,.025); transform: none; }
 .sidebar-section-title svg { opacity: .72; transition: transform .16s ease, color .16s ease; }
 .sidebar-section.has-active .sidebar-section-title { color: color-mix(in srgb, var(--active-color) 72%, #b2bccb); }
@@ -234,7 +234,7 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
 .app-footer .footer-links { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .app-footer .footer-copy { color: #d9e0ec; font-weight: 600; flex: 1; min-width: 220px; }
 .app-footer .footer-links > :not(.footer-copy) { align-self: center; }
-.app-footer a:not(.footer-bmc), .footer-link { color: #aab3c2; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; border: 1px solid transparent; border-radius: 7px; padding: 0 7px; transition: color .16s ease, border-color .16s ease, transform .16s ease; }
+.app-footer a:not(.footer-bmc), .footer-link { color: #aab3c2; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; border: 1px solid transparent; border-radius: 7px; padding: 0 7px; transition: color .16s ease, border-color .16s ease, transform .16s ease; }
 .footer-link { background: transparent; cursor: pointer; font-size: 12px; }
 .app-footer a:not(.footer-bmc):hover, .footer-link:hover { color: var(--gold); border-color: rgba(240,198,79,.18); transform: translateY(-1px); }
 .footer-bmc {
@@ -931,7 +931,8 @@ th, td { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.055); te
 th { color: var(--gold); font: 600 12px Rajdhani, sans-serif; text-transform: uppercase; background: #12151b; position: sticky; top: 0; }
 .table-sort-button {
   width: 100%;
-  padding: 0;
+  min-height: 28px;
+  padding: 0 6px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1196,7 +1197,7 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .table-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: -10px; }
 .table-heading h3 { color: var(--gold); }
 .table-heading span { color: var(--muted); font-size: 11px; }
-.sort-button { border: 1px solid transparent; background: transparent; color: inherit; padding: 0 2px; border-radius: 5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; text-transform: inherit; font: inherit; }
+.sort-button { min-height: 28px; min-width: 28px; border: 1px solid transparent; background: transparent; color: inherit; padding: 0 6px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; text-transform: inherit; font: inherit; }
 .sort-button:disabled { cursor: default; }
 .full-height { min-height: calc(100vh - 57px); grid-template-rows: auto auto auto minmax(520px, 1fr); }
 .form-card { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 16px; display: grid; gap: 14px; }

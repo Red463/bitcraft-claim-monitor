@@ -352,6 +352,14 @@ corepack pnpm --filter @workspace/bitcraft-local run dev
 corepack pnpm --filter @workspace/bitcraft-local run build
 ```
 
+### Test Check
+
+```bash
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+Use [`docs/developer-guide.md`](./docs/developer-guide.md) for architecture conventions and [`docs/release-readiness-audit.md`](./docs/release-readiness-audit.md) for the current public-release evidence and blockers. Live browser notification source checks that cannot be proven by sample smoke notices are tracked in [`docs/notification-live-source-verification.md`](./docs/notification-live-source-verification.md).
+
 ### Isolated Development Database
 
 To avoid writing test history into the default local database:
@@ -432,6 +440,7 @@ deploy/                              systemd and Caddy production configuration
 DEPLOYMENT.md                        VPS installation and maintenance guide
 docs/developer-guide.md              Maintainer architecture and contribution guide
 docs/notification-system.md          Browser notification architecture and verification notes
+docs/notification-live-source-verification.md  Live-source notification verification runbook
 docs/release-readiness-audit.md      Current public-release readiness audit and blockers
 BITJITA_API_AUDIT.md                 Public API audit and integration notes
 ```

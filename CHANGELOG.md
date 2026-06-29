@@ -8,6 +8,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.96] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving more SQLite schema, default settings, owner bootstrap, release metadata, and scheduled-job logic into focused tested server helpers.
+- Improved browser notification reliability by scoping signed-in deal-alert deduplication per user and documenting the remaining live-source verification checks.
+- Improved public-release CSS and UX safeguards for shared sort controls, app chrome controls, and Public Craft Finder actions.
+- Updated README, developer, notification, and release-readiness documentation with current verification evidence and remaining live-source blockers.
+
 ## [1.0.0-beta.95] - 2026-06-29
 
 ### Changed

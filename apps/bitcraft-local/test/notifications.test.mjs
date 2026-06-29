@@ -421,6 +421,70 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
   ]);
 });
 
+test("browserNotificationSourceDrafts scopes deal-alert dedupe to the signed-in user", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const userA = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: {
+      refreshToken: 1,
+      userKey: "discord-a",
+      alerts: [{ id: 2, itemName: "User A Hide", unitPrice: 5, discountPercent: 20, baselineAverage: 8, baselineWindowDays: 7 }],
+    },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  const userBBaseline = browserNotificationSourceDrafts(userA.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: {
+      refreshToken: 2,
+      userKey: "discord-b",
+      alerts: [{ id: 1, itemName: "User B Old Hide", unitPrice: 6, discountPercent: 20, baselineAverage: 9, baselineWindowDays: 7 }],
+    },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.deepEqual(userBBaseline.drafts, []);
+
+  const userBNext = browserNotificationSourceDrafts(userBBaseline.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: {
+      refreshToken: 3,
+      userKey: "discord-b",
+      alerts: [
+        { id: 2, itemName: "User B New Hide", unitPrice: 4, discountPercent: 45, baselineAverage: 8, baselineWindowDays: 7 },
+        { id: 1, itemName: "User B Old Hide", unitPrice: 6, discountPercent: 20, baselineAverage: 9, baselineWindowDays: 7 },
+      ],
+    },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.deepEqual(userBNext.drafts.map((draft) => draft.sourceKey), ["deal-alert:2"]);
+  assert.equal(userBNext.drafts[0].body.includes("User B New Hide"), true);
+});
+
 test("browserNotificationSourceDrafts records disabled deal alerts without replaying them later", () => {
   const helpers = {
     activity: {

@@ -45,6 +45,35 @@ test("shared command panel primitives use neutral class names", () => {
   assert.equal(globalCss.includes(".command-filter-header"), true);
   assert.deepEqual(forbidden, []);
 });
+test("shared table sort buttons keep a usable click target", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const sortRule = globalCss.match(/\.table-sort-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(sortRule, /min-height:\s*28px\b/);
+  assert.match(sortRule, /padding:\s*0\s+6px\b/);
+});
+test("shared app chrome controls keep usable click targets", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const sidebarTitleRule = globalCss.match(/\.sidebar-section-title\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const footerLinkRule = globalCss.match(/\.app-footer a:not\(\.footer-bmc\),\s*\.footer-link\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const sidebarToggleRule = globalCss.match(/\.sidebar-toggle\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(sidebarTitleRule, /min-height:\s*30px\b/);
+  assert.match(footerLinkRule, /min-height:\s*30px\b/);
+  assert.match(sidebarToggleRule, /(?:width:\s*30px\b[\s\S]*height:\s*30px\b|height:\s*30px\b[\s\S]*width:\s*30px\b)/);
+});
+test("public craft table actions keep usable click targets", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const publicCraftCss = readFileSync(new URL("../src/styles/public-craft.css", import.meta.url), "utf8");
+  const sortRule = globalCss.match(/\.sort-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const mapLinkRule = publicCraftCss.match(/\.map-location-link\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(sortRule, /min-height:\s*28px\b/);
+  assert.match(sortRule, /min-width:\s*28px\b/);
+  assert.match(sortRule, /padding:\s*0\s+6px\b/);
+  assert.match(mapLinkRule, /min-height:\s*28px\b/);
+  assert.match(mapLinkRule, /padding:\s*0\s+4px\b/);
+});
 test("bot dashboard shell styles live in the bot dashboard stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const botCssUrl = new URL("../src/styles/bot-dashboard.css", import.meta.url);

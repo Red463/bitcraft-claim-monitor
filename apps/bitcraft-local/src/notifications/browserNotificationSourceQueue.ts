@@ -24,6 +24,7 @@ export type NotificationActivitySource = {
 export type DealAlertSource = {
   alerts: AnyRecord[];
   refreshToken: number;
+  userKey?: string | null;
 };
 
 export type BrowserNotificationSourceQueueOptions = {
@@ -43,7 +44,7 @@ export type BrowserNotificationSourceHelpers = {
 
 export type BrowserNotificationSourceSnapshots = {
   activity: MarketActivityToastSnapshot | null;
-  dealAlerts: Set<string> | null;
+  dealAlerts: { userKey: string; knownIds: Set<string> } | null;
   production: ProductionCraftQueueSnapshot | null;
 };
 
@@ -76,8 +77,10 @@ export function browserNotificationSourceDrafts(
   }
 
   if (options.dealAlerts.refreshToken) {
-    const result = dealAlertQueueToastDrafts(snapshots.dealAlerts, options.dealAlerts.alerts);
-    snapshots.dealAlerts = result.knownIds;
+    const dealAlertUserKey = String(options.dealAlerts.userKey ?? "").trim();
+    const previousDealAlertIds = snapshots.dealAlerts?.userKey === dealAlertUserKey ? snapshots.dealAlerts.knownIds : null;
+    const result = dealAlertQueueToastDrafts(previousDealAlertIds, options.dealAlerts.alerts, 3, dealAlertUserKey);
+    snapshots.dealAlerts = { userKey: dealAlertUserKey, knownIds: result.knownIds };
     const marketToastsEnabled = (options.appToastSettings.marketListings || options.appToastSettings.marketSales)
       && (options.userToastSettings.marketListings || options.userToastSettings.marketSales);
     if (marketToastsEnabled) drafts.push(...result.drafts);

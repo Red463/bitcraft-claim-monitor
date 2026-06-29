@@ -74,3 +74,83 @@ export function scheduledJobScheduleLabel(schedule) {
   if (config.frequency === "monthly") return `Monthly on day ${config.dayOfMonth} at ${config.time}`;
   return `Daily at ${config.time}`;
 }
+
+export function seedScheduledJobs({
+  db,
+  statements,
+  registry,
+  now = () => new Date().toISOString(),
+  nextRunIso = nextScheduledRunIso,
+}) {
+  const seededAt = now();
+  for (const [key, job] of Object.entries(registry)) {
+    statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextRunIso(job.schedule), seededAt);
+    const row = statements.getScheduledJob.get(key);
+    if (!row?.next_run_at) {
+      db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextRunIso(row?.schedule ?? job.schedule), seededAt, key);
+    }
+  }
+}
+
+export function recoverStaleScheduledJobs({
+  statements,
+  staleAfterMs = 15 * 60 * 1000,
+  now = () => new Date(),
+}) {
+  const current = now();
+  const cutoff = new Date(current.getTime() - staleAfterMs).toISOString();
+  const updatedAt = current.toISOString();
+  const nextRunAt = current.toISOString();
+  const staleAfterMinutes = Math.round(staleAfterMs / 60000);
+  const result = statements.resetStaleScheduledJobs.run(
+    `Recovered abandoned run after server restart or timeout. The previous run was still marked running for more than ${staleAfterMinutes} minutes.`,
+    nextRunAt,
+    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes }),
+    updatedAt,
+    cutoff,
+  );
+  return result.changes;
+}
+
+function safeJson(value, fallback = {}) {
+  try {
+    return JSON.parse(value ?? "");
+  } catch {
+    return fallback;
+  }
+}
+
+export function publicScheduledJobRow(row = {}) {
+  return {
+    key: row.job_key,
+    label: row.label,
+    description: row.description ?? "",
+    schedule: row.schedule,
+    scheduleLabel: scheduledJobScheduleLabel(row.schedule),
+    scheduleConfig: parseScheduledJobSchedule(row.schedule),
+    enabled: Boolean(row.enabled),
+    running: Boolean(row.running),
+    lastRunAt: row.last_run_at,
+    lastSuccessAt: row.last_success_at,
+    lastError: row.last_error,
+    nextRunAt: row.next_run_at,
+    metadata: safeJson(row.metadata_json, {}),
+    updatedAt: row.updated_at,
+  };
+}
+
+export function scheduledJobsStatus({
+  enabled,
+  statements,
+  recoverStaleJobs,
+  now = () => new Date(),
+}) {
+  recoverStaleJobs();
+  const recipeCatalogCount = toNumber(statements.recipeCatalogCount.get()?.count);
+  return {
+    enabled,
+    serverTime: now().toISOString(),
+    recipeCatalogCount,
+    jobs: statements.listScheduledJobs.all().map(publicScheduledJobRow),
+  };
+}

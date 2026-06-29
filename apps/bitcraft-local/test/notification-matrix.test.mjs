@@ -56,6 +56,16 @@ test("notification live-source checklist separates smoke evidence from real sour
   }
 });
 
+test("verified live-source checks carry dated evidence while required checks stay blockers", () => {
+  for (const check of LIVE_SOURCE_NOTIFICATION_CHECKS) {
+    if (check.status === "verified") {
+      assert.match(check.liveEvidence?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.equal(check.liveEvidence?.reference.includes("docs/"), true);
+    } else {
+      assert.equal(check.liveEvidence, undefined);
+    }
+  }
+});
 test("live-source checklist exposes required release blockers", () => {
   const required = liveSourceNotificationChecksForStatus("required");
   const verified = liveSourceNotificationChecksForStatus("verified");

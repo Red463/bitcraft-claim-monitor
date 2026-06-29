@@ -125,6 +125,10 @@ function DashboardApp() {
   const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active);
   const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
   const dealAlerts = useDealAlerts(dealRefreshToken);
+  const dealAlertSource = React.useMemo(
+    () => ({ ...dealAlerts, userKey: userAuth.user?.discordId ?? "" }),
+    [dealAlerts, userAuth.user?.discordId],
+  );
   const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
@@ -325,7 +329,7 @@ function DashboardApp() {
     appToastSettings: appSettings.toastSettings,
     userToastSettings: normalizedUserToastSettings,
     notificationActivity,
-    dealAlerts,
+    dealAlerts: dealAlertSource,
     productionCrafts: data.crafts,
     productionCraftCatalog: data.raw?.crafts ?? state.data?.crafts,
     hasProductionData: Boolean(state.data),

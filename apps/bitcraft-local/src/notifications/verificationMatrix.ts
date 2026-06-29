@@ -64,12 +64,18 @@ export const SUPPORTED_BROWSER_NOTIFICATION_TYPES: readonly BrowserNotificationT
 
 export type LiveSourceNotificationStatus = "verified" | "required";
 
+export type LiveSourceNotificationEvidence = {
+  date: string;
+  reference: string;
+};
+
 export type LiveSourceNotificationCheck = {
   typeId: BrowserNotificationTypeId;
   source: string;
   status: LiveSourceNotificationStatus;
   browserSmokeEvidence: string;
   liveVerification: string;
+  liveEvidence?: LiveSourceNotificationEvidence;
 };
 
 export const LIVE_SOURCE_NOTIFICATION_CHECKS: readonly LiveSourceNotificationCheck[] = [
@@ -79,6 +85,7 @@ export const LIVE_SOURCE_NOTIFICATION_CHECKS: readonly LiveSourceNotificationChe
     status: "verified",
     browserSmokeEvidence: "Loopback smoke verified sample market-listing toasts on every routed main-app page.",
     liveVerification: "Verified through the notification-activity polling path with inserted market_new_listing rows, real refresh controls, drawer persistence, unread state, user setting gating, dismissal, and drawer navigation.",
+    liveEvidence: { date: "2026-06-28", reference: "docs/release-readiness-audit.md#notification-status" },
   },
   {
     typeId: "market-sale",
@@ -86,6 +93,7 @@ export const LIVE_SOURCE_NOTIFICATION_CHECKS: readonly LiveSourceNotificationChe
     status: "verified",
     browserSmokeEvidence: "Loopback smoke verified sample market-sale toasts on every routed main-app page.",
     liveVerification: "Verified through the notification-activity polling path with market sale activity rows, real refresh controls, drawer persistence, unread state, and no page-mounted source dependency.",
+    liveEvidence: { date: "2026-06-28", reference: "docs/release-readiness-audit.md#notification-status" },
   },
   {
     typeId: "market-deal-alert",
