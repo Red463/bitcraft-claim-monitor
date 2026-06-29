@@ -297,9 +297,9 @@ export function CraftCalculatorPage() {
         </div>
       </header>
 
-      <section className="production-command-panel craftcalc-controls">
-        <div className="market-command-header">
-          <span className="production-command-title"><Calculator size={15} /> Recipe lookup</span>
+      <section className="command-filter-panel craftcalc-controls">
+        <div className="command-filter-header">
+          <span className="command-filter-title"><Calculator size={15} /> Recipe lookup</span>
           <span>Item and cargo recipes are resolved recursively where BitJita exposes the chain.</span>
         </div>
         <div className="craftcalc-control-grid">
@@ -327,9 +327,9 @@ export function CraftCalculatorPage() {
       </section>
 
       {selectedTarget && recipeChoices.length ? (
-        <section className="production-command-panel craftcalc-recipe-picker">
-          <div className="market-command-header">
-            <span className="production-command-title"><Workflow size={15} /> Recipe routes</span>
+        <section className="command-filter-panel craftcalc-recipe-picker">
+          <div className="command-filter-header">
+            <span className="command-filter-title"><Workflow size={15} /> Recipe routes</span>
             <span>Choose which BitJita recipe to use when an item has multiple valid routes.</span>
           </div>
           <div className="craftcalc-route-list">

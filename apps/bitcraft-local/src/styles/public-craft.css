@@ -58,7 +58,7 @@
   font-weight: 800;
 }
 
-.public-craft-command-panel .production-command-main .inline-field {
+.public-craft-command-panel .command-filter-main .inline-field {
   flex: 1 1 260px;
 }
 
@@ -73,6 +73,9 @@
 }
 
 .public-craft-hint svg { color: #f0c64f; }
+
+.map-location-link { margin-top: 3px; border: 0; background: transparent; color: var(--gold); padding: 0; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 11px; }
+.map-location-link:hover { text-decoration: underline; }
 
 .public-craft-finder .table-wrap {
   border-color: rgba(108,123,145,.24);
@@ -109,4 +112,11 @@
 .public-craft-page .select-control {
   border-color: rgba(154,168,190,.28);
   background: #080d14;
+}
+
+@media (pointer: coarse) {
+  .map-location-link {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

@@ -286,9 +286,9 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
         <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
         <MiniStat icon={<TrendingUp />} label="Sales Revenue" value={formatCompactNumber(confirmedRevenue)} />
       </div>
-      <section className="production-command-panel market-command-panel">
-        <div className="market-command-header">
-          <span className="production-command-title"><CircleDollarSign size={15} /> Market tools</span>
+      <section className="command-filter-panel market-command-panel">
+        <div className="command-filter-header">
+          <span className="command-filter-title"><CircleDollarSign size={15} /> Market tools</span>
           <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : "Browse settlement market data by view and member."}</span>
         </div>
         <div className="market-tool-row">
@@ -367,9 +367,9 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
         <MiniStat icon={<CircleDollarSign />} label="Top Value" value={highest[0] ? formatCompactNumber(toNumber(highest[0].price) * toNumber(highest[0].quantity || 1)) : "-"} />
       </div>
       <div className="highlight-grid market-highlights">{highest.map((listing) => <div key={listing.entityId ?? listing.itemName}><ItemLabel item={{ ...listing, name: listing.itemName }} name={listing.itemName} /><span>{formatNumber(toNumber(listing.price) * toNumber(listing.quantity || 1))}g - {formatNumber(listing.price)}g ea</span></div>)}</div>
-      <section className="production-command-panel market-filter-panel">
-        <div className="market-command-header">
-          <span className="production-command-title"><Search size={15} /> Listing filters</span>
+      <section className="command-filter-panel market-filter-panel">
+        <div className="command-filter-header">
+          <span className="command-filter-title"><Search size={15} /> Listing filters</span>
           <span>{formatNumber(rows.length)} visible rows</span>
         </div>
         <div className="market-filter-grid">

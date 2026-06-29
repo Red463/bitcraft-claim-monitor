@@ -101,7 +101,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error }: { act
         <MiniStat icon={<Building2 />} label={memberFilter === "All" ? "System Changes" : "Other Changes"} value={formatNumber(settlementChanges)} title={memberFilter === "All" ? "Within loaded history" : "Not attributed to members"} />
         <MiniStat icon={<RefreshCw />} label="Latest Event" value={latestEvent ? timeAgo(latestEvent) : "-"} title={latestEvent ? dateLabel(latestEvent) : "Awaiting activity"} />
       </div>
-      <section className="production-command-panel activity-command-panel" aria-label="Activity filters">
+      <section className="command-filter-panel activity-command-panel" aria-label="Activity filters">
         <div className="activity-command-head">
           <strong><Activity size={16} /> Activity Filters</strong>
           <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>

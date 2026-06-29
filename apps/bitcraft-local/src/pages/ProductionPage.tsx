@@ -217,9 +217,9 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
         <MiniStat icon={<TrendingUp />} label="Total XP" value={formatNumber(totalProductionXp)} />
         <MiniStat icon={<Star />} label="XP Remaining" value={formatNumber(remainingProductionXp)} />
       </div>
-      <div className="production-command-panel">
-        <div className="production-command-main">
-          <span className="production-command-title"><Wrench size={15} /> Production controls</span>
+      <div className="command-filter-panel">
+        <div className="command-filter-main">
+          <span className="command-filter-title"><Wrench size={15} /> Production controls</span>
           <label className="inline-field"><span>Member</span>
             <select className="select-control" value={selectedMemberId} onChange={(event) => { onSelectMember(event.target.value); trackAnalyticsEvent("production_eligibility_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
               <option value="All">All members</option>

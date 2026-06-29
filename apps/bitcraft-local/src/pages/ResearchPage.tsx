@@ -75,9 +75,9 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
           ))}
         </div>
       ) : null}
-      <section className="production-command-panel research-command-panel">
+      <section className="command-filter-panel research-command-panel">
         <div className="research-command-header">
-          <span className="production-command-title"><Search size={15} /> Research filters</span>
+          <span className="command-filter-title"><Search size={15} /> Research filters</span>
           <span>{formatNumber(matching.length)} matching technologies</span>
         </div>
         <div className="research-filter-grid">

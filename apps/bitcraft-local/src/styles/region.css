@@ -170,7 +170,7 @@
 .region-table-panel {
   padding: 12px;
 }
-.region-table-panel .market-command-header {
+.region-table-panel .command-filter-header {
   padding-bottom: 10px;
   border-bottom: 1px solid rgba(154,168,190,.12);
 }

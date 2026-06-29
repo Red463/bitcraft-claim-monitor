@@ -236,7 +236,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
             <MiniStat icon={<Shield />} label="Under siege" value={formatNumber(towerSummary.underSiege)} />
             <MiniStat icon={<Zap />} label="Active towers" value={formatNumber(towerSummary.activeTowers)} />
           </div>
-          <section className="production-command-panel empires-watch-controls">
+          <section className="command-filter-panel empires-watch-controls">
             <strong><Clock size={15} /> Inactivity threshold</strong>
             <label className="field compact-field"><span>Days offline</span><input value={inactiveDays} onChange={(event) => setInactiveDays(event.target.value.replace(/\D/g, "").slice(0, 3) || "1")} /></label>
           </section>

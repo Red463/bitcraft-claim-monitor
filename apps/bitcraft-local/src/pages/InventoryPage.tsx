@@ -187,9 +187,9 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
           </div>
         </section>
       ) : null}
-      <div className="production-command-panel inventory-command-panel">
+      <div className="command-filter-panel inventory-command-panel">
         <div className="inventory-command-header">
-          <span className="production-command-title"><Search size={15} /> Inventory filters</span>
+          <span className="command-filter-title"><Search size={15} /> Inventory filters</span>
           <div className="inventory-command-actions">
             {selectedCoreMaterial ? <button className="mini-action active" onClick={() => setCoreMaterialFilter("All")}><X size={13} /> {selectedCoreMaterial.label} only</button> : null}
             <label className="inventory-inline-toggle"><span>Non-empty only</span><input type="checkbox" checked={nonEmptyOnly} onChange={(event) => setNonEmptyOnly(event.target.checked)} /></label>

@@ -139,9 +139,9 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
         <MiniStat icon={<GraduationCap />} label="Skill Filter" value={skillName} />
         <MiniStat icon={<TrendingUp />} label="XP Available" value={formatNumber(totalAvailableXp)} />
       </div>
-      <div className="production-command-panel public-craft-command-panel">
-        <div className="production-command-main">
-          <span className="production-command-title"><Search size={15} /> Craft filters</span>
+      <div className="command-filter-panel public-craft-command-panel">
+        <div className="command-filter-main">
+          <span className="command-filter-title"><Search size={15} /> Craft filters</span>
           <label className="inline-field"><span>Skill</span>
             <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("public_craft_skill_filter_used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
               <option value="All">All Skills</option>

@@ -98,8 +98,8 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
 
   return (
     <section className="price-finder buy-order-finder">
-      <div className="market-command-header price-finder-header">
-        <span className="production-command-title"><ShoppingBag size={15} /> Buy order lookup</span>
+      <div className="command-filter-header price-finder-header">
+        <span className="command-filter-title"><ShoppingBag size={15} /> Buy order lookup</span>
         <span>{state.loading ? "Updating cached orders..." : `${formatNumber(total)} cached orders`}</span>
       </div>
       <div className="price-finder-controls">

@@ -218,8 +218,8 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
   const maxWatches = toNumber(dealSettings.maxWatchesPerUser) || 10;
   return (
     <section className="price-finder">
-      <div className="market-command-header price-finder-header">
-        <span className="production-command-title"><Search size={15} /> Price lookup</span>
+      <div className="command-filter-header price-finder-header">
+        <span className="command-filter-title"><Search size={15} /> Price lookup</span>
         <span>{regionLabel} completed trades</span>
       </div>
       <div className="price-finder-controls">

@@ -12,6 +12,39 @@ test("setup workflow stylesheet keeps ownership to setup, workflow, and admin-me
 
   assert.deepEqual(forbiddenGlobalSelectors, []);
 });
+
+test("shared command panel primitives use neutral class names", () => {
+  const checkedFiles = [
+    "../src/styles.css",
+    "../src/styles/public-craft.css",
+    "../src/styles/market.css",
+    "../src/pages/ActivityPage.tsx",
+    "../src/pages/CraftCalculatorPage.tsx",
+    "../src/pages/EmpiresPage.tsx",
+    "../src/pages/InventoryPage.tsx",
+    "../src/pages/MarketPage.tsx",
+    "../src/pages/ProductionPage.tsx",
+    "../src/pages/PublicCraftFinderPage.tsx",
+    "../src/pages/ResearchPage.tsx",
+    "../src/pages/RegionPage.tsx",
+    "../src/pages/market/BuyOrderFinder.tsx",
+    "../src/pages/market/PriceFinder.tsx",
+  ];
+  const forbidden = [];
+  for (const relativePath of checkedFiles) {
+    const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+    for (const className of ["production-command-panel", "production-command-main", "production-command-title", "market-command-header"]) {
+      if (source.includes(className)) forbidden.push(relativePath + ": " + className);
+    }
+  }
+
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.equal(globalCss.includes(".command-filter-panel"), true);
+  assert.equal(globalCss.includes(".command-filter-main"), true);
+  assert.equal(globalCss.includes(".command-filter-title"), true);
+  assert.equal(globalCss.includes(".command-filter-header"), true);
+  assert.deepEqual(forbidden, []);
+});
 test("bot dashboard shell styles live in the bot dashboard stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const botCssUrl = new URL("../src/styles/bot-dashboard.css", import.meta.url);
@@ -105,8 +138,11 @@ test("production page styles live in the production stylesheet", () => {
     ".production-grid",
     ".production-card",
     ".production-member-banner",
+    ".production-page .production-member-banner",
     ".settlement-passive-crafts",
     ".private-craft-pill",
+    ".production-private-toggle",
+    ".production-crafter-line",
   ];
 
   const startsOwnedSelector = (css, selector) => css
@@ -132,6 +168,7 @@ test("public craft finder page styles live in the public craft stylesheet", () =
     ".public-craft-summary",
     ".public-craft-command-panel",
     ".public-craft-hint",
+    ".map-location-link",
   ];
 
   const startsOwnedSelector = (css, selector) => css

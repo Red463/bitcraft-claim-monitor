@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.90] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness stylesheet ownership by moving Production and Public Craft Finder selectors into page-owned CSS modules.
+- Renamed reused command/filter styling primitives to neutral `command-filter-*` classes and added guard coverage to prevent page-specific names returning.
+- Updated release-readiness and developer documentation with the latest CSS ownership boundaries.
+
 ## [1.0.0-beta.89] - 2026-06-29
 
 ### Added

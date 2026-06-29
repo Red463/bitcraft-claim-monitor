@@ -123,6 +123,83 @@
 }
 .production-page .production-member-banner svg,
 .production-page .production-member-banner strong { color: #56d5ff; }
+.production-private-toggle {
+  min-height: 38px;
+  border: 1px solid rgba(154,168,190,.22);
+  border-radius: 8px;
+  background: rgba(5,8,12,.78);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.production-private-toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.production-private-toggle svg { color: #f0c64f; }
+.production-private-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 38px;
+  height: 21px;
+  border: 1px solid rgba(154,168,190,.32);
+  border-radius: 999px;
+  background: rgba(154,168,190,.16);
+  position: relative;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.production-private-toggle input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #9aa6b6;
+  transition: transform .16s ease, background .16s ease;
+}
+.production-private-toggle input[type="checkbox"]:checked {
+  border-color: rgba(240,198,79,.58);
+  background: rgba(240,198,79,.22);
+  box-shadow: 0 0 0 3px rgba(240,198,79,.08);
+}
+.production-private-toggle input[type="checkbox"]:checked::before {
+  transform: translateX(17px);
+  background: #f0c64f;
+}
+.production-private-toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 2px;
+}
+.production-crafter-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(154,168,190,.12);
+}
+.production-crafter-line > span {
+  color: #aab5c4;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
 .production-page .production-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
