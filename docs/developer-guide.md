@@ -36,6 +36,9 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/styles/construction.css` owns the routed Construction page shell, summary cards, warning section, material needs, project cards, progress rows, completion controls, and page-specific responsive rules.
 - `src/styles/research.css` owns the routed Research page shell, summary cards, unlock chips, filter panel, research lanes, and technology cards. Shared `research-filter-field` form-control styles stay global because Market and Craft Calculator reuse that class.
 - `src/styles/activity.css` owns the routed Activity page shell, summary cards, filter panel, category controls, timeline, event rows, and search-loading state.
+- `src/styles/region.css` owns the routed Region page shell, rank and summary cards, regional insights, supply leaders, nearby settlement panel, and regional rankings table treatment.
+- `src/styles/sync.css` owns the routed Sync page shell, topbar, and embedded BitCraft Sync iframe treatment.
+- `src/styles/map.css` owns the routed Map page shell, player/resource selectors, focus banner, map iframe, and Map-specific responsive layout rules. Admin-only map URL diagnostics stay global with the admin styles because they render outside the routed Map page.
 - `src/styles/bot-dashboard.css` owns the dedicated `/bot` dashboard shell, overview metrics, section navigation, and related responsive shell rules.
 - `src/styles/app-chrome.css` owns floating app tools, shared help/legal dialogs, Discord sign-in dialog, cookie consent, command palette shell, and related mobile overrides.
 - `src/styles/user-settings.css` owns the browser settings dialog, account-linking cards, theme editor, and settings-specific responsive rules.
@@ -108,7 +111,7 @@ Adding a notification type requires a test-first pure draft helper, a stable `so
 - Use existing CSS variables for color, borders, radius, focus, and z-index.
 - Keep button text compact and use lucide icons where an icon exists.
 - Do not hide layout issues with high-specificity CSS hacks. Fix the component structure first when possible.
-- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified. Setup/workflow styles belong in `setup-workflow.css`; bot dashboard shell/navigation styles belong in `bot-dashboard.css`; shared app-chrome overlays belong in `app-chrome.css`; notification UI belongs in `notifications.css`; user settings UI belongs in `user-settings.css`; stable routed page styles can move to a page-named stylesheet such as `leaderboard.css`, `production.css`, `public-craft.css`, `inventory.css`, `construction.css`, `research.css`, `activity.css`, or `empires.css`.
+- Add page-specific CSS near related existing sections in `styles.css` until a focused stylesheet module is justified. Setup/workflow styles belong in `setup-workflow.css`; bot dashboard shell/navigation styles belong in `bot-dashboard.css`; shared app-chrome overlays belong in `app-chrome.css`; notification UI belongs in `notifications.css`; user settings UI belongs in `user-settings.css`; stable routed page styles can move to a page-named stylesheet such as `leaderboard.css`, `production.css`, `public-craft.css`, `inventory.css`, `construction.css`, `research.css`, `activity.css`, `region.css`, `sync.css`, `map.css`, or `empires.css`.
 - Any new stylesheet module under `src/styles/` must be imported by `src/main.tsx` and documented here if it establishes a reusable convention. Keep feature-owned modules narrow; shared layout primitives stay in `styles.css`.
 
 ## Commands

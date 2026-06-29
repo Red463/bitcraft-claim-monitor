@@ -230,3 +230,85 @@ test("activity page styles live in the activity stylesheet", () => {
     assert.equal(activityCss.includes(selector), true, `${selector} should live in activity.css`);
   }
 });
+test("region page styles live in the region stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const regionCssUrl = new URL("../src/styles/region.css", import.meta.url);
+  assert.equal(existsSync(regionCssUrl), true);
+  const regionCss = readFileSync(regionCssUrl, "utf8");
+  const regionSelectors = [
+    ".region-panel",
+    ".region-topbar",
+    ".region-rank-grid",
+    ".region-summary-grid",
+    ".region-insights",
+    ".region-context",
+    ".region-leaders-panel",
+    ".region-table-panel",
+    ".nearby-panel",
+    ".mine-row",
+    ".mine-text",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/region\.css";/);
+  for (const selector of regionSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(regionCss.includes(selector), true, `${selector} should live in region.css`);
+  }
+});
+test("sync page styles live in the sync stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const syncCssUrl = new URL("../src/styles/sync.css", import.meta.url);
+  assert.equal(existsSync(syncCssUrl), true);
+  const syncCss = readFileSync(syncCssUrl, "utf8");
+  const syncSelectors = [
+    ".sync-panel",
+    ".sync-topbar",
+    ".sync-frame",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/sync\.css";/);
+  for (const selector of syncSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(syncCss.includes(selector), true, `${selector} should live in sync.css`);
+  }
+});
+test("map page styles live in the map stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const mapCssUrl = new URL("../src/styles/map.css", import.meta.url);
+  assert.equal(existsSync(mapCssUrl), true);
+  const mapCss = readFileSync(mapCssUrl, "utf8");
+  const mapSelectors = [
+    ".map-panel.full-height",
+    ".map-topbar",
+    ".map-frame",
+    ".map-focus",
+    ".map-workspace",
+    ".map-resource-panel",
+    ".map-resource-heading",
+    ".map-resource-controls",
+    ".map-selected-resources",
+    ".map-resource-list",
+    ".map-resource-icon",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/map\.css";/);
+  for (const selector of mapSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(mapCss.includes(selector), true, `${selector} should live in map.css`);
+  }
+});
