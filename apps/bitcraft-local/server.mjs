@@ -44,6 +44,7 @@ import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaInd
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
+import { snapshotActivityChanges, snapshotSummary } from "./src/server/snapshotPlanning.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
 import {
@@ -3256,11 +3257,6 @@ function isDeployableStorage(building) {
   return deployableStorageName.test(String(building?.buildingName ?? building?.name ?? ""));
 }
 
-function signedChange(after, before, suffix = "") {
-  const delta = toNumber(after) - toNumber(before);
-  const sign = delta >= 0 ? "+" : "-";
-  return `${sign}${Math.abs(delta).toLocaleString()}${suffix}`;
-}
 
 function usedTradeIdsForListing(listingKey) {
   const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
@@ -3489,25 +3485,34 @@ function persistProductionContributions(records) {
   }
 }
 
-async function recordSnapshot(payload) {
-  const now = new Date().toISOString();
-  let pendingProductionNotifications = [];
-  let productionDiagnostics = [];
-  const claimId = String(payload.claimId ?? payload.claim?.entityId ?? "");
-  if (!claimId) throw new Error("Missing claim id");
-  const productionContributionRecords = payload.crafts
-    ? await collectProductionContributionRecords(claimId, payload.crafts, now)
-    : [];
-
-  const claim = payload.claim ?? {};
-  const market = unwrap(payload.market, "listings", []);
-  const membersCount = toNumber(payload.membersCount);
-  const buildingsCount = toNumber(payload.buildingsCount);
-  const marketCount = market.length;
-  const supplies = toNumber(claim.supplies);
-  const treasury = toNumber(claim.treasury);
-  const supplyMeta = supplyRunwayMetadata(claim, supplies);
+function writeSettlementSnapshot(claimId, now, payload, summary) {
   const previous = statements.latestSnapshot.get(claimId);
+  const claim = payload.claim ?? {};
+  const supplyMeta = supplyRunwayMetadata(claim, summary.supplies);
+  db.exec("BEGIN");
+  try {
+    statements.insertSnapshot.run(
+      claimId,
+      now,
+      summary.supplies,
+      summary.treasury,
+      summary.membersCount,
+      summary.buildingsCount,
+      summary.marketCount,
+      JSON.stringify(payload),
+    );
+    for (const change of snapshotActivityChanges(previous, summary, { supplyMetadata: supplyMeta })) {
+      addActivity(claimId, change.type, change.summary, now, change.metadata);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function syncMarketListingsForSnapshot(claimId, marketPayload, now) {
+  const market = unwrap(marketPayload, "listings", []);
   const normalizedListings = market.map(normalizeListing);
   const seen = new Set(normalizedListings.map((listing) => listing.key));
   const existingListings = new Map(normalizedListings.map((listing) => [listing.key, statements.listingByKey.get(listing.key)]));
@@ -3546,23 +3551,6 @@ async function recordSnapshot(payload) {
 
   db.exec("BEGIN");
   try {
-    statements.insertSnapshot.run(claimId, now, supplies, treasury, membersCount, buildingsCount, marketCount, JSON.stringify(payload));
-
-    if (previous) {
-      const checks = [
-        ["supplies", toNumber(previous.supplies), supplies, `${signedChange(supplies, previous.supplies)} supplies`],
-        ["treasury", toNumber(previous.treasury), treasury, `${signedChange(treasury, previous.treasury, "g")} to treasury`],
-        ["members", toNumber(previous.members_count), membersCount, `${signedChange(membersCount, previous.members_count)} members`],
-        ["buildings", toNumber(previous.buildings_count), buildingsCount, `${signedChange(buildingsCount, previous.buildings_count)} buildings`],
-        ["market", toNumber(previous.market_count), marketCount, `${signedChange(marketCount, previous.market_count)} market listings`],
-      ];
-      for (const [type, before, after, summary] of checks) {
-        if (before !== after) addActivity(claimId, type, summary, now, type === "supplies" ? { before, after, ...supplyMeta } : { before, after });
-      }
-    } else {
-      addActivity(claimId, "baseline", "Baseline snapshot saved", now, { membersCount, buildingsCount, marketCount });
-    }
-
     for (const listing of normalizedListings) {
       const existing = existingListings.get(listing.key);
       statements.upsertListing.run(
@@ -3627,23 +3615,41 @@ async function recordSnapshot(payload) {
     }
 
     applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
-    if (payload.crafts) {
-      const productionResult = recordProductionJobs(claimId, payload.crafts, now);
-      pendingProductionNotifications = productionResult.pendingNotifications;
-      productionDiagnostics = productionResult.diagnostics;
-      persistProductionContributions(productionContributionRecords);
-    }
-
     db.exec("COMMIT");
-    for (const diagnostic of productionDiagnostics) recordDiscordDeliverySafe(diagnostic);
-    await deliverProductionNotifications(pendingProductionNotifications);
-    return { ok: true, capturedAt: now };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
 }
 
+async function syncProductionForSnapshot(claimId, craftsPayload, now) {
+  if (!craftsPayload) return { pendingNotifications: [], diagnostics: [] };
+  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, now);
+  db.exec("BEGIN");
+  try {
+    const productionResult = recordProductionJobs(claimId, craftsPayload, now);
+    persistProductionContributions(productionContributionRecords);
+    db.exec("COMMIT");
+    return productionResult;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function recordSnapshot(payload) {
+  const now = new Date().toISOString();
+  const summary = snapshotSummary(payload);
+  const claimId = summary.claimId;
+  if (!claimId) throw new Error("Missing claim id");
+
+  writeSettlementSnapshot(claimId, now, payload, summary);
+  await syncMarketListingsForSnapshot(claimId, payload.market ?? { listings: [] }, now);
+  const productionResult = await syncProductionForSnapshot(claimId, payload.crafts, now);
+  for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
+  await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
+  return { ok: true, capturedAt: now };
+}
 async function fetchBitjita(pathname, options = {}) {
   // Central BitJita client used by collectors and local helper endpoints. Keep
   // the identifying header here so upstream sees a consistent app identity, and

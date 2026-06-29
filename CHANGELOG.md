@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.99] - 2026-06-30
+
+### Changed
+
+- Split snapshot recording into a short settlement snapshot write followed by separate market-listing and production sync phases, reducing how long worker transactions hold the SQLite writer lock.
+
 ## [1.0.0-beta.98] - 2026-06-30
 
 ### Changed
