@@ -8,6 +8,190 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.96] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving more SQLite schema, default settings, owner bootstrap, release metadata, and scheduled-job logic into focused tested server helpers.
+- Improved browser notification reliability by scoping signed-in deal-alert deduplication per user and documenting the remaining live-source verification checks.
+- Improved public-release CSS and UX safeguards for shared sort controls, app chrome controls, and Public Craft Finder actions.
+- Updated README, developer, notification, and release-readiness documentation with current verification evidence and remaining live-source blockers.
+
+## [1.0.0-beta.95] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving Discord OAuth flow decisions into a focused tested server helper.
+- Updated developer and release-readiness documentation with the latest OAuth helper boundary and verification evidence.
+
+## [1.0.0-beta.94] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving DB-backed session lookup, Discord OAuth config, and OAuth state secret handling into focused tested server helpers.
+- Documented the `/bot` notification exception as an accepted release decision and updated release-readiness verification evidence.
+
+## [1.0.0-beta.93] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving legacy password hashing and admin sign-in throttling into focused tested server helpers.
+- Updated developer and release-readiness documentation with the latest password-auth and login-attempt helper boundaries.
+
+## [1.0.0-beta.92] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving admin/app session policy and Discord OAuth state handling into focused tested server helpers.
+- Updated developer and release-readiness documentation with the latest auth helper boundaries and verification evidence.
+
+## [1.0.0-beta.91] - 2026-06-29
+
+### Changed
+
+- Improved BitJita proxy reliability with tested cache TTLs, request deduplication, timeout handling, and stale-if-error fallback.
+- Improved release-readiness structure by moving admin permissions, public user payloads, admin mutation guards, and auth identity helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries and verification evidence.
+
+## [1.0.0-beta.90] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness stylesheet ownership by moving Production and Public Craft Finder selectors into page-owned CSS modules.
+- Renamed reused command/filter styling primitives to neutral `command-filter-*` classes and added guard coverage to prevent page-specific names returning.
+- Updated release-readiness and developer documentation with the latest CSS ownership boundaries.
+
+## [1.0.0-beta.89] - 2026-06-29
+
+### Added
+
+- Added live-source notification verification guidance for production queue changes and signed-in market deal alerts.
+
+### Changed
+
+- Improved browser notification reliability by keeping market activity, deal-alert, and production queue sources in a tested app-level source queue.
+- Updated release-readiness documentation with the current live-source notification blockers.
+
+## [1.0.0-beta.88] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving the admin console and user settings dialog out of the app shell.
+- Added focused admin display helpers and boundary tests so release-critical shell responsibilities stay easier to review.
+- Expanded notification verification coverage for every routed page and supported browser notification type.
+
+## [1.0.0-beta.87] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by removing the legacy main page bundle after moving Production and Market into dedicated page modules.
+- Split Market price finder and buy-order finder tools into focused market-owned components.
+- Updated developer and release-readiness documentation with the latest page and market tool boundaries.
+
+## [1.0.0-beta.86] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving Inventory, Map, and Public Craft Finder pages out of the legacy main page bundle.
+- Moved shared active-region loading and labels into a tested hook so page components no longer own duplicate region helper logic.
+- Updated developer and release-readiness documentation with the latest page boundaries.
+
+## [1.0.0-beta.85] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving routed Leaderboard and Production page styles into focused page-owned stylesheets.
+- Reduced duplicated browser helper code in the main page bundle by reusing shared analytics and URL query helpers.
+- Updated developer and release-readiness documentation with the latest page-helper and stylesheet boundaries.
+
+## [1.0.0-beta.84] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving scheduled job, market activity, production activity, and recipe catalog helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries.
+
+## [1.0.0-beta.83] - 2026-06-28
+
+### Added
+
+- Added a tested release notification matrix covering routed pages, supported browser notification types, and the intentional bot-dashboard exception.
+
+### Changed
+
+- Improved release-readiness structure by moving request-body parsing, rate limiting, visitor IP privacy helpers, and Empires page styles into focused modules with tests where applicable.
+- Updated developer and release-readiness documentation with the latest server, notification, and stylesheet boundaries.
+
+## [1.0.0-beta.82] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving HTTP response, cookie, request-origin, and CSRF helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries.
+
+### Fixed
+
+- Confirmed admin settings responses keep submitted Discord bot tokens redacted while preserving configured-token status.
+## [1.0.0-beta.81] - 2026-06-28
+
+### Changed
+
+- Improved release-readiness structure by moving market listing, best-seller sorting, production craft, and activity-log helpers into focused page utility modules.
+- Updated developer and release-readiness documentation with the latest page-helper extraction boundaries.
+
+## [1.0.0-beta.80] - 2026-06-28
+
+### Added
+
+- Added focused server route-group tests and helper coverage for visitor logging route classification.
+
+### Changed
+
+- Improved release-readiness structure by moving shared app chrome styles and route classification helpers into focused modules.
+- Documented the remaining public-release browser notification and server architecture verification gaps.
+
+### Fixed
+
+- Fixed notification toasts appearing behind the floating help control and added browser sound helper coverage.
+
+## [1.0.0-beta.79] - 2026-06-28
+
+### Changed
+
+- Improved browser notification settings reliability by normalizing saved toast and sound preferences before account sync, UI rendering, and sound playback.
+- Moved browser user-settings styles into a focused stylesheet so settings, account-linking, and theme-editor rules are easier to maintain.
+
+### Fixed
+
+- Fixed corrupted or outdated browser notification settings from disabling important notification gates or selecting invalid sound/volume values.
+## [1.0.0-beta.78] - 2026-06-28
+
+### Changed
+
+- Improved notification reliability by centralising market, deal alert, production craft, toast stack, and notification log handling in tested helpers.
+- Moved notification-specific UI rules into a focused stylesheet and documented the styling boundary for future release work.
+
+### Fixed
+
+- Fixed duplicate persisted notifications replacing newer entries by ensuring the newest matching notice wins before the notification log is capped.
+
+## [1.0.0-beta.77] - 2026-06-28
+
+### Added
+
+- Added maintainer documentation covering the current app structure, data flow, notifications, styling conventions, and release-readiness blockers.
+- Added focused tests for extracted notification, activity, map, market analytics, and member identity helpers.
+
+### Changed
+
+- Improved release-readiness structure by moving notification, activity, map, market analytics, and member identity logic into clearer focused modules.
+- Expanded the example environment file with the app's local, production, BitJita, Discord, background task, and GeoIP settings.
+- Documented browser notification smoke coverage for market listing and sale alerts across the main app pages.
+
+### Fixed
+
+- Fixed admin-role access to user-management routes while keeping viewer-level users blocked.
+
 ## [1.0.0-beta.76] - 2026-06-28
 
 ### Changed
@@ -1697,5 +1881,3 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-
-

@@ -1,0 +1,32 @@
+import assert from "node:assert/strict";
+import { readFileSync, existsSync } from "node:fs";
+import test from "node:test";
+
+test("AppShell delegates notification smoke wiring to the notifications hook", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const hookUrl = new URL("../src/notifications/useBrowserNotificationSmoke.ts", import.meta.url);
+
+  assert.equal(existsSync(hookUrl), true, "notification smoke hook should exist");
+  assert.match(appShell, /import \{ useBrowserNotificationSmoke \} from "\.\/notifications\/useBrowserNotificationSmoke";/);
+  assert.match(appShell, /useBrowserNotificationSmoke\(\{ active, pushToast \}\);/);
+  assert.doesNotMatch(appShell, /installBrowserNotificationSmokeBridge|smokeNotificationTypeFromSearch|smokeBrowserNotificationDraft|isLocalNotificationSmokeHost/);
+});
+test("AppShell delegates live notification source effects to the notifications hook", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const hookUrl = new URL("../src/notifications/useBrowserNotificationSources.ts", import.meta.url);
+
+  assert.equal(existsSync(hookUrl), true, "notification source hook should exist");
+  assert.match(appShell, /import \{ useBrowserNotificationSources \} from "\.\/notifications\/useBrowserNotificationSources";/);
+  assert.match(appShell, /useBrowserNotificationSources\(\{/);
+  assert.doesNotMatch(appShell, /marketActivityQueueToastDrafts|dealAlertQueueToastDrafts|productionCraftQueueToastDrafts/);
+  assert.doesNotMatch(appShell, /MarketActivityToastSnapshot|ProductionCraftQueueSnapshot|activityNoticeIdsRef|dealAlertIdsRef|craftQueueRef/);
+});
+test("AppShell delegates toast state, timers, and persisted log to the notifications hook", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const hookUrl = new URL("../src/notifications/useToastNotifications.ts", import.meta.url);
+
+  assert.equal(existsSync(hookUrl), true, "toast notification hook should exist");
+  assert.match(appShell, /import \{ useToastNotifications \} from "\.\/notifications\/useToastNotifications";/);
+  assert.match(appShell, /useToastNotifications\(\{ soundSettings: normalizedUserToastSettings \}\)/);
+  assert.doesNotMatch(appShell, /appendNotificationLog|appendToastStack|createToastNotice|markNotificationsRead|toastTimersRef|notificationSourceKeysRef/);
+});

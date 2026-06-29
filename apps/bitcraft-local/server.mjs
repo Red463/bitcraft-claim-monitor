@@ -2,15 +2,67 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
 import { inflateRawSync } from "node:zlib";
-import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
+import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
+import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
+import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
+import { originFromRequest as requestOriginFromRequest, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
+import { csrfToken } from "./src/server/httpCsrf.mjs";
+import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
+import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
+import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
+import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
+import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
+import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
+import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
+import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
+import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
+import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
+import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
+import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
+import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
+import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
+import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
+import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
+import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
+import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
+import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
+import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
+import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
+import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
+import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
+import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements } from "./src/server/schemaMigrations.mjs";
+import { currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey } from "./src/server/appRelease.mjs";
+import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
+import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
+import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
+import {
+  ADMIN_SESSION_COOKIE_NAME,
+  ADMIN_SESSION_MAX_AGE_SECONDS,
+  APP_USER_SESSION_COOKIE_NAME,
+  APP_USER_SESSION_MAX_AGE_SECONDS,
+  clearHttpSessionCookie,
+  createHttpSession,
+  sessionTokenFromRequest,
+  sessionTokenHash,
+} from "./src/server/serverSessions.mjs";
+import {
+  clearOAuthStateCookie,
+  oauthStateCookie,
+  readOAuthStateCookie,
+  resolveOAuthStateSecret,
+} from "./src/server/oauthState.mjs";
 
 setDefaultResultOrder("ipv4first");
+
+const rateLimit = createRateLimiter({ sendJson: send });
 
 // This server is the local app boundary: it serves the built frontend, proxies
 // BitJita requests, owns SQLite history/configuration, validates admin sessions,
@@ -33,6 +85,7 @@ const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
+const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
@@ -70,876 +123,19 @@ const db = new DatabaseSync(databasePath);
 // append-only history, admin/auth state, Discord state, analytics, and scheduled
 // job metadata. Schema changes should be additive unless a migration is called
 // out clearly for production operators.
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id TEXT NOT NULL,
-    captured_at TEXT NOT NULL,
-    supplies REAL,
-    treasury REAL,
-    members_count INTEGER,
-    buildings_count INTEGER,
-    market_count INTEGER,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_listings (
-    listing_key TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    side TEXT,
-    owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
-    tier TEXT,
-    rarity TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    status TEXT NOT NULL,
-    sold_at TEXT,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    listing_key TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    side TEXT,
-    owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
-    tier TEXT,
-    rarity TEXT,
-    occurred_at TEXT NOT NULL,
-    source_key TEXT,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_trades (
-    trade_id TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    order_entity_id TEXT,
-    seller_entity_id TEXT,
-    seller_username TEXT,
-    purchaser_entity_id TEXT,
-    purchaser_username TEXT,
-    item_id TEXT,
-    item_type TEXT,
-    item_name TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    unit_price REAL NOT NULL,
-    total_price REAL NOT NULL,
-    tier TEXT,
-    rarity TEXT,
-    occurred_at TEXT NOT NULL,
-    imported_at TEXT NOT NULL,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_buy_orders_current (
-    claim_id TEXT NOT NULL,
-    order_key TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    region_name TEXT,
-    market_claim_id TEXT,
-    market_claim_name TEXT,
-    buyer_entity_id TEXT,
-    buyer_name TEXT,
-    item_id TEXT,
-    item_type TEXT,
-    item_name TEXT NOT NULL,
-    tier TEXT,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    quantity REAL,
-    unit_price REAL,
-    total_value REAL,
-    stored_coins REAL,
-    listed_at TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, order_key)
-  );
-  CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current (
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_type TEXT NOT NULL DEFAULT '0',
-    item_name TEXT,
-    average_unit_price REAL,
-    sales_count REAL,
-    units_sold REAL,
-    total_value REAL,
-    window_days INTEGER NOT NULL DEFAULT 7,
-    first_bucket_at TEXT,
-    last_bucket_at TEXT,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, region_id, item_id, item_type)
-  );
-  CREATE TABLE IF NOT EXISTS activity_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    occurred_at TEXT NOT NULL,
-    metadata_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS admin_users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'owner',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS admin_sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES admin_users(id)
-  );
-  CREATE TABLE IF NOT EXISTS user_accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    discord_id TEXT NOT NULL UNIQUE,
-    discord_username TEXT,
-    discord_global_name TEXT,
-    discord_avatar TEXT,
-    character_player_id TEXT,
-    character_name TEXT,
-    character_status TEXT NOT NULL DEFAULT 'unlinked',
-    settings_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    last_login_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS user_sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES user_accounts(id)
-  );
-  CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS domain_payload_current (
-    claim_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    data_json TEXT NOT NULL,
-    collected_at TEXT NOT NULL,
-    last_attempt_at TEXT NOT NULL,
-    last_success_at TEXT NOT NULL,
-    last_error TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, domain)
-  );
-  CREATE TABLE IF NOT EXISTS app_secrets (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS scheduled_jobs (
-    job_key TEXT PRIMARY KEY,
-    label TEXT NOT NULL,
-    description TEXT,
-    schedule TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    last_run_at TEXT,
-    last_success_at TEXT,
-    last_error TEXT,
-    next_run_at TEXT,
-    running INTEGER NOT NULL DEFAULT 0,
-    metadata_json TEXT NOT NULL DEFAULT '{}',
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS recipe_catalog_entries (
-    catalog_key TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    item_type INTEGER NOT NULL DEFAULT 0,
-    name TEXT,
-    tier INTEGER,
-    rarity TEXT,
-    tag TEXT,
-    icon_asset_name TEXT,
-    detail_json TEXT NOT NULL,
-    source TEXT NOT NULL,
-    last_synced_at TEXT NOT NULL,
-    last_error TEXT,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_deal_watches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    discord_id TEXT NOT NULL,
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_type TEXT NOT NULL DEFAULT '0',
-    item_name TEXT NOT NULL,
-    tier INTEGER,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    threshold_percent REAL NOT NULL DEFAULT 30,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    last_checked_at TEXT,
-    last_alert_at TEXT,
-    last_baseline_window_days INTEGER,
-    last_baseline_average REAL,
-    last_error TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (user_id, claim_id, region_id, item_id, item_type)
-  );
-  CREATE TABLE IF NOT EXISTS market_deal_alerts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    watch_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    discord_id TEXT NOT NULL,
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_type TEXT NOT NULL DEFAULT '0',
-    item_name TEXT NOT NULL,
-    tier INTEGER,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    listing_key TEXT NOT NULL,
-    market_claim_id TEXT,
-    market_claim_name TEXT,
-    seller_name TEXT,
-    quantity REAL,
-    unit_price REAL,
-    total_value REAL,
-    baseline_window_days INTEGER NOT NULL,
-    baseline_average REAL NOT NULL,
-    sales_count INTEGER NOT NULL DEFAULT 0,
-    discount_percent REAL NOT NULL,
-    dm_status TEXT NOT NULL DEFAULT 'pending',
-    dm_error TEXT,
-    created_at TEXT NOT NULL,
-    read_at TEXT,
-    raw_json TEXT NOT NULL,
-    UNIQUE (watch_id, listing_key)
-  );
-  CREATE TABLE IF NOT EXISTS production_jobs (
-    job_key TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    label TEXT NOT NULL,
-    building_name TEXT,
-    crafter_name TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    status TEXT NOT NULL,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS production_contributions (
-    contribution_key TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    craft_entity_id TEXT NOT NULL,
-    contributor_entity_id TEXT NOT NULL,
-    contributor_name TEXT NOT NULL,
-    profession TEXT,
-    craft_label TEXT,
-    structure_name TEXT,
-    item_tier TEXT,
-    contributed_progress REAL NOT NULL DEFAULT 0,
-    contributed_xp REAL NOT NULL DEFAULT 0,
-    contribution_count REAL NOT NULL DEFAULT 0,
-    first_contributed_at TEXT,
-    last_contributed_at TEXT,
-    first_seen TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS admin_audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    username TEXT NOT NULL,
-    action TEXT NOT NULL,
-    details_json TEXT NOT NULL,
-    occurred_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS admin_login_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    successful INTEGER NOT NULL,
-    occurred_at TEXT NOT NULL,
-    remote_address TEXT
-  );
-  CREATE TABLE IF NOT EXISTS analytics_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    visitor_key TEXT NOT NULL,
-    session_key TEXT NOT NULL,
-    event_name TEXT NOT NULL,
-    page TEXT NOT NULL,
-    properties_json TEXT NOT NULL,
-    duration_seconds INTEGER,
-    occurred_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS visitor_security_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    occurred_at TEXT NOT NULL,
-    method TEXT NOT NULL,
-    route_group TEXT NOT NULL,
-    status_code INTEGER NOT NULL,
-    status_class TEXT NOT NULL,
-    ip_address TEXT,
-    ip_anonymized TEXT NOT NULL,
-    ip_hash TEXT NOT NULL,
-    visitor_key TEXT NOT NULL,
-    user_agent_hash TEXT,
-    country TEXT,
-    city TEXT
-  );
-  CREATE TABLE IF NOT EXISTS geoip_ranges (
-    ip_start INTEGER NOT NULL,
-    ip_end INTEGER NOT NULL,
-    country TEXT NOT NULL,
-    city TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (ip_start, ip_end)
-  );
-  CREATE TABLE IF NOT EXISTS visitor_geoip_cache (
-    ip_hash TEXT PRIMARY KEY,
-    ip_anonymized TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    country TEXT NOT NULL,
-    city TEXT,
-    looked_up_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    error TEXT
-  );
-  CREATE TABLE IF NOT EXISTS discord_delivery_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,
-    status TEXT NOT NULL,
-    summary TEXT,
-    channel_id TEXT,
-    channel_key TEXT,
-    reason TEXT,
-    error TEXT,
-    metadata_json TEXT NOT NULL,
-    response_json TEXT,
-    occurred_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS discord_craft_watches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    profession_key TEXT NOT NULL,
-    profession_name TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (guild_id, user_id, profession_key)
-  );
-  CREATE TABLE IF NOT EXISTS discord_mod_cases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    case_type TEXT NOT NULL,
-    user_id TEXT,
-    moderator TEXT NOT NULL,
-    reason TEXT,
-    details_json TEXT NOT NULL,
-    occurred_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS discord_warnings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    moderator TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS discord_mod_notes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    moderator TEXT NOT NULL,
-    note TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS discord_custom_commands (
-    name TEXT PRIMARY KEY,
-    description TEXT NOT NULL,
-    response TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS discord_component_votes (
-    message_id TEXT NOT NULL,
-    component_key TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (message_id, user_id, kind)
-  );
-  CREATE TABLE IF NOT EXISTS discord_component_messages (
-    message_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    metadata_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (message_id, kind)
-  );
-  CREATE TABLE IF NOT EXISTS discord_temp_bans (
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    unban_at TEXT NOT NULL,
-    reason TEXT,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (guild_id, user_id)
-  );
-  CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
-  CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
-  CREATE INDEX IF NOT EXISTS idx_market_deal_watches_user ON market_deal_watches (user_id, enabled, updated_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_deal_watches_scan ON market_deal_watches (claim_id, region_id, enabled, item_id, item_type);
-  CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_user ON market_deal_alerts (user_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_watch ON market_deal_alerts (watch_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_activity_claim_time ON activity_events (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_analytics_time ON analytics_events (occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_analytics_page_time ON analytics_events (page, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_visitor_security_time ON visitor_security_events (occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_visitor_security_location ON visitor_security_events (country, city, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_geoip_ranges_lookup ON geoip_ranges (ip_start, ip_end);
-  CREATE INDEX IF NOT EXISTS idx_visitor_geoip_cache_expires ON visitor_geoip_cache (expires_at);
-  CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
-  CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
-  CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_discord_craft_watches_profession ON discord_craft_watches (guild_id, profession_key, mode);
-  CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);
-  CREATE INDEX IF NOT EXISTS idx_discord_mod_notes_user ON discord_mod_notes (guild_id, user_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
-  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
-  CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
-`);
+applySchemaBootstrap(db);
+applyLegacySchemaCleanup(db);
 
-// Legacy all-in-one JSON cache from the server-owned refresh experiment. Current
-// page rendering no longer depends on it, so dropping it prevents stale blob data
-// from being mistaken for the active source of truth.
-db.exec("DROP TABLE IF EXISTS current_claim_state;");
 
-function ensureColumn(table, column, definition) {
-  // Migrations are intentionally additive so self-hosted installations keep
-  // their local history when upgrading between beta builds.
-  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
-  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-}
+applyAdditiveColumnMigrations(db);
+applySchemaIndexStatements(db);
 
-ensureColumn("market_listings", "owner_entity_id", "TEXT");
-ensureColumn("market_listings", "item_id", "TEXT");
-ensureColumn("market_listings", "item_type", "TEXT");
-ensureColumn("market_events", "owner_entity_id", "TEXT");
-ensureColumn("market_events", "item_id", "TEXT");
-ensureColumn("market_events", "item_type", "TEXT");
-ensureColumn("market_events", "trade_id", "TEXT");
-ensureColumn("market_events", "source_key", "TEXT");
-ensureColumn("market_buy_orders_current", "icon_asset_name", "TEXT");
-ensureColumn("market_buy_orders_current", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("market_buy_orders_current", "updated_at", "TEXT");
-ensureColumn("market_regional_sale_averages_current", "item_name", "TEXT");
-ensureColumn("market_regional_sale_averages_current", "window_days", "INTEGER NOT NULL DEFAULT 7");
-ensureColumn("activity_events", "source_key", "TEXT");
-ensureColumn("admin_users", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("admin_users", "last_login_at", "TEXT");
-ensureColumn("admin_users", "role", "TEXT NOT NULL DEFAULT 'owner'");
-ensureColumn("admin_users", "discord_id", "TEXT");
-ensureColumn("admin_users", "discord_username", "TEXT");
-ensureColumn("admin_users", "discord_global_name", "TEXT");
-ensureColumn("admin_users", "discord_avatar", "TEXT");
-ensureColumn("production_jobs", "start_notified", "INTEGER NOT NULL DEFAULT 0");
-ensureColumn("domain_payload_current", "updated_at", "TEXT");
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;");
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;");
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';");
-
-const defaultClaimId = "1369094286777412590";
-const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
-const defaultTheme = {
-  bg: "#0c0d10",
-  sidebar: "#06070a",
-  panel: "#181b21",
-  panel2: "#11141a",
-  border: "#353b46",
-  muted: "#a8adba",
-  text: "#f6f3ea",
-  gold: "#f0c64f",
-  good: "#4ee28a",
-  danger: "#ef6461",
-};
 const now = new Date().toISOString();
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("claim_id", defaultClaimId, now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("bitcraft_sync_url", defaultSyncUrl, now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("excluded_member_ids_json", JSON.stringify([]), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("theme_json", JSON.stringify(defaultTheme), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("refresh_seconds", "30", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("server_refresh_seconds", String(Math.round(snapshotIntervalMs / 1000)), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("collector_settings_json", JSON.stringify({}), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_page", "dashboard", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("default_region", "", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("market_deal_watch_json", JSON.stringify({ maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true }), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("branding_json", JSON.stringify({}), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("snapshot_retention_days", "365", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_json", JSON.stringify({ enabled: false, applicationId: "", publicKey: "", guildId: "", channelId: "", minSaleValue: 0, supplyRunwayDaysThreshold: 7, productionMinXp: 40000, productionMinAgeMinutes: 5, productionUsers: "", craftChannels: { forestry: "1509932116077711411", carpentry: "1509932154442875201", masonry: "1509932188446101585", mining: "1509932207060291797", smithing: "1509932228090658936", scholar: "1509932259262595245", hunting: "1510275986766434325", leatherworking: "1509932280829710547", tailoring: "1509932306486398976", farming: "1509932539626786926", fishing: "1509932564641747074", cooking: "1509932588180181033", foraging: "1509932609378058412" }, notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true } }), now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_announced_version", "", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_supply_report_at", "", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_low_supplies_at", "", now);
-db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run("discord_last_delivery_json", JSON.stringify({ status: "none" }), now);
-db.prepare("DELETE FROM app_settings WHERE key = ?").run("analytics_json");
+applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
 
-const statements = {
-  latestSnapshot: db.prepare("SELECT * FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
-  insertSnapshot: db.prepare(`
-    INSERT INTO snapshots (claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  listingByKey: db.prepare("SELECT * FROM market_listings WHERE listing_key = ?"),
-  activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),
-  upsertListing: db.prepare(`
-    INSERT INTO market_listings (listing_key, claim_id, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, first_seen, last_seen, status, sold_at, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
-    ON CONFLICT(listing_key) DO UPDATE SET
-      item_name = excluded.item_name,
-      side = excluded.side,
-      owner = excluded.owner,
-      owner_entity_id = excluded.owner_entity_id,
-      item_id = excluded.item_id,
-      item_type = excluded.item_type,
-      quantity = excluded.quantity,
-      price = excluded.price,
-      total_value = excluded.total_value,
-      tier = excluded.tier,
-      rarity = excluded.rarity,
-      last_seen = excluded.last_seen,
-      status = 'active',
-      sold_at = NULL,
-      raw_json = excluded.raw_json
-  `),
-  markListingClosed: db.prepare("UPDATE market_listings SET status = ?, sold_at = ?, last_seen = ? WHERE listing_key = ? AND status = 'active'"),
-  insertMarketEvent: db.prepare(`
-    INSERT OR IGNORE INTO market_events (claim_id, event_type, listing_key, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, occurred_at, trade_id, source_key, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  pendingMarketEvents: db.prepare(`
-    SELECT * FROM market_events
-    WHERE claim_id = ?
-      AND event_type = 'partial_quantity_drop'
-      AND trade_id IS NULL
-    ORDER BY occurred_at DESC
-    LIMIT 50
-  `),
-  confirmMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, trade_id = ?, raw_json = ? WHERE id = ?"),
-  resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
-  insertMarketTrade: db.prepare(`
-    INSERT OR IGNORE INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username, purchaser_entity_id, purchaser_username,
-      item_id, item_type, item_name, quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  insertActivity: db.prepare(`
-    INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
-    VALUES (?, ?, ?, ?, ?)
-  `),
-  insertSourcedActivity: db.prepare(`
-    INSERT OR IGNORE INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `),
-  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
-  dealWatchByUserItem: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?"),
-  dealWatchByIdForUser: db.prepare("SELECT * FROM market_deal_watches WHERE id = ? AND user_id = ?"),
-  listDealWatchesForUser: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? ORDER BY enabled DESC, updated_at DESC"),
-  listEnabledDealWatches: db.prepare("SELECT * FROM market_deal_watches WHERE enabled = 1 ORDER BY region_id ASC, item_name ASC"),
-  insertDealWatch: db.prepare(`
-    INSERT INTO market_deal_watches (
-      user_id, discord_id, claim_id, region_id, item_id, item_type, item_name, tier, rarity, icon_asset_name,
-      threshold_percent, enabled, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-  `),
-  updateDealWatch: db.prepare(`
-    UPDATE market_deal_watches
-    SET enabled = COALESCE(?, enabled), threshold_percent = COALESCE(?, threshold_percent), updated_at = ?
-    WHERE id = ? AND user_id = ?
-  `),
-  deleteDealWatch: db.prepare("DELETE FROM market_deal_watches WHERE id = ? AND user_id = ?"),
-  updateDealWatchChecked: db.prepare(`
-    UPDATE market_deal_watches
-    SET last_checked_at = ?, last_baseline_window_days = ?, last_baseline_average = ?, last_error = ?, updated_at = ?
-    WHERE id = ?
-  `),
-  updateDealWatchAlerted: db.prepare("UPDATE market_deal_watches SET last_alert_at = ?, updated_at = ? WHERE id = ?"),
-  insertDealAlert: db.prepare(`
-    INSERT OR IGNORE INTO market_deal_alerts (
-      watch_id, user_id, discord_id, claim_id, region_id, item_id, item_type, item_name, tier, rarity, icon_asset_name,
-      listing_key, market_claim_id, market_claim_name, seller_name, quantity, unit_price, total_value,
-      baseline_window_days, baseline_average, sales_count, discount_percent, dm_status, dm_error, created_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  listDealAlertsForUser: db.prepare("SELECT * FROM market_deal_alerts WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"),
-  updateDealAlertDm: db.prepare("UPDATE market_deal_alerts SET dm_status = ?, dm_error = ? WHERE id = ?"),
-  unreadDealAlertCount: db.prepare("SELECT COUNT(*) AS count FROM market_deal_alerts WHERE user_id = ? AND read_at IS NULL"),
-  activeProductionJobs: db.prepare("SELECT * FROM production_jobs WHERE claim_id = ? AND status = 'active'"),
-  productionJobCount: db.prepare("SELECT COUNT(*) AS count FROM production_jobs WHERE claim_id = ?"),
-  markProductionStartNotified: db.prepare("UPDATE production_jobs SET start_notified = 1 WHERE job_key = ?"),
-  rekeyProductionJob: db.prepare("UPDATE OR IGNORE production_jobs SET job_key = ? WHERE job_key = ?"),
-  upsertProductionJob: db.prepare(`
-    INSERT INTO production_jobs (job_key, claim_id, label, building_name, crafter_name, first_seen, last_seen, status, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-    ON CONFLICT(job_key) DO UPDATE SET
-      label = excluded.label,
-      building_name = excluded.building_name,
-      crafter_name = excluded.crafter_name,
-      last_seen = excluded.last_seen,
-      status = 'active',
-      start_notified = CASE WHEN production_jobs.status = 'active' THEN production_jobs.start_notified ELSE 0 END,
-      raw_json = excluded.raw_json
-  `),
-  completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
-  upsertProductionContribution: db.prepare(`
-    INSERT INTO production_contributions (
-      contribution_key, claim_id, craft_entity_id, contributor_entity_id, contributor_name, profession, craft_label, structure_name,
-      item_tier, contributed_progress, contributed_xp, contribution_count, first_contributed_at, last_contributed_at, first_seen, updated_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(contribution_key) DO UPDATE SET
-      contributor_name = excluded.contributor_name,
-      profession = excluded.profession,
-      craft_label = excluded.craft_label,
-      structure_name = excluded.structure_name,
-      item_tier = excluded.item_tier,
-      contributed_progress = max(production_contributions.contributed_progress, excluded.contributed_progress),
-      contributed_xp = max(production_contributions.contributed_xp, excluded.contributed_xp),
-      contribution_count = max(production_contributions.contribution_count, excluded.contribution_count),
-      first_contributed_at = CASE
-        WHEN production_contributions.first_contributed_at IS NULL THEN excluded.first_contributed_at
-        WHEN excluded.first_contributed_at IS NULL THEN production_contributions.first_contributed_at
-        WHEN excluded.first_contributed_at < production_contributions.first_contributed_at THEN excluded.first_contributed_at
-        ELSE production_contributions.first_contributed_at
-      END,
-      last_contributed_at = CASE
-        WHEN production_contributions.last_contributed_at IS NULL THEN excluded.last_contributed_at
-        WHEN excluded.last_contributed_at IS NULL THEN production_contributions.last_contributed_at
-        WHEN excluded.last_contributed_at > production_contributions.last_contributed_at THEN excluded.last_contributed_at
-        ELSE production_contributions.last_contributed_at
-      END,
-      updated_at = excluded.updated_at,
-      raw_json = excluded.raw_json
-  `),
-  getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
-  upsertSetting: db.prepare(`
-    INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-  `),
-  domainPayloadsByClaim: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ?"),
-  domainPayload: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ?"),
-  upsertDomainPayload: db.prepare(`
-    INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(claim_id, domain) DO UPDATE SET
-      data_json = excluded.data_json,
-      collected_at = excluded.collected_at,
-      last_attempt_at = excluded.last_attempt_at,
-      last_success_at = excluded.last_success_at,
-      last_error = excluded.last_error,
-      updated_at = excluded.updated_at
-  `),
-  updateDomainPayloadError: db.prepare("UPDATE domain_payload_current SET last_attempt_at = ?, last_error = ?, updated_at = ? WHERE claim_id = ? AND domain = ?"),
-  getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
-  upsertSecret: db.prepare(`
-    INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-  `),
-  deleteSecret: db.prepare("DELETE FROM app_secrets WHERE key = ?"),
-  upsertScheduledJob: db.prepare(`
-    INSERT INTO scheduled_jobs (job_key, label, description, schedule, enabled, next_run_at, running, metadata_json, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', ?)
-    ON CONFLICT(job_key) DO UPDATE SET
-      label = excluded.label,
-      description = excluded.description,
-      updated_at = excluded.updated_at
-  `),
-  listScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs ORDER BY job_key"),
-  getScheduledJob: db.prepare("SELECT * FROM scheduled_jobs WHERE job_key = ?"),
-  dueScheduledJobs: db.prepare("SELECT * FROM scheduled_jobs WHERE enabled = 1 AND running = 0 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC"),
-  setScheduledJobEnabled: db.prepare("UPDATE scheduled_jobs SET enabled = ?, updated_at = ? WHERE job_key = ?"),
-  updateScheduledJobSettings: db.prepare("UPDATE scheduled_jobs SET schedule = ?, enabled = ?, next_run_at = ?, updated_at = ? WHERE job_key = ?"),
-  markScheduledJobRunning: db.prepare("UPDATE scheduled_jobs SET running = 1, last_run_at = ?, last_error = NULL, updated_at = ? WHERE job_key = ?"),
-  markScheduledJobSuccess: db.prepare("UPDATE scheduled_jobs SET running = 0, last_success_at = ?, last_error = NULL, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
-  markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
-  updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
-  resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
-  getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
-  listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
-  recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),
-  upsertRecipeCatalogEntry: db.prepare(`
-    INSERT INTO recipe_catalog_entries (
-      catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
-      detail_json, source, last_synced_at, last_error, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    ON CONFLICT(catalog_key) DO UPDATE SET
-      item_type = excluded.item_type,
-      name = COALESCE(excluded.name, recipe_catalog_entries.name),
-      tier = COALESCE(excluded.tier, recipe_catalog_entries.tier),
-      rarity = COALESCE(excluded.rarity, recipe_catalog_entries.rarity),
-      tag = COALESCE(excluded.tag, recipe_catalog_entries.tag),
-      icon_asset_name = COALESCE(excluded.icon_asset_name, recipe_catalog_entries.icon_asset_name),
-      detail_json = excluded.detail_json,
-      source = excluded.source,
-      last_synced_at = excluded.last_synced_at,
-      last_error = NULL,
-      updated_at = excluded.updated_at
-  `),
-  updateRecipeCatalogError: db.prepare("UPDATE recipe_catalog_entries SET last_error = ?, updated_at = ? WHERE catalog_key = ?"),
-  adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
-  adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
-  adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
-  adminBySession: db.prepare(`
-    SELECT admin_users.id, admin_users.username, admin_users.role, admin_users.discord_id, admin_users.discord_username, admin_users.discord_global_name, admin_users.discord_avatar
-    FROM admin_sessions
-    JOIN admin_users ON admin_users.id = admin_sessions.user_id
-    WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ? AND admin_users.active = 1
-  `),
-  insertAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)"),
-  insertDiscordAdmin: db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at, discord_id, discord_username, discord_global_name, discord_avatar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
-  updateAdminDiscordProfile: db.prepare("UPDATE admin_users SET username = ?, discord_username = ?, discord_global_name = ?, discord_avatar = ?, last_login_at = ? WHERE id = ?"),
-  updatePassword: db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?"),
-  updateAdminActive: db.prepare("UPDATE admin_users SET active = ? WHERE id = ?"),
-  updateAdminRole: db.prepare("UPDATE admin_users SET role = ? WHERE id = ?"),
-  updateLastLogin: db.prepare("UPDATE admin_users SET last_login_at = ? WHERE id = ?"),
-  insertSession: db.prepare("INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
-  deleteSession: db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?"),
-  deleteUserSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ?"),
-  deleteOtherSessions: db.prepare("DELETE FROM admin_sessions WHERE user_id = ? AND token_hash <> ?"),
-  deleteExpiredSessions: db.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?"),
-  userBySession: db.prepare(`
-    SELECT user_accounts.*
-    FROM user_sessions
-    JOIN user_accounts ON user_accounts.id = user_sessions.user_id
-    WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?
-  `),
-  userByDiscordId: db.prepare("SELECT * FROM user_accounts WHERE discord_id = ?"),
-  upsertUserAccount: db.prepare(`
-    INSERT INTO user_accounts (discord_id, discord_username, discord_global_name, discord_avatar, character_status, settings_json, created_at, last_login_at)
-    VALUES (?, ?, ?, ?, 'unlinked', '{}', ?, ?)
-    ON CONFLICT(discord_id) DO UPDATE SET
-      discord_username = excluded.discord_username,
-      discord_global_name = excluded.discord_global_name,
-      discord_avatar = excluded.discord_avatar,
-      last_login_at = excluded.last_login_at
-  `),
-  updateUserLastLogin: db.prepare("UPDATE user_accounts SET last_login_at = ? WHERE id = ?"),
-  insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
-  deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
-  deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),
-  updateUserCharacter: db.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = ? WHERE id = ?"),
-  updateUserSettings: db.prepare("UPDATE user_accounts SET settings_json = ? WHERE id = ?"),
-  listUserAccounts: db.prepare("SELECT * FROM user_accounts ORDER BY last_login_at DESC, created_at DESC"),
-  updateUserCharacterStatus: db.prepare("UPDATE user_accounts SET character_status = ? WHERE id = ?"),
-  insertAudit: db.prepare("INSERT INTO admin_audit_log (user_id, username, action, details_json, occurred_at) VALUES (?, ?, ?, ?, ?)"),
-  insertLoginEvent: db.prepare("INSERT INTO admin_login_events (username, successful, occurred_at, remote_address) VALUES (?, ?, ?, ?)"),
-  insertAnalyticsEvent: db.prepare(`
-    INSERT INTO analytics_events (visitor_key, session_key, event_name, page, properties_json, duration_seconds, occurred_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `),
-  insertVisitorSecurityEvent: db.prepare(`
-    INSERT INTO visitor_security_events (
-      occurred_at, method, route_group, status_code, status_class, ip_address,
-      ip_anonymized, ip_hash, visitor_key, user_agent_hash, country, city
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  clearGeoipRanges: db.prepare("DELETE FROM geoip_ranges"),
-  insertGeoipRange: db.prepare("INSERT INTO geoip_ranges (ip_start, ip_end, country, city, updated_at) VALUES (?, ?, ?, ?, ?)"),
-  lookupGeoipRange: db.prepare("SELECT country, city FROM geoip_ranges WHERE ip_start <= ? AND ip_end >= ? ORDER BY ip_start DESC LIMIT 1"),
-  geoipRangeCount: db.prepare("SELECT COUNT(*) AS count FROM geoip_ranges"),
-  geoipRangeLastUpdated: db.prepare("SELECT MAX(updated_at) AS updated_at FROM geoip_ranges"),
-  getVisitorGeoipCache: db.prepare("SELECT * FROM visitor_geoip_cache WHERE ip_hash = ?"),
-  upsertVisitorGeoipCache: db.prepare(`
-    INSERT INTO visitor_geoip_cache (ip_hash, ip_anonymized, provider, country, city, looked_up_at, expires_at, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(ip_hash) DO UPDATE SET
-      ip_anonymized = excluded.ip_anonymized,
-      provider = excluded.provider,
-      country = excluded.country,
-      city = excluded.city,
-      looked_up_at = excluded.looked_up_at,
-      expires_at = excluded.expires_at,
-      error = excluded.error
-  `),
-  pruneVisitorGeoipCache: db.prepare("DELETE FROM visitor_geoip_cache WHERE expires_at < ?"),
-  visitorGeoipCacheCount: db.prepare("SELECT COUNT(*) AS count FROM visitor_geoip_cache"),
-  visitorGeoipCacheLastLookup: db.prepare("SELECT MAX(looked_up_at) AS looked_up_at FROM visitor_geoip_cache"),
-  updateVisitorSecurityLocationByIpHash: db.prepare(`
-    UPDATE visitor_security_events
-    SET country = ?, city = ?
-    WHERE ip_hash = ? AND COALESCE(country, 'Unknown') = 'Unknown'
-  `),
-  insertDiscordDelivery: db.prepare(`
-    INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
-  recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
-  pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
-  upsertDiscordCraftWatch: db.prepare(`
-    INSERT INTO discord_craft_watches (guild_id, user_id, profession_key, profession_name, mode, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(guild_id, user_id, profession_key) DO UPDATE SET
-      profession_name = excluded.profession_name,
-      mode = excluded.mode,
-      updated_at = excluded.updated_at
-  `),
-  getDiscordCraftWatch: db.prepare("SELECT * FROM discord_craft_watches WHERE guild_id = ? AND user_id = ? AND profession_key = ?"),
-  deleteDiscordCraftWatch: db.prepare("DELETE FROM discord_craft_watches WHERE guild_id = ? AND user_id = ? AND profession_key = ?"),
-  clearDiscordCraftWatches: db.prepare("DELETE FROM discord_craft_watches WHERE guild_id = ? AND user_id = ?"),
-  listDiscordCraftWatches: db.prepare("SELECT * FROM discord_craft_watches WHERE guild_id = ? AND user_id = ? ORDER BY profession_name"),
-  matchingDiscordCraftWatches: db.prepare("SELECT user_id, mode FROM discord_craft_watches WHERE guild_id = ? AND profession_key = ?"),
-  insertDiscordModCase: db.prepare("INSERT INTO discord_mod_cases (guild_id, case_type, user_id, moderator, reason, details_json, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
-  recentDiscordModCases: db.prepare("SELECT * FROM discord_mod_cases WHERE guild_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?"),
-  insertDiscordWarning: db.prepare("INSERT INTO discord_warnings (guild_id, user_id, moderator, reason, active, created_at) VALUES (?, ?, ?, ?, 1, ?)"),
-  listDiscordWarnings: db.prepare("SELECT * FROM discord_warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50"),
-  clearDiscordWarnings: db.prepare("UPDATE discord_warnings SET active = 0 WHERE guild_id = ? AND user_id = ? AND active = 1"),
-  insertDiscordModNote: db.prepare("INSERT INTO discord_mod_notes (guild_id, user_id, moderator, note, created_at) VALUES (?, ?, ?, ?, ?)"),
-  listDiscordModNotes: db.prepare("SELECT * FROM discord_mod_notes WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50"),
-  deleteDiscordModNote: db.prepare("DELETE FROM discord_mod_notes WHERE id = ? AND guild_id = ?"),
-  upsertDiscordCustomCommand: db.prepare("INSERT INTO discord_custom_commands (name, description, response, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, response = excluded.response, updated_at = excluded.updated_at"),
-  deleteDiscordCustomCommand: db.prepare("DELETE FROM discord_custom_commands WHERE name = ?"),
-  listDiscordCustomCommands: db.prepare("SELECT * FROM discord_custom_commands ORDER BY name"),
-  getDiscordCustomCommand: db.prepare("SELECT * FROM discord_custom_commands WHERE name = ?"),
-  upsertDiscordComponentVote: db.prepare("INSERT INTO discord_component_votes (message_id, component_key, user_id, kind, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(message_id, user_id, kind) DO UPDATE SET component_key = excluded.component_key, updated_at = excluded.updated_at"),
-  componentVoteCounts: db.prepare("SELECT component_key, COUNT(*) AS count FROM discord_component_votes WHERE message_id = ? AND kind = ? GROUP BY component_key"),
-  upsertDiscordComponentMessage: db.prepare("INSERT INTO discord_component_messages (message_id, kind, metadata_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id, kind) DO UPDATE SET metadata_json = excluded.metadata_json, updated_at = excluded.updated_at"),
-  getDiscordComponentMessage: db.prepare("SELECT * FROM discord_component_messages WHERE message_id = ? AND kind = ?"),
-  upsertDiscordTempBan: db.prepare("INSERT INTO discord_temp_bans (guild_id, user_id, unban_at, reason, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET unban_at = excluded.unban_at, reason = excluded.reason"),
-  dueDiscordTempBans: db.prepare("SELECT * FROM discord_temp_bans WHERE unban_at <= ? LIMIT 25"),
-  deleteDiscordTempBan: db.prepare("DELETE FROM discord_temp_bans WHERE guild_id = ? AND user_id = ?"),
-};
+const statements = createPreparedStatements(db);
 
-const defaultOwnerDiscordId = String(process.env.DEFAULT_OWNER_DISCORD_ID ?? "145544610234630144").trim();
-
-function seedDefaultDiscordOwner() {
-  if (isTestRuntime || !/^\d+$/.test(defaultOwnerDiscordId)) return;
-  if (db.prepare("SELECT id FROM admin_users WHERE discord_id = ?").get(defaultOwnerDiscordId)) return;
-  const createdAt = new Date().toISOString();
-  const existingRed = db.prepare("SELECT id FROM admin_users WHERE username = ?").get("red463");
-  if (existingRed) {
-    db.prepare("UPDATE admin_users SET discord_id = ?, discord_username = ?, discord_global_name = ?, role = 'owner', active = 1 WHERE id = ?")
-      .run(defaultOwnerDiscordId, "red463", "red463", existingRed.id);
-    return;
-  }
-  statements.insertDiscordAdmin.run("red463", "discord-oauth-admin", "owner", createdAt, defaultOwnerDiscordId, "red463", "red463", "");
-}
-
-seedDefaultDiscordOwner();
+seedDefaultDiscordOwner({ db, statements, defaultOwnerDiscordId: defaultOwnerDiscordIdFromEnv(process.env), isTestRuntime });
 
 function toNumber(value) {
   const n = Number(value ?? 0);
@@ -948,120 +144,6 @@ function toNumber(value) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function nextDailyMidnightIso(from = new Date()) {
-  const next = new Date(from);
-  next.setHours(24, 0, 0, 0);
-  return next.toISOString();
-}
-
-function parseScheduledJobSchedule(schedule) {
-  const raw = String(schedule ?? "").trim();
-  if (!raw || raw === "daily_midnight") return { frequency: "daily", time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-  if (raw.startsWith("interval@")) {
-    return { frequency: "interval", intervalSeconds: Math.min(Math.max(Math.floor(toNumber(raw.split("@")[1]) || 1800), 60), 86400), time: "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-  }
-  const parts = raw.split("@");
-  const frequency = ["daily", "weekly", "monthly"].includes(parts[0]) ? parts[0] : "daily";
-  if (frequency === "weekly") {
-    return { frequency, dayOfWeek: Math.min(6, Math.max(0, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfMonth: 1 };
-  }
-  if (frequency === "monthly") {
-    return { frequency, dayOfMonth: Math.min(28, Math.max(1, Math.floor(toNumber(parts[1]) || 1))), time: validScheduleTime(parts[2]) ? parts[2] : "00:00", dayOfWeek: 1 };
-  }
-  return { frequency: "daily", time: validScheduleTime(parts[1]) ? parts[1] : "00:00", dayOfWeek: 1, dayOfMonth: 1 };
-}
-
-function validScheduleTime(value) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? ""));
-}
-
-function serializeScheduledJobSchedule(input = {}) {
-  const frequency = ["daily", "weekly", "monthly", "interval"].includes(String(input.frequency)) ? String(input.frequency) : "daily";
-  const time = validScheduleTime(input.time) ? String(input.time) : "00:00";
-  if (frequency === "interval") return `interval@${Math.min(Math.max(Math.floor(toNumber(input.intervalSeconds) || 1800), 60), 86400)}`;
-  if (frequency === "weekly") {
-    const dayOfWeek = Math.min(6, Math.max(0, Math.floor(toNumber(input.dayOfWeek) || 1)));
-    return `weekly@${dayOfWeek}@${time}`;
-  }
-  if (frequency === "monthly") {
-    const dayOfMonth = Math.min(28, Math.max(1, Math.floor(toNumber(input.dayOfMonth) || 1)));
-    return `monthly@${dayOfMonth}@${time}`;
-  }
-  return `daily@${time}`;
-}
-
-function nextScheduledRunIso(schedule, from = new Date()) {
-  const config = parseScheduledJobSchedule(schedule);
-  if (config.frequency === "interval") return new Date(from.getTime() + (toNumber(config.intervalSeconds) || 1800) * 1000).toISOString();
-  const [hours, minutes] = config.time.split(":").map((part) => Number(part));
-  const next = new Date(from);
-  next.setSeconds(0, 0);
-  if (config.frequency === "weekly") {
-    const dayDelta = (config.dayOfWeek - next.getDay() + 7) % 7;
-    next.setDate(next.getDate() + dayDelta);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) next.setDate(next.getDate() + 7);
-    return next.toISOString();
-  }
-  if (config.frequency === "monthly") {
-    next.setDate(config.dayOfMonth);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) {
-      next.setMonth(next.getMonth() + 1, config.dayOfMonth);
-      next.setHours(hours, minutes, 0, 0);
-    }
-    return next.toISOString();
-  }
-  next.setHours(hours, minutes, 0, 0);
-  if (next <= from) next.setDate(next.getDate() + 1);
-  return next.toISOString();
-}
-
-function scheduledJobScheduleLabel(schedule) {
-  const config = parseScheduledJobSchedule(schedule);
-  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  if (config.frequency === "interval") return `Every ${Math.round((toNumber(config.intervalSeconds) || 1800) / 60)} minutes`;
-  if (config.frequency === "weekly") return `Weekly on ${weekdays[config.dayOfWeek]} at ${config.time}`;
-  if (config.frequency === "monthly") return `Monthly on day ${config.dayOfMonth} at ${config.time}`;
-  return `Daily at ${config.time}`;
-}
-function recipeCatalogKey(kind, id) {
-  const normalizedKind = String(kind ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-  return `${normalizedKind}:${String(id ?? "").trim()}`;
-}
-
-function recipeKindFromItemType(value) {
-  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-}
-
-function recipeTargetFromDetail(detail, fallback = {}) {
-  const source = detail?.item ?? detail?.cargo ?? detail ?? {};
-  const kind = detail?.cargo ? "cargo" : recipeKindFromItemType(source.itemType ?? source.item_type ?? fallback.itemType ?? fallback.kind);
-  return {
-    id: String(source.id ?? source.itemId ?? fallback.id ?? ""),
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    name: String(source.name ?? fallback.name ?? "Unknown item"),
-    tier: Number.isFinite(Number(source.tier ?? fallback.tier)) ? Number(source.tier ?? fallback.tier) : null,
-    rarity: source.rarityStr ?? source.rarity ?? fallback.rarity ?? null,
-    tag: source.tag ?? fallback.tag ?? null,
-    iconAssetName: source.iconAssetName ?? fallback.iconAssetName ?? null,
-  };
-}
-
-function recipeTargetFromRow(row) {
-  return {
-    id: String(row.target_id),
-    kind: String(row.kind) === "cargo" ? "cargo" : "items",
-    itemType: toNumber(row.item_type),
-    name: row.name ?? "Unknown item",
-    tier: row.tier == null ? null : toNumber(row.tier),
-    rarity: row.rarity ?? null,
-    tag: row.tag ?? null,
-    iconAssetName: row.icon_asset_name ?? null,
-  };
 }
 
 function upsertRecipeCatalogDetail(target, detail, source = "bitjita") {
@@ -1283,60 +365,21 @@ const scheduledJobRegistry = {
 };
 
 function seedScheduledJobs() {
-  const seededAt = new Date().toISOString();
-  for (const [key, job] of Object.entries(scheduledJobRegistry)) {
-    statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextScheduledRunIso(job.schedule), seededAt);
-    const row = statements.getScheduledJob.get(key);
-    if (!row?.next_run_at) {
-      db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextScheduledRunIso(row?.schedule ?? job.schedule), seededAt, key);
-    }
-  }
+  seedScheduledJobsRegistry({ db, statements, registry: scheduledJobRegistry });
 }
 
 const scheduledJobStaleAfterMs = 15 * 60 * 1000;
 
 function recoverStaleScheduledJobs() {
-  const cutoff = new Date(Date.now() - scheduledJobStaleAfterMs).toISOString();
-  const updatedAt = new Date().toISOString();
-  const nextRunAt = new Date().toISOString();
-  const result = statements.resetStaleScheduledJobs.run(
-    `Recovered abandoned run after server restart or timeout. The previous run was still marked running for more than ${Math.round(scheduledJobStaleAfterMs / 60000)} minutes.`,
-    nextRunAt,
-    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes: Math.round(scheduledJobStaleAfterMs / 60000) }),
-    updatedAt,
-    cutoff,
-  );
-  return result.changes;
+  return recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
 }
 
 function scheduledJobRow(row) {
-  return {
-    key: row.job_key,
-    label: row.label,
-    description: row.description ?? "",
-    schedule: row.schedule,
-    scheduleLabel: scheduledJobScheduleLabel(row.schedule),
-    scheduleConfig: parseScheduledJobSchedule(row.schedule),
-    enabled: Boolean(row.enabled),
-    running: Boolean(row.running),
-    lastRunAt: row.last_run_at,
-    lastSuccessAt: row.last_success_at,
-    lastError: row.last_error,
-    nextRunAt: row.next_run_at,
-    metadata: safeJson(row.metadata_json, {}),
-    updatedAt: row.updated_at,
-  };
+  return publicScheduledJobRow(row);
 }
 
 function scheduledJobsStatus() {
-  recoverStaleScheduledJobs();
-  const recipeCatalogCount = toNumber(statements.recipeCatalogCount.get()?.count);
-  return {
-    enabled: scheduledJobsEnabled,
-    serverTime: new Date().toISOString(),
-    recipeCatalogCount,
-    jobs: statements.listScheduledJobs.all().map(scheduledJobRow),
-  };
+  return scheduledJobsStatusResponse({ enabled: scheduledJobsEnabled, statements, recoverStaleJobs: recoverStaleScheduledJobs });
 }
 
 async function runScheduledJob(jobKey, { manual = false } = {}) {
@@ -1387,159 +430,16 @@ function checkScheduledJobs() {
 seedScheduledJobs();
 
 function currentAppBuildId() {
-  const envRevision = String(process.env.SOURCE_VERSION ?? process.env.RENDER_GIT_COMMIT ?? process.env.GITHUB_SHA ?? "").trim();
-  if (envRevision) return envRevision.slice(0, 12);
-  try {
-    const gitDir = path.join(repoRoot, ".git");
-    const head = readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
-    if (head.startsWith("ref:")) {
-      const refPath = head.slice(5).trim();
-      const full = readFileSync(path.join(gitDir, refPath), "utf8").trim();
-      return full.slice(0, 12);
-    }
-    if (/^[a-f0-9]{40}$/i.test(head)) return head.slice(0, 12);
-  } catch {}
-  return "";
+  return resolveCurrentAppBuildId({ repoRoot });
 }
 
 function currentAppReleaseKey() {
-  const buildId = currentAppBuildId();
-  return buildId ? `${appVersion}+${buildId}` : appVersion;
+  return resolveCurrentAppReleaseKey({ appVersion, buildId: currentAppBuildId() });
 }
 
 function unwrap(payload, key, fallback) {
   if (Array.isArray(payload)) return payload;
   return payload?.[key] ?? fallback;
-}
-
-function listingKey(row) {
-  const id = row.entityId ?? row.id ?? row.marketListingId ?? row.listingId;
-  if (id) return String(id);
-  return [
-    row.itemName ?? "unknown",
-    row.ownerUsername ?? row.owner ?? "",
-    row.side ?? row.orderType ?? "sell",
-    row.quantity ?? "",
-    row.price ?? "",
-  ].join("|");
-}
-
-function bitjitaTimestampIso(value) {
-  if (!value) return null;
-  const text = String(value);
-  if (!/^\d+$/.test(text)) {
-    const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  const numeric = Number(text);
-  const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
-  const date = new Date(millis);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function normalizeListing(row) {
-  const quantity = toNumber(row.quantity);
-  const price = toNumber(row.price);
-  return {
-    key: listingKey(row),
-    itemName: String(row.itemName ?? row.name ?? "Unknown item"),
-    side: String(row.side ?? row.orderType ?? "sell"),
-    owner: row.ownerUsername ?? row.ownerName ?? row.owner ?? null,
-    ownerEntityId: row.ownerEntityId ?? row.owner_entity_id ?? null,
-    itemId: row.itemId ?? row.item_id ?? null,
-    itemType: row.itemType ?? row.item_type ?? null,
-    quantity,
-    price,
-    totalValue: quantity * price,
-    tier: row.itemTier ?? row.tier ?? null,
-    rarity: row.itemRarityStr ?? row.rarity ?? null,
-    listedAt: bitjitaTimestampIso(row.timestamp ?? row.createdAt),
-    tradeId: row.tradeId ?? row.id ?? null,
-    raw: row,
-  };
-}
-
-function stableCraftPart(value, fallback = "") {
-  return String(value ?? fallback).trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function craftJobKey(job) {
-  const output = job.craftedItem?.[0] ?? {};
-  const claim = stableCraftPart(job.claimEntityId ?? job.claimId, "claim");
-  const structure = stableCraftPart(
-    job.buildingEntityId ?? job.structureEntityId ?? job.stationEntityId ?? job.craftingStationEntityId ?? job.buildingId ?? job.buildingName ?? job.structureName,
-  );
-  const recipe = stableCraftPart(job.recipeId ?? job.recipeEntityId ?? job.recipe_entity_id ?? job.craftingRecipeId ?? job.recipeName ?? job.name);
-  const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId);
-  const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType);
-  const visibility = job.isPublic === false ? "private" : "public";
-  // BitJita can report the same public craft with a different current/last crafter as work continues.
-  // Crafter is notification metadata, not stable craft identity, otherwise starts can fire again.
-  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|"));
-}
-
-function craftOutputItem(job, craftsPayload = {}) {
-  const itemId = String(job.craftedItem?.[0]?.item_id ?? job.outputItemId ?? job.itemId ?? "");
-  return [...(craftsPayload.items ?? []), ...(craftsPayload.cargos ?? [])].find((candidate) => String(candidate.id) === itemId) ?? null;
-}
-
-function craftDisplayName(job, craftsPayload = {}) {
-  const item = craftOutputItem(job, craftsPayload);
-  return String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`);
-}
-
-function normalizeProductionJob(job, craftsPayload = {}) {
-  const metrics = productionMetrics(job);
-  const item = craftOutputItem(job, craftsPayload);
-  return {
-    key: craftJobKey(job),
-    label: String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`),
-    tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
-    buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
-    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
-    ...metrics,
-    raw: job,
-  };
-}
-
-const skillNames = {
-  2: "Forestry",
-  3: "Carpentry",
-  4: "Masonry",
-  5: "Mining",
-  6: "Smithing",
-  7: "Scholar",
-  8: "Leatherworking",
-  9: "Hunting",
-  10: "Tailoring",
-  11: "Farming",
-  12: "Fishing",
-  13: "Cooking",
-  14: "Foraging",
-};
-
-function productionMetrics(job) {
-  const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
-  const skillName = job.levelRequirements?.[0]?.skillName ?? skillNames[skillId] ?? "";
-  const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
-  const totalEffort = toNumber(job.totalActionsRequired ?? job.totalCraftWork ?? job.requiredCraftWork ?? job.craftWorkRequired ?? job.effortRequired ?? job.totalEffort);
-  const completedEffort = toNumber(job.progress ?? job.completedCraftWork ?? job.completedEffort ?? job.actionsCompleted);
-  const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? (totalEffort ? totalEffort - completedEffort : 0));
-  const progressPct = totalEffort > 0 ? Math.max(0, Math.min(100, ((totalEffort - remainingEffort) / totalEffort) * 100)) : Math.max(0, Math.min(100, toNumber(job.progressPct ?? job.progressPercent ?? job.progress)));
-  return {
-    skillId,
-    skillName,
-    professionKey: String(skillName || "").toLowerCase().replace(/[^a-z]/g, ""),
-    totalEffort,
-    remainingEffort,
-    progressPct,
-    totalXp: totalEffort * xpPerEffort,
-  };
-}
-
-function normalizeProfessionKey(value) {
-  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
 }
 
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
@@ -1652,263 +552,6 @@ async function deliverProductionNotifications(pendingNotifications = []) {
   }
 }
 
-const defaultCraftChannels = {
-  forestry: "1509932116077711411",
-  carpentry: "1509932154442875201",
-  masonry: "1509932188446101585",
-  mining: "1509932207060291797",
-  smithing: "1509932228090658936",
-  scholar: "1509932259262595245",
-  hunting: "1510275986766434325",
-  leatherworking: "1509932280829710547",
-  tailoring: "1509932306486398976",
-  farming: "1509932539626786926",
-  fishing: "1509932564641747074",
-  cooking: "1509932588180181033",
-  foraging: "1509932609378058412",
-};
-
-const defaultCraftRoles = {
-  forestry: "1511297282769944596",
-  carpentry: "1511297283386249358",
-  masonry: "1511297283931639808",
-  mining: "1511297284724494399",
-  smithing: "1511297285772804206",
-  scholar: "1511297286469324890",
-  leatherworking: "1511297288511815751",
-  tailoring: "1511297287157055632",
-  farming: "1511297288176144425",
-  fishing: "1511297635665969222",
-  cooking: "1511297639269011486",
-  foraging: "1511297639868665966",
-  hunting: "1511297640866906153",
-};
-
-const defaultDiscordChannels = {
-  notifications: "",
-  modNotes: "1509972023927902218",
-  modLog: "",
-  ...defaultCraftChannels,
-};
-
-const defaultNotificationChannels = {
-  marketListings: "notifications",
-  marketSales: "notifications",
-  lowSupplies: "notifications",
-  appUpdates: "notifications",
-  supplyReport: "modNotes",
-  productionStarted: "profession",
-  productionCompleted: "profession",
-};
-
-const defaultColourRoles = [
-  { key: "green1", label: "Green 1", roleName: "Green 1", roleId: "", color: 0x2be56f },
-  { key: "green2", label: "Green 2", roleName: "Green 2", roleId: "", color: 0x1fb72e },
-  { key: "blue1", label: "Blue 1", roleName: "Blue 1", roleId: "", color: 0x5fa8ff },
-  { key: "blue2", label: "Blue 2", roleName: "Blue 2", roleId: "", color: 0x244cff },
-  { key: "purple", label: "Purple", roleName: "Purple", roleId: "", color: 0x9b4acb },
-  { key: "pink", label: "Pink", roleName: "Pink", roleId: "", color: 0xff4f88 },
-  { key: "red", label: "Red", roleName: "Red", roleId: "", color: 0xff2028 },
-  { key: "yellow", label: "Yellow", roleName: "Yellow", roleId: "", color: 0xf4c430 },
-  { key: "orange", label: "Orange", roleName: "Orange", roleId: "", color: 0xff9f1c },
-  { key: "black", label: "Black", roleName: "Black", roleId: "", color: 0x111111 },
-  { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
-];
-
-const defaultRolePanels = [
-  {
-    key: "access",
-    label: "Access Roles",
-    channelId: "",
-    messageId: "",
-    title: "Welcome to Timbersteel Trade!",
-    description: "Choose your access role below.",
-    mode: "single",
-    showHelperText: true,
-    options: [
-      { key: "citizen", label: "Citizen", roleId: "", emoji: "1️⃣" },
-      { key: "visitor", label: "Visitor", roleId: "", emoji: "2️⃣" },
-    ],
-  },
-  {
-    key: "professions",
-    label: "Profession Roles",
-    channelId: "",
-    messageId: "",
-    title: "Choose Your Professions",
-    description: "Select as many profession interests as you like.",
-    mode: "multi",
-    showHelperText: true,
-    options: Object.keys(defaultCraftRoles).map((key) => ({
-      key,
-      label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
-      roleId: defaultCraftRoles[key],
-      emoji: "",
-    })),
-  },
-  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", showHelperText: true, options: [] },
-  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", showHelperText: true, options: [] },
-];
-
-const defaultWelcomeFlow = {
-  enabled: false,
-  channelId: "",
-  messageId: "",
-  title: "Welcome to Timbersteel Trade",
-  message: "Read the welcome steps, choose your roles, then click Ready.",
-  readyRoleId: "",
-  showNextStep: true,
-};
-
-const defaultDiscordPresence = {
-  enabled: true,
-  status: "online",
-  activityType: "watching",
-  activityText: "app.timbersteeltrade.com",
-};
-
-const defaultDiscordSettings = {
-  enabled: false,
-  applicationId: "",
-  publicKey: "",
-  guildId: "",
-  channelId: "",
-  minSaleValue: 0,
-  supplyRunwayDaysThreshold: 7,
-  productionMinXp: 40000,
-  productionMinAgeMinutes: 5,
-  productionUsers: "",
-  supplyReportIntervalDays: 3,
-  channels: defaultDiscordChannels,
-  notificationChannels: defaultNotificationChannels,
-  craftChannels: defaultCraftChannels,
-  craftRoles: defaultCraftRoles,
-  colourRolesChannelId: "",
-  colourRolesMessageId: "",
-  colourRoles: defaultColourRoles,
-  rolePanels: defaultRolePanels,
-  welcomeFlow: defaultWelcomeFlow,
-  presence: defaultDiscordPresence,
-  notify: {
-    marketListings: true,
-    marketSales: true,
-    production: true,
-    productionStarted: true,
-    productionCompleted: true,
-    lowSupplies: false,
-    appUpdates: true,
-    supplyReports: true,
-  },
-};
-
-function normalizeDiscordRoleOption(value = {}, index = 0) {
-  const label = String(value.label ?? `Role ${index + 1}`).trim() || `Role ${index + 1}`;
-  return {
-    key: String(value.key ?? (label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `role-${index + 1}`)).trim(),
-    label,
-    roleId: String(value.roleId ?? "").trim(),
-    emoji: String(value.emoji ?? "").trim().slice(0, 16),
-  };
-}
-
-function normalizeDiscordRolePanel(value = {}, fallback = {}, index = 0) {
-  const label = String(value.label ?? fallback.label ?? `Panel ${index + 1}`).trim() || `Panel ${index + 1}`;
-  const options = Array.isArray(value.options) ? value.options : fallback.options ?? [];
-  return {
-    key: String(value.key ?? fallback.key ?? (label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `panel-${index + 1}`)).trim(),
-    label,
-    channelId: String(value.channelId ?? fallback.channelId ?? "").trim(),
-    messageId: String(value.messageId ?? fallback.messageId ?? "").trim(),
-    title: String(value.title ?? fallback.title ?? label).trim() || label,
-    description: String(value.description ?? fallback.description ?? "").trim(),
-    mode: String(value.mode ?? fallback.mode ?? "multi") === "single" ? "single" : "multi",
-    showHelperText: value.showHelperText !== undefined ? value.showHelperText !== false : fallback.showHelperText !== false,
-    options: options.map((option, optionIndex) => normalizeDiscordRoleOption(option, optionIndex)).filter((option) => option.label),
-  };
-}
-
-function normalizeDiscordWelcomeFlow(value = {}) {
-  return {
-    ...defaultWelcomeFlow,
-    ...value,
-    enabled: value.enabled === true,
-    channelId: String(value.channelId ?? "").trim(),
-    messageId: String(value.messageId ?? "").trim(),
-    title: String(value.title ?? defaultWelcomeFlow.title).trim() || defaultWelcomeFlow.title,
-    message: String(value.message ?? defaultWelcomeFlow.message).trim() || defaultWelcomeFlow.message,
-    readyRoleId: String(value.readyRoleId ?? "").trim(),
-    showNextStep: value.showNextStep !== false,
-  };
-}
-
-function normalizeDiscordPresence(value = {}) {
-  const status = ["online", "idle", "dnd", "invisible"].includes(String(value.status)) ? String(value.status) : defaultDiscordPresence.status;
-  const activityType = ["playing", "watching", "listening", "competing"].includes(String(value.activityType)) ? String(value.activityType) : defaultDiscordPresence.activityType;
-  const activityText = String(value.activityText ?? defaultDiscordPresence.activityText).trim().slice(0, 128) || defaultDiscordPresence.activityText;
-  return {
-    ...defaultDiscordPresence,
-    ...value,
-    enabled: value.enabled !== false,
-    status,
-    activityType,
-    activityText,
-  };
-}
-
-function normalizeDiscordSettings(value = {}) {
-  const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
-  const savedColourRoles = Array.isArray(value.colourRoles) ? value.colourRoles : [];
-  const colourRoleSource = Array.isArray(value.colourRoles) ? savedColourRoles : defaultColourRoles;
-  const rolePanelSource = Array.isArray(value.rolePanels) ? value.rolePanels : defaultRolePanels;
-  return {
-    ...defaultDiscordSettings,
-    ...value,
-    enabled: value.enabled === true,
-    applicationId: String(value.applicationId ?? "").trim(),
-    publicKey: String(value.publicKey ?? "").trim(),
-    guildId: String(value.guildId ?? "").trim(),
-    channelId: String(value.channelId ?? "").trim(),
-    minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
-    supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
-    productionMinXp: Math.max(value.productionMinXp == null ? 40000 : toNumber(value.productionMinXp), 0),
-    productionMinAgeMinutes: Math.max((value.productionMinAgeMinutes ?? value.productionMinAgeMins) == null ? 5 : toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins), 0),
-    productionUsers: String(value.productionUsers ?? "").trim(),
-    supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
-    channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
-    notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
-    craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
-    craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
-    colourRolesChannelId: String(value.colourRolesChannelId ?? "").trim(),
-    colourRolesMessageId: String(value.colourRolesMessageId ?? "").trim(),
-    colourRoles: colourRoleSource.map((item, index) => {
-      const entry = defaultColourRoles[index] ?? {};
-      const saved = item ?? {};
-      const savedRoleName = String(saved.roleName ?? "");
-      const label = String(saved.label ?? entry.label ?? "New Colour").trim() || "New Colour";
-      return {
-        key: String(saved.key ?? entry.key ?? `colour-${index + 1}`).trim() || `colour-${index + 1}`,
-        label,
-        roleName: savedRoleName.trim() || String(entry.roleName ?? label),
-        roleId: String(saved.roleId ?? "").trim(),
-        color: Math.max(toNumber(saved.color ?? entry.color), 0),
-      };
-    }),
-    rolePanels: rolePanelSource.map((panel, index) => normalizeDiscordRolePanel(panel, defaultRolePanels[index], index)),
-    welcomeFlow: normalizeDiscordWelcomeFlow(value.welcomeFlow ?? {}),
-    presence: normalizeDiscordPresence(value.presence ?? {}),
-    notify: {
-      marketListings: notify.marketListings !== false,
-      marketSales: notify.marketSales !== false,
-      production: notify.production !== false,
-      productionStarted: notify.productionStarted ?? notify.production ?? true,
-      productionCompleted: notify.productionCompleted ?? notify.production ?? true,
-      lowSupplies: notify.lowSupplies === true,
-      appUpdates: notify.appUpdates !== false,
-      supplyReports: notify.supplyReports !== false,
-    },
-  };
-}
-
 function getDiscordSettingsRaw() {
   const stored = normalizeDiscordSettings(safeJson(statements.getSetting.get("discord_json")?.value, defaultDiscordSettings));
   const envToken = String(process.env.DISCORD_BOT_TOKEN ?? "").trim();
@@ -1937,84 +580,6 @@ function publicDiscordSettings() {
   };
 }
 
-const domainCollectorDefaults = {
-  claim: { label: "Claim", intervalSeconds: 30 },
-  members: { label: "Members", intervalSeconds: 30 },
-  players: { label: "Player details", intervalSeconds: 60 },
-  professions: { label: "Professions", intervalSeconds: 30 },
-  production: { label: "Production", intervalSeconds: 30 },
-  inventory: { label: "Inventory and storage", intervalSeconds: 60 },
-  construction: { label: "Construction", intervalSeconds: 60 },
-  research: { label: "Research", intervalSeconds: 600 },
-  market: { label: "Market", intervalSeconds: 60 },
-  buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
-  region: { label: "Region", intervalSeconds: 300 },
-  mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
-  storageActivity: { label: "Storage activity", intervalSeconds: 60 },
-  marketTrades: { label: "Member market trades", intervalSeconds: 60 },
-};
-
-const domainPayloadKeys = ["claim", "members", "citizens", "buildings", "construction", "research", "market", "regionalBuyOrders", "crafts", "players", "playerDetailDiagnostics", "contributions", "region", "regionStatus", "tradeVolume", "inventories", "recruitment", "layout", "skills"];
-const collectorPrimaryPayloadDomain = {
-  claim: "claim",
-  members: "members",
-  players: "players",
-  professions: "citizens",
-  production: "crafts",
-  inventory: "inventories",
-  construction: "construction",
-  research: "research",
-  market: "market",
-  buyOrders: "regionalBuyOrders",
-  region: "region",
-  mapCatalog: "skills",
-};
-
-const payloadDomainCollector = {
-  claim: "claim",
-  members: "members",
-  players: "players",
-  playerDetailDiagnostics: "players",
-  citizens: "professions",
-  skills: "mapCatalog",
-  crafts: "production",
-  contributions: "production",
-  inventories: "inventory",
-  recruitment: "inventory",
-  layout: "inventory",
-  buildings: "construction",
-  construction: "construction",
-  research: "research",
-  market: "market",
-  tradeVolume: "market",
-  regionalBuyOrders: "buyOrders",
-  region: "region",
-  regionStatus: "region",
-};
-
-const collectorCurrentTables = {
-  production: ["production_contributions"],
-  market: ["market_listings", "market_trades"],
-  buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
-  mapCatalog: ["domain_payload_current"],
-  snapshotHistory: ["snapshots"],
-  storageActivity: ["activity_events"],
-  marketTrades: ["market_trades"],
-};
-
-function normalizeCollectorSettings(value = {}) {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  return Object.fromEntries(Object.entries(domainCollectorDefaults).map(([key, defaults]) => {
-    const saved = source[key] && typeof source[key] === "object" ? source[key] : {};
-    return [key, {
-      label: defaults.label,
-      enabled: saved.enabled !== false,
-      intervalSeconds: Math.min(Math.max(toNumber(saved.intervalSeconds ?? saved.intervalMs / 1000) || defaults.intervalSeconds, 15), 3600),
-    }];
-  }));
-}
-
 function getCollectorSettings() {
   return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
 }
@@ -2039,14 +604,7 @@ function migrateBuyOrderCollectorInterval() {
 migrateBuyOrderCollectorInterval();
 
 function marketDealWatchSettings() {
-  const saved = safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {});
-  const config = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
-  return {
-    maxWatchesPerUser: Math.min(Math.max(Math.floor(toNumber(config.maxWatchesPerUser) || 10), 1), 100),
-    thresholdPercent: Math.min(Math.max(toNumber(config.thresholdPercent) || 30, 1), 95),
-    minConfirmedSales: Math.min(Math.max(Math.floor(toNumber(config.minConfirmedSales) || 3), 1), 100),
-    discordDmEnabled: config.discordDmEnabled !== false,
-  };
+  return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
 }
 
 function getSettings() {
@@ -2054,22 +612,22 @@ function getSettings() {
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
   const excludedMemberIds = safeJson(statements.getSetting.get("excluded_member_ids_json")?.value, []);
-  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "dashboard";
+  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? DEFAULT_APP_PAGE;
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
-    excludedMemberIds: Array.isArray(excludedMemberIds) ? [...new Set(excludedMemberIds.map((value) => String(value ?? "").trim()).filter(Boolean))] : [],
+    excludedMemberIds: normalizeStoredExcludedMemberIds(excludedMemberIds),
     theme: { ...defaultTheme, ...theme },
-    refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
-    serverRefreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300),
+    refreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("refresh_seconds")?.value, 30),
+    serverRefreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)),
     collectorSettings: getCollectorSettings(),
-    defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
+    defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     marketDealWatch: marketDealWatchSettings(),
     branding,
-    snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
+    snapshotRetentionDays: normalizeSavedSnapshotRetentionDays(statements.getSetting.get("snapshot_retention_days")?.value, 365),
     visitorSecurity: visitorSecuritySettings(),
     browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
@@ -2078,7 +636,7 @@ function getSettings() {
 
 const pollStatus = {
   enabled: serverPollingEnabled,
-  intervalMs: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300) * 1000,
+  intervalMs: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)) * 1000,
   running: false,
   nextRunAt: null,
   lastAttemptAt: null,
@@ -2094,7 +652,7 @@ const pollStatus = {
 };
 
 function serverRefreshIntervalMs() {
-  const seconds = Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300);
+  const seconds = normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000));
   return seconds * 1000;
 }
 
@@ -2254,50 +812,14 @@ function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
   pollStatus.lastRunMetrics = metrics;
 }
 
-function validSyncUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" && parsed.hostname === "bitcraftsync.app";
-  } catch {
-    return false;
-  }
-}
-
-function validPage(value) {
-  return ["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "empires", "map", "sync", "activity"].includes(value);
-}
-
-const scryptAsync = promisify(scrypt);
-
-async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  const hash = Buffer.from(await scryptAsync(password, salt, 64)).toString("hex");
-  return `scrypt:${salt}:${hash}`;
-}
-
-async function verifyPassword(password, stored) {
-  const [scheme, salt, expected] = String(stored).split(":");
-  if (scheme !== "scrypt" || !salt || !expected) return false;
-  const actual = Buffer.from(await scryptAsync(password, salt, 64));
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return expectedBuffer.length === actual.length && timingSafeEqual(actual, expectedBuffer);
-}
-
-function tokenHash(token) {
-  return createHash("sha256").update(String(token)).digest("hex");
-}
-
-function parseCookies(req) {
-  return Object.fromEntries(String(req.headers.cookie ?? "").split(";").map((part) => {
-    const [key, ...value] = part.trim().split("=");
-    return [key, decodeURIComponent(value.join("=") ?? "")];
-  }).filter(([key]) => key));
-}
 
 function getSessionUser(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
-  if (!token) return null;
-  statements.deleteExpiredSessions.run(new Date().toISOString());
-  return statements.adminBySession.get(tokenHash(token), new Date().toISOString()) ?? null;
+  return lookupHttpSessionUser({
+    req,
+    cookieName: ADMIN_SESSION_COOKIE_NAME,
+    deleteExpiredSessions: statements.deleteExpiredSessions,
+    userBySession: statements.adminBySession,
+  });
 }
 
 function requireAdmin(req, res) {
@@ -2316,9 +838,7 @@ function audit(user, action, details = {}) {
   statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
 }
 
-const loginAttempts = new Map();
-const upstreamCache = new Map();
-const upstreamInflight = new Map();
+const adminLoginAttempts = createAdminLoginAttemptStore();
 const empireScoutInflight = new Map();
 const regionCache = new Map();
 const regionClaimListCache = new Map();
@@ -2337,7 +857,6 @@ const productionCraftsInflight = new Map();
 let mapCatalogCache = null;
 const dashboardDataCache = new Map();
 const dashboardDataInflight = new Map();
-const rateLimitBuckets = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
@@ -2353,98 +872,16 @@ const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTI
 const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const BITJITA_PROXY_CACHE_POLICIES = [
-  { pattern: /^\/api\/(?:resources|creatures|skills|items|cargos|recipes|crafting-recipes)(?:\/|$)/, ttlMs: 60 * 60 * 1000 },
-  { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
-  { pattern: /^\/api\/players\/[^/]+$/, ttlMs: 60 * 1000 },
-  { pattern: /^\/api\/claims\/[^/]+\/(?:members|citizens)$/, ttlMs: 30 * 1000 },
-  { pattern: /^\/api\/claims\/[^/]+\/(?:market\/listings|buildings|inventories|construction|research|layout)$/, ttlMs: 15 * 1000 },
-  { pattern: /^\/api\/crafts(?:\/|$)/, ttlMs: 15 * 1000 },
-  { pattern: /^\/api\/logs\/storage$/, ttlMs: 10 * 1000 },
-];
-
-const BODY_LIMITS = {
-  auth: 8 * 1024,
-  analytics: 8 * 1024,
-  json: 64 * 1024,
-  settings: 256 * 1024,
-  branding: 2 * 1024 * 1024,
-  snapshot: 1024 * 1024,
-  discordInteraction: 256 * 1024,
-};
-
-class RequestBodyTooLargeError extends Error {
-  constructor(limit) {
-    super(`Request body is too large; maximum size is ${limit} bytes`);
-    this.statusCode = 413;
-  }
-}
-
-const RATE_LIMITS = {
-  auth: { windowMs: 15 * 60 * 1000, max: 30 },
-  analytics: { windowMs: 60 * 1000, max: 120 },
-  discordInteraction: { windowMs: 60 * 1000, max: 120 },
-  proxy: { windowMs: 60 * 1000, max: 600 },
-  expensiveLocal: { windowMs: 60 * 1000, max: 60 },
-};
-
-function requestAddress(req) {
-  return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
-}
-
-function normalizeIpAddress(value) {
-  let ip = String(value ?? "").trim();
-  if (!ip) return "";
-  if (ip.startsWith("::ffff:")) ip = ip.slice("::ffff:".length);
-  if (ip === "::1") return "127.0.0.1";
-  return ip;
-}
-
-function anonymizeIpAddress(value) {
-  const ip = normalizeIpAddress(value);
-  const parts = ip.split(".");
-  if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
-    return `${parts[0]}.${parts[1]}.${parts[2]}.0`;
-  }
-  if (ip.includes(":")) {
-    return ip.split(":").slice(0, 4).join(":") + "::";
-  }
-  return "unknown";
-}
-
-function ipHash(value) {
-  return createHash("sha256").update(`${appIdentifier}|${normalizeIpAddress(value)}`).digest("hex");
-}
+const bitjitaProxyCache = createBitjitaProxyCache({
+  appIdentifier,
+  defaultTtlMs: UPSTREAM_CACHE_TTL_MS,
+  staleIfErrorMs: UPSTREAM_STALE_IF_ERROR_MS,
+  maxEntries: UPSTREAM_CACHE_MAX_ENTRIES,
+  timeoutMs: BITJITA_PROXY_TIMEOUT_MS,
+});
 
 function visitorSecuritySettings(includeSecrets = false) {
-  const saved = safeJson(statements.getSetting.get("visitor_security_json")?.value, {});
-  const licenseKey = String(saved.geoipLicenseKey ?? "").trim();
-  const provider = ["ipapi", "local", "disabled"].includes(String(saved.geoipProvider ?? "ipapi")) ? String(saved.geoipProvider ?? "ipapi") : "ipapi";
-  const settings = {
-    fullIpRetentionDays: Math.min(Math.max(toNumber(saved.fullIpRetentionDays) || 7, 1), 30),
-    statsRetentionDays: Math.min(Math.max(toNumber(saved.statsRetentionDays) || 180, 30), 730),
-    geoipProvider: provider,
-    geoipCacheDays: Math.min(Math.max(Math.floor(toNumber(saved.geoipCacheDays) || 30), 1), 90),
-    geoipSourceUrl: String(saved.geoipSourceUrl ?? "").trim(),
-    geoipAccountId: String(saved.geoipAccountId ?? "").trim(),
-    geoipLicenseKeyConfigured: Boolean(licenseKey),
-  };
-  if (includeSecrets) settings.geoipLicenseKey = licenseKey;
-  return settings;
-}
-
-function routeGroup(pathname) {
-  if (pathname.startsWith("/api/local/admin")) return "admin";
-  if (pathname.startsWith("/api/local/auth") || pathname.startsWith("/api/local/user")) return "auth";
-  if (pathname.startsWith("/api/discord")) return "discord";
-  if (pathname.startsWith("/api/bitjita")) return "bitjita-proxy";
-  if (pathname.startsWith("/api/local")) return "local-api";
-  if (pathname.startsWith("/assets/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
-  return "app";
-}
-
-function shouldLogVisitor(pathname) {
-  return routeGroup(pathname) !== "static";
+  return normalizeVisitorSecuritySettings(safeJson(statements.getSetting.get("visitor_security_json")?.value, {}), { includeSecrets });
 }
 
 function ipv4ToNumber(ip) {
@@ -3010,135 +1447,7 @@ function visitorSecurityDashboard(params = new URLSearchParams()) {
   };
 }
 
-function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
-  const now = Date.now();
-  const key = `${name}:${requestAddress(req) || "unknown"}`;
-  const current = rateLimitBuckets.get(key);
-  const bucket = current && current.resetAt > now ? current : { count: 0, resetAt: now + policy.windowMs };
-  bucket.count += 1;
-  rateLimitBuckets.set(key, bucket);
-  if (bucket.count <= policy.max) return true;
-  const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-  send(res, 429, {
-    error: "Too many requests. Please slow down and try again shortly.",
-    source: "local-rate-limit",
-    retryAfter,
-  }, { "retry-after": String(retryAfter), "x-rate-limit-source": "local" });
-  return false;
-}
 
-function loginAttemptKey(req, username) {
-  return `${requestAddress(req)}|${String(username).toLowerCase()}`;
-}
-
-function loginBlocked(key) {
-  const record = loginAttempts.get(key);
-  if (!record || Date.now() - record.firstAt > 15 * 60 * 1000) {
-    loginAttempts.delete(key);
-    return false;
-  }
-  return record.count >= 5;
-}
-
-function failedLogin(key) {
-  const existing = loginAttempts.get(key);
-  if (!existing || Date.now() - existing.firstAt > 15 * 60 * 1000) {
-    loginAttempts.set(key, { count: 1, firstAt: Date.now() });
-  } else {
-    existing.count += 1;
-  }
-}
-
-function validAdminUsername(username) {
-  return /^[A-Za-z0-9_-]{3,32}$/.test(username);
-}
-
-function validDiscordId(value) {
-  return /^\d{15,25}$/.test(String(value ?? "").trim());
-}
-
-const ADMIN_ROLE_LABELS = {
-  owner: "Owner",
-  admin: "Administrator",
-  "discord-manager": "Discord Manager",
-  moderator: "Moderator",
-  viewer: "Viewer",
-};
-
-const ADMIN_ROLE_PERMISSIONS = {
-  owner: ["*"],
-  admin: [
-    "status.view",
-    "settings.view",
-    "settings.manage",
-    "data.view",
-    "data.export",
-    "data.manage",
-    "accounts.manage",
-    "analytics.view",
-    "analytics.manage",
-    "audit.view",
-    "discord.view",
-    "discord.manage",
-    "discord.moderate",
-  ],
-  "discord-manager": ["status.view", "settings.view", "discord.view", "discord.manage"],
-  moderator: ["status.view", "settings.view", "discord.view", "discord.moderate", "audit.view"],
-  viewer: ["status.view", "settings.view", "data.view", "analytics.view", "audit.view", "discord.view"],
-};
-
-function normalizeAdminRole(value) {
-  const role = String(value ?? "viewer").trim().toLowerCase();
-  return Object.hasOwn(ADMIN_ROLE_LABELS, role) ? role : "viewer";
-}
-
-function publicAdminUser(row) {
-  if (!row) return null;
-  const role = normalizeAdminRole(row.role);
-  return {
-    id: row.id,
-    username: row.username,
-    discordId: String(row.discord_id ?? ""),
-    discordUsername: String(row.discord_username ?? ""),
-    discordGlobalName: String(row.discord_global_name ?? ""),
-    avatarUrl: userAvatarUrl(row),
-    role,
-    roleLabel: ADMIN_ROLE_LABELS[role],
-    permissions: adminPermissions(role),
-  };
-}
-
-function adminPermissions(role) {
-  return ADMIN_ROLE_PERMISSIONS[normalizeAdminRole(role)] ?? ADMIN_ROLE_PERMISSIONS.viewer;
-}
-
-function adminHasPermission(user, permission) {
-  const permissions = adminPermissions(user?.role);
-  return permissions.includes("*") || permissions.includes(permission);
-}
-
-function adminPermissionFor(method, pathname) {
-  if (pathname === "/api/local/admin/me") return "status.view";
-  if (pathname === "/api/local/admin/status") return "status.view";
-  if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
-  if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
-  if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
-  if (pathname === "/api/local/admin/branding") return "settings.manage";
-  if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
-  if (pathname === "/api/local/admin/sessions/clear") return "users.manage";
-  if (pathname === "/api/local/admin/user-accounts") return "accounts.manage";
-  if (pathname === "/api/local/admin/user-accounts/approval") return "accounts.manage";
-  if (pathname === "/api/local/admin/audit") return "audit.view";
-  if (pathname === "/api/local/admin/analytics") return method === "DELETE" ? "analytics.manage" : "analytics.view";
-  if (pathname === "/api/local/admin/visitor-security") return "analytics.view";
-  if (pathname === "/api/local/admin/tables" || pathname === "/api/local/admin/table") return "data.view";
-  if (pathname === "/api/local/admin/export") return "data.export";
-  if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup" || pathname === "/api/local/admin/maintenance/prune") return "data.manage";
-  if (pathname.startsWith("/api/local/admin/discord/moderation/")) return "discord.moderate";
-  if (pathname.startsWith("/api/local/admin/discord/") && method === "GET") return "discord.view";
-  if (pathname.startsWith("/api/local/admin/discord/")) return "discord.manage";
-  return "status.view";
-}
 
 function requireAdminPermission(req, res, user, permission) {
   if (adminHasPermission(user, permission)) return true;
@@ -3147,132 +1456,82 @@ function requireAdminPermission(req, res, user, permission) {
 }
 
 function sameOriginRequest(req) {
-  const origin = String(req.headers.origin ?? "").trim();
-  if (!origin) return true;
-  try {
-    const originUrl = new URL(origin);
-    const host = String(req.headers.host ?? "");
-    if (originUrl.host === host) return true;
-    return !isProduction && ["127.0.0.1", "localhost"].includes(originUrl.hostname) && /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(host);
-  } catch {
-    return false;
-  }
-}
-
-function csrfToken(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
-  return token ? createHash("sha256").update(`csrf:${token}`).digest("base64url") : null;
+  return requestSameOriginRequest(req, { isProduction });
 }
 
 function requireAdminMutation(req, res, user) {
-  if (!["POST", "PUT", "DELETE"].includes(req.method ?? "")) return true;
-  if (!sameOriginRequest(req)) {
-    send(res, 403, { error: "Cross-origin administrator mutation rejected" });
-    return false;
-  }
-  const expected = csrfToken(req);
-  const actual = String(req.headers["x-csrf-token"] ?? "");
-  if (!expected || actual.length !== expected.length || !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) {
-    send(res, 403, { error: "Invalid administrator request token" });
+  const rejection = adminMutationRejection(req, { isProduction });
+  if (rejection) {
+    send(res, 403, { error: rejection });
     return false;
   }
   return Boolean(user);
 }
 
 function createSession(userId) {
-  const token = randomBytes(32).toString("base64url");
-  const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-  statements.insertSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
+  const session = createHttpSession({
+    cookieName: ADMIN_SESSION_COOKIE_NAME,
+    maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS,
+    secure: isProduction,
+  });
+  statements.insertSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt);
   return {
-    token,
-    cookie: `bitcraft_admin_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
+    token: session.token,
+    cookie: session.cookie,
   };
 }
 
 function clearSession(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
-  if (token) statements.deleteSession.run(tokenHash(token));
-  return `bitcraft_admin_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
+  if (token) statements.deleteSession.run(sessionTokenHash(token));
+  return clearHttpSessionCookie(ADMIN_SESSION_COOKIE_NAME, { secure: isProduction });
 }
 
 function originFromRequest(req) {
-  const proto = String(req.headers["x-forwarded-proto"] ?? (isProduction ? "https" : "http")).split(",")[0].trim();
-  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim();
-  return `${proto || "http"}://${host}`;
+  return requestOriginFromRequest(req, { isProduction });
 }
 
 function discordOAuthConfig(req) {
-  const discordSettings = getDiscordSettingsRaw();
-  const clientId = String(process.env.DISCORD_OAUTH_CLIENT_ID ?? discordSettings.applicationId ?? "").trim();
-  const envSecret = String(process.env.DISCORD_OAUTH_CLIENT_SECRET ?? "").trim();
-  const storedSecret = String(statements.getSecret.get("discord_oauth_client_secret")?.value ?? "").trim();
-  const clientSecret = envSecret || storedSecret;
-  const redirectUri = String(process.env.DISCORD_OAUTH_REDIRECT_URI ?? "").trim() || `${originFromRequest(req)}/api/local/auth/discord/callback`;
-  return { clientId, clientSecret, redirectUri, enabled: Boolean(clientId && clientSecret) };
-}
-
-function safeReturnPath(value) {
-  const text = String(value ?? "/?page=dashboard").trim() || "/?page=dashboard";
-  if (!text.startsWith("/") || text.startsWith("//") || text.includes("\\")) return "/?page=dashboard";
-  return text.slice(0, 500);
-}
-
-function userAvatarUrl(row) {
-  const avatar = String(row?.discord_avatar ?? "").trim();
-  const discordId = String(row?.discord_id ?? "").trim();
-  return avatar && discordId ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=128` : null;
-}
-
-function publicAppUser(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    discordId: String(row.discord_id ?? ""),
-    username: String(row.discord_username ?? ""),
-    globalName: String(row.discord_global_name ?? ""),
-    avatarUrl: userAvatarUrl(row),
-    characterPlayerId: String(row.character_player_id ?? ""),
-    characterName: String(row.character_name ?? ""),
-    characterStatus: String(row.character_status ?? "unlinked"),
-    settings: safeJson(row.settings_json, {}),
-    createdAt: row.created_at,
-    lastLoginAt: row.last_login_at,
-  };
+  return resolveDiscordOAuthConfig({
+    env: process.env,
+    discordSettings: getDiscordSettingsRaw(),
+    storedClientSecret: statements.getSecret.get("discord_oauth_client_secret")?.value,
+    origin: originFromRequest(req),
+  });
 }
 
 function getAppUser(req) {
-  const token = parseCookies(req).bitcraft_user_session;
-  if (!token) return null;
-  statements.deleteExpiredUserSessions.run(new Date().toISOString());
-  return statements.userBySession.get(tokenHash(token), new Date().toISOString()) ?? null;
+  return lookupHttpSessionUser({
+    req,
+    cookieName: APP_USER_SESSION_COOKIE_NAME,
+    deleteExpiredSessions: statements.deleteExpiredUserSessions,
+    userBySession: statements.userBySession,
+  });
 }
 
 function createAppUserSession(userId) {
-  const token = randomBytes(32).toString("base64url");
-  const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-  statements.insertUserSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
+  const session = createHttpSession({
+    cookieName: APP_USER_SESSION_COOKIE_NAME,
+    maxAgeSeconds: APP_USER_SESSION_MAX_AGE_SECONDS,
+    secure: isProduction,
+  });
+  statements.insertUserSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt);
   return {
-    token,
-    cookie: `bitcraft_user_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 60 * 60}${isProduction ? "; Secure" : ""}`,
+    token: session.token,
+    cookie: session.cookie,
   };
 }
 
 function clearAppUserSession(req) {
-  const token = parseCookies(req).bitcraft_user_session;
-  if (token) statements.deleteAppUserSession.run(tokenHash(token));
-  return `bitcraft_user_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  const token = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
+  if (token) statements.deleteAppUserSession.run(sessionTokenHash(token));
+  return clearHttpSessionCookie(APP_USER_SESSION_COOKIE_NAME, { secure: isProduction });
 }
 
 function authStatus(req) {
   const user = getAppUser(req);
   const config = discordOAuthConfig(req);
   return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
-}
-
-function discordProfileDisplayName(profile) {
-  return String(profile.global_name ?? profile.username ?? profile.id ?? "Discord user").trim() || "Discord user";
 }
 
 function createAdminSessionForDiscordProfile(profile, loginAt) {
@@ -3295,58 +1554,33 @@ function createAdminSessionForDiscordProfile(profile, loginAt) {
 }
 
 function oauthStateSecret() {
-  const stored = String(statements.getSecret.get("discord_oauth_state_secret")?.value ?? "").trim();
-  if (stored) return stored;
-  const generated = randomBytes(32).toString("base64url");
-  statements.upsertSecret.run("discord_oauth_state_secret", generated, new Date().toISOString());
-  return generated;
-}
-
-function signedOAuthStateValue(payload) {
-  const encoded = Buffer.from(payload, "utf8").toString("base64url");
-  const signature = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
-  return `${encoded}.${signature}`;
-}
-
-function verifySignedOAuthStateValue(value) {
-  const [encoded, signature, ...extra] = String(value ?? "").split(".");
-  if (!encoded || !signature || extra.length) return null;
-  const expected = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
-  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-  return encoded;
+  return resolveOAuthStateSecret({
+    getSecret: statements.getSecret,
+    upsertSecret: statements.upsertSecret,
+  });
 }
 
 function authStateCookie(state, returnTo) {
-  const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
-  return `bitcraft_discord_oauth_state=${encodeURIComponent(signedOAuthStateValue(payload))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${isProduction ? "; Secure" : ""}`;
+  return oauthStateCookie(state, returnTo, { secret: oauthStateSecret(), secure: isProduction });
 }
 
 function clearAuthStateCookie() {
-  return `bitcraft_discord_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${isProduction ? "; Secure" : ""}`;
+  return clearOAuthStateCookie({ secure: isProduction });
 }
 
 function readAuthStateCookie(req) {
-  try {
-    const encoded = verifySignedOAuthStateValue(parseCookies(req).bitcraft_discord_oauth_state);
-    if (!encoded) return null;
-    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
+  return readOAuthStateCookie(req, oauthStateSecret());
 }
 
 async function handleDiscordOAuthStart(req, res, url) {
   const config = discordOAuthConfig(req);
   if (!config.enabled) return send(res, 503, { error: "Discord login is not configured on this server" });
   const state = randomBytes(24).toString("base64url");
-  const returnTo = safeReturnPath(url.searchParams.get("returnTo"));
-  const authorize = new URL("https://discord.com/oauth2/authorize");
-  authorize.searchParams.set("client_id", config.clientId);
-  authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("redirect_uri", config.redirectUri);
-  authorize.searchParams.set("scope", "identify");
-  authorize.searchParams.set("state", state);
-  res.writeHead(302, { location: authorize.toString(), "set-cookie": authStateCookie(state, returnTo) });
+  const returnTo = url.searchParams.get("returnTo");
+  res.writeHead(302, {
+    location: buildDiscordAuthorizeUrl({ config, state }),
+    "set-cookie": authStateCookie(state, returnTo),
+  });
   res.end();
   return true;
 }
@@ -3357,45 +1591,35 @@ async function handleDiscordOAuthCallback(req, res, url) {
   const state = String(url.searchParams.get("state") ?? "");
   const code = String(url.searchParams.get("code") ?? "");
   const error = String(url.searchParams.get("error") ?? "");
-  const returnTo = safeReturnPath(stateCookie?.returnTo);
-  if (error) {
-    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-denied`, "set-cookie": clearAuthStateCookie() });
+  const callbackDecision = discordOAuthCallbackDecision({ config, stateCookie, state, code, error });
+  if (!callbackDecision.ok) {
+    res.writeHead(302, { location: callbackDecision.location, "set-cookie": clearAuthStateCookie() });
     res.end();
     return true;
   }
-  if (!config.enabled || !code || !stateCookie?.state || stateCookie.state !== state) {
-    res.writeHead(302, { location: `${returnTo}${returnTo.includes("?") ? "&" : "?"}auth=discord-error`, "set-cookie": clearAuthStateCookie() });
-    res.end();
-    return true;
-  }
-  const tokenBody = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: config.redirectUri,
-  });
-  const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: tokenBody,
-  });
+  const returnTo = callbackDecision.returnTo;
+  const tokenRequest = discordOAuthTokenRequest({ config, code: callbackDecision.code });
+  const tokenResponse = await fetch(tokenRequest.url, tokenRequest.init);
   if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed: ${tokenResponse.status}`);
   const tokenJson = await tokenResponse.json();
-  const profileResponse = await fetch("https://discord.com/api/v10/users/@me", {
-    headers: { authorization: `Bearer ${tokenJson.access_token}` },
-  });
+  const profileRequest = discordOAuthProfileRequest(tokenJson.access_token);
+  const profileResponse = await fetch(profileRequest.url, profileRequest.init);
   if (!profileResponse.ok) throw new Error(`Discord profile lookup failed: ${profileResponse.status}`);
   const profile = await profileResponse.json();
-  const discordId = String(profile.id ?? "").trim();
-  if (!/^\d+$/.test(discordId)) throw new Error("Discord profile did not include a usable id");
   const loginAt = new Date().toISOString();
-  statements.upsertUserAccount.run(discordId, String(profile.username ?? ""), String(profile.global_name ?? ""), String(profile.avatar ?? ""), loginAt, loginAt);
-  const user = statements.userByDiscordId.get(discordId);
+  const account = discordOAuthProfileAccount(profile, loginAt);
+  statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
+  const user = statements.userByDiscordId.get(account.discordId);
   statements.updateUserLastLogin.run(loginAt, user.id);
   const session = createAppUserSession(user.id);
   const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
-  res.writeHead(302, { location: returnTo, "set-cookie": [clearAuthStateCookie(), session.cookie, ...(adminSession ? [adminSession.cookie] : [])] });
+  const redirect = discordOAuthSuccessRedirect({
+    returnTo,
+    clearStateCookie: clearAuthStateCookie(),
+    userSessionCookie: session.cookie,
+    adminSessionCookie: adminSession?.cookie,
+  });
+  res.writeHead(302, { location: redirect.location, "set-cookie": redirect.setCookie });
   res.end();
   return true;
 }
@@ -5024,14 +3248,6 @@ function signedChange(after, before, suffix = "") {
   return `${sign}${Math.abs(delta).toLocaleString()}${suffix}`;
 }
 
-function tradeMatchesListing(trade, listing) {
-  const orderId = String(trade.orderEntityId ?? trade.order_entity_id ?? "");
-  if (orderId && orderId === String(listing.key)) return true;
-  const sameItem = String(trade.itemId ?? "") === String(listing.itemId ?? "") && String(trade.itemType ?? "") === String(listing.itemType ?? "");
-  const sameSeller = !listing.ownerEntityId || String(trade.sellerEntityId ?? "") === String(listing.ownerEntityId);
-  return sameItem && sameSeller;
-}
-
 function usedTradeIdsForListing(listingKey) {
   const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
   return new Set(rows.flatMap((row) => String(row.trade_id).split(",")).filter(Boolean));
@@ -5118,15 +3334,6 @@ function applyPendingMarketConfirmations(claimId, now, confirmations) {
       `market_sale_confirmed:${listing.key}:${trade.id ?? ""}`,
     );
   }
-}
-
-function marketEventSourceKey(eventType, listing) {
-  const key = listing?.key ?? "unknown";
-  const tradeId = listing?.tradeId ? String(listing.tradeId) : "";
-  if (eventType === "new_listing") return `market_event:${eventType}:${key}`;
-  if (eventType === "sale" || eventType === "partial_sale") return `market_event:${eventType}:${key}:${tradeId}`;
-  if (eventType === "removed_or_cancelled") return `market_event:${eventType}:${key}`;
-  return `market_event:${eventType}:${key}:${tradeId || `${toNumber(listing?.quantity)}:${toNumber(listing?.totalValue)}`}`;
 }
 
 function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
@@ -5438,7 +3645,7 @@ async function fetchBitjita(pathname, options = {}) {
       if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
       return response.json();
     }
-    response = await fetchUpstreamCached(url, { timeoutMs });
+    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs });
   } catch (error) {
     if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
@@ -5780,40 +3987,6 @@ function dealWatchRow(row) {
   };
 }
 
-function dealAlertRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    watchId: row.watch_id,
-    userId: row.user_id,
-    discordId: row.discord_id,
-    claimId: row.claim_id,
-    regionId: row.region_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    itemName: row.item_name,
-    tier: row.tier,
-    rarity: row.rarity,
-    iconAssetName: row.icon_asset_name,
-    listingKey: row.listing_key,
-    marketClaimId: row.market_claim_id,
-    marketClaimName: row.market_claim_name,
-    sellerName: row.seller_name,
-    quantity: toNumber(row.quantity),
-    unitPrice: toNumber(row.unit_price),
-    totalValue: toNumber(row.total_value),
-    baselineWindowDays: toNumber(row.baseline_window_days),
-    baselineAverage: toNumber(row.baseline_average),
-    salesCount: toNumber(row.sales_count),
-    discountPercent: toNumber(row.discount_percent),
-    dmStatus: row.dm_status,
-    dmError: row.dm_error,
-    createdAt: row.created_at,
-    readAt: row.read_at,
-    raw: safeJson(row.raw_json, {}),
-  };
-}
-
 function normalizeRegionalSellListing(listing, regionId, regionName, fallbackClaim = {}) {
   const base = normalizeListing(listing);
   const marketClaimId = String(listing.claimEntityId ?? listing.claimId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
@@ -5875,28 +4048,6 @@ async function dealBaselineForItem(regionId, itemId, itemType, minSales) {
   const historyKind = marketPriceHistoryKind(itemType);
   const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: 10000 });
   return priceHistoryWindowAverage(payload, 7, minSales) ?? priceHistoryWindowAverage(payload, 30, minSales);
-}
-
-function dealAlertDiscordPayload(alert) {
-  const discount = Math.round(toNumber(alert.discountPercent));
-  const baseline = `${formatGold(alert.baselineAverage)} ${alert.baselineWindowDays}-day average`;
-  return {
-    embeds: [{
-      author: { name: "Timbersteel Trade" },
-      title: "Market Deal Found",
-      description: `**${alert.itemName}** is listed ${discount}% below the confirmed regional average.`,
-      color: 0x4ee28a,
-      fields: [
-        { name: "Listing price", value: formatGold(alert.unitPrice), inline: true },
-        { name: "Baseline", value: baseline, inline: true },
-        { name: "Quantity", value: toNumber(alert.quantity).toLocaleString(), inline: true },
-        { name: "Market", value: String(alert.marketClaimName ?? "Unknown settlement"), inline: true },
-        { name: "Region", value: `R${alert.regionId}`, inline: true },
-      ],
-      timestamp: alert.createdAt,
-      footer: { text: "Deal watch alert" },
-    }],
-  };
 }
 
 async function runMarketDealWatchJob({ jobKey } = {}) {
@@ -5982,7 +4133,7 @@ async function runMarketDealWatchJob({ jobKey } = {}) {
         if (!result.changes) continue;
         alerts += 1;
         statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
-        const alert = dealAlertRow({
+        const alert = publicDealAlertRow({
           id: result.lastInsertRowid,
           watch_id: watch.id,
           user_id: watch.user_id,
@@ -6505,12 +4656,6 @@ async function fetchCachedRegionClaims(regionId) {
   return value;
 }
 
-function parseRegionIds(value) {
-  return String(value ?? "")
-    .split(/[,\s]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => /^\d+$/.test(entry));
-}
 
 function normalizeRegionRow(row, source = "bitjita") {
   const regionId = String(row?.regionId ?? row?.id ?? "").trim();
@@ -7736,7 +5881,7 @@ function notificationActivity(claimId, limit = 120) {
     WHERE claim_id = ? AND event_type IN (${placeholders})
     ORDER BY occurred_at DESC, id DESC
     LIMIT ?
-  `).all(claimId, ...notableTypes, eventLimit);
+  `).all(claimId, ...notableTypes, eventLimit).map((event) => publicNotificationActivityEvent(event));
   const total = toNumber(db.prepare(`
     SELECT COUNT(*) AS count
     FROM activity_events
@@ -8133,16 +6278,6 @@ function csvValue(value) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-function sendText(res, status, text, contentType, headers = {}) {
-  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-store", ...headers }));
-  res.end(text);
-}
-
-function sendBinary(res, status, content, contentType, headers = {}) {
-  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-cache", ...headers }));
-  res.end(content);
-}
-
 const brandingFormats = {
   "image/png": { extension: ".png", contentType: "image/png" },
   "image/jpeg": { extension: ".jpg", contentType: "image/jpeg" },
@@ -8204,20 +6339,6 @@ function createBackup() {
   return { name, size: info.size, createdAt: info.mtime.toISOString() };
 }
 
-async function readRawBody(req, limit = BODY_LIMITS.json) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > limit) throw new RequestBodyTooLargeError(limit);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-async function readJson(req, limit = BODY_LIMITS.json) {
-  return JSON.parse((await readRawBody(req, limit)).toString("utf8") || "{}");
-}
 
 const discordCommands = [
   { name: "help", description: "Show Timbersteel Trade bot commands and app links." },
@@ -8806,55 +6927,6 @@ async function registerDiscordCommands() {
   return response.json();
 }
 
-function securityHeaders(headers = {}) {
-  return {
-    "content-security-policy": [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data: https://fonts.gstatic.com",
-      "connect-src 'self' https://bitjita.com https://discord.com",
-      "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "frame-ancestors 'self'",
-    ].join("; "),
-    "cross-origin-opener-policy": "same-origin",
-    "referrer-policy": "strict-origin-when-cross-origin",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "SAMEORIGIN",
-    ...headers,
-  };
-}
-
-function send(res, status, body, headers = {}) {
-  const json = JSON.stringify(body);
-  res.writeHead(status, securityHeaders({
-    "content-type": "application/json",
-    ...headers,
-  }));
-  res.end(json);
-}
-
-function mimeType(filePath) {
-  const types = {
-    ".css": "text/css; charset=utf-8",
-    ".html": "text/html; charset=utf-8",
-    ".ico": "image/x-icon",
-    ".jpg": "image/jpeg",
-    ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-    ".webp": "image/webp",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-  };
-  return types[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
-}
-
 async function serveBuiltFrontend(url, method, res) {
   if (!serveFrontend || !["GET", "HEAD"].includes(method ?? "")) return false;
   const pathname = decodeURIComponent(url.pathname);
@@ -8869,93 +6941,11 @@ async function serveBuiltFrontend(url, method, res) {
   const content = await readFile(candidate);
   res.writeHead(200, securityHeaders({
     "content-type": mimeType(candidate),
-    "cache-control": candidate.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "cache-control": staticCacheControl(candidate),
   }));
   if (method === "HEAD") return res.end();
   res.end(content);
   return true;
-}
-
-function pruneUpstreamCache(now = Date.now()) {
-  for (const [key, value] of upstreamCache) {
-    if ((value.staleExpiresAt ?? value.expiresAt) <= now) upstreamCache.delete(key);
-  }
-  while (upstreamCache.size > UPSTREAM_CACHE_MAX_ENTRIES) {
-    const oldestKey = upstreamCache.keys().next().value;
-    if (!oldestKey) break;
-    upstreamCache.delete(oldestKey);
-  }
-}
-
-function bitjitaProxyCacheTtl(upstream) {
-  const pathname = upstream.pathname;
-  const policy = BITJITA_PROXY_CACHE_POLICIES.find((entry) => entry.pattern.test(pathname));
-  return policy?.ttlMs ?? UPSTREAM_CACHE_TTL_MS;
-}
-
-function hasFreshUpstreamCache(upstream) {
-  const key = upstream.toString();
-  const cached = upstreamCache.get(key);
-  return Boolean(cached && cached.expiresAt > Date.now());
-}
-
-function staleUpstreamResponse(cached) {
-  return cached ? { ...cached, cacheState: "stale-if-error", stale: true } : null;
-}
-
-async function fetchUpstreamCached(upstream, options = {}) {
-  const key = upstream.toString();
-  const now = Date.now();
-  const ttlMs = bitjitaProxyCacheTtl(upstream);
-  const cached = upstreamCache.get(key);
-  if (cached && cached.expiresAt > now) return { ...cached, cacheState: "hit" };
-  const staleCandidate = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-
-  const inflight = upstreamInflight.get(key);
-  if (inflight) {
-    try {
-      const value = await inflight;
-      return { ...value, cacheState: "deduped" };
-    } catch (error) {
-      const stale = staleUpstreamResponse(staleCandidate);
-      if (stale) return stale;
-      throw error;
-    }
-  }
-
-  const request = (async () => {
-    try {
-      const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_PROXY_TIMEOUT_MS));
-      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      const response = await fetch(upstream, fetchOptions);
-      const body = Buffer.from(await response.arrayBuffer());
-      const headers = {
-        "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
-        "cache-control": `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
-      };
-      const value = { status: response.status, headers, body, expiresAt: Date.now() + ttlMs, staleExpiresAt: Date.now() + ttlMs + UPSTREAM_STALE_IF_ERROR_MS, ttlMs };
-      if (response.ok) {
-        upstreamCache.set(key, value);
-        pruneUpstreamCache();
-      } else if (staleCandidate && response.status >= 500) {
-        return staleUpstreamResponse(staleCandidate);
-      }
-      return value;
-    } catch (error) {
-      const stale = staleUpstreamResponse(staleCandidate);
-      if (stale) return stale;
-      throw error;
-    }
-  })();
-
-  upstreamInflight.set(key, request);
-  try {
-    const value = await request;
-    return { ...value, cacheState: value.cacheState ?? "miss" };
-  } finally {
-    upstreamInflight.delete(key);
-  }
 }
 
 async function proxyBitjita(req, url, res) {
@@ -8965,9 +6955,8 @@ async function proxyBitjita(req, url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
-  const cacheKey = upstream.toString();
-  if (!hasFreshUpstreamCache(upstream) && !upstreamInflight.has(cacheKey) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-  const response = await fetchUpstreamCached(upstream);
+  if (!bitjitaProxyCache.hasFreshCache(upstream) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
+  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream);
   res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
   res.end(response.body);
 }
@@ -9052,12 +7041,12 @@ const server = createServer(async (req, res) => {
       const characterName = String(body.characterName ?? "").trim();
       if (!characterPlayerId && !characterName) {
         statements.updateUserCharacter.run("", "", "unlinked", user.id);
-        return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+        return send(res, 200, { user: publicAppUser(getAppUser(req)) });
       }
       if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
       if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
       statements.updateUserCharacter.run(characterPlayerId, characterName, "pending", user.id);
-      const updatedUser = statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString());
+      const updatedUser = getAppUser(req);
       void sendDiscordCharacterLinkRequest(updatedUser, { characterPlayerId, characterName });
       return send(res, 200, { user: publicAppUser(updatedUser) });
     }
@@ -9069,7 +7058,7 @@ const server = createServer(async (req, res) => {
       const raw = JSON.stringify(body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? body.settings : {});
       if (raw.length > 50000) return send(res, 413, { error: "Saved settings are too large" });
       statements.updateUserSettings.run(raw, user.id);
-      return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+      return send(res, 200, { user: publicAppUser(getAppUser(req)) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
@@ -9119,7 +7108,7 @@ const server = createServer(async (req, res) => {
       const username = String(body.username ?? "admin").trim();
       if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
       const password = String(body.password ?? "");
-      if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+      if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
       const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
       statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
@@ -9133,16 +7122,16 @@ const server = createServer(async (req, res) => {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(req, username);
-      if (loginBlocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
+      const attemptKey = loginAttemptKey(requestAddress(req), username);
+      if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
       const user = statements.adminByUsername.get(username);
       const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
       statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
       if (!successful) {
-        failedLogin(attemptKey);
+        adminLoginAttempts.recordFailure(attemptKey);
         return send(res, 401, { error: "Invalid username or password" });
       }
-      loginAttempts.delete(attemptKey);
+      adminLoginAttempts.clear(attemptKey);
       statements.updateLastLogin.run(new Date().toISOString(), user.id);
       audit(user, "admin.login");
       const session = createSession(user.id);
@@ -9383,35 +7372,28 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.settings);
         const nextClaimId = String(body.claimId ?? "").trim();
         const nextSyncUrl = String(body.syncUrl ?? defaultSyncUrl).trim();
-        if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
-        if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
+        if (!validClaimId(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
+        if (!validBitcraftSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
-        if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
+        if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
-        if (!Number.isInteger(serverRefreshSeconds) || serverRefreshSeconds < 15 || serverRefreshSeconds > 300) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
+        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
         const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
-        const defaultPage = String(body.defaultPage ?? "dashboard");
-        if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
+        const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
+        if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
-        if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
+        if (defaultRegion && !validRegionId(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
         const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
         if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
-        const excludedMemberIds = Array.isArray(body.excludedMemberIds)
-          ? [...new Set(body.excludedMemberIds.map((value) => String(value ?? "").trim()).filter((value) => /^\d{8,}$/.test(value)))]
-          : [];
+        const excludedMemberIds = normalizeSubmittedExcludedMemberIds(body.excludedMemberIds);
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
-        if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
+        if (!validSnapshotRetentionDays(snapshotRetentionDays)) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const previousVisitorSecurity = visitorSecuritySettings(true);
-        const submittedGeoipLicenseKey = typeof body.visitorSecurity?.geoipLicenseKey === "string" ? body.visitorSecurity.geoipLicenseKey.trim() : "";
-        const visitorSecurity = {
-          fullIpRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.fullIpRetentionDays) || 7), 1), 30),
-          statsRetentionDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.statsRetentionDays) || 180), 30), 730),
-          geoipProvider: ["ipapi", "local", "disabled"].includes(String(body.visitorSecurity?.geoipProvider ?? "ipapi")) ? String(body.visitorSecurity?.geoipProvider ?? "ipapi") : "ipapi",
-          geoipCacheDays: Math.min(Math.max(Math.floor(toNumber(body.visitorSecurity?.geoipCacheDays) || 30), 1), 90),
-          geoipSourceUrl: String(body.visitorSecurity?.geoipSourceUrl ?? "").trim(),
-          geoipAccountId: String(body.visitorSecurity?.geoipAccountId ?? "").trim(),
-          geoipLicenseKey: body.visitorSecurity?.geoipClearLicenseKey === true ? "" : submittedGeoipLicenseKey || previousVisitorSecurity.geoipLicenseKey || "",
-        };
+        const visitorSecurity = normalizeVisitorSecuritySettings(body.visitorSecurity ?? {}, {
+          includeSecrets: true,
+          previous: previousVisitorSecurity,
+          clearLicenseKey: body.visitorSecurity?.geoipClearLicenseKey === true,
+        });
         if (visitorSecurity.geoipSourceUrl && !/^https?:\/\//i.test(visitorSecurity.geoipSourceUrl)) return send(res, 400, { error: "GeoIP source URL must start with http:// or https://" });
         const nextTheme = { ...defaultTheme, ...(body.theme ?? {}) };
         const toastSettings = {
@@ -9419,12 +7401,7 @@ const server = createServer(async (req, res) => {
           marketSales: body.toastSettings?.marketSales !== false,
           production: body.toastSettings?.production !== false,
         };
-        const marketDealWatch = {
-          maxWatchesPerUser: Math.min(Math.max(Math.floor(toNumber(body.marketDealWatch?.maxWatchesPerUser) || 10), 1), 100),
-          thresholdPercent: Math.min(Math.max(toNumber(body.marketDealWatch?.thresholdPercent) || 30, 1), 95),
-          minConfirmedSales: Math.min(Math.max(Math.floor(toNumber(body.marketDealWatch?.minConfirmedSales) || 3), 1), 100),
-          discordDmEnabled: body.marketDealWatch?.discordDmEnabled !== false,
-        };
+        const marketDealWatch = normalizeMarketDealWatchSettings(body.marketDealWatch ?? {});
         const discordSettings = normalizeDiscordSettings(body.discord ?? {});
         const discordToken = String(body.discord?.botToken ?? "").trim();
         if (discordSettings.enabled) {
@@ -9488,7 +7465,7 @@ const server = createServer(async (req, res) => {
           FROM admin_users LEFT JOIN admin_sessions ON admin_sessions.user_id = admin_users.id AND admin_sessions.expires_at > ?
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
-        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: userAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
+        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: discordAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
@@ -9514,7 +7491,7 @@ const server = createServer(async (req, res) => {
         if (role === "owner" && normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only owners can create owner administrators" });
         if (legacyAdminPasswordAuth && !discordId) {
           if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-          if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+          if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
           try {
             const result = statements.insertAdmin.run(username, await hashPassword(password), role, new Date().toISOString());
             audit(user, "user.create", { id: result.lastInsertRowid, username, role });
@@ -9540,7 +7517,7 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId);
         const password = String(body.password ?? "");
-        if (!userId || password.length < 12) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
+        if (!userId || !validLegacyAdminPassword(password)) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
         const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
         statements.updatePassword.run(await hashPassword(password), userId);
@@ -9577,8 +7554,8 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId ?? user.id);
         if (userId === user.id) {
-          const token = parseCookies(req).bitcraft_admin_session;
-          if (token) statements.deleteOtherSessions.run(user.id, tokenHash(token));
+          const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
+          if (token) statements.deleteOtherSessions.run(user.id, sessionTokenHash(token));
         } else {
           statements.deleteUserSessions.run(userId);
         }
@@ -9707,7 +7684,7 @@ const server = createServer(async (req, res) => {
       if (!appUser) return;
       const limit = Math.min(Math.max(toNumber(url.searchParams.get("limit")) || 50, 1), 100);
       return send(res, 200, {
-        alerts: statements.listDealAlertsForUser.all(appUser.id, limit).map(dealAlertRow),
+        alerts: statements.listDealAlertsForUser.all(appUser.id, limit).map(publicDealAlertRow),
         unread: toNumber(statements.unreadDealAlertCount.get(appUser.id)?.count),
       });
     }
@@ -9878,6 +7855,3 @@ server.listen(port, host, () => {
     setInterval(checkScheduledJobs, 60 * 1000);
   }
 });
-
-
-

@@ -133,9 +133,9 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
           </section>
         ) : null}
       </div>
-      <section className="production-command-panel region-table-panel">
-        <div className="market-command-header">
-          <span className="production-command-title"><Globe2 size={15} /> Regional rankings</span>
+      <section className="command-filter-panel region-table-panel">
+        <div className="command-filter-header">
+          <span className="command-filter-title"><Globe2 size={15} /> Regional rankings</span>
           <span>Click a column heading to sort</span>
         </div>
         <div className="table-wrap">

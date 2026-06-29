@@ -105,7 +105,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
 
   return (
     <div className="panel skills-page">
-      <header className="members-topbar skills-topbar">
+      <header className="skills-topbar">
         <div>
           <h2>Member Professions</h2>
           <p>{citizens.length} citizens - {professionIds.length} professions tracked separately from adventure skills</p>

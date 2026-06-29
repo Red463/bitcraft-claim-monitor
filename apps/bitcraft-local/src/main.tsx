@@ -1,6 +1,28 @@
-﻿import { createRoot } from "react-dom/client";
-import "./styles/phase6.css";
+import { createRoot } from "react-dom/client";
+import "./styles/setup-workflow.css";
 import "./styles.css";
+import "./styles/admin.css";
+import "./styles/discord-admin.css";
+import "./styles/dashboard.css";
+import "./styles/leaderboard.css";
+import "./styles/production.css";
+import "./styles/public-craft.css";
+import "./styles/market.css";
+import "./styles/craftcalc.css";
+import "./styles/members.css";
+import "./styles/skills.css";
+import "./styles/inventory.css";
+import "./styles/construction.css";
+import "./styles/research.css";
+import "./styles/activity.css";
+import "./styles/region.css";
+import "./styles/sync.css";
+import "./styles/map.css";
+import "./styles/bot-dashboard.css";
+import "./styles/empires.css";
+import "./styles/app-chrome.css";
+import "./styles/user-settings.css";
+import "./styles/notifications.css";
 import App from "./AppShell";
 
 // Keep this file as the React bootstrapping boundary only. App-level routing,

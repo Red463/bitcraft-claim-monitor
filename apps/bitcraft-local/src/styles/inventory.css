@@ -1,0 +1,243 @@
+.inventory-page {
+  background: #030303;
+  background: var(--command-page-gradient);
+  min-height: 100%;
+  color: #f4f7fb;
+}
+.inventory-topbar { align-items: center; }
+.inventory-page .dashboard-top-meta {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+.inventory-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.inventory-page .mini-stat {
+  min-height: 112px;
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  padding: 18px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 4px 14px;
+}
+.inventory-page .mini-stat div {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+  color: #f3c532;
+}
+.inventory-page .mini-stat svg { width: 20px; height: 20px; }
+.inventory-page .mini-stat > span {
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.inventory-page .mini-stat strong {
+  color: #fff;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+}
+.inventory-page .material-watch,
+.inventory-page .item-detail {
+  border: 1px solid rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  padding: 18px;
+}
+.inventory-page .material-watch h3,
+.inventory-page .item-detail h3 {
+  color: #b8c2cf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.inventory-page .material-watch h3 svg,
+.inventory-page .item-detail h3 svg {
+  color: #f0c64f;
+  width: 15px;
+  height: 15px;
+}
+.inventory-page .material-watch .legend {
+  margin: 0;
+  color: #a6afbd;
+  font-size: 13px;
+}
+.inventory-page .material-card {
+  min-height: 172px;
+  border-color: rgba(154,168,190,.16);
+  border-radius: 7px;
+  background: rgba(5,8,12,.78);
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.inventory-page .material-card:hover {
+  border-color: rgba(240,198,79,.34);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240,198,79,.1), transparent 34%),
+    rgba(5,8,12,.84);
+  transform: translateY(-1px);
+}
+.inventory-page .material-card.active {
+  border-color: rgba(240,198,79,.46);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240,198,79,.14), transparent 35%),
+    rgba(240,198,79,.08);
+  box-shadow: inset 0 0 0 1px rgba(240,198,79,.08);
+}
+.inventory-page .material-card span {
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+}
+.inventory-page .material-card strong {
+  color: #fff;
+  font-family: Outfit, system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+}
+.inventory-command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(154,168,190,.12);
+}
+.inventory-command-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+.inventory-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.25fr) minmax(210px, 1.25fr) repeat(4, minmax(130px, .75fr));
+  gap: 10px;
+  align-items: end;
+}
+.inventory-filter-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.inventory-filter-field > span {
+  color: #aab5c4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.inventory-filter-field .search {
+  width: 100%;
+}
+.inventory-filter-field .select-control {
+  width: 100%;
+}
+.inventory-page .select-control,
+.inventory-page .search {
+  border-color: rgba(154,168,190,.28);
+  background: #080d14;
+}
+.inventory-page .search input {
+  background: transparent;
+}
+.inventory-inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #aab5c4;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.inventory-inline-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 38px;
+  height: 20px;
+  border: 1px solid rgba(154,168,190,.28);
+  border-radius: 999px;
+  background: rgba(154,168,190,.18);
+  position: relative;
+  cursor: pointer;
+}
+.inventory-inline-toggle input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #aeb8c6;
+  transition: transform .16s ease, background .16s ease;
+}
+.inventory-inline-toggle input[type="checkbox"]:checked {
+  border-color: rgba(240,198,79,.46);
+  background: rgba(240,198,79,.24);
+}
+.inventory-inline-toggle input[type="checkbox"]:checked::before {
+  transform: translateX(18px);
+  background: #f0c64f;
+}
+.inventory-page .container-list {
+  gap: 12px;
+}
+.inventory-page .container-card {
+  border-color: rgba(108,123,145,.24);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
+    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.18);
+}
+.inventory-page .container-card summary {
+  min-height: 58px;
+  color: #aab5c4;
+}
+.inventory-page .container-card summary span {
+  color: #f7f8fb;
+}
+.inventory-page .container-card summary svg {
+  color: #f0c64f;
+}
+.inventory-page .container-card .table-wrap {
+  border-top-color: rgba(154,168,190,.14);
+  background-color: #090e15;
+  background-image: none;
+}
+.inventory-page .container-card th {
+  background: linear-gradient(180deg, rgba(15,22,31,.98), rgba(9,14,21,.99));
+  color: #aeb8c6;
+}
+.inventory-page .container-card td {
+  background: rgba(6,10,15,.78);
+}
+.inventory-page .container-card tbody tr:nth-child(even) td {
+  background: rgba(8,13,20,.82);
+}
+.inventory-page .container-card tbody tr:hover td {
+  background: rgba(240,198,79,.045);
+}
+.inventory-page .item-link.with-icon .item-thumb {
+  border-color: rgba(154,168,190,.2);
+  background: rgba(5,8,12,.78);
+}
+
+@media (max-width: 1250px) {
+  .inventory-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

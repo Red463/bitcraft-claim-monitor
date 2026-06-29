@@ -1,4 +1,4 @@
-import type { MapFocus } from "../pages/MainPages";
+import type { MapFocus } from "../pages/map/mapUtils";
 import { toNumber } from "../main-app-data";
 
 export function urlMapFocus(): MapFocus {

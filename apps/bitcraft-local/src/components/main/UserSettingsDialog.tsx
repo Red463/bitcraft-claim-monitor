@@ -1,0 +1,457 @@
+import React from "react";
+import {
+  Activity,
+  Bell,
+  Download,
+  HardDrive,
+  KeyRound,
+  LogOut,
+  MessageCircle,
+  RefreshCw,
+  Save,
+  Settings,
+  Share2,
+  Shield,
+  Star,
+  Upload,
+  UserPlus,
+  X,
+} from "lucide-react";
+import type { AnyRecord } from "../../main-app-data";
+import { DEFAULT_USER_TOAST_SETTINGS } from "../../settingsDefaults";
+import {
+  clampThemeNumber,
+  CUSTOM_THEME_STORAGE_KEY,
+  DEFAULT_THEME,
+  loadSavedCustomTheme,
+  normalizeThemeCandidate,
+  THEME_FIELD_GROUPS,
+  THEME_FIELDS,
+  THEME_GRADIENT_RANGE_FIELDS,
+  THEME_PRESETS,
+  THEME_RANGE_FIELD_CONFIG,
+  type ThemeColorKey,
+  type ThemeRangeKey,
+  type ThemeSettings,
+} from "../../theme";
+import type { UserAuthState, UserToastSettings } from "../../types/settings";
+import { memberDisplayName } from "../../utils/memberTracking";
+import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
+
+/**
+ * Browser-local preferences dialog.
+ *
+ * These settings intentionally follow the browser rather than the installation:
+ * density, toast preferences, page defaults, linked account controls, and custom
+ * themes should not be written into global admin configuration.
+ */
+export type UserSettingsDialogProps = {
+  density: "comfortable" | "compact";
+  onDensityChange: (density: "comfortable" | "compact") => void;
+  toastSettings: UserToastSettings;
+  onToastSettingsChange: (settings: UserToastSettings) => void;
+  theme: ThemeSettings;
+  onThemeChange: (theme: ThemeSettings) => void;
+  auth: UserAuthState;
+  members: AnyRecord[];
+  onDiscordLogin: () => void;
+  onDiscordLogout: () => Promise<void>;
+  onLinkCharacter: (member: AnyRecord | null) => Promise<void>;
+  onSaveAccountSettings: () => Promise<void>;
+  onLoadAccountSettings: () => void;
+  showAdminTools: boolean;
+  onOpenAdmin: () => void;
+  onResetSettings: () => void;
+  onClose: () => void;
+};
+
+export function UserSettingsDialog({
+  density,
+  onDensityChange,
+  toastSettings,
+  onToastSettingsChange,
+  theme,
+  onThemeChange,
+  auth,
+  members,
+  onDiscordLogin,
+  onDiscordLogout,
+  onLinkCharacter,
+  onSaveAccountSettings,
+  onLoadAccountSettings,
+  showAdminTools,
+  onOpenAdmin,
+  onResetSettings,
+  onClose,
+}: UserSettingsDialogProps) {
+  const [settingsSection, setSettingsSection] = React.useState<"account" | "theme" | "preferences" | "data">("account");
+  React.useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  const [themeExpanded, setThemeExpanded] = React.useState(false);
+  const [themeShareOpen, setThemeShareOpen] = React.useState(false);
+  const [themeImportText, setThemeImportText] = React.useState("");
+  const [themeShareStatus, setThemeShareStatus] = React.useState("");
+  const [customTheme, setCustomTheme] = React.useState<ThemeSettings>(() => loadSavedCustomTheme());
+  const [customThemeStatus, setCustomThemeStatus] = React.useState("");
+  const [lastThemeChoice, setLastThemeChoice] = React.useState("");
+  const [selectedCharacterId, setSelectedCharacterId] = React.useState(auth.user?.characterPlayerId ?? "");
+  const [accountStatus, setAccountStatus] = React.useState("");
+  React.useEffect(() => setSelectedCharacterId(auth.user?.characterPlayerId ?? ""), [auth.user?.characterPlayerId]);
+  const themeFingerprint = JSON.stringify(theme);
+  const customThemeFingerprint = JSON.stringify(customTheme);
+  const matchedBuiltInPreset = THEME_PRESETS.find((preset) => JSON.stringify(preset.theme) === themeFingerprint)?.id;
+  const customThemeMatches = customThemeFingerprint === themeFingerprint;
+  const activePreset = lastThemeChoice === "custom" && customThemeMatches
+    ? "custom"
+    : matchedBuiltInPreset ?? (customThemeMatches ? "custom" : "custom-editing");
+  const fieldLabel = (key: ThemeColorKey) => THEME_FIELDS.find(([fieldKey]) => fieldKey === key)?.[1] ?? key;
+  const setThemeValue = (key: ThemeColorKey, value: string) => onThemeChange({ ...theme, [key]: value });
+  const rangeFieldLabel = (key: ThemeRangeKey) => THEME_RANGE_FIELD_CONFIG[key].label;
+  const setThemeRangeValue = (key: ThemeRangeKey, value: string) => {
+    const config = THEME_RANGE_FIELD_CONFIG[key];
+    onThemeChange({ ...theme, [key]: clampThemeNumber(value, config.min, config.max, DEFAULT_THEME[key]) });
+  };
+  const previewGradient = `linear-gradient(180deg, ${theme.gradientTop} ${theme.gradientTopStop}%, ${theme.gradientMid} ${theme.gradientMidStop}%, ${theme.gradientBase} ${theme.gradientFadeStop}%)`;
+  const themePayload = React.useMemo(() => JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }, null, 2), [theme]);
+  const saveCustomTheme = () => {
+    localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }));
+    setCustomTheme(theme);
+    setLastThemeChoice("custom");
+    setThemeExpanded(false);
+    setCustomThemeStatus("Custom theme saved. You can now switch between presets and Custom.");
+  };
+  const openCustomTheme = () => {
+    onThemeChange(customTheme);
+    setLastThemeChoice("custom");
+    setThemeExpanded(true);
+    setThemeShareStatus("");
+    setCustomThemeStatus(customThemeFingerprint === JSON.stringify(DEFAULT_THEME) ? "Custom starts from the default theme until you save your own." : "");
+  };
+  const openThemeShare = () => {
+    const nextOpen = !themeShareOpen;
+    if (nextOpen && !themeImportText.trim()) setThemeImportText(themePayload);
+    setThemeShareStatus("");
+    setThemeShareOpen(nextOpen);
+  };
+  const copyTheme = async () => {
+    setThemeImportText(themePayload);
+    try {
+      await navigator.clipboard?.writeText(themePayload);
+      setThemeShareStatus("Theme copied to clipboard.");
+    } catch {
+      setThemeShareStatus("Theme JSON is ready below. Copy it manually if clipboard access is blocked.");
+    }
+  };
+  const downloadTheme = () => {
+    const blob = new Blob([themePayload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "timbersteel-theme.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setThemeShareStatus("Theme export downloaded.");
+  };
+  const applyImportedTheme = () => {
+    try {
+      const parsed = JSON.parse(themeImportText);
+      const result = normalizeThemeCandidate(parsed);
+      if (!result) throw new Error("No recognised colour fields were found.");
+      onThemeChange(result.theme);
+      setLastThemeChoice("custom-editing");
+      setThemeExpanded(true);
+      setThemeShareStatus(`Imported ${result.count} theme setting${result.count === 1 ? "" : "s"}. Save as Custom if you want to keep it in the preset list.`);
+    } catch (error) {
+      setThemeShareStatus(error instanceof Error ? error.message : "Could not import that theme JSON.");
+    }
+  };
+  const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
+  const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
+  const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
+  const statusLabel = auth.user?.characterStatus === "approved"
+    ? "Approved"
+    : auth.user?.characterStatus === "pending"
+      ? "Awaiting admin approval"
+      : auth.user?.characterStatus === "rejected"
+        ? "Rejected"
+        : "Not linked";
+  async function runAccountAction(action: () => Promise<void>, success: string) {
+    setAccountStatus("");
+    try {
+      await action();
+      setAccountStatus(success);
+    } catch (error) {
+      setAccountStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <section className="help-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <Settings size={19} />
+            <h2 id="settings-title">User Settings</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close user settings"><X size={16} /></button>
+        </header>
+        <div className="settings-shell">
+          <nav className="settings-section-tabs" aria-label="Settings sections">
+            {([
+              ["account", "Account", MessageCircle],
+              ["theme", "Theme", Star],
+              ["preferences", "Preferences", Bell],
+              ["data", "Local data", HardDrive],
+            ] as const).map(([id, label, Icon]) => (
+              <button key={id} className={settingsSection === id ? "active" : ""} onClick={() => setSettingsSection(id)}>
+                <Icon size={15} /><span>{label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="settings-grid">
+          {settingsSection === "account" ? <section className="settings-account-section">
+            <div className="settings-section-heading">
+              <div>
+                <h3>Discord Account</h3>
+                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and save settings beyond this browser.</p>
+              </div>
+              {auth.user ? <button className="toolbar-button" onClick={() => runAccountAction(onDiscordLogout, "Signed out of Discord.")}><LogOut size={14} /> Sign out</button> : null}
+            </div>
+            {!auth.user ? (
+              <div className="account-connect-card">
+                <div>
+                  <strong>Not signed in</strong>
+                  <span>{auth.discordLoginEnabled ? "Sign in with Discord to request a character link and save your preferences on this server." : "Discord login is not configured on this server yet."}</span>
+                </div>
+                <button className="toolbar-button primary" disabled={!auth.discordLoginEnabled} onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</button>
+              </div>
+            ) : (
+              <div className="account-profile-card">
+                <div className="account-profile-main">
+                  {auth.user.avatarUrl ? <img src={auth.user.avatarUrl} alt="" /> : <span>{accountName.slice(0, 1).toUpperCase()}</span>}
+                  <div>
+                    <strong>{accountName}</strong>
+                    <small>Discord ID {auth.user.discordId}</small>
+                  </div>
+                  <em className={`link-status ${auth.user.characterStatus}`}>{statusLabel}</em>
+                </div>
+                <div className="account-link-grid">
+                  <label className="field">
+                    <span>BitCraft character</span>
+                    <select value={selectedCharacterId} onChange={(event) => setSelectedCharacterId(event.target.value)}>
+                      <option value="">Select your character</option>
+                      {auth.user.characterPlayerId && !members.some((member) => String(member.playerEntityId) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
+                      {members.map((member) => <option key={member.playerEntityId ?? memberDisplayName(member)} value={String(member.playerEntityId ?? "")}>{memberDisplayName(member)}</option>)}
+                    </select>
+                  </label>
+                  <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>
+                </div>
+                <div className="settings-account-actions">
+                  <button className="toolbar-button" onClick={() => runAccountAction(onSaveAccountSettings, "Settings saved to your Discord account.")}><Save size={14} /> Save settings to account</button>
+                  <button className="toolbar-button" disabled={!auth.user.settings || !Object.keys(auth.user.settings).length} onClick={onLoadAccountSettings}><Download size={14} /> Load saved settings</button>
+                </div>
+                {accountStatus ? <p className="theme-share-status">{accountStatus}</p> : null}
+              </div>
+            )}
+          </section> : null}
+          {settingsSection === "account" ? <section>
+            <h3>This Browser</h3>
+            <p className="legend">Your page, filters, density and notification preferences are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+          </section> : null}
+          {settingsSection === "account" && showAdminTools ? <section>
+            <h3>Admin Tools</h3>
+            <p className="legend">For settlement monitor administrators. Opens the admin console where configuration, database, accounts and diagnostics are managed.</p>
+            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> Open Admin Console</button>
+          </section> : null}
+          {settingsSection === "theme" ? <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
+            <div className="settings-section-heading">
+              <div>
+                <h3>Theme</h3>
+                <p className="legend">Saved locally for this browser. Presets apply instantly and advanced controls can be fine-tuned below.</p>
+              </div>
+              <div className="settings-heading-actions">
+                <button className="toolbar-button" onClick={() => { onThemeChange(DEFAULT_THEME); setLastThemeChoice("default"); setThemeExpanded(false); }}><RefreshCw size={14} /> Reset Default</button>
+                <button className="toolbar-button" onClick={openThemeShare}><Share2 size={14} /> Import / Export</button>
+                {themeExpanded ? <button className="toolbar-button primary" onClick={saveCustomTheme}><Save size={14} /> Save Custom</button> : null}
+              </div>
+            </div>
+            <div className="theme-preset-grid">
+              {THEME_PRESETS.map((preset) => (
+                <button className={activePreset === preset.id ? "active" : ""} key={preset.id} onClick={() => { onThemeChange(preset.theme); setLastThemeChoice(preset.id); setThemeExpanded(false); }}>
+                  <span className="theme-preset-swatches" aria-hidden="true">
+                    <i style={{ background: preset.theme.bg }} />
+                    <i style={{ background: preset.theme.panel }} />
+                    <i style={{ background: preset.theme.gold }} />
+                  </span>
+                  <strong>{preset.label}</strong>
+                  <small>{preset.description}</small>
+                </button>
+              ))}
+              <button className={`theme-custom-preset ${activePreset === "custom" || themeExpanded ? "active" : ""}`} onClick={openCustomTheme}>
+                <span className="theme-preset-swatches" aria-hidden="true">
+                  <i style={{ background: customTheme.gradientBase }} />
+                  <i style={{ background: customTheme.cardTop }} />
+                  <i style={{ background: customTheme.activeColor }} />
+                </span>
+                <strong>Custom</strong>
+                <small>Open the editor and use your saved custom theme.</small>
+              </button>
+            </div>
+            {customThemeStatus ? <p className="theme-share-status">{customThemeStatus}</p> : null}
+            {themeShareOpen ? (
+              <div className="theme-share-panel">
+                <div>
+                  <strong>Theme backup and sharing</strong>
+                  <p className="legend">Export this browser theme as JSON, or paste a shared Timbersteel theme below and apply it locally.</p>
+                </div>
+                <div className="theme-share-actions">
+                  <button className="toolbar-button" onClick={copyTheme}><Share2 size={14} /> Copy current theme</button>
+                  <button className="toolbar-button" onClick={downloadTheme}><Download size={14} /> Download JSON</button>
+                  <button className="toolbar-button primary" onClick={applyImportedTheme}><Upload size={14} /> Apply import</button>
+                </div>
+                <label className="field theme-json-field">
+                  <span>Theme JSON</span>
+                  <textarea value={themeImportText} onChange={(event) => setThemeImportText(event.target.value)} spellCheck={false} />
+                </label>
+                {themeShareStatus ? <p className="theme-share-status">{themeShareStatus}</p> : null}
+              </div>
+            ) : null}
+            <div className="theme-editor-layout" hidden={!themeExpanded}>
+              <div className="theme-field-groups">
+                <div className="theme-field-group">
+                  <strong>Gradient Shape</strong>
+                  <div className="theme-range-grid">
+                    {THEME_GRADIENT_RANGE_FIELDS.map((key) => {
+                      const config = THEME_RANGE_FIELD_CONFIG[key];
+                      return (
+                        <label className="theme-range-field" key={key}>
+                          <span>{rangeFieldLabel(key)}</span>
+                          <input
+                            aria-label={rangeFieldLabel(key)}
+                            type="range"
+                            min={config.min}
+                            max={config.max}
+                            value={theme[key]}
+                            onChange={(event) => setThemeRangeValue(key, event.target.value)}
+                          />
+                          <span className="theme-range-value">
+                            <input
+                              aria-label={`${rangeFieldLabel(key)} value`}
+                              type="number"
+                              min={config.min}
+                              max={config.max}
+                              value={theme[key]}
+                              onChange={(event) => setThemeRangeValue(key, event.target.value)}
+                            />
+                            <em>{config.unit}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                {THEME_FIELD_GROUPS.map((group) => (
+                  <div className="theme-field-group" key={group.title}>
+                    <strong>{group.title}</strong>
+                    <div className="theme-grid">
+                      {group.keys.map((key) => (
+                        <label className="color-field" key={key}>
+                          <span>{fieldLabel(key)}</span>
+                          <code>{theme[key]}</code>
+                          <input aria-label={fieldLabel(key)} type="color" value={theme[key]} onInput={(event) => setThemeValue(key, event.currentTarget.value)} onChange={(event) => setThemeValue(key, event.target.value)} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="theme-preview-card" style={{ background: previewGradient, borderColor: theme.border, color: theme.text }}>
+                <aside style={{ background: `linear-gradient(180deg, ${theme.sidebar}, ${theme.gradientBase})`, borderColor: theme.border }}>
+                  <b style={{ color: theme.activeColor }}>Timbersteel</b>
+                  <span style={{ color: theme.muted }}>Claim Monitor</span>
+                  <em style={{ borderColor: theme.activeBorder, color: theme.activeColor, background: theme.activeBg }}>Dashboard</em>
+                </aside>
+                <main>
+                  <header>
+                    <span style={{ color: theme.cardTitle }}>Theme Preview</span>
+                    <strong style={{ color: theme.cardValue }}>Dashboard</strong>
+                  </header>
+                  <article style={{ background: `linear-gradient(180deg, ${theme.cardTop}, ${theme.cardBottom})`, borderColor: theme.border }}>
+                    <div style={{ background: theme.iconBg, color: theme.activeColor }}>
+                      <Shield size={16} />
+                    </div>
+                    <span style={{ color: theme.cardTitle }}>Supply Status</span>
+                    <b style={{ color: theme.cardValue }}>47d 6h</b>
+                    <small style={{ color: theme.good }}>Healthy runway</small>
+                  </article>
+                  <article style={{ background: `linear-gradient(180deg, ${theme.cardTop}, ${theme.cardBottom})`, borderColor: theme.border }}>
+                    <div style={{ background: theme.iconBg, color: theme.activeColor }}>
+                      <Activity size={16} />
+                    </div>
+                    <span style={{ color: theme.cardTitle }}>Recent Activity</span>
+                    <b style={{ color: theme.cardValue }}>5 events</b>
+                    <small style={{ color: theme.danger }}>1 needs review</small>
+                  </article>
+                </main>
+                <p style={{ color: theme.muted }}>Preview shows page gradient, sidebar, cards, borders, text, accent and status colours.</p>
+                <div className="theme-preview-progress" style={{ background: theme.panel2 }}>
+                  <i style={{ background: `linear-gradient(90deg, ${theme.good}, #56d5ff)` }} />
+                </div>
+              </div>
+            </div>
+          </section> : null}
+          {settingsSection === "preferences" ? <section>
+            <h3>Display Density</h3>
+            <div className="segmented-control">
+              <button className={density === "comfortable" ? "active" : ""} onClick={() => onDensityChange("comfortable")}>Comfortable</button>
+              <button className={density === "compact" ? "active" : ""} onClick={() => onDensityChange("compact")}>Compact</button>
+            </div>
+          </section> : null}
+          {settingsSection === "preferences" ? <section>
+            <h3>Notifications</h3>
+            {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
+              <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
+            ))}
+          </section> : null}
+          {settingsSection === "preferences" ? <section className="notification-sound-settings">
+            <div className="settings-section-heading">
+              <div>
+                <h3>Notification Sound</h3>
+                <p className="legend">Optional browser-only sound for new toast notifications. Preview unlocks browser audio if needed.</p>
+              </div>
+              <button className="toolbar-button" onClick={() => previewNotificationSound({ soundId: toastSettings.soundId, soundVolume: toastSettings.soundVolume })}><Bell size={14} /> Preview</button>
+            </div>
+            <label className="toggle-row"><input type="checkbox" checked={toastSettings.soundEnabled} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundEnabled: event.target.checked })} /><span>Play a sound for new notifications</span></label>
+            <div className="notification-sound-grid">
+              <label className="field">
+                <span>Sound</span>
+                <select value={toastSettings.soundId} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundId: event.target.value as UserToastSettings["soundId"] })}>
+                  {NOTIFICATION_SOUND_OPTIONS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
+                </select>
+              </label>
+              <label className="field notification-volume-field">
+                <span>Volume</span>
+                <div>
+                  <input type="range" min="0" max="100" step="1" value={soundVolumePercent} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.target.value) / 100 })} />
+                  <strong>{soundVolumePercent}%</strong>
+                </div>
+              </label>
+            </div>
+            <p className="legend">{NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === toastSettings.soundId)?.description ?? "Generated notification sound."}</p>
+          </section> : null}
+          {settingsSection === "data" ? <section>
+            <h3>Reset</h3>
+            <p className="legend">Reset this browser's local app preferences. Admin settings and settlement data are not affected.</p>
+            <button className="toolbar-button" onClick={onResetSettings}><RefreshCw size={14} /> Reset my settings</button>
+          </section> : null}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+

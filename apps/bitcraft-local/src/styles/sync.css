@@ -1,0 +1,25 @@
+.sync-panel {
+  min-height: 100vh;
+  grid-template-rows: auto minmax(720px, 1fr);
+  align-content: start;
+  background: #030303;
+  background: var(--command-page-gradient);
+  color: #f4f7fb;
+}
+.sync-topbar {
+  align-items: center;
+}
+.sync-panel .dashboard-top-meta {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+.sync-frame {
+  width: 100%;
+  min-height: 720px;
+  height: 100%;
+  border: 1px solid rgba(108,123,145,.28);
+  border-radius: 7px;
+  background: #05080d;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.28);
+}
