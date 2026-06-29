@@ -90,14 +90,14 @@ Future server extraction should be incremental and dependency-injected. Continue
 
 ## Notifications
 
-Browser notification architecture is documented in [`notification-system.md`](./notification-system.md). In short:
+Browser notification architecture is documented in [`notification-system.md`](./notification-system.md), and remaining live-source release checks are covered by [`notification-live-source-verification.md`](./notification-live-source-verification.md). In short:
 
 - `src/components/main/Notifications.tsx` renders toasts and the drawer.
 - `src/notifications/toastNotices.ts` owns notice shape, destination mapping, and dedupe keys.
 - `src/notifications/notificationSources.ts` turns data events into toast drafts.
-- `src/notifications/verificationMatrix.ts` defines the release notification page/type matrix and the intentional `/bot` exception; update it whenever a page or browser notification type changes.
+- `src/notifications/verificationMatrix.ts` defines the release notification page/type matrix, live-source checklist, tested status filters, required-ID helper, live-source completion gate, and the intentional `/bot` exception; update it whenever a page, browser notification type, or source-verification status changes.
 - `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers; `src/notifications/useBrowserNotificationSmoke.ts` wires the smoke event bridge and `smokeNotification` query trigger into the mounted app for built-app smoke checks.
-- `src/notifications/useBrowserNotificationSources.ts` keeps market activity, signed-in deal-alert, and production queue toast sources mounted globally so route changes do not disable toasts.
+- `src/notifications/browserNotificationSourceQueue.ts` owns the pure app-level source queue adapter; `src/notifications/useBrowserNotificationSources.ts` keeps market activity, signed-in deal-alert, and production queue toast sources mounted globally so route changes do not disable toasts.
 - `src/notifications/useToastNotifications.ts` owns the browser toast stack, persisted notification log, source-key dedupe, auto-dismiss timers, read-state marking, and optional sound playback.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization; `src/utils/notificationSounds.ts` handles optional generated browser sounds and silently tolerates browser audio blocking.
 

@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.89] - 2026-06-29
+
+### Added
+
+- Added live-source notification verification guidance for production queue changes and signed-in market deal alerts.
+
+### Changed
+
+- Improved browser notification reliability by keeping market activity, deal-alert, and production queue sources in a tested app-level source queue.
+- Updated release-readiness documentation with the current live-source notification blockers.
+
 ## [1.0.0-beta.88] - 2026-06-29
 
 ### Changed

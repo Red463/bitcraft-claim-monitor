@@ -10,6 +10,7 @@ import {
   productionCraftQueueToastDrafts,
   selectUnseenNotificationItems,
 } from "../src/notifications/notificationSources.ts";
+import { browserNotificationSourceDrafts } from "../src/notifications/browserNotificationSourceQueue.ts";
 import { appendNotificationLog, appendToastStack, createToastNotice, dedupeNotifications, markNotificationsRead, notificationDedupeKey } from "../src/notifications/toastNotices.ts";
 
 test("dedupeNotifications keeps the newest notice for source and legacy duplicates", () => {
@@ -300,6 +301,79 @@ test("productionCraftQueueToastDrafts emits capped started and completed drafts 
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started", "Craft started", "Craft completed", "Craft completed"]);
   assert.deepEqual([...result.snapshot.jobs.keys()], ["old-2", "new-1", "new-2", "new-3"]);
 });
+test("browserNotificationSourceDrafts queues live source rows without page-mounted state", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const seeded = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 1,
+      events: [
+        { id: 2, event_type: "market_sale", summary: "Old sale", itemName: "Old Sale" },
+        { id: 1, event_type: "market_new_listing", summary: "Old listing", itemName: "Old Listing" },
+      ],
+    },
+    dealAlerts: {
+      refreshToken: 1,
+      alerts: [{ id: 1, itemName: "Old Hide", unitPrice: 5, discountPercent: 20, baselineAverage: 8, baselineWindowDays: 7 }],
+    },
+    productionCrafts: [{ entityId: "old-craft", name: "Old Beam", buildingName: "Workshop" }],
+    hasProductionData: true,
+  }, helpers);
+
+  assert.equal(seeded.drafts.length, 0);
+
+  const next = browserNotificationSourceDrafts(seeded.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 2,
+      events: [
+        { id: 4, event_type: "market_sale_confirmed", summary: "New sale", itemName: "New Sale" },
+        { id: 3, event_type: "market_new_listing", summary: "New listing", itemName: "New Listing" },
+        { id: 2, event_type: "market_sale", summary: "Old sale", itemName: "Old Sale" },
+      ],
+    },
+    dealAlerts: {
+      refreshToken: 2,
+      alerts: [
+        { id: 5, itemName: "New Hide", unitPrice: 4, discountPercent: 50, baselineAverage: 8, baselineWindowDays: 7 },
+        { id: 1, itemName: "Old Hide", unitPrice: 5, discountPercent: 20, baselineAverage: 8, baselineWindowDays: 7 },
+      ],
+    },
+    productionCrafts: [{ entityId: "new-craft", name: "New Beam", buildingName: "Workshop" }],
+    hasProductionData: true,
+  }, helpers);
+
+  assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), [
+    "activity:3",
+    "activity:4",
+    "deal-alert:5",
+    "production-started:claim-1:new-craft",
+    "production-completed:claim-1:old-craft",
+  ]);
+  assert.deepEqual(next.drafts.map((draft) => draft.title), [
+    "New market listing",
+    "Market sale",
+    "Market deal found",
+    "Craft started",
+    "Craft completed",
+  ]);
+});
+
 test("selectUnseenNotificationItems seeds known ids then returns newest unseen items in display order", () => {
   const seeded = selectUnseenNotificationItems(null, [{ id: "old-1" }, { id: "old-2" }], (item) => item.id);
   assert.deepEqual(seeded.unseen, []);

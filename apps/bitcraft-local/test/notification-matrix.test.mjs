@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { NAV } from "../src/navigation.ts";
@@ -6,6 +7,10 @@ import { installBrowserNotificationSmokeBridge, smokeBrowserNotificationDraft, i
 import { appendNotificationLog, appendToastStack, createToastNotice } from "../src/notifications/toastNotices.ts";
 import {
   BOT_NOTIFICATION_EXCEPTION,
+  LIVE_SOURCE_NOTIFICATION_CHECKS,
+  liveSourceNotificationChecksForStatus,
+  liveSourceNotificationVerificationComplete,
+  requiredLiveSourceNotificationTypeIds,
   NOTIFICATION_MATRIX_PAGES,
   SUPPORTED_BROWSER_NOTIFICATION_TYPES,
   pageScopedBrowserNotificationDraft,
@@ -31,6 +36,52 @@ test("notification verification matrix names every supported browser notificatio
   assert.equal(SUPPORTED_BROWSER_NOTIFICATION_TYPES.every((type) => type.source && type.expectedDestination), true);
 });
 
+test("notification live-source checklist separates smoke evidence from real source verification", () => {
+  assert.deepEqual(LIVE_SOURCE_NOTIFICATION_CHECKS.map((check) => check.typeId), SUPPORTED_BROWSER_NOTIFICATION_TYPES.map((type) => type.id));
+
+  const checksByType = new Map(LIVE_SOURCE_NOTIFICATION_CHECKS.map((check) => [check.typeId, check]));
+  assert.equal(checksByType.get("market-listing").status, "verified");
+  assert.equal(checksByType.get("market-sale").status, "verified");
+  assert.equal(checksByType.get("market-deal-alert").status, "required");
+  assert.equal(checksByType.get("production-started").status, "required");
+  assert.equal(checksByType.get("production-completed").status, "required");
+
+  for (const check of LIVE_SOURCE_NOTIFICATION_CHECKS) {
+    assert.equal(check.source.length > 0, true);
+    assert.equal(check.browserSmokeEvidence.length > 0, true);
+    assert.equal(check.liveVerification.length > 0, true);
+    if (check.status === "required") {
+      assert.match(check.liveVerification, /not only sample|signed-in|queue diff/i);
+    }
+  }
+});
+
+test("live-source checklist exposes required release blockers", () => {
+  const required = liveSourceNotificationChecksForStatus("required");
+  const verified = liveSourceNotificationChecksForStatus("verified");
+
+  assert.deepEqual(required.map((check) => check.typeId), [
+    "market-deal-alert",
+    "production-started",
+    "production-completed",
+  ]);
+  assert.deepEqual(verified.map((check) => check.typeId), ["market-listing", "market-sale"]);
+  assert.equal(required.every((check) => check.liveVerification.includes("Still required")), true);
+});
+
+test("live-source completion helper reports remaining required blockers", () => {
+  assert.equal(liveSourceNotificationVerificationComplete(), false);
+});
+
+test("live-source runbook lists every required notification blocker", () => {
+  const runbook = readFileSync(new URL("../../../docs/notification-live-source-verification.md", import.meta.url), "utf8");
+  const requiredIds = requiredLiveSourceNotificationTypeIds();
+
+  assert.deepEqual(requiredIds, ["market-deal-alert", "production-started", "production-completed"]);
+  for (const typeId of requiredIds) {
+    assert.equal(runbook.includes("`" + typeId + "`"), true, `runbook missing ${typeId}`);
+  }
+});
 test("notification verification matrix keeps the dedicated bot route as an explicit exception", () => {
   assert.deepEqual(BOT_NOTIFICATION_EXCEPTION, {
     route: "/bot",

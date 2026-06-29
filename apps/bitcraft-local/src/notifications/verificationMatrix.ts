@@ -62,6 +62,66 @@ export const SUPPORTED_BROWSER_NOTIFICATION_TYPES: readonly BrowserNotificationT
   },
 ];
 
+export type LiveSourceNotificationStatus = "verified" | "required";
+
+export type LiveSourceNotificationCheck = {
+  typeId: BrowserNotificationTypeId;
+  source: string;
+  status: LiveSourceNotificationStatus;
+  browserSmokeEvidence: string;
+  liveVerification: string;
+};
+
+export const LIVE_SOURCE_NOTIFICATION_CHECKS: readonly LiveSourceNotificationCheck[] = [
+  {
+    typeId: "market-listing",
+    source: "/api/local/notification-activity event_type=market_new_listing",
+    status: "verified",
+    browserSmokeEvidence: "Loopback smoke verified sample market-listing toasts on every routed main-app page.",
+    liveVerification: "Verified through the notification-activity polling path with inserted market_new_listing rows, real refresh controls, drawer persistence, unread state, user setting gating, dismissal, and drawer navigation.",
+  },
+  {
+    typeId: "market-sale",
+    source: "/api/local/notification-activity event_type=market_sale or market_sale_confirmed",
+    status: "verified",
+    browserSmokeEvidence: "Loopback smoke verified sample market-sale toasts on every routed main-app page.",
+    liveVerification: "Verified through the notification-activity polling path with market sale activity rows, real refresh controls, drawer persistence, unread state, and no page-mounted source dependency.",
+  },
+  {
+    typeId: "market-deal-alert",
+    source: "/api/local/market/deal-alerts for the signed-in Discord-linked user",
+    status: "required",
+    browserSmokeEvidence: "Loopback smoke verified sample market-deal-alert toasts on every routed main-app page.",
+    liveVerification: "Still required with a signed-in Discord-linked user and a real deal-alert feed, not only sample smoke drafts.",
+  },
+  {
+    typeId: "production-started",
+    source: "Global production craft queue diff in useBrowserNotificationSources",
+    status: "required",
+    browserSmokeEvidence: "Loopback smoke verified sample production-started toasts on every routed main-app page.",
+    liveVerification: "Still required from an actual production queue diff that adds a craft, not only sample smoke drafts.",
+  },
+  {
+    typeId: "production-completed",
+    source: "Global production craft queue diff in useBrowserNotificationSources",
+    status: "required",
+    browserSmokeEvidence: "Loopback smoke verified sample production-completed toasts on every routed main-app page.",
+    liveVerification: "Still required from an actual production queue diff that removes/completes a craft, not only sample smoke drafts.",
+  },
+];
+
+export function liveSourceNotificationChecksForStatus(status: LiveSourceNotificationStatus): LiveSourceNotificationCheck[] {
+  return LIVE_SOURCE_NOTIFICATION_CHECKS.filter((check) => check.status === status);
+}
+
+export function liveSourceNotificationVerificationComplete(): boolean {
+  return liveSourceNotificationChecksForStatus("required").length === 0;
+}
+
+export function requiredLiveSourceNotificationTypeIds(): BrowserNotificationTypeId[] {
+  return liveSourceNotificationChecksForStatus("required").map((check) => check.typeId);
+}
+
 export const NOTIFICATION_MATRIX_PAGES: readonly NotificationMatrixPage[] = [
   { panel: "admin", label: "Admin", path: "/?page=admin" },
   { panel: "dashboard", label: "Dashboard", path: "/?page=dashboard" },
