@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.98] - 2026-06-30
+
+### Changed
+
+- Added resumable worker budgets for storage activity and member market-trade imports so expensive collector work continues across runs instead of scanning every building or member in one pass.
+- Added worker budget environment controls for storage activity and market trade import batch sizes and runtimes.
+
 ## [1.0.0-beta.97] - 2026-06-29
 
 ### Added

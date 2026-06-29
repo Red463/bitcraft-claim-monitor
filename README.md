@@ -392,6 +392,10 @@ Supported application server environment variables:
 | `ENABLE_SERVER_POLLING` | Override worker-side snapshot polling | enabled when background jobs are allowed |
 | `SQLITE_BUSY_TIMEOUT_MS` | SQLite lock wait timeout for web/worker access | `5000` |
 | `SNAPSHOT_INTERVAL_MS` | Polling interval, minimum 10 seconds | `30000` |
+| `STORAGE_ACTIVITY_MAX_RUNTIME_MS` | Worker runtime budget for one storage activity pass | `15000` |
+| `STORAGE_ACTIVITY_BATCH_SIZE` | Worker building batch size for storage activity resume passes | `25` |
+| `MARKET_TRADES_MAX_RUNTIME_MS` | Worker runtime budget for one member trade import pass | `15000` |
+| `MARKET_TRADES_BATCH_SIZE` | Worker member batch size for market trade resume passes | `20` |
 | `DISCORD_BOT_TOKEN` | Optional Discord bot token override | admin-stored secret |
 | `DISCORD_APPLICATION_ID` | Optional Discord application ID override | admin setting |
 | `DISCORD_PUBLIC_KEY` | Optional Discord interactions public key override | admin setting |

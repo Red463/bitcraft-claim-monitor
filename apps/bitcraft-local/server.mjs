@@ -37,6 +37,7 @@ import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedS
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
+import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements } from "./src/server/schemaMigrations.mjs";
@@ -83,6 +84,14 @@ const processRoleConfig = processRoleCapabilities(processRole);
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
+const storageActivityJobBudget = normalizeJobBudget({
+  maxRuntimeMs: process.env.STORAGE_ACTIVITY_MAX_RUNTIME_MS ?? 15000,
+  batchSize: process.env.STORAGE_ACTIVITY_BATCH_SIZE ?? 25,
+});
+const marketTradeJobBudget = normalizeJobBudget({
+  maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
+  batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
+});
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
@@ -4457,6 +4466,19 @@ function marketTradeBackfillKey(claimId, playerId) {
   return `market_trade_backfill:${claimId}:${playerId}`;
 }
 
+function collectorResumeSettingKey(jobKey, claimId) {
+  return `collector_resume:${jobKey}:${claimId}`;
+}
+
+function readCollectorResume(jobKey, claimId) {
+  return safeJson(statements.getSetting.get(collectorResumeSettingKey(jobKey, claimId))?.value, {});
+}
+
+function writeCollectorResume(jobKey, claimId, metadata = {}) {
+  const updatedAt = new Date().toISOString();
+  statements.upsertSetting.run(collectorResumeSettingKey(jobKey, claimId), JSON.stringify({ ...metadata, updatedAt }), updatedAt);
+}
+
 async function fetchOrderTrades(playerId, orderEntityId) {
   const trades = [];
   let offset = 0;
@@ -4493,18 +4515,35 @@ function tradeOccurredAt(trade, importedAt) {
   return Number.isNaN(parsed.getTime()) ? importedAt : parsed.toISOString();
 }
 
-async function importMemberSellTrades(claimId, members) {
+function memberTradeImportKey(member) {
+  return String(member.playerEntityId ?? member.entityId ?? "").trim();
+}
+
+async function importMemberSellTrades(claimId, members, options = {}) {
+  const budget = normalizeJobBudget(options.budget ?? {}, marketTradeJobBudget);
   const uniqueMembers = [...new Map(members
-    .filter((member) => member.playerEntityId ?? member.entityId)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
-  const imports = await mapWithConcurrency(uniqueMembers, 3, async (member) => {
+    .filter((member) => memberTradeImportKey(member))
+    .map((member) => [memberTradeImportKey(member), member])).values()]
+    .sort((a, b) => memberTradeImportKey(a).localeCompare(memberTradeImportKey(b)));
+  const resume = readCollectorResume("marketTrades", claimId);
+  const batch = selectResumeBatch(uniqueMembers, {
+    cursor: resume.nextCursor,
+    batchSize: budget.batchSize,
+    getKey: memberTradeImportKey,
+  });
+  const startedAtMs = Date.now();
+  const imports = [];
+  const processedMembers = [];
+  for (const member of batch.items) {
+    if (!jobBudgetAllowsMore(startedAtMs, budget, processedMembers.length)) break;
+    processedMembers.push(member);
     try {
-      return await fetchMemberSettlementSellTrades(claimId, member);
+      imports.push(await fetchMemberSettlementSellTrades(claimId, member));
     } catch (error) {
       console.warn(`BitCraft market trade import failed for ${member.userName ?? member.playerEntityId}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      imports.push(null);
     }
-  });
+  }
   const importedAt = new Date().toISOString();
   let inserted = 0;
   db.exec("BEGIN");
@@ -4520,9 +4559,24 @@ async function importMemberSellTrades(claimId, members) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return inserted;
+  const complete = batch.complete && processedMembers.length === batch.items.length;
+  const nextCursor = complete ? null : (processedMembers.length ? memberTradeImportKey(processedMembers[processedMembers.length - 1]) : (resume.nextCursor ?? null));
+  writeCollectorResume("marketTrades", claimId, {
+    nextCursor,
+    complete,
+    processed: processedMembers.length,
+    total: uniqueMembers.length,
+    inserted,
+    budget,
+  });
+  return {
+    inserted,
+    requested: uniqueMembers.length,
+    processed: processedMembers.length,
+    complete,
+    nextCursor,
+  };
 }
-
 async function mapWithConcurrency(values, concurrency, mapper) {
   const results = new Array(values.length);
   let next = 0;
@@ -4537,21 +4591,38 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   return results;
 }
 
-async function collectStorageActivity(claimId, inventories) {
-  const buildings = unwrap(inventories, "buildings", []).filter((building) => building.entityId && !isDeployableStorage(building));
+function storageActivityBuildingKey(building) {
+  return String(building.entityId ?? "").trim();
+}
+
+async function collectStorageActivity(claimId, inventories, options = {}) {
+  const budget = normalizeJobBudget(options.budget ?? {}, storageActivityJobBudget);
+  const buildings = unwrap(inventories, "buildings", [])
+    .filter((building) => building.entityId && !isDeployableStorage(building))
+    .sort((a, b) => storageActivityBuildingKey(a).localeCompare(storageActivityBuildingKey(b)));
+  const resume = readCollectorResume("storageActivity", claimId);
+  const batch = selectResumeBatch(buildings, {
+    cursor: resume.nextCursor,
+    batchSize: budget.batchSize,
+    getKey: storageActivityBuildingKey,
+  });
+  const startedAtMs = Date.now();
   const failures = [];
-  const responses = await mapWithConcurrency(buildings, 4, async (building) => {
+  const responses = [];
+  const processedBuildings = [];
+  for (const building of batch.items) {
+    if (!jobBudgetAllowsMore(startedAtMs, budget, processedBuildings.length)) break;
+    processedBuildings.push(building);
     try {
-      return { building, payload: await fetchBitjita(`/logs/storage?buildingEntityId=${building.entityId}&limit=40`) };
+      responses.push({ building, payload: await fetchBitjita(`/logs/storage?buildingEntityId=${building.entityId}&limit=40`) });
     } catch (error) {
       failures.push(`${storageContainerName(building)}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
     }
-  });
+  }
   let inserted = 0;
   db.exec("BEGIN");
   try {
-    for (const result of responses.filter(Boolean)) {
+    for (const result of responses) {
       const items = [...(result.payload.items ?? []), ...(result.payload.cargos ?? [])];
       const catalog = new Map(items.map((item) => [String(item.id), item]));
       const containerName = storageContainerName(result.building);
@@ -4584,9 +4655,26 @@ async function collectStorageActivity(claimId, inventories) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return { requested: buildings.length, inserted, failures };
+  const complete = batch.complete && processedBuildings.length === batch.items.length;
+  const nextCursor = complete ? null : (processedBuildings.length ? storageActivityBuildingKey(processedBuildings[processedBuildings.length - 1]) : (resume.nextCursor ?? null));
+  writeCollectorResume("storageActivity", claimId, {
+    nextCursor,
+    complete,
+    processed: processedBuildings.length,
+    total: buildings.length,
+    inserted,
+    failures: failures.slice(0, 20),
+    budget,
+  });
+  return {
+    requested: buildings.length,
+    processed: processedBuildings.length,
+    inserted,
+    complete,
+    nextCursor,
+    failures,
+  };
 }
-
 async function fetchCachedClaimDetail(claimId) {
   const cached = claimDetailCache.get(String(claimId));
   if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -5630,15 +5718,20 @@ async function collectServerSnapshot(force = false) {
     collectorSuccess("snapshotHistory", snapshotStartedAt);
     const storageStartedAt = collectorAttempt("storageActivity");
     pollStatus.storageLastAttemptAt = new Date().toISOString();
-    const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] });
+    const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] }, { budget: storageActivityJobBudget });
     pollStatus.storageRequests = storageResult.requested;
     pollStatus.storageInserted = storageResult.inserted;
+    pollStatus.storageProcessed = storageResult.processed;
+    pollStatus.storageComplete = storageResult.complete;
     pollStatus.storageLastError = storageResult.failures.length ? storageResult.failures.join("; ") : null;
     pollStatus.storageLastSuccessAt = new Date().toISOString();
     if (storageResult.failures.length) collectorFailure("storageActivity", storageStartedAt, new Error(storageResult.failures.join("; ")));
     else collectorSuccess("storageActivity", storageStartedAt);
     const marketStartedAt = collectorAttempt("marketTrades");
-    await importMemberSellTrades(claimId, members);
+    const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
+    pollStatus.marketTradesProcessed = marketTradeResult.processed;
+    pollStatus.marketTradesInserted = marketTradeResult.inserted;
+    pollStatus.marketTradesComplete = marketTradeResult.complete;
     collectorSuccess("marketTrades", marketStartedAt);
     pollStatus.lastSuccessAt = new Date().toISOString();
     pollStatus.lastError = null;
