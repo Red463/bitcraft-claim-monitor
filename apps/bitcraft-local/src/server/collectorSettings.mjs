@@ -16,7 +16,7 @@ export const domainCollectorDefaults = {
   buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
+  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 900 },
   storageActivity: { label: "Storage activity", intervalSeconds: 60 },
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };

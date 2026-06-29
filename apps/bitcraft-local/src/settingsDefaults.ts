@@ -148,7 +148,7 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   buyOrders: { label: "Regional buy orders", enabled: true, intervalSeconds: 300 },
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", enabled: true, intervalSeconds: 60 },
+  snapshotHistory: { label: "Snapshot and history", enabled: true, intervalSeconds: 900 },
   storageActivity: { label: "Storage activity", enabled: true, intervalSeconds: 60 },
   marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },
 };

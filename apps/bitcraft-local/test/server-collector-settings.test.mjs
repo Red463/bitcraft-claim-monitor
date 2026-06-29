@@ -34,3 +34,14 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.buyOrders, ["market_buy_orders_current", "market_regional_sale_averages_current"]);
 });
+
+test("snapshot history default interval is long enough not to monopolize production", () => {
+  assert.equal(domainCollectorDefaults.snapshotHistory.intervalSeconds, 900);
+  assert.equal(normalizeCollectorSettings({}).snapshotHistory.intervalSeconds, 900);
+});
+
+test("collector settings still clamp submitted intervals to the existing bounds", () => {
+  const normalized = normalizeCollectorSettings({ snapshotHistory: { intervalSeconds: 2 } });
+
+  assert.equal(normalized.snapshotHistory.intervalSeconds, 15);
+});

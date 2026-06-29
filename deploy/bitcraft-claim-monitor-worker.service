@@ -1,6 +1,6 @@
 [Unit]
-Description=BitCraft Claim Monitor
-After=network-online.target
+Description=BitCraft Claim Monitor Worker
+After=network-online.target bitcraft-claim-monitor.service
 Wants=network-online.target
 
 [Service]
@@ -9,12 +9,10 @@ User=bitcraft
 Group=bitcraft
 WorkingDirectory=/opt/bitcraft-claim-monitor/apps/bitcraft-local
 Environment=NODE_ENV=production
-Environment=APP_HOST=127.0.0.1
-Environment=APP_PORT=18430
 Environment=BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor
-Environment=BITCRAFT_PROCESS_ROLE=web
+Environment=BITCRAFT_PROCESS_ROLE=worker
 EnvironmentFile=-/etc/bitcraft-claim-monitor.env
-ExecStart=/usr/bin/node /opt/bitcraft-claim-monitor/apps/bitcraft-local/server.mjs
+ExecStart=/usr/bin/node /opt/bitcraft-claim-monitor/apps/bitcraft-local/worker.mjs
 Restart=on-failure
 RestartSec=5
 UMask=0077

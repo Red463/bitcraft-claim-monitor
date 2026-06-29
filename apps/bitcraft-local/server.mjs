@@ -36,9 +36,11 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements } from "./src/server/schemaMigrations.mjs";
+import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
@@ -76,9 +78,11 @@ const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_E
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
-const serverPollingEnabled = process.env.ENABLE_SERVER_POLLING !== "false";
-const discordStartupEnabled = process.env.ENABLE_DISCORD_STARTUP !== "false";
-const scheduledJobsEnabled = process.env.ENABLE_SCHEDULED_JOBS !== "false";
+const processRole = resolveProcessRole(process.env, { isProduction });
+const processRoleConfig = processRoleCapabilities(processRole);
+const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
+const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
+const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
@@ -118,6 +122,7 @@ process.on("uncaughtException", (error) => {
 
 const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
 const db = new DatabaseSync(databasePath);
+applyDatabaseConnectionPragmas(db, { busyTimeoutMs: process.env.SQLITE_BUSY_TIMEOUT_MS ?? 5000 });
 // SQLite is intentionally bootstrapped in-process because the app is designed to
 // self-host as a single service. Tables below mix current cached records,
 // append-only history, admin/auth state, Discord state, analytics, and scheduled
@@ -7839,8 +7844,7 @@ function scheduleServerPolling(delayMs = 0) {
   }, delayMs);
 }
 
-server.listen(port, host, () => {
-  console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""}`);
+function startBackgroundTasks() {
   startDiscordGateway();
   setTimeout(() => {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
@@ -7854,4 +7858,14 @@ server.listen(port, host, () => {
     checkScheduledJobs();
     setInterval(checkScheduledJobs, 60 * 1000);
   }
-});
+}
+
+if (processRoleConfig.serveHttp) {
+  server.listen(port, host, () => {
+    console.log(`BitCraft monitor server listening on http://${host}:${port}${serveFrontend ? " with production frontend" : ""} role=${processRole}`);
+    if (processRoleConfig.runBackgroundJobs) startBackgroundTasks();
+  });
+} else {
+  console.log(`BitCraft monitor worker started role=${processRole}`);
+  startBackgroundTasks();
+}
