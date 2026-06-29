@@ -50,6 +50,8 @@ test("toastItemFromActivity extracts market item display metadata defensively", 
   });
   assert.equal(toastItemFromActivity({ metadata_json: "{}" }), null);
   assert.equal(activityNoticeKey({ id: 12, source_key: "activity-source" }), "activity-source");
+  assert.equal(activityNoticeKey({ id: 12, source_key: "", event_type: "market_new_listing", occurred_at: "2026-06-29T10:00:00.000Z", summary: "Listing" }), "activity:12");
+  assert.equal(activityNoticeKey({ source_key: "   ", event_type: "market_sale", occurred_at: "2026-06-29T10:05:00.000Z", summary: "Sale" }), "activity:market_sale:2026-06-29T10:05:00.000Z:Sale");
 });
 
 test("compactActivity combines adjacent treasury updates only", () => {

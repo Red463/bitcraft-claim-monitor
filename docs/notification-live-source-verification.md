@@ -60,7 +60,7 @@ Purpose: prove the signed-in user's deal-alert feed creates browser toasts throu
 1. Sign in with a Discord-linked user that has access to deal alerts.
 2. Configure or identify a safe deal-watch rule that will produce one new alert in the test environment.
 3. Open a main app page that is not Market, such as Dashboard or Production.
-4. Confirm market browser notifications are enabled where relevant.
+4. Confirm at least one app-level market browser notification category and one local user-level market notification category are enabled; deal-alert toasts use the browser market-toast gate.
 5. Capture the current `/api/local/market/deal-alerts` baseline for the signed-in user.
 6. Create or wait for a real deal-alert source row for that user.
 7. Refresh deal-alert data through the normal app refresh path or wait for background refresh.

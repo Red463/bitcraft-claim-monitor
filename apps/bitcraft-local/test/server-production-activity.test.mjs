@@ -27,6 +27,7 @@ test("production activity helpers keep stable craft identity independent of craf
   );
   assert.equal(craftJobKey(updatedCrafterJob), craftJobKey(baseJob));
   assert.equal(craftJobKey({ entityId: "craft-entity-1" }), "craft-entity-1");
+  assert.equal(craftJobKey({ entityId: "", id: " ", craftEntityId: "", claimId: "claim-1", recipeName: "Simple Plank", isPublic: true }), "craft|claim-1|simple plank|public");
 });
 
 test("production activity helpers normalize production jobs with catalog item metadata", () => {

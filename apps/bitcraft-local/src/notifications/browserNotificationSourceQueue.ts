@@ -78,7 +78,9 @@ export function browserNotificationSourceDrafts(
   if (options.dealAlerts.refreshToken) {
     const result = dealAlertQueueToastDrafts(snapshots.dealAlerts, options.dealAlerts.alerts);
     snapshots.dealAlerts = result.knownIds;
-    drafts.push(...result.drafts);
+    const marketToastsEnabled = (options.appToastSettings.marketListings || options.appToastSettings.marketSales)
+      && (options.userToastSettings.marketListings || options.userToastSettings.marketSales);
+    if (marketToastsEnabled) drafts.push(...result.drafts);
   }
 
   if (options.hasProductionData) {

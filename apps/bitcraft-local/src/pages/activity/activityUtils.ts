@@ -107,7 +107,12 @@ export function toastItemFromActivity(event: AnyRecord): AnyRecord | null {
 }
 
 export function activityNoticeKey(event: AnyRecord): string {
-  return String(event.source_key ?? event.sourceKey ?? `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`);
+  const explicitKey = event.source_key ?? event.sourceKey;
+  if (explicitKey != null) {
+    const normalized = String(explicitKey).trim();
+    if (normalized) return normalized;
+  }
+  return `activity:${event.id ?? `${event.event_type}:${event.occurred_at ?? event.occurredAt}:${event.summary}`}`;
 }
 export function sanitizeActivityLog(items: unknown): string[] {
   if (!Array.isArray(items)) return [];

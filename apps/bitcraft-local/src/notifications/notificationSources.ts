@@ -58,7 +58,7 @@ export function marketActivityQueueToastDrafts(
 ): { snapshot: MarketActivityToastSnapshot; drafts: ToastNoticeDraft[]; seeded: boolean } {
   const notableEvents = events.filter(isMarketActivityToastEvent);
   const knownIds = previous?.claimId === claimId ? previous.knownIds : null;
-  const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => String(event.id), limit);
+  const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => helpers.key(event), limit);
   const snapshot = { claimId, knownIds: selection.knownIds };
   if (selection.seeded) return { snapshot, drafts: [], seeded: true };
   const drafts = selection.unseen
@@ -86,12 +86,20 @@ export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
     sourceKey: `deal-alert:${alert.id}`,
   };
 }
+function dealAlertId(alert: AnyRecord): string | null {
+  const id = alert.id;
+  if (id == null) return null;
+  const normalized = String(id).trim();
+  return normalized ? normalized : null;
+}
+
 export function dealAlertQueueToastDrafts(
   knownIds: Set<string> | null,
   alerts: AnyRecord[],
   limit = 3,
 ): { knownIds: Set<string>; drafts: ToastNoticeDraft[]; seeded: boolean } {
-  const selection = selectUnseenNotificationItems(knownIds, alerts, (alert) => String(alert.id), limit);
+  const identifiableAlerts = alerts.filter((alert) => dealAlertId(alert) != null);
+  const selection = selectUnseenNotificationItems(knownIds, identifiableAlerts, (alert) => dealAlertId(alert) as string, limit);
   if (selection.seeded) return { knownIds: selection.knownIds, drafts: [], seeded: true };
   return {
     knownIds: selection.knownIds,
@@ -134,8 +142,22 @@ export type ProductionCraftQueueToastOptions = {
   maxCompleted?: number;
 };
 
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (value == null) continue;
+    const normalized = String(value).trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 export function productionCraftJobKey(job: AnyRecord): string {
-  return String(job.entityId ?? job.id ?? job.craftId ?? `${job.buildingName ?? "Settlement production"}-${job.recipeId ?? job.itemId ?? job.name ?? "craft"}`);
+  return firstNonEmptyString(
+    job.entityId,
+    job.id,
+    job.craftId,
+    `${job.buildingName ?? "Settlement production"}-${job.recipeId ?? job.itemId ?? job.name ?? "craft"}`,
+  ) as string;
 }
 
 export function productionCraftQueueToastDrafts(

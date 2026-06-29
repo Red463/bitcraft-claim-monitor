@@ -32,7 +32,7 @@ This keeps notification trigger logic central to the mounted app shell rather th
 
 ## Replay And Deduplication
 
-On first load, activity and deal-alert sources seed their known IDs and do not replay old rows as fresh toasts. Later refreshes select only unseen rows, cap the batch, and display them in chronological display order.
+On first load, activity and deal-alert sources seed their known source keys and do not replay old rows as fresh toasts. Blank activity `source_key` values fall back to the derived activity key instead of creating empty notification source keys. Production craft rows also use the first non-empty craft identity field before falling back to building/recipe identity, avoiding empty production notification keys. Deal-alert rows without a stable non-empty ID are ignored so malformed live rows cannot create `deal-alert:undefined` notifications. Later refreshes select only unseen rows, cap the batch, and display them in chronological display order.
 
 Toast deduplication prefers `sourceKey` when present. Legacy notices without `sourceKey` dedupe by `kind`, `title`, and `body`.
 
@@ -42,10 +42,11 @@ Browser toast settings are controlled by app/admin settings and user settings:
 
 - Market listing toasts require both app-level and user-level listing notifications to be enabled.
 - Market sale toasts require both app-level and user-level sale notifications to be enabled.
+- Market deal-alert toasts use the broader market toast gate: at least one app-level market category and one user-level market category must be enabled. Disabled deal-alert rows still advance the known-ID baseline so they do not replay later.
 - Production toasts require both app-level and user-level production notifications to be enabled.
 - Sounds are browser-only and are skipped when disabled or blocked by the browser. Persisted browser toast settings are normalized to boolean notification gates, known tone IDs, and a 0-1 volume range before preview, playback, account save, or account load.
 
-Deal-alert toasts are tied to the signed-in user's deal-alert feed.
+Deal-alert toasts are tied to the signed-in user's deal-alert feed and follow the browser market-toast gate rather than a separate persisted toggle.
 
 ## Adding A Browser Notification Type
 
@@ -64,9 +65,9 @@ Automated coverage exists for:
 - Toast notice creation and destination mapping.
 - Deduplication by `sourceKey` and legacy title/body keys, including persisted log duplicate replacement.
 - Market activity draft generation and settings gating.
-- Deal-alert draft generation and signed-in deal-alert source queue seeding.
-- Production craft draft generation and production queue diffing.
-- Initial known-ID seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, the app-level source-queue adapter that combines live source rows without page-mounted state, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
+- Market activity queueing by stable notification source keys, deal-alert draft generation, signed-in deal-alert source queue seeding, malformed deal-alert row filtering, and disabled market-toast gating without later replay.
+- Production craft draft generation, non-empty production craft identity fallback, and production queue diffing.
+- Initial known-source-key seeding, unseen item selection, market claim changes, disabled market settings, signed-in deal-alert batches, production baseline seeding, production claim changes, disabled production settings, started/completed caps, the app-level source-queue adapter that combines live source rows without page-mounted state, visible toast-stack caps, persisted notification-log caps, drawer read-state marking, and browser toast setting normalization.
 - The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, the current `/bot` exception, sample draft-to-toast/log creation for every supported type, unique page-scoped source keys for all 85 routed page/type combinations, and one live-source checklist row per supported type.
 - The loopback-only smoke helpers in `src/notifications/browserSmoke.ts` are covered for host gating, supported-type parsing, unique source keys, and dispatch into normal toast notices; AppShell boundary tests keep smoke wiring delegated through `src/notifications/useBrowserNotificationSmoke.ts`, live source effects delegated through `src/notifications/useBrowserNotificationSources.ts`, and toast stack/log/timer state delegated through `src/notifications/useToastNotifications.ts`.
 

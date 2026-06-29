@@ -7,6 +7,15 @@ export function stableCraftPart(value, fallback = "") {
   return String(value ?? fallback).trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    const normalized = String(value).trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 export function craftJobKey(job) {
   const output = job.craftedItem?.[0] ?? {};
   const claim = stableCraftPart(job.claimEntityId ?? job.claimId, "claim");
@@ -20,7 +29,7 @@ export function craftJobKey(job) {
   // BitJita can report the same public craft with a different current/last crafter as work continues.
   // Crafter is notification metadata, not stable craft identity, otherwise starts can fire again.
   if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|"));
+  return firstNonEmptyString(job.entityId, job.id, job.craftEntityId) ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|");
 }
 
 export function craftOutputItem(job, craftsPayload = {}) {
