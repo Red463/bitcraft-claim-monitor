@@ -94,6 +94,14 @@ export function verificationRowsForStatus(status: NotificationVerificationStatus
   ));
 }
 
+export function pageScopedBrowserNotificationDraft(panel: ActivePanel, typeId: BrowserNotificationTypeId): ToastNoticeDraft {
+  const draft = sampleBrowserNotificationDraft(typeId);
+  return {
+    ...draft,
+    sourceKey: `matrix:${panel}:${typeId}:${draft.sourceKey}`,
+  };
+}
+
 export function sampleBrowserNotificationDraft(typeId: BrowserNotificationTypeId): ToastNoticeDraft {
   if (typeId === "market-listing") {
     const draft = marketActivityToastDraft(

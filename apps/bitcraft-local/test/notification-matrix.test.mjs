@@ -8,6 +8,7 @@ import {
   BOT_NOTIFICATION_EXCEPTION,
   NOTIFICATION_MATRIX_PAGES,
   SUPPORTED_BROWSER_NOTIFICATION_TYPES,
+  pageScopedBrowserNotificationDraft,
   sampleBrowserNotificationDraft,
   verificationRowsForStatus,
 } from "../src/notifications/verificationMatrix.ts";
@@ -61,6 +62,23 @@ test("every supported notification type can produce a page-independent toast not
     assert.deepEqual(stack, [notice]);
     assert.deepEqual(log, [notice]);
   }
+});
+test("every routed page and notification type has a unique page-scoped sample draft", () => {
+  const sourceKeys = new Set();
+
+  for (const page of NOTIFICATION_MATRIX_PAGES) {
+    for (const type of SUPPORTED_BROWSER_NOTIFICATION_TYPES) {
+      const draft = pageScopedBrowserNotificationDraft(page.panel, type.id);
+      const notice = createToastNotice({ id: `matrix-${page.panel}-${type.id}`, ...draft });
+
+      assert.equal(notice.destination, type.expectedDestination);
+      assert.equal(notice.sourceKey.includes(`matrix:${page.panel}:${type.id}:`), true);
+      assert.equal(sourceKeys.has(notice.sourceKey), false, `duplicate source key for ${page.panel} / ${type.id}`);
+      sourceKeys.add(notice.sourceKey);
+    }
+  }
+
+  assert.equal(sourceKeys.size, NOTIFICATION_MATRIX_PAGES.length * SUPPORTED_BROWSER_NOTIFICATION_TYPES.length);
 });
 test("notification smoke helper creates unique loopback-only browser-verification drafts", () => {
   assert.equal(isLocalNotificationSmokeHost("127.0.0.1"), true);

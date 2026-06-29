@@ -34,9 +34,9 @@ flowchart LR
 
 | Layer | Primary files | Responsibilities |
 | --- | --- | --- |
-| Frontend shell | `apps/bitcraft-local/src/main.tsx`, `src/AppShell.tsx` | React bootstrap, route selection, global refresh, app settings, admin shell, auth, local settings, help/legal chrome, analytics consent, toasts, and notification drawer orchestration. |
+| Frontend shell | `apps/bitcraft-local/src/main.tsx`, `src/AppShell.tsx`, `src/components/admin/AdminPanel.tsx`, `src/components/main/UserSettingsDialog.tsx` | React bootstrap, route selection, global refresh, app settings, admin console rendering, auth, local settings state and dialog, help/legal chrome, analytics consent, toasts, and notification drawer orchestration. |
 | Routed pages | `apps/bitcraft-local/src/pages/*` | Feature-owned page modules for Dashboard, Activity, Inventory, Market, Map, Production, Public Craft Finder, and other routes. The legacy `MainPages.tsx` bundle has been removed. |
-| Bot dashboard components | `apps/bitcraft-local/src/components/bot/*`, `src/styles/bot-dashboard.css` | Individual `/bot` dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated shell/navigation styles. |
+| Admin and bot dashboard components | `apps/bitcraft-local/src/components/admin/AdminPanel.tsx`, `src/components/admin/adminDisplay.ts`, `src/components/bot/*`, `src/styles/bot-dashboard.css` | Shared admin console shell for `/?page=admin` and `/bot`, pure admin display helpers, plus individual bot dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated shell/navigation styles. |
 | Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts`, `src/notifications/*` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers, notification generation, dedupe, settings normalization, and smoke-verification helpers. |
 | Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, notification activity redaction, deal-alert payload formatting, market activity normalization, production activity normalization, recipe catalog normalization, and scheduled-job schedule handling. |
 | Deployment | `deploy/*`, `DEPLOYMENT.md`, `LOCAL_DEV.md` | Caddy/systemd examples and local development guidance. |
@@ -49,8 +49,8 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 | Route | Page | Purpose | Primary frontend files | Auth |
 | --- | --- | --- | --- | --- |
-| `/?page=dashboard` | Dashboard | Settlement command-centre summary. | `src/main.tsx` (`Dashboard`) | Public |
-| `/?page=leaderboard` | Leaderboard | Recorded settlement craft contribution by member/profession. | `src/main.tsx` (`Leaderboard`) | Public |
+| `/?page=dashboard` | Dashboard | Settlement command-centre summary. | `src/pages/DashboardPage.tsx` (`Dashboard`) | Public |
+| `/?page=leaderboard` | Leaderboard | Recorded settlement craft contribution by member/profession. | `src/pages/LeaderboardPage.tsx` (`Leaderboard`) | Public |
 | `/?page=members` | Members | Settlement roster, online state, equipment, details. | `src/pages/MembersPage.tsx` | Public |
 | `/?page=skills` | Professions | Profession levels, tiers, coverage. | `src/pages/SkillsPage.tsx` | Public |
 | `/?page=production` | Production | Current crafts, member eligibility, passive crafts. | `src/pages/ProductionPage.tsx` (`Production`) | Public |
@@ -63,35 +63,35 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 | `/?page=empire` | Region | Regional settlement context and rankings. | `src/pages/RegionPage.tsx` | Public |
 | `/?page=map` | Map | Embedded map with resource/player/region helpers. | `src/pages/MapPage.tsx` (`MapPanel`) | Public |
 | `/?page=sync` | Sync | Optional BitCraft Sync embed. | `src/pages/SyncPage.tsx` | Public |
-| `/?page=activity` | Activity | Stored local settlement activity history. | `src/main.tsx` (`ActivityPanel`) | Public |
-| `/?page=admin` | Admin | Admin settings, jobs, users, data, analytics. | `src/main.tsx` (`AdminPanel`) | Admin session |
-| `/bot` | Bot dashboard | Discord bot setup and server-management dashboard. | `src/main.tsx` (`AdminPanel` bot mode), `src/components/bot/*` | Admin session with Discord permissions |
+| `/?page=activity` | Activity | Stored local settlement activity history. | `src/pages/ActivityPage.tsx` (`ActivityPanel`) | Public |
+| `/?page=admin` | Admin | Admin settings, jobs, users, data, analytics. | `src/components/admin/AdminPanel.tsx` | Admin session |
+| `/bot` | Bot dashboard | Discord bot setup and server-management dashboard. | `src/components/admin/AdminPanel.tsx` bot mode, `src/components/bot/*` | Admin session with Discord permissions |
 
 ### Dashboard
 
 - Route: `/?page=dashboard`
 - Purpose: high-level settlement health and command-centre summary.
-- Key components/functions: `Dashboard`, `DashboardMetric`, `DashboardCardHeader`, `DashboardTrend` in `apps/bitcraft-local/src/main.tsx`.
+- Key components/functions: `Dashboard` in `src/pages/DashboardPage.tsx`; shared `DashboardMetric`, `DashboardCardHeader`, and `DashboardTrend` in `src/components/main/DashboardWidgets.tsx`.
 - Data needs: claim summary, members, supply, treasury, construction count, production queue, online members, recent non-treasury/non-supply activity, snapshots/trends.
 - Data source: frontend `useBitjitaData` refreshes live claim, member, production, construction, market and region data through the local `/api/bitjita/*` proxy; local history comes from `useLocalHistory` and `/api/local/history`.
 - Fetching/transformation: frontend normalizers such as `normalizeData`, `claimSupplyRunOutAt`, `claimSupplyCap`, and formatting helpers from `main-app-data.ts` adapt live BitJita responses into dashboard-ready values.
 - Actions: navigates to related pages using `onNavigate`.
 - Auth: public.
 - Loading/error/empty states: global BitJita warning banner displays partial refresh issues; chart and recent activity have empty states.
-- Related files: `src/main.tsx`, `src/api/bitjita.ts`, `src/api/localHistory.ts`, `src/main-app-data.ts`, `server.mjs`.
+- Related files: `src/pages/DashboardPage.tsx`, `src/components/main/DashboardWidgets.tsx`, `src/api/bitjita.ts`, `src/api/localHistory.ts`, `src/main-app-data.ts`, `server.mjs`.
 
 ### Leaderboard
 
 - Route: `/?page=leaderboard`
 - Purpose: shows recorded craft contribution totals by member and profession.
-- Key components/functions: `Leaderboard` in `src/main.tsx`; backend `/api/local/leaderboard`.
+- Key components/functions: `Leaderboard` in `src/pages/LeaderboardPage.tsx`; backend `/api/local/leaderboard`.
 - Data needs: `production_contributions`, production job metadata, member/profession filters.
 - Data source: local SQLite only, populated by server polling from BitJita production contribution data.
 - Fetching/transformation: frontend fetches the local leaderboard endpoint; backend combines stored contribution rows, local market/activity history, and current live member/player data where needed.
 - Actions: profession filter.
 - Auth: public.
 - Loading/error/empty states: page-level loading and empty states.
-- Related files: `src/main.tsx`, `server.mjs`.
+- Related files: `src/pages/LeaderboardPage.tsx`, `server.mjs`.
 - Needs review: contribution accuracy depends on BitJita returning contribution data. The app intentionally should not infer contribution from progress changes.
 
 ### Members
@@ -619,7 +619,7 @@ Route permissions are mapped by `adminPermissionFor` in `server.mjs`.
 ## Known Complexity / Risk Areas
 
 1. `server.mjs` is a high-risk file because it combines routing, schema migrations, polling, BitJita proxying, auth, Discord bot logic, scheduled jobs, and diagnostics.
-2. `src/AppShell.tsx` is still broad. Routed page components have been extracted to `src/pages`, but admin shell and cross-cutting orchestration remain large.
+2. `src/AppShell.tsx` is now focused on top-level browser orchestration after page, admin, notification, and user-settings extractions. `src/components/admin/AdminPanel.tsx` is still large and should be split further only along stable admin tab/helper boundaries.
 3. BitJita response shapes are adapted from observed wrappers and endpoints. `unwrap`, `normalizeData`, and page logic handle several possible nesting patterns, but field semantics can still change upstream.
 4. Production contribution must come from BitJita. Fallback inference from craft progress would be misleading and should be avoided.
 5. Market sale/removal analytics depend on listing/trade fields being available and stable. Buyer/seller details may be missing for some endpoints.

@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.88] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving the admin console and user settings dialog out of the app shell.
+- Added focused admin display helpers and boundary tests so release-critical shell responsibilities stay easier to review.
+- Expanded notification verification coverage for every routed page and supported browser notification type.
+
 ## [1.0.0-beta.87] - 2026-06-29
 
 ### Changed
