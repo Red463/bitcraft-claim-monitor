@@ -105,13 +105,15 @@ EOF
 chmod 600 /etc/bitcraft-claim-monitor.env
 ```
 
-Install the checked-in systemd service:
+Install the checked-in systemd services. The web service handles requests; the worker service handles polling, history imports, scheduled jobs, and Discord background work:
 
 ```bash
 cp /opt/bitcraft-claim-monitor/deploy/bitcraft-claim-monitor.service /etc/systemd/system/
+cp /opt/bitcraft-claim-monitor/deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now bitcraft-claim-monitor
-systemctl status bitcraft-claim-monitor
+systemctl enable --now bitcraft-claim-monitor bitcraft-claim-monitor-worker
+systemctl status bitcraft-claim-monitor --no-pager -l
+systemctl status bitcraft-claim-monitor-worker --no-pager -l
 curl http://127.0.0.1:18430/api/local/health
 ```
 
@@ -132,7 +134,7 @@ Open `https://app.timbersteeltrade.com/` in your browser. Caddy automatically ob
 
 Go to the app's **Admin** page and sign in with Discord once Discord OAuth is configured. The default owner Discord ID is seeded as the owner administrator unless you override `DEFAULT_OWNER_DISCORD_ID`. Legacy password admin setup is a compatibility path only and should normally remain disabled.
 
-On a production installation, market/activity/contribution history and notification-support data are collected by the server on the configured intervals. Visitors do not write snapshots, and manually resolving uncertain market events remains an admin-only action.
+On a production installation, market/activity/contribution history and notification-support data are collected by the worker on the configured intervals. Visitors do not write snapshots, and manually resolving uncertain market events remains an admin-only action.
 
 ## Updating the App
 
@@ -143,8 +145,13 @@ cd /opt/bitcraft-claim-monitor
 sudo -u bitcraft git pull --ff-only
 sudo -u bitcraft corepack pnpm install --frozen-lockfile
 sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
-systemctl restart bitcraft-claim-monitor
-systemctl status bitcraft-claim-monitor
+cp deploy/bitcraft-claim-monitor.service /etc/systemd/system/
+cp deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now bitcraft-claim-monitor-worker
+systemctl restart bitcraft-claim-monitor bitcraft-claim-monitor-worker
+systemctl status bitcraft-claim-monitor --no-pager -l
+systemctl status bitcraft-claim-monitor-worker --no-pager -l
 ```
 
 Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace history, admin configuration, uploaded branding or admin-created backups.

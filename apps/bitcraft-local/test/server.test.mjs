@@ -1205,6 +1205,7 @@ test("background polling failures keep the server online", async (t) => {
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "true",
+      BITCRAFT_PROCESS_ROLE: "all",
       ENABLE_SCHEDULED_JOBS: "false",
       ADMIN_SETUP_KEY: "test-setup-key",
       APP_HOST: "127.0.0.1",

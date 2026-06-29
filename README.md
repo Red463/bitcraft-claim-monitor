@@ -388,8 +388,14 @@ Supported application server environment variables:
 | `DISCORD_OAUTH_CLIENT_SECRET` | Discord OAuth client secret for sign-in | unset |
 | `DISCORD_OAUTH_REDIRECT_URI` | Explicit Discord OAuth callback URL | inferred from request origin |
 | `ENABLE_LEGACY_ADMIN_PASSWORD_AUTH` | Re-enable legacy password admin login | disabled |
-| `ENABLE_SERVER_POLLING` | Override server-side snapshot polling | enabled in production |
+| `BITCRAFT_PROCESS_ROLE` | Process role: `web`, `worker`, or `all` | `web` in production, `all` locally |
+| `ENABLE_SERVER_POLLING` | Override worker-side snapshot polling | enabled when background jobs are allowed |
+| `SQLITE_BUSY_TIMEOUT_MS` | SQLite lock wait timeout for web/worker access | `5000` |
 | `SNAPSHOT_INTERVAL_MS` | Polling interval, minimum 10 seconds | `30000` |
+| `STORAGE_ACTIVITY_MAX_RUNTIME_MS` | Worker runtime budget for one storage activity pass | `15000` |
+| `STORAGE_ACTIVITY_BATCH_SIZE` | Worker building batch size for storage activity resume passes | `25` |
+| `MARKET_TRADES_MAX_RUNTIME_MS` | Worker runtime budget for one member trade import pass | `15000` |
+| `MARKET_TRADES_BATCH_SIZE` | Worker member batch size for market trade resume passes | `20` |
 | `DISCORD_BOT_TOKEN` | Optional Discord bot token override | admin-stored secret |
 | `DISCORD_APPLICATION_ID` | Optional Discord application ID override | admin setting |
 | `DISCORD_PUBLIC_KEY` | Optional Discord interactions public key override | admin setting |
@@ -404,7 +410,7 @@ The intended production setup is:
 - Node.js 24.
 - Application installed at `/opt/bitcraft-claim-monitor`.
 - Persistent data at `/var/lib/bitcraft-claim-monitor`.
-- systemd running the Node application on `127.0.0.1:18430`.
+- systemd running the web Node process on `127.0.0.1:18430` and a separate worker process for collectors and scheduled jobs.
 - Caddy serving `https://app.timbersteeltrade.com` as the public HTTPS domain, with `https://claim.timbersteeltrade.com` and `https://claim.hostred.co.uk` redirected to it.
 
 Full first-time instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
@@ -416,8 +422,13 @@ cd /opt/bitcraft-claim-monitor
 sudo -u bitcraft git pull --ff-only
 sudo -u bitcraft corepack pnpm install --frozen-lockfile
 sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
-systemctl restart bitcraft-claim-monitor
+cp deploy/bitcraft-claim-monitor.service /etc/systemd/system/
+cp deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now bitcraft-claim-monitor-worker
+systemctl restart bitcraft-claim-monitor bitcraft-claim-monitor-worker
 systemctl status bitcraft-claim-monitor --no-pager -l
+systemctl status bitcraft-claim-monitor-worker --no-pager -l
 curl http://127.0.0.1:18430/api/local/health
 ```
 

@@ -8,6 +8,31 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.99] - 2026-06-30
+
+### Changed
+
+- Split snapshot recording into a short settlement snapshot write followed by separate market-listing and production sync phases, reducing how long worker transactions hold the SQLite writer lock.
+
+## [1.0.0-beta.98] - 2026-06-30
+
+### Changed
+
+- Added resumable worker budgets for storage activity and member market-trade imports so expensive collector work continues across runs instead of scanning every building or member in one pass.
+- Added worker budget environment controls for storage activity and market trade import batch sizes and runtimes.
+
+## [1.0.0-beta.97] - 2026-06-29
+
+### Added
+
+- Added a separate production worker service for polling, history imports, scheduled jobs, and Discord background work.
+
+### Changed
+
+- Changed production startup so the public web service serves requests without running expensive background collectors in the same process.
+- Increased the default snapshot-history collector interval and added SQLite snapshot indexes to reduce repeated API and database load.
+- Added SQLite busy-timeout startup pragmas so concurrent web and worker database access waits briefly instead of failing immediately.
+
 ## [1.0.0-beta.96] - 2026-06-29
 
 ### Changed

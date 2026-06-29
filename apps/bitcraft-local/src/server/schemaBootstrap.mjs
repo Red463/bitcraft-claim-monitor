@@ -451,6 +451,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
+  CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured ON snapshots (claim_id, captured_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON snapshots (captured_at);
 `;
 
 export function applySchemaBootstrap(db) {

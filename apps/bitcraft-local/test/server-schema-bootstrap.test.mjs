@@ -15,6 +15,8 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_domain_payload_claim",
+    "CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured",
+    "CREATE INDEX IF NOT EXISTS idx_snapshots_captured",
   ]) {
     assert.match(schemaBootstrapSql, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
