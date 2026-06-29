@@ -27,8 +27,12 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 - `src/server/httpBodies.mjs` contains dependency-free body-size limits, raw request-body reading, JSON parsing, and 413 body-too-large errors.
 - `src/server/httpRateLimit.mjs` contains dependency-free rate-limit policies, request-address extraction, and the app 429 limiter factory.
 - `src/server/visitorIp.mjs` contains dependency-free visitor IP normalization, coarse anonymization, and app-salted hash helpers for visitor-security analytics.
+- `src/server/visitorSecuritySettings.mjs` contains visitor-security retention, GeoIP provider, cache, account, and license-key setting normalization.
 - `src/server/notificationActivity.mjs` contains public notification-activity metadata redaction helpers so local notification history does not leak secret-shaped fields.
 - `src/server/dealAlerts.mjs` contains public market deal-alert row shaping and Discord DM payload formatting.
+- `src/server/marketDealWatchSettings.mjs` contains market deal-watch dashboard setting normalization.
+- `src/server/discordSettings.mjs` contains Discord settings defaults plus role-panel, welcome-flow, presence, notification-channel, and colour-role normalization.
+- `src/server/collectorSettings.mjs` contains background collector defaults, payload-domain ownership maps, current-table ownership maps, and dashboard collector setting normalization.
 - `src/server/marketActivity.mjs` contains dependency-free market listing normalization, BitJita timestamp coercion, trade/listing matching, and market event source-key helpers.
 - `src/server/productionActivity.mjs` contains dependency-free production craft identity, output lookup, metrics, and profession-key helpers used by activity history and Discord notifications.
 - `src/server/recipeCatalog.mjs` contains dependency-free recipe catalog key, item-kind, and target-normalization helpers used by cached recipe detail storage.

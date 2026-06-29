@@ -38,7 +38,7 @@ flowchart LR
 | Routed pages | `apps/bitcraft-local/src/pages/*` | Feature-owned page modules for Dashboard, Activity, Inventory, Market, Map, Production, Public Craft Finder, and other routes. The legacy `MainPages.tsx` bundle has been removed. |
 | Admin and bot dashboard components | `apps/bitcraft-local/src/components/admin/AdminPanel.tsx`, `src/components/admin/adminDisplay.ts`, `src/components/bot/*`, `src/styles/admin.css`, `src/styles/discord-admin.css`, `src/styles/bot-dashboard.css` | Shared admin console shell for `/?page=admin` and `/bot`, pure admin display helpers, plus individual bot dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated admin, Discord section, and bot shell/navigation styles. |
 | Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts`, `src/notifications/*` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers, notification generation, dedupe, settings normalization, and smoke-verification helpers. |
-| Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, notification activity redaction, deal-alert payload formatting, market activity normalization, production activity normalization, recipe catalog normalization, and scheduled-job schedule handling. |
+| Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, visitor-security settings normalization, notification activity redaction, deal-alert payload formatting, market deal-watch settings normalization, market activity normalization, production activity normalization, recipe catalog normalization, Discord settings normalization, collector settings normalization, and scheduled-job schedule handling. |
 | Deployment | `deploy/*`, `DEPLOYMENT.md`, `LOCAL_DEV.md` | Caddy/systemd examples and local development guidance. |
 
 ## Page-by-Page Breakdown
@@ -271,7 +271,7 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=admin`
 - Purpose: admin control panel for app settings, data, users, jobs, backups, analytics, and maintenance.
-- Key components/functions: `AdminPanel` in `src/main.tsx`; admin endpoints in `server.mjs`.
+- Key components/functions: `AdminPanel` in `src/components/admin/AdminPanel.tsx`; admin endpoints in `server.mjs`; Discord settings normalization in `src/server/discordSettings.mjs`.
 - Data needs: admin session, settings, jobs, polling diagnostics, user accounts, tables, analytics, audit log.
 - Data source: `/api/local/admin/*` routes, backed by SQLite.
 - Fetching/transformation: frontend fetches admin status/settings after authenticated session; server applies RBAC permissions through `adminPermissionFor`, `requireAdminPermission`, and role permissions.
