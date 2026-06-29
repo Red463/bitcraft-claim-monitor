@@ -33,6 +33,7 @@ import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
 import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
 import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
+import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -1510,22 +1511,22 @@ function getSettings() {
   const toastSettings = safeJson(statements.getSetting.get("toast_json")?.value, { marketListings: true, marketSales: true, production: true });
   const branding = safeJson(statements.getSetting.get("branding_json")?.value, {});
   const excludedMemberIds = safeJson(statements.getSetting.get("excluded_member_ids_json")?.value, []);
-  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? "dashboard";
+  const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? DEFAULT_APP_PAGE;
   return {
     claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
-    excludedMemberIds: Array.isArray(excludedMemberIds) ? [...new Set(excludedMemberIds.map((value) => String(value ?? "").trim()).filter(Boolean))] : [],
+    excludedMemberIds: normalizeStoredExcludedMemberIds(excludedMemberIds),
     theme: { ...defaultTheme, ...theme },
-    refreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("refresh_seconds")?.value) || 30, 15), 300),
-    serverRefreshSeconds: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300),
+    refreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("refresh_seconds")?.value, 30),
+    serverRefreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)),
     collectorSettings: getCollectorSettings(),
-    defaultPage: validPage(savedDefaultPage) ? savedDefaultPage : "dashboard",
+    defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     marketDealWatch: marketDealWatchSettings(),
     branding,
-    snapshotRetentionDays: Math.min(Math.max(toNumber(statements.getSetting.get("snapshot_retention_days")?.value) || 365, 30), 3650),
+    snapshotRetentionDays: normalizeSavedSnapshotRetentionDays(statements.getSetting.get("snapshot_retention_days")?.value, 365),
     visitorSecurity: visitorSecuritySettings(),
     browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
@@ -1534,7 +1535,7 @@ function getSettings() {
 
 const pollStatus = {
   enabled: serverPollingEnabled,
-  intervalMs: Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300) * 1000,
+  intervalMs: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)) * 1000,
   running: false,
   nextRunAt: null,
   lastAttemptAt: null,
@@ -1550,7 +1551,7 @@ const pollStatus = {
 };
 
 function serverRefreshIntervalMs() {
-  const seconds = Math.min(Math.max(toNumber(statements.getSetting.get("server_refresh_seconds")?.value) || Math.round(snapshotIntervalMs / 1000), 15), 300);
+  const seconds = normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000));
   return seconds * 1000;
 }
 
@@ -1710,18 +1711,6 @@ function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
   pollStatus.lastRunMetrics = metrics;
 }
 
-function validSyncUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" && parsed.hostname === "bitcraftsync.app";
-  } catch {
-    return false;
-  }
-}
-
-function validPage(value) {
-  return ["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "empires", "map", "sync", "activity"].includes(value);
-}
 
 function getSessionUser(req) {
   const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
@@ -5577,12 +5566,6 @@ async function fetchCachedRegionClaims(regionId) {
   return value;
 }
 
-function parseRegionIds(value) {
-  return String(value ?? "")
-    .split(/[,\s]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => /^\d+$/.test(entry));
-}
 
 function normalizeRegionRow(row, source = "bitjita") {
   const regionId = String(row?.regionId ?? row?.id ?? "").trim();
@@ -8299,24 +8282,22 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.settings);
         const nextClaimId = String(body.claimId ?? "").trim();
         const nextSyncUrl = String(body.syncUrl ?? defaultSyncUrl).trim();
-        if (!/^\d{8,}$/.test(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
-        if (!validSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
+        if (!validClaimId(nextClaimId)) return send(res, 400, { error: "Settlement ID must be a numeric BitCraft claim id" });
+        if (!validBitcraftSyncUrl(nextSyncUrl)) return send(res, 400, { error: "BitCraft Sync URL must be a https://bitcraftsync.app link" });
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
-        if (!Number.isInteger(refreshSeconds) || refreshSeconds < 15 || refreshSeconds > 300) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
+        if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
-        if (!Number.isInteger(serverRefreshSeconds) || serverRefreshSeconds < 15 || serverRefreshSeconds > 300) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
+        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
         const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
-        const defaultPage = String(body.defaultPage ?? "dashboard");
-        if (!validPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
+        const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
+        if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
-        if (defaultRegion && !/^\d+$/.test(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
+        if (defaultRegion && !validRegionId(defaultRegion)) return send(res, 400, { error: "Default region must be numeric or blank" });
         const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
         if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
-        const excludedMemberIds = Array.isArray(body.excludedMemberIds)
-          ? [...new Set(body.excludedMemberIds.map((value) => String(value ?? "").trim()).filter((value) => /^\d{8,}$/.test(value)))]
-          : [];
+        const excludedMemberIds = normalizeSubmittedExcludedMemberIds(body.excludedMemberIds);
         const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
-        if (!Number.isInteger(snapshotRetentionDays) || snapshotRetentionDays < 30 || snapshotRetentionDays > 3650) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
+        if (!validSnapshotRetentionDays(snapshotRetentionDays)) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const previousVisitorSecurity = visitorSecuritySettings(true);
         const visitorSecurity = normalizeVisitorSecuritySettings(body.visitorSecurity ?? {}, {
           includeSecrets: true,
