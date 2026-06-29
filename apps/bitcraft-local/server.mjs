@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash, createHmac, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
 import { inflateRawSync } from "node:zlib";
 import { promisify } from "node:util";
@@ -32,6 +32,21 @@ import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdm
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
+import {
+  ADMIN_SESSION_COOKIE_NAME,
+  ADMIN_SESSION_MAX_AGE_SECONDS,
+  APP_USER_SESSION_COOKIE_NAME,
+  APP_USER_SESSION_MAX_AGE_SECONDS,
+  clearHttpSessionCookie,
+  createHttpSession,
+  sessionTokenFromRequest,
+  sessionTokenHash,
+} from "./src/server/serverSessions.mjs";
+import {
+  clearOAuthStateCookie,
+  oauthStateCookie,
+  readOAuthStateCookie,
+} from "./src/server/oauthState.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -1722,15 +1737,11 @@ async function verifyPassword(password, stored) {
   return expectedBuffer.length === actual.length && timingSafeEqual(actual, expectedBuffer);
 }
 
-function tokenHash(token) {
-  return createHash("sha256").update(String(token)).digest("hex");
-}
-
 function getSessionUser(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
+  const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
   if (!token) return null;
   statements.deleteExpiredSessions.run(new Date().toISOString());
-  return statements.adminBySession.get(tokenHash(token), new Date().toISOString()) ?? null;
+  return statements.adminBySession.get(sessionTokenHash(token), new Date().toISOString()) ?? null;
 }
 
 function requireAdmin(req, res) {
@@ -2401,20 +2412,22 @@ function requireAdminMutation(req, res, user) {
 }
 
 function createSession(userId) {
-  const token = randomBytes(32).toString("base64url");
-  const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-  statements.insertSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
+  const session = createHttpSession({
+    cookieName: ADMIN_SESSION_COOKIE_NAME,
+    maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS,
+    secure: isProduction,
+  });
+  statements.insertSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt);
   return {
-    token,
-    cookie: serializeHttpOnlyCookie("bitcraft_admin_session", token, { maxAge: 7 * 24 * 60 * 60, secure: isProduction }),
+    token: session.token,
+    cookie: session.cookie,
   };
 }
 
 function clearSession(req) {
-  const token = parseCookies(req).bitcraft_admin_session;
-  if (token) statements.deleteSession.run(tokenHash(token));
-  return serializeHttpOnlyCookie("bitcraft_admin_session", "", { maxAge: 0, secure: isProduction });
+  const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
+  if (token) statements.deleteSession.run(sessionTokenHash(token));
+  return clearHttpSessionCookie(ADMIN_SESSION_COOKIE_NAME, { secure: isProduction });
 }
 
 function originFromRequest(req) {
@@ -2432,27 +2445,29 @@ function discordOAuthConfig(req) {
 }
 
 function getAppUser(req) {
-  const token = parseCookies(req).bitcraft_user_session;
+  const token = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
   if (!token) return null;
   statements.deleteExpiredUserSessions.run(new Date().toISOString());
-  return statements.userBySession.get(tokenHash(token), new Date().toISOString()) ?? null;
+  return statements.userBySession.get(sessionTokenHash(token), new Date().toISOString()) ?? null;
 }
 
 function createAppUserSession(userId) {
-  const token = randomBytes(32).toString("base64url");
-  const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-  statements.insertUserSession.run(tokenHash(token), userId, expiresAt.toISOString(), createdAt.toISOString());
+  const session = createHttpSession({
+    cookieName: APP_USER_SESSION_COOKIE_NAME,
+    maxAgeSeconds: APP_USER_SESSION_MAX_AGE_SECONDS,
+    secure: isProduction,
+  });
+  statements.insertUserSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt);
   return {
-    token,
-    cookie: serializeHttpOnlyCookie("bitcraft_user_session", token, { maxAge: 30 * 24 * 60 * 60, secure: isProduction }),
+    token: session.token,
+    cookie: session.cookie,
   };
 }
 
 function clearAppUserSession(req) {
-  const token = parseCookies(req).bitcraft_user_session;
-  if (token) statements.deleteAppUserSession.run(tokenHash(token));
-  return serializeHttpOnlyCookie("bitcraft_user_session", "", { maxAge: 0, secure: isProduction });
+  const token = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
+  if (token) statements.deleteAppUserSession.run(sessionTokenHash(token));
+  return clearHttpSessionCookie(APP_USER_SESSION_COOKIE_NAME, { secure: isProduction });
 }
 
 function authStatus(req) {
@@ -2488,37 +2503,16 @@ function oauthStateSecret() {
   return generated;
 }
 
-function signedOAuthStateValue(payload) {
-  const encoded = Buffer.from(payload, "utf8").toString("base64url");
-  const signature = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
-  return `${encoded}.${signature}`;
-}
-
-function verifySignedOAuthStateValue(value) {
-  const [encoded, signature, ...extra] = String(value ?? "").split(".");
-  if (!encoded || !signature || extra.length) return null;
-  const expected = createHmac("sha256", oauthStateSecret()).update(encoded).digest("base64url");
-  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-  return encoded;
-}
-
 function authStateCookie(state, returnTo) {
-  const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
-  return serializeHttpOnlyCookie("bitcraft_discord_oauth_state", signedOAuthStateValue(payload), { maxAge: 600, secure: isProduction });
+  return oauthStateCookie(state, returnTo, { secret: oauthStateSecret(), secure: isProduction });
 }
 
 function clearAuthStateCookie() {
-  return serializeHttpOnlyCookie("bitcraft_discord_oauth_state", "", { maxAge: 0, secure: isProduction });
+  return clearOAuthStateCookie({ secure: isProduction });
 }
 
 function readAuthStateCookie(req) {
-  try {
-    const encoded = verifySignedOAuthStateValue(parseCookies(req).bitcraft_discord_oauth_state);
-    if (!encoded) return null;
-    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
+  return readOAuthStateCookie(req, oauthStateSecret());
 }
 
 async function handleDiscordOAuthStart(req, res, url) {
@@ -8009,12 +8003,12 @@ const server = createServer(async (req, res) => {
       const characterName = String(body.characterName ?? "").trim();
       if (!characterPlayerId && !characterName) {
         statements.updateUserCharacter.run("", "", "unlinked", user.id);
-        return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+        return send(res, 200, { user: publicAppUser(statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString())) });
       }
       if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
       if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
       statements.updateUserCharacter.run(characterPlayerId, characterName, "pending", user.id);
-      const updatedUser = statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString());
+      const updatedUser = statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString());
       void sendDiscordCharacterLinkRequest(updatedUser, { characterPlayerId, characterName });
       return send(res, 200, { user: publicAppUser(updatedUser) });
     }
@@ -8026,7 +8020,7 @@ const server = createServer(async (req, res) => {
       const raw = JSON.stringify(body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? body.settings : {});
       if (raw.length > 50000) return send(res, 413, { error: "Saved settings are too large" });
       statements.updateUserSettings.run(raw, user.id);
-      return send(res, 200, { user: publicAppUser(statements.userBySession.get(tokenHash(parseCookies(req).bitcraft_user_session), new Date().toISOString())) });
+      return send(res, 200, { user: publicAppUser(statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString())) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
@@ -8524,8 +8518,8 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId ?? user.id);
         if (userId === user.id) {
-          const token = parseCookies(req).bitcraft_admin_session;
-          if (token) statements.deleteOtherSessions.run(user.id, tokenHash(token));
+          const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
+          if (token) statements.deleteOtherSessions.run(user.id, sessionTokenHash(token));
         } else {
           statements.deleteUserSessions.run(userId);
         }

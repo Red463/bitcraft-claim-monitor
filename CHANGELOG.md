@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.92] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving admin/app session policy and Discord OAuth state handling into focused tested server helpers.
+- Updated developer and release-readiness documentation with the latest auth helper boundaries and verification evidence.
+
 ## [1.0.0-beta.91] - 2026-06-29
 
 ### Changed
