@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.91] - 2026-06-29
+
+### Changed
+
+- Improved BitJita proxy reliability with tested cache TTLs, request deduplication, timeout handling, and stale-if-error fallback.
+- Improved release-readiness structure by moving admin permissions, public user payloads, admin mutation guards, and auth identity helpers out of the production server into focused tested modules.
+- Updated developer and release-readiness documentation with the latest server helper boundaries and verification evidence.
+
 ## [1.0.0-beta.90] - 2026-06-29
 
 ### Changed

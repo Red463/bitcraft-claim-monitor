@@ -13,7 +13,7 @@ import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheCon
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
 import { originFromRequest as requestOriginFromRequest, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
-import { csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
+import { csrfToken } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
@@ -27,6 +27,11 @@ import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from ".
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
+import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
+import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
+import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
+import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
+import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -1745,8 +1750,6 @@ function audit(user, action, details = {}) {
 }
 
 const loginAttempts = new Map();
-const upstreamCache = new Map();
-const upstreamInflight = new Map();
 const empireScoutInflight = new Map();
 const regionCache = new Map();
 const regionClaimListCache = new Map();
@@ -1780,17 +1783,13 @@ const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTI
 const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const BITJITA_PROXY_CACHE_POLICIES = [
-  { pattern: /^\/api\/(?:resources|creatures|skills|items|cargos|recipes|crafting-recipes)(?:\/|$)/, ttlMs: 60 * 60 * 1000 },
-  { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
-  { pattern: /^\/api\/players\/[^/]+$/, ttlMs: 60 * 1000 },
-  { pattern: /^\/api\/claims\/[^/]+\/(?:members|citizens)$/, ttlMs: 30 * 1000 },
-  { pattern: /^\/api\/claims\/[^/]+\/(?:market\/listings|buildings|inventories|construction|research|layout)$/, ttlMs: 15 * 1000 },
-  { pattern: /^\/api\/crafts(?:\/|$)/, ttlMs: 15 * 1000 },
-  { pattern: /^\/api\/logs\/storage$/, ttlMs: 10 * 1000 },
-];
-
-
+const bitjitaProxyCache = createBitjitaProxyCache({
+  appIdentifier,
+  defaultTtlMs: UPSTREAM_CACHE_TTL_MS,
+  staleIfErrorMs: UPSTREAM_STALE_IF_ERROR_MS,
+  maxEntries: UPSTREAM_CACHE_MAX_ENTRIES,
+  timeoutMs: BITJITA_PROXY_TIMEOUT_MS,
+});
 
 function visitorSecuritySettings(includeSecrets = false) {
   return normalizeVisitorSecuritySettings(safeJson(statements.getSetting.get("visitor_security_json")?.value, {}), { includeSecrets });
@@ -2382,98 +2381,6 @@ function failedLogin(key) {
   }
 }
 
-function validAdminUsername(username) {
-  return /^[A-Za-z0-9_-]{3,32}$/.test(username);
-}
-
-function validDiscordId(value) {
-  return /^\d{15,25}$/.test(String(value ?? "").trim());
-}
-
-const ADMIN_ROLE_LABELS = {
-  owner: "Owner",
-  admin: "Administrator",
-  "discord-manager": "Discord Manager",
-  moderator: "Moderator",
-  viewer: "Viewer",
-};
-
-const ADMIN_ROLE_PERMISSIONS = {
-  owner: ["*"],
-  admin: [
-    "status.view",
-    "settings.view",
-    "settings.manage",
-    "data.view",
-    "data.export",
-    "data.manage",
-    "users.manage",
-    "accounts.manage",
-    "analytics.view",
-    "analytics.manage",
-    "audit.view",
-    "discord.view",
-    "discord.manage",
-    "discord.moderate",
-  ],
-  "discord-manager": ["status.view", "settings.view", "discord.view", "discord.manage"],
-  moderator: ["status.view", "settings.view", "discord.view", "discord.moderate", "audit.view"],
-  viewer: ["status.view", "settings.view", "data.view", "analytics.view", "audit.view", "discord.view"],
-};
-
-function normalizeAdminRole(value) {
-  const role = String(value ?? "viewer").trim().toLowerCase();
-  return Object.hasOwn(ADMIN_ROLE_LABELS, role) ? role : "viewer";
-}
-
-function publicAdminUser(row) {
-  if (!row) return null;
-  const role = normalizeAdminRole(row.role);
-  return {
-    id: row.id,
-    username: row.username,
-    discordId: String(row.discord_id ?? ""),
-    discordUsername: String(row.discord_username ?? ""),
-    discordGlobalName: String(row.discord_global_name ?? ""),
-    avatarUrl: userAvatarUrl(row),
-    role,
-    roleLabel: ADMIN_ROLE_LABELS[role],
-    permissions: adminPermissions(role),
-  };
-}
-
-function adminPermissions(role) {
-  return ADMIN_ROLE_PERMISSIONS[normalizeAdminRole(role)] ?? ADMIN_ROLE_PERMISSIONS.viewer;
-}
-
-function adminHasPermission(user, permission) {
-  const permissions = adminPermissions(user?.role);
-  return permissions.includes("*") || permissions.includes(permission);
-}
-
-function adminPermissionFor(method, pathname) {
-  if (pathname === "/api/local/admin/me") return "status.view";
-  if (pathname === "/api/local/admin/status") return "status.view";
-  if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
-  if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
-  if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
-  if (pathname === "/api/local/admin/branding") return "settings.manage";
-  if (pathname === "/api/local/admin/users" || pathname === "/api/local/admin/user/password" || pathname === "/api/local/admin/user/status" || pathname === "/api/local/admin/user/role") return "users.manage";
-  if (pathname === "/api/local/admin/sessions/clear") return "users.manage";
-  if (pathname === "/api/local/admin/user-accounts") return "accounts.manage";
-  if (pathname === "/api/local/admin/user-accounts/approval") return "accounts.manage";
-  if (pathname === "/api/local/admin/audit") return "audit.view";
-  if (pathname === "/api/local/admin/analytics") return method === "DELETE" ? "analytics.manage" : "analytics.view";
-  if (pathname === "/api/local/admin/visitor-security") return "analytics.view";
-  if (pathname === "/api/local/admin/tables" || pathname === "/api/local/admin/table") return "data.view";
-  if (pathname === "/api/local/admin/export") return "data.export";
-  if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup" || pathname === "/api/local/admin/maintenance/prune") return "data.manage";
-  if (pathname.startsWith("/api/local/admin/discord/moderation/")) return "discord.moderate";
-  if (pathname.startsWith("/api/local/admin/discord/") && method === "GET") return "discord.view";
-  if (pathname.startsWith("/api/local/admin/discord/")) return "discord.manage";
-  return "status.view";
-}
-
 function requireAdminPermission(req, res, user, permission) {
   if (adminHasPermission(user, permission)) return true;
   send(res, 403, { error: `Administrator role does not allow ${permission.replace(".", " ")}` });
@@ -2485,15 +2392,9 @@ function sameOriginRequest(req) {
 }
 
 function requireAdminMutation(req, res, user) {
-  if (!["POST", "PUT", "DELETE"].includes(req.method ?? "")) return true;
-  if (!sameOriginRequest(req)) {
-    send(res, 403, { error: "Cross-origin administrator mutation rejected" });
-    return false;
-  }
-  const expected = csrfToken(req);
-  const actual = String(req.headers["x-csrf-token"] ?? "");
-  if (!validCsrfHeader(expected, actual)) {
-    send(res, 403, { error: "Invalid administrator request token" });
+  const rejection = adminMutationRejection(req, { isProduction });
+  if (rejection) {
+    send(res, 403, { error: rejection });
     return false;
   }
   return Boolean(user);
@@ -2530,29 +2431,6 @@ function discordOAuthConfig(req) {
   return { clientId, clientSecret, redirectUri, enabled: Boolean(clientId && clientSecret) };
 }
 
-function userAvatarUrl(row) {
-  const avatar = String(row?.discord_avatar ?? "").trim();
-  const discordId = String(row?.discord_id ?? "").trim();
-  return avatar && discordId ? `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=128` : null;
-}
-
-function publicAppUser(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    discordId: String(row.discord_id ?? ""),
-    username: String(row.discord_username ?? ""),
-    globalName: String(row.discord_global_name ?? ""),
-    avatarUrl: userAvatarUrl(row),
-    characterPlayerId: String(row.character_player_id ?? ""),
-    characterName: String(row.character_name ?? ""),
-    characterStatus: String(row.character_status ?? "unlinked"),
-    settings: safeJson(row.settings_json, {}),
-    createdAt: row.created_at,
-    lastLoginAt: row.last_login_at,
-  };
-}
-
 function getAppUser(req) {
   const token = parseCookies(req).bitcraft_user_session;
   if (!token) return null;
@@ -2581,10 +2459,6 @@ function authStatus(req) {
   const user = getAppUser(req);
   const config = discordOAuthConfig(req);
   return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
-}
-
-function discordProfileDisplayName(profile) {
-  return String(profile.global_name ?? profile.username ?? profile.id ?? "Discord user").trim() || "Discord user";
 }
 
 function createAdminSessionForDiscordProfile(profile, loginAt) {
@@ -4733,7 +4607,7 @@ async function fetchBitjita(pathname, options = {}) {
       if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
       return response.json();
     }
-    response = await fetchUpstreamCached(url, { timeoutMs });
+    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs });
   } catch (error) {
     if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
@@ -8042,88 +7916,6 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
-function pruneUpstreamCache(now = Date.now()) {
-  for (const [key, value] of upstreamCache) {
-    if ((value.staleExpiresAt ?? value.expiresAt) <= now) upstreamCache.delete(key);
-  }
-  while (upstreamCache.size > UPSTREAM_CACHE_MAX_ENTRIES) {
-    const oldestKey = upstreamCache.keys().next().value;
-    if (!oldestKey) break;
-    upstreamCache.delete(oldestKey);
-  }
-}
-
-function bitjitaProxyCacheTtl(upstream) {
-  const pathname = upstream.pathname;
-  const policy = BITJITA_PROXY_CACHE_POLICIES.find((entry) => entry.pattern.test(pathname));
-  return policy?.ttlMs ?? UPSTREAM_CACHE_TTL_MS;
-}
-
-function hasFreshUpstreamCache(upstream) {
-  const key = upstream.toString();
-  const cached = upstreamCache.get(key);
-  return Boolean(cached && cached.expiresAt > Date.now());
-}
-
-function staleUpstreamResponse(cached) {
-  return cached ? { ...cached, cacheState: "stale-if-error", stale: true } : null;
-}
-
-async function fetchUpstreamCached(upstream, options = {}) {
-  const key = upstream.toString();
-  const now = Date.now();
-  const ttlMs = bitjitaProxyCacheTtl(upstream);
-  const cached = upstreamCache.get(key);
-  if (cached && cached.expiresAt > now) return { ...cached, cacheState: "hit" };
-  const staleCandidate = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-
-  const inflight = upstreamInflight.get(key);
-  if (inflight) {
-    try {
-      const value = await inflight;
-      return { ...value, cacheState: "deduped" };
-    } catch (error) {
-      const stale = staleUpstreamResponse(staleCandidate);
-      if (stale) return stale;
-      throw error;
-    }
-  }
-
-  const request = (async () => {
-    try {
-      const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_PROXY_TIMEOUT_MS));
-      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      const response = await fetch(upstream, fetchOptions);
-      const body = Buffer.from(await response.arrayBuffer());
-      const headers = {
-        "content-type": response.headers.get("content-type") ?? "application/json; charset=utf-8",
-        "cache-control": `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
-      };
-      const value = { status: response.status, headers, body, expiresAt: Date.now() + ttlMs, staleExpiresAt: Date.now() + ttlMs + UPSTREAM_STALE_IF_ERROR_MS, ttlMs };
-      if (response.ok) {
-        upstreamCache.set(key, value);
-        pruneUpstreamCache();
-      } else if (staleCandidate && response.status >= 500) {
-        return staleUpstreamResponse(staleCandidate);
-      }
-      return value;
-    } catch (error) {
-      const stale = staleUpstreamResponse(staleCandidate);
-      if (stale) return stale;
-      throw error;
-    }
-  })();
-
-  upstreamInflight.set(key, request);
-  try {
-    const value = await request;
-    return { ...value, cacheState: value.cacheState ?? "miss" };
-  } finally {
-    upstreamInflight.delete(key);
-  }
-}
-
 async function proxyBitjita(req, url, res) {
   // Browser pages call this local proxy instead of bitjita.com directly. The
   // proxy centralises CORS avoidance, upstream caching, and rate limiting while
@@ -8131,9 +7923,8 @@ async function proxyBitjita(req, url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
-  const cacheKey = upstream.toString();
-  if (!hasFreshUpstreamCache(upstream) && !upstreamInflight.has(cacheKey) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-  const response = await fetchUpstreamCached(upstream);
+  if (!bitjitaProxyCache.hasFreshCache(upstream) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
+  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream);
   res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
   res.end(response.body);
 }
@@ -8644,7 +8435,7 @@ const server = createServer(async (req, res) => {
           FROM admin_users LEFT JOIN admin_sessions ON admin_sessions.user_id = admin_users.id AND admin_sessions.expires_at > ?
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
-        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: userAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
+        return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: discordAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
@@ -9034,6 +8825,3 @@ server.listen(port, host, () => {
     setInterval(checkScheduledJobs, 60 * 1000);
   }
 });
-
-
-

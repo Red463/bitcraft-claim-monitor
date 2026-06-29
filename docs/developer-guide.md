@@ -68,7 +68,7 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 
 1. Browser pages refresh live public game data through same-origin `/api/bitjita/*` routes.
 2. The Vite dev server proxies those routes to BitJita and proxies `/api/local/*` to the local Node server.
-3. In production, `server.mjs` serves the built frontend, the restricted BitJita proxy, local/admin APIs, SQLite persistence, background collectors, and Discord delivery.
+3. In production, `server.mjs` serves the built frontend, the restricted BitJita proxy route, local/admin APIs, SQLite persistence, background collectors, and Discord delivery; `src/server/bitjitaProxyCache.mjs` owns proxy cache TTLs, pruning, in-flight dedupe, timeout fetches, and stale-if-error fallback.
 4. `src/api/bitjita.ts` and `src/api/localHistory.ts` expose browser hooks that handle aborts, loading state, cached helper data, and stale-data metadata.
 5. `src/utils/normalize.ts` turns raw BitJita/local payloads into page-facing structures.
 6. SQLite is retained for history, notifications, analytics, cached tools, diagnostics, admin state, and Discord state. Normal page rendering should continue to prefer live BitJita data unless a helper endpoint intentionally returns cached last-known-good data with freshness metadata.
@@ -86,7 +86,7 @@ This guide describes the maintained app under `apps/bitcraft-local` and the conv
 
 When adding an endpoint, prefer a thin route handler that delegates parsing, data shaping, and database work to focused helpers. Add a focused Node test when the endpoint changes auth, persistence, polling, notification, Discord, or cache behavior.
 
-Future server extraction should be incremental and dependency-injected. Continue with helpers that do not need the request dispatcher, then move schema/statements into a database module, then auth/session/permission helpers, BitJita proxy/cache, scheduled jobs/collectors, Discord services, and finally route groups. Keep the route order explicit: public health/proxy/config first, authenticated admin routes after session/CSRF/permission checks, user-private endpoints after app-user auth, and static frontend fallback last.
+Future server extraction should be incremental and dependency-injected. Continue with helpers that do not need the request dispatcher, then move schema/statements into a database module, then session/OAuth helpers, scheduled jobs/collectors, Discord services, and finally route groups. Admin role labels, least-privilege route permission mapping, role normalization, and permission checks now live in `src/server/adminPermissions.mjs`; public admin/app user response shaping and Discord avatar URL construction live in `src/server/publicUsers.mjs`; admin same-origin and CSRF mutation rejection lives in `src/server/adminRequestGuards.mjs`; admin username validation, Discord ID validation, and Discord profile display-name fallback live in `src/server/authIdentity.mjs`; session lookup and OAuth remain in `server.mjs`. Keep the route order explicit: public health/proxy/config first, authenticated admin routes after session/CSRF/permission checks, user-private endpoints after app-user auth, and static frontend fallback last.
 
 ## Notifications
 
