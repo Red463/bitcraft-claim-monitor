@@ -7,6 +7,7 @@ import {
   clearOAuthStateCookie,
   oauthStateCookie,
   readOAuthStateCookie,
+  resolveOAuthStateSecret,
   signedOAuthStateValue,
   verifySignedOAuthStateValue,
 } from "../src/server/oauthState.mjs";
@@ -46,6 +47,33 @@ test("OAuth state cookies clamp return paths and read only valid signed payloads
   assert.equal(readOAuthStateCookie({ headers: {} }, secret), null);
 });
 
+
+test("resolveOAuthStateSecret reuses stored secrets and persists generated secrets", () => {
+  const storedWrites = [];
+  assert.equal(resolveOAuthStateSecret({
+    getSecret: { get: () => ({ value: " stored-secret " }) },
+    upsertSecret: { run: (...args) => storedWrites.push(args) },
+    randomBytes: () => Buffer.from("unused"),
+    now: () => new Date("2026-06-29T10:00:00.000Z"),
+  }), "stored-secret");
+  assert.deepEqual(storedWrites, []);
+
+  const generatedWrites = [];
+  const generated = resolveOAuthStateSecret({
+    getSecret: { get: () => null },
+    upsertSecret: { run: (...args) => generatedWrites.push(args) },
+    randomBytes: (size) => {
+      assert.equal(size, 32);
+      return { toString: (encoding) => `generated-${encoding}` };
+    },
+    now: () => new Date("2026-06-29T10:00:00.000Z"),
+  });
+
+  assert.equal(generated, "generated-base64url");
+  assert.deepEqual(generatedWrites, [
+    ["discord_oauth_state_secret", "generated-base64url", "2026-06-29T10:00:00.000Z"],
+  ]);
+});
 test("clearOAuthStateCookie keeps the existing clear-cookie shape", () => {
   assert.equal(
     clearOAuthStateCookie({ secure: false }),

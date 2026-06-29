@@ -86,10 +86,18 @@ test("notification verification matrix keeps the dedicated bot route as an expli
   assert.deepEqual(BOT_NOTIFICATION_EXCEPTION, {
     route: "/bot",
     supported: false,
+    releaseDecision: "accepted-intentional-exception",
     reason: "Dedicated bot dashboard mounts BotControlApp without DashboardApp notification chrome.",
   });
 });
 
+test("bot notification exception docs carry the accepted release decision", () => {
+  const notificationDocs = readFileSync(new URL("../../../docs/notification-system.md", import.meta.url), "utf8");
+  const releaseAudit = readFileSync(new URL("../../../docs/release-readiness-audit.md", import.meta.url), "utf8");
+
+  assert.equal(notificationDocs.includes("accepted-intentional-exception"), true);
+  assert.equal(releaseAudit.includes("accepted-intentional-exception"), true);
+});
 test("verificationRowsForStatus produces one row for every page and type combination", () => {
   const rows = verificationRowsForStatus("manual-required");
 

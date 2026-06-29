@@ -1,10 +1,25 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes as cryptoRandomBytes, timingSafeEqual } from "node:crypto";
 
 import { parseCookies, serializeHttpOnlyCookie } from "./httpCookies.mjs";
 import { safeReturnPath } from "./httpRequests.mjs";
 
 export const DISCORD_OAUTH_STATE_COOKIE_NAME = "bitcraft_discord_oauth_state";
 export const DISCORD_OAUTH_STATE_MAX_AGE_SECONDS = 600;
+
+export const DISCORD_OAUTH_STATE_SECRET_KEY = "discord_oauth_state_secret";
+
+export function resolveOAuthStateSecret({
+  getSecret,
+  upsertSecret,
+  randomBytes = cryptoRandomBytes,
+  now = () => new Date(),
+} = {}) {
+  const stored = String(getSecret.get(DISCORD_OAUTH_STATE_SECRET_KEY)?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  upsertSecret.run(DISCORD_OAUTH_STATE_SECRET_KEY, generated, now().toISOString());
+  return generated;
+}
 
 export function signedOAuthStateValue(payload, secret) {
   const encoded = Buffer.from(payload, "utf8").toString("base64url");

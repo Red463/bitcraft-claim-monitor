@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.94] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving DB-backed session lookup, Discord OAuth config, and OAuth state secret handling into focused tested server helpers.
+- Documented the `/bot` notification exception as an accepted release decision and updated release-readiness verification evidence.
+
 ## [1.0.0-beta.93] - 2026-06-29
 
 ### Changed

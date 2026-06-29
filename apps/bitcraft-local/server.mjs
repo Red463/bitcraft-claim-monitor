@@ -34,6 +34,8 @@ import { discordProfileDisplayName, validAdminUsername, validDiscordId } from ".
 import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
 import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
+import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
+import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -48,6 +50,7 @@ import {
   clearOAuthStateCookie,
   oauthStateCookie,
   readOAuthStateCookie,
+  resolveOAuthStateSecret,
 } from "./src/server/oauthState.mjs";
 
 setDefaultResultOrder("ipv4first");
@@ -1713,10 +1716,12 @@ function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
 
 
 function getSessionUser(req) {
-  const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
-  if (!token) return null;
-  statements.deleteExpiredSessions.run(new Date().toISOString());
-  return statements.adminBySession.get(sessionTokenHash(token), new Date().toISOString()) ?? null;
+  return lookupHttpSessionUser({
+    req,
+    cookieName: ADMIN_SESSION_COOKIE_NAME,
+    deleteExpiredSessions: statements.deleteExpiredSessions,
+    userBySession: statements.adminBySession,
+  });
 }
 
 function requireAdmin(req, res) {
@@ -2389,20 +2394,21 @@ function originFromRequest(req) {
 }
 
 function discordOAuthConfig(req) {
-  const discordSettings = getDiscordSettingsRaw();
-  const clientId = String(process.env.DISCORD_OAUTH_CLIENT_ID ?? discordSettings.applicationId ?? "").trim();
-  const envSecret = String(process.env.DISCORD_OAUTH_CLIENT_SECRET ?? "").trim();
-  const storedSecret = String(statements.getSecret.get("discord_oauth_client_secret")?.value ?? "").trim();
-  const clientSecret = envSecret || storedSecret;
-  const redirectUri = String(process.env.DISCORD_OAUTH_REDIRECT_URI ?? "").trim() || `${originFromRequest(req)}/api/local/auth/discord/callback`;
-  return { clientId, clientSecret, redirectUri, enabled: Boolean(clientId && clientSecret) };
+  return resolveDiscordOAuthConfig({
+    env: process.env,
+    discordSettings: getDiscordSettingsRaw(),
+    storedClientSecret: statements.getSecret.get("discord_oauth_client_secret")?.value,
+    origin: originFromRequest(req),
+  });
 }
 
 function getAppUser(req) {
-  const token = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
-  if (!token) return null;
-  statements.deleteExpiredUserSessions.run(new Date().toISOString());
-  return statements.userBySession.get(sessionTokenHash(token), new Date().toISOString()) ?? null;
+  return lookupHttpSessionUser({
+    req,
+    cookieName: APP_USER_SESSION_COOKIE_NAME,
+    deleteExpiredSessions: statements.deleteExpiredUserSessions,
+    userBySession: statements.userBySession,
+  });
 }
 
 function createAppUserSession(userId) {
@@ -2450,11 +2456,10 @@ function createAdminSessionForDiscordProfile(profile, loginAt) {
 }
 
 function oauthStateSecret() {
-  const stored = String(statements.getSecret.get("discord_oauth_state_secret")?.value ?? "").trim();
-  if (stored) return stored;
-  const generated = randomBytes(32).toString("base64url");
-  statements.upsertSecret.run("discord_oauth_state_secret", generated, new Date().toISOString());
-  return generated;
+  return resolveOAuthStateSecret({
+    getSecret: statements.getSecret,
+    upsertSecret: statements.upsertSecret,
+  });
 }
 
 function authStateCookie(state, returnTo) {
@@ -7951,12 +7956,12 @@ const server = createServer(async (req, res) => {
       const characterName = String(body.characterName ?? "").trim();
       if (!characterPlayerId && !characterName) {
         statements.updateUserCharacter.run("", "", "unlinked", user.id);
-        return send(res, 200, { user: publicAppUser(statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString())) });
+        return send(res, 200, { user: publicAppUser(getAppUser(req)) });
       }
       if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
       if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
       statements.updateUserCharacter.run(characterPlayerId, characterName, "pending", user.id);
-      const updatedUser = statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString());
+      const updatedUser = getAppUser(req);
       void sendDiscordCharacterLinkRequest(updatedUser, { characterPlayerId, characterName });
       return send(res, 200, { user: publicAppUser(updatedUser) });
     }
@@ -7968,7 +7973,7 @@ const server = createServer(async (req, res) => {
       const raw = JSON.stringify(body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? body.settings : {});
       if (raw.length > 50000) return send(res, 413, { error: "Saved settings are too large" });
       statements.updateUserSettings.run(raw, user.id);
-      return send(res, 200, { user: publicAppUser(statements.userBySession.get(sessionTokenHash(sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME)), new Date().toISOString())) });
+      return send(res, 200, { user: publicAppUser(getAppUser(req)) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;

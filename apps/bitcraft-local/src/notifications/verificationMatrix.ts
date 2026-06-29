@@ -145,6 +145,7 @@ export const NOTIFICATION_MATRIX_PAGES: readonly NotificationMatrixPage[] = [
 export const BOT_NOTIFICATION_EXCEPTION = {
   route: "/bot",
   supported: false,
+  releaseDecision: "accepted-intentional-exception",
   reason: "Dedicated bot dashboard mounts BotControlApp without DashboardApp notification chrome.",
 } as const;
 
