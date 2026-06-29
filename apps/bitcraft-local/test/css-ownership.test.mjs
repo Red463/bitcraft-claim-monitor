@@ -187,6 +187,77 @@ test("craft calculator page styles live in the craft calculator stylesheet", () 
     assert.equal(craftcalcCss.includes(selector), true, `${selector} should live in craftcalc.css`);
   }
 });
+test("skills page styles live in the skills stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const skillsCssUrl = new URL("../src/styles/skills.css", import.meta.url);
+  assert.equal(existsSync(skillsCssUrl), true);
+  const skillsCss = readFileSync(skillsCssUrl, "utf8");
+  const skillsSelectors = [
+    ".skills-page",
+    ".skills-topbar",
+    ".skills-summary",
+    ".skills-dashboard",
+    ".focus-panel",
+    ".coverage-panel",
+    ".focus-metrics",
+    ".focus-tier-strip",
+    ".focus-tier-segment",
+    ".focus-list",
+    ".coverage-list",
+    ".adventure-skills-panel",
+    ".adventure-skill-grid",
+    ".skills-toolbar",
+    ".heatmap-wrap",
+    ".skill-table",
+    ".skill-cell",
+    ".tier-legend",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/skills\.css";/);
+  for (const selector of skillsSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(skillsCss.includes(selector), true, `${selector} should live in skills.css`);
+  }
+});test("members page styles live in the members stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const membersCssUrl = new URL("../src/styles/members.css", import.meta.url);
+  assert.equal(existsSync(membersCssUrl), true);
+  const membersCss = readFileSync(membersCssUrl, "utf8");
+  const membersSelectors = [
+    ".members-page",
+    ".members-topbar",
+    ".members-summary-grid",
+    ".members-toolbar",
+    ".members-roster-table",
+    ".member-name-cell",
+    ".member-row-avatar",
+    ".member-row-copy",
+    ".profile-actions",
+    ".gear-preset-list",
+    ".gear-preset",
+    ".public-profile-grid",
+    ".profile-history-panel",
+    ".profile-section-heading",
+    ".passive-craft-list",
+    ".passive-craft-card",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/members\.css";/);
+  for (const selector of membersSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(membersCss.includes(selector), true, `${selector} should live in members.css`);
+  }
+});
 test("inventory page styles live in the inventory stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
