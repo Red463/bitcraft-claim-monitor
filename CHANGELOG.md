@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.93] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by moving legacy password hashing and admin sign-in throttling into focused tested server helpers.
+- Updated developer and release-readiness documentation with the latest password-auth and login-attempt helper boundaries.
+
 ## [1.0.0-beta.92] - 2026-06-29
 
 ### Changed

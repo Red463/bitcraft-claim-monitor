@@ -2,10 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createHash, createPublicKey, randomBytes, scrypt, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
 import { inflateRawSync } from "node:zlib";
-import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
@@ -32,6 +31,8 @@ import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdm
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
+import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
+import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -1722,21 +1723,6 @@ function validPage(value) {
   return ["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "empires", "map", "sync", "activity"].includes(value);
 }
 
-const scryptAsync = promisify(scrypt);
-
-async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  const hash = Buffer.from(await scryptAsync(password, salt, 64)).toString("hex");
-  return `scrypt:${salt}:${hash}`;
-}
-
-async function verifyPassword(password, stored) {
-  const [scheme, salt, expected] = String(stored).split(":");
-  if (scheme !== "scrypt" || !salt || !expected) return false;
-  const actual = Buffer.from(await scryptAsync(password, salt, 64));
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return expectedBuffer.length === actual.length && timingSafeEqual(actual, expectedBuffer);
-}
-
 function getSessionUser(req) {
   const token = sessionTokenFromRequest(req, ADMIN_SESSION_COOKIE_NAME);
   if (!token) return null;
@@ -1760,7 +1746,7 @@ function audit(user, action, details = {}) {
   statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
 }
 
-const loginAttempts = new Map();
+const adminLoginAttempts = createAdminLoginAttemptStore();
 const empireScoutInflight = new Map();
 const regionCache = new Map();
 const regionClaimListCache = new Map();
@@ -2370,27 +2356,6 @@ function visitorSecurityDashboard(params = new URLSearchParams()) {
 }
 
 
-function loginAttemptKey(req, username) {
-  return `${requestAddress(req)}|${String(username).toLowerCase()}`;
-}
-
-function loginBlocked(key) {
-  const record = loginAttempts.get(key);
-  if (!record || Date.now() - record.firstAt > 15 * 60 * 1000) {
-    loginAttempts.delete(key);
-    return false;
-  }
-  return record.count >= 5;
-}
-
-function failedLogin(key) {
-  const existing = loginAttempts.get(key);
-  if (!existing || Date.now() - existing.firstAt > 15 * 60 * 1000) {
-    loginAttempts.set(key, { count: 1, firstAt: Date.now() });
-  } else {
-    existing.count += 1;
-  }
-}
 
 function requireAdminPermission(req, res, user, permission) {
   if (adminHasPermission(user, permission)) return true;
@@ -8070,7 +8035,7 @@ const server = createServer(async (req, res) => {
       const username = String(body.username ?? "admin").trim();
       if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
       const password = String(body.password ?? "");
-      if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+      if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
       const createdAt = new Date().toISOString();
       const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
       statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
@@ -8084,16 +8049,16 @@ const server = createServer(async (req, res) => {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(req, username);
-      if (loginBlocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
+      const attemptKey = loginAttemptKey(requestAddress(req), username);
+      if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
       const user = statements.adminByUsername.get(username);
       const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
       statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
       if (!successful) {
-        failedLogin(attemptKey);
+        adminLoginAttempts.recordFailure(attemptKey);
         return send(res, 401, { error: "Invalid username or password" });
       }
-      loginAttempts.delete(attemptKey);
+      adminLoginAttempts.clear(attemptKey);
       statements.updateLastLogin.run(new Date().toISOString(), user.id);
       audit(user, "admin.login");
       const session = createSession(user.id);
@@ -8455,7 +8420,7 @@ const server = createServer(async (req, res) => {
         if (role === "owner" && normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only owners can create owner administrators" });
         if (legacyAdminPasswordAuth && !discordId) {
           if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-          if (password.length < 12) return send(res, 400, { error: "Password must be at least 12 characters" });
+          if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
           try {
             const result = statements.insertAdmin.run(username, await hashPassword(password), role, new Date().toISOString());
             audit(user, "user.create", { id: result.lastInsertRowid, username, role });
@@ -8481,7 +8446,7 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId);
         const password = String(body.password ?? "");
-        if (!userId || password.length < 12) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
+        if (!userId || !validLegacyAdminPassword(password)) return send(res, 400, { error: "Select a user and enter a password of at least 12 characters" });
         const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
         statements.updatePassword.run(await hashPassword(password), userId);
