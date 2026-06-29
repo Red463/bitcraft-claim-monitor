@@ -6,6 +6,8 @@ import "./styles/production.css";
 import "./styles/public-craft.css";
 import "./styles/inventory.css";
 import "./styles/construction.css";
+import "./styles/research.css";
+import "./styles/activity.css";
 import "./styles/bot-dashboard.css";
 import "./styles/empires.css";
 import "./styles/app-chrome.css";

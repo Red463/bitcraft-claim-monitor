@@ -171,3 +171,62 @@ test("construction page styles live in the construction stylesheet", () => {
     assert.equal(constructionCss.includes(selector), true, `${selector} should live in construction.css`);
   }
 });
+test("research page styles live in the research stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const researchCssUrl = new URL("../src/styles/research.css", import.meta.url);
+  assert.equal(existsSync(researchCssUrl), true);
+  const researchCss = readFileSync(researchCssUrl, "utf8");
+  const researchSelectors = [
+    ".research-panel",
+    ".research-topbar",
+    ".research-summary",
+    ".research-unlocks",
+    ".research-command-panel",
+    ".research-command-header",
+    ".research-filter-grid",
+    ".research-lanes",
+    ".research-card",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/research\.css";/);
+  for (const selector of researchSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(researchCss.includes(selector), true, `${selector} should live in research.css`);
+  }
+});
+test("activity page styles live in the activity stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const activityCssUrl = new URL("../src/styles/activity.css", import.meta.url);
+  assert.equal(existsSync(activityCssUrl), true);
+  const activityCss = readFileSync(activityCssUrl, "utf8");
+  const activitySelectors = [
+    ".activity-panel",
+    ".activity-topbar",
+    ".activity-overview",
+    ".activity-command-panel",
+    ".activity-command-head",
+    ".activity-filter-grid",
+    ".activity-filters",
+    ".activity-options",
+    ".activity-timeline",
+    ".activity-event",
+    ".activity-search-loading",
+    ".activity-empty",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/activity\.css";/);
+  for (const selector of activitySelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(activityCss.includes(selector), true, `${selector} should live in activity.css`);
+  }
+});
