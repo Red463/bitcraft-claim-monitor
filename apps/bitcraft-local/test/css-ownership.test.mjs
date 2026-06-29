@@ -115,6 +115,78 @@ test("public craft finder page styles live in the public craft stylesheet", () =
     assert.equal(publicCraftCss.includes(selector), true, `${selector} should live in public-craft.css`);
   }
 });
+test("market page styles live in the market stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const marketCssUrl = new URL("../src/styles/market.css", import.meta.url);
+  assert.equal(existsSync(marketCssUrl), true);
+  const marketCss = readFileSync(marketCssUrl, "utf8");
+  const marketSelectors = [
+    ".market-page",
+    ".market-topbar",
+    ".market-summary",
+    ".market-command-panel",
+    ".market-filter-panel",
+    ".market-tool-row",
+    ".market-member-field",
+    ".market-tabs",
+    ".market-filter-grid",
+    ".market-analytics",
+    ".market-best-leaderboard",
+    ".price-finder",
+    ".buy-order-opportunities",
+    ".opportunity-strip",
+    ".pagination-row",
+    ".price-recommendation",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/market\.css";/);
+  for (const selector of marketSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(marketCss.includes(selector), true, `${selector} should live in market.css`);
+  }
+});
+
+test("craft calculator page styles live in the craft calculator stylesheet", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const craftcalcCssUrl = new URL("../src/styles/craftcalc.css", import.meta.url);
+  assert.equal(existsSync(craftcalcCssUrl), true);
+  const craftcalcCss = readFileSync(craftcalcCssUrl, "utf8");
+  const craftcalcSelectors = [
+    ".craftcalc-page",
+    ".craftcalc-topbar",
+    ".craftcalc-controls",
+    ".craftcalc-recipe-picker",
+    ".craftcalc-control-grid",
+    ".craftcalc-route-list",
+    ".craftcalc-route-card",
+    ".craftcalc-route-heading",
+    ".craftcalc-route-pill",
+    ".craftcalc-summary",
+    ".craftcalc-section",
+    ".craftcalc-material-grid",
+    ".craftcalc-material-row",
+    ".craftcalc-step-list",
+    ".craftcalc-step-card",
+    ".craftcalc-warning",
+    ".craftcalc-empty",
+  ];
+
+  const startsOwnedSelector = (css, selector) => css
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
+
+  assert.match(mainTsx, /import "\.\/styles\/craftcalc\.css";/);
+  for (const selector of craftcalcSelectors) {
+    assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
+    assert.equal(craftcalcCss.includes(selector), true, `${selector} should live in craftcalc.css`);
+  }
+});
 test("inventory page styles live in the inventory stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");

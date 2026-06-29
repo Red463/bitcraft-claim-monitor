@@ -4,6 +4,8 @@ import "./styles.css";
 import "./styles/leaderboard.css";
 import "./styles/production.css";
 import "./styles/public-craft.css";
+import "./styles/market.css";
+import "./styles/craftcalc.css";
 import "./styles/inventory.css";
 import "./styles/construction.css";
 import "./styles/research.css";
