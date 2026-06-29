@@ -135,7 +135,9 @@ import { Region } from "./pages/RegionPage";
 import { Skills } from "./pages/SkillsPage";
 import { SyncPanel } from "./pages/SyncPage";
 import { Dashboard } from "./pages/DashboardPage";
-import { ActivityPanel, Inventory, Leaderboard, MapPanel, Market, Production, PublicCraftFinder } from "./pages/MainPages";
+import { ActivityPanel } from "./pages/ActivityPage";
+import { Leaderboard } from "./pages/LeaderboardPage";
+import { Inventory, MapPanel, Market, Production, PublicCraftFinder } from "./pages/MainPages";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {

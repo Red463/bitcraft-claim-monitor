@@ -8,16 +8,10 @@ import {
   ArrowUpDown,
   Box,
   Building2,
-  Calculator,
   CheckCircle2,
-  Circle,
   CircleDollarSign,
-  Clock,
-  Crown,
-  Database,
   ExternalLink,
   Factory,
-  FileText,
   Globe2,
   GraduationCap,
   Hammer,
@@ -37,20 +31,17 @@ import {
   Star,
   TrendingDown,
   TrendingUp,
-  Trophy,
   Users,
   User,
   Wrench,
   X,
 } from "lucide-react";
-
-import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "../components/main/DashboardWidgets";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { Segmented } from "../components/main/Segmented";
-import { Info, MiniStat, Stat } from "../components/main/Stats";
+import { MiniStat } from "../components/main/Stats";
 import {
   buildConstructionProjects,
   toNumber,
@@ -64,7 +55,6 @@ import {
   formatDuration,
   formatEquipmentSlot,
   formatNumber,
-  formatPlaytime,
   shortDateLabel,
   timeAgo,
   timestampMs,
@@ -73,15 +63,13 @@ import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
 import { getTrackedOwnerName } from "../utils/ownership";
 import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
-import { memberDisplayName, memberTrackingId, memberTrackingKeys } from "../utils/memberIdentity";
+import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
-import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
+import { SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { updateQueryState } from "../navigation";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
-import { activityActorName, activityContainerName, activitySummary, compactActivity, sanitizeActivityLog } from "./activity/activityUtils";
-import { activityStyle } from "./activity/activityDisplay";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
 import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
 import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "./market/listingUtils";
@@ -1620,395 +1608,6 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   );
 }
 
-type LeaderboardTab = "contribution" | "professions" | "activity" | "market" | "online";
-
-const LEADERBOARD_TABS: Array<{ id: LeaderboardTab; label: string; icon: React.ReactNode }> = [
-  { id: "contribution", label: "Contribution", icon: <Trophy size={14} /> },
-  { id: "professions", label: "Professions", icon: <GraduationCap size={14} /> },
-  { id: "activity", label: "Activity", icon: <Activity size={14} /> },
-  { id: "market", label: "Market", icon: <CircleDollarSign size={14} /> },
-  { id: "online", label: "Online / Sessions", icon: <Users size={14} /> },
-];
-
-export function Leaderboard({
-  claimId,
-  refreshToken,
-  excludedMemberIds = [],
-  data,
-}: {
-  claimId: string;
-  refreshToken: number;
-  excludedMemberIds?: string[];
-  data: ReturnType<typeof normalizeData>;
-}) {
-  const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
-  const [activeTab, setActiveTab] = usePersistedState<LeaderboardTab>("leaderboard.tab", "contribution");
-  const [professionFilter, setProfessionFilter] = React.useState("All");
-  const [professionSort, setProfessionSort] = React.useState("totalLevel");
-  const [activitySort, setActivitySort] = React.useState("totalEvents");
-  const [marketSort, setMarketSort] = React.useState("confirmedSaleValue");
-  React.useEffect(() => {
-    const controller = new AbortController();
-    setState((current) => ({ ...current, loading: true, error: null }));
-    fetch(`${LOCAL_API}/leaderboard?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`leaderboard HTTP ${response.status}`)))
-      .then((payload) => setState({ data: payload, error: null, loading: false }))
-      .catch((error) => {
-        if (!controller.signal.aborted) setState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
-      });
-    return () => controller.abort();
-  }, [claimId, refreshToken]);
-  const leaderboard = state.data ?? {};
-  const contributionBoard = leaderboard.contribution ?? leaderboard;
-  const excludedLeaderboardKeys = React.useMemo(() => new Set(excludedMemberIds.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean)), [excludedMemberIds]);
-  const isExcluded = React.useCallback((entry: AnyRecord) => memberTrackingKeys(entry).some((key) => excludedLeaderboardKeys.has(key)), [excludedLeaderboardKeys]);
-  const contributors: AnyRecord[] = React.useMemo(() => {
-    const rows = contributionBoard.contributors ?? [];
-    if (!excludedLeaderboardKeys.size) return rows;
-    return rows.filter((entry: AnyRecord) => !memberTrackingKeys({ playerEntityId: entry.contributorId, userName: entry.name }).some((key) => excludedLeaderboardKeys.has(key)));
-  }, [contributionBoard.contributors, excludedLeaderboardKeys]);
-  const recent: AnyRecord[] = React.useMemo(() => {
-    const rows = contributionBoard.recent ?? [];
-    if (!excludedLeaderboardKeys.size) return rows;
-    return rows.filter((entry: AnyRecord) => !memberTrackingKeys({ playerEntityId: entry.contributorId, userName: entry.contributorName }).some((key) => excludedLeaderboardKeys.has(key)));
-  }, [contributionBoard.recent, excludedLeaderboardKeys]);
-  const professions: AnyRecord[] = React.useMemo(() => {
-    const byProfession = new Map<string, AnyRecord>();
-    for (const contributor of contributors) {
-      for (const row of contributor.professions ?? []) {
-        const profession = String(row.profession ?? "Unknown");
-        const current = byProfession.get(profession) ?? { profession, totalProgress: 0, totalXp: 0, craftCount: 0, contributorCount: 0, topContributor: "", topContributorProgress: 0 };
-        const progress = toNumber(row.progress);
-        current.totalProgress += progress;
-        current.totalXp += toNumber(row.xp);
-        current.craftCount += toNumber(row.crafts);
-        current.contributorCount += 1;
-        if (progress > current.topContributorProgress) {
-          current.topContributor = contributor.name;
-          current.topContributorProgress = progress;
-        }
-        byProfession.set(profession, current);
-      }
-    }
-    return Array.from(byProfession.values()).sort((a, b) => b.totalProgress - a.totalProgress);
-  }, [contributors]);
-  const summary = React.useMemo(() => ({
-    ...(contributionBoard.summary ?? {}),
-    contributorCount: contributors.length,
-    professionCount: professions.length,
-    totalProgress: contributors.reduce((sum, row) => sum + toNumber(row.totalProgress), 0),
-    totalXp: contributors.reduce((sum, row) => sum + toNumber(row.totalXp), 0),
-    recordedCrafts: contributors.reduce((sum, row) => sum + toNumber(row.craftCount), 0),
-    lastContributedAt: recent[0]?.lastContributedAt ?? null,
-  }), [contributors, contributionBoard.summary, professions.length, recent]);
-  const filteredContributors = professionFilter === "All"
-    ? contributors
-    : contributors.filter((entry) => entry.professions?.some?.((profession: AnyRecord) => profession.profession === professionFilter));
-  const topContributor = contributors[0];
-  const topProfession = professions[0];
-  const professionRows = bitjitaSkillRows(data.skills, "Profession");
-  const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
-  const professionLabel = (id: number) => skillNameFromRows(professionRows, id) || SKILL_NAMES[id] || `Profession ${id}`;
-  const citizens: AnyRecord[] = React.useMemo(() => {
-    const rows = data.citizens ?? [];
-    if (!excludedLeaderboardKeys.size) return rows;
-    return rows.filter((entry) => !isExcluded({ playerEntityId: entry.playerEntityId ?? entry.entityId, userName: entry.userName ?? entry.username }));
-  }, [data.citizens, excludedLeaderboardKeys.size, isExcluded]);
-  const professionCompareRows = React.useMemo(() => citizens.map((citizen) => {
-    const skills = citizen.skills ?? {};
-    const levels = professionIds.map((id) => ({ id, name: professionLabel(id), level: toNumber(skills[String(id)]) }));
-    const highest = levels.reduce((best, row) => row.level > best.level ? row : best, { id: 0, name: "None yet", level: 0 });
-    return {
-      entityId: citizen.entityId ?? citizen.playerEntityId ?? citizen.userName,
-      name: citizen.userName ?? citizen.username ?? "Unknown member",
-      totalLevel: professionIds.reduce((total, id) => total + toNumber(skills[String(id)]), 0),
-      totalXp: toNumber(citizen.totalXP ?? citizen.totalXp),
-      highestLevel: highest.level,
-      highestProfession: highest.name,
-      highestTier: skillTier(highest.level),
-      selectedLevel: professionFilter === "All" ? highest.level : toNumber(skills[String(professionIds.find((id) => professionLabel(id) === professionFilter) ?? "")]),
-      levels,
-    };
-  }), [citizens, professionFilter, professionIds, professionRows]);
-  const professionSortValue = (row: AnyRecord) => {
-    if (professionSort === "totalXp") return toNumber(row.totalXp);
-    if (professionSort === "highestLevel") return toNumber(row.highestLevel);
-    if (professionSort === "selectedLevel") return toNumber(row.selectedLevel);
-    return toNumber(row.totalLevel);
-  };
-  const sortedProfessionRows = [...professionCompareRows]
-    .filter((row) => professionFilter === "All" || row.levels.some((level: AnyRecord) => level.name === professionFilter))
-    .sort((a, b) => professionSortValue(b) - professionSortValue(a) || String(a.name).localeCompare(String(b.name)));
-  const marketRows: AnyRecord[] = React.useMemo(() => {
-    const rows = leaderboard.market?.members ?? [];
-    if (!excludedLeaderboardKeys.size) return rows;
-    return rows.filter((entry: AnyRecord) => !isExcluded({ playerEntityId: entry.memberId, userName: entry.name }));
-  }, [excludedLeaderboardKeys.size, isExcluded, leaderboard.market?.members]);
-  const sortedMarketRows = [...marketRows].sort((a, b) => toNumber(b[marketSort]) - toNumber(a[marketSort]) || String(a.name).localeCompare(String(b.name)));
-  const activityRows: AnyRecord[] = React.useMemo(() => {
-    const rows = leaderboard.activity?.members ?? [];
-    if (!excludedLeaderboardKeys.size) return rows;
-    return rows.filter((entry: AnyRecord) => !isExcluded({ userName: entry.name }));
-  }, [excludedLeaderboardKeys.size, isExcluded, leaderboard.activity?.members]);
-  const sortedActivityRows = [...activityRows].sort((a, b) => toNumber(b[activitySort]) - toNumber(a[activitySort]) || String(a.name).localeCompare(String(b.name)));
-  const playerById = React.useMemo(() => new Map((data.players ?? []).map((player) => [String(player.playerEntityId ?? player.entityId ?? player.id ?? ""), player])), [data.players]);
-  const playerByName = React.useMemo(() => new Map((data.players ?? []).map((player) => [String(player.username ?? player.userName ?? "").toLowerCase(), player])), [data.players]);
-  const onlineRows = React.useMemo(() => {
-    const rows = data.members.map((member) => {
-      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-      const player = playerById.get(playerId) ?? playerByName.get(String(member.userName ?? member.username ?? "").toLowerCase()) ?? {};
-      return {
-        entityId: playerId,
-        name: member.userName ?? member.username ?? "Unknown member",
-        signedIn: Boolean(player.signedIn ?? player.online),
-        sessionSeconds: player.sessionSeconds,
-        timePlayedSeconds: player.timePlayedSeconds,
-        timeSignedInSeconds: player.timeSignedInSeconds,
-        lastLoginTimestamp: member.lastLoginTimestamp,
-      };
-    });
-    return rows.sort((a, b) => Number(b.signedIn) - Number(a.signedIn) || toNumber(b.sessionSeconds) - toNumber(a.sessionSeconds) || String(a.name).localeCompare(String(b.name)));
-  }, [data.members, playerById, playerByName]);
-  const mostPlayedRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.timePlayedSeconds) > toNumber(best?.timePlayedSeconds) ? row : best, null);
-  const longestSessionRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.sessionSeconds) > toNumber(best?.sessionSeconds) ? row : best, null);
-  const activeTabMeta = LEADERBOARD_TABS.find((tab) => tab.id === activeTab) ?? LEADERBOARD_TABS[0];
-  const tabSummary = activeTab === "professions" ? [
-    <MiniStat key="members" icon={<Users />} label="Members Compared" value={formatNumber(sortedProfessionRows.length)} />,
-    <MiniStat key="total" icon={<GraduationCap />} label="Total Profession Levels" value={formatNumber(sortedProfessionRows.reduce((total, row) => total + toNumber(row.totalLevel), 0))} />,
-    <MiniStat key="highest" icon={<TrendingUp />} label="Highest Level" value={formatNumber(Math.max(...sortedProfessionRows.map((row) => toNumber(row.highestLevel)), 0))} />,
-    <MiniStat key="top" icon={<Trophy />} label="Top Member" value={sortedProfessionRows[0]?.name ?? "None yet"} />,
-  ] : activeTab === "activity" ? [
-    <MiniStat key="members" icon={<Users />} label="Members With Activity" value={formatNumber(sortedActivityRows.length)} />,
-    <MiniStat key="events" icon={<Activity />} label="Recorded Events" value={formatNumber(sortedActivityRows.reduce((total, row) => total + toNumber(row.totalEvents), 0))} />,
-    <MiniStat key="top" icon={<Trophy />} label="Most Recorded" value={sortedActivityRows[0]?.name ?? "None yet"} />,
-    <MiniStat key="updated" icon={<Clock />} label="Latest Activity" value={leaderboard.activity?.summary?.lastActivityAt ? timeAgo(leaderboard.activity.summary.lastActivityAt) : "No history"} />,
-  ] : activeTab === "market" ? [
-    <MiniStat key="members" icon={<Users />} label="Market Members" value={formatNumber(sortedMarketRows.length)} />,
-    <MiniStat key="listings" icon={<ShoppingBag />} label="Active Listings" value={formatNumber(leaderboard.market?.summary?.activeListings)} />,
-    <MiniStat key="sales" icon={<CircleDollarSign />} label="Confirmed Sales Value" value={formatCompactNumber(leaderboard.market?.summary?.confirmedSaleValue)} />,
-    <MiniStat key="top" icon={<Trophy />} label="Top Seller" value={sortedMarketRows[0]?.name ?? "None yet"} />,
-  ] : activeTab === "online" ? [
-    <MiniStat key="online" icon={<Users />} label="Online Now" value={formatNumber(onlineRows.filter((row) => row.signedIn).length)} />,
-    <MiniStat key="members" icon={<Users />} label="Tracked Members" value={formatNumber(onlineRows.length)} />,
-    <MiniStat key="played" icon={<Trophy />} label="Most Played" value={mostPlayedRow?.timePlayedSeconds ? `${mostPlayedRow.name} - ${formatPlaytime(mostPlayedRow.timePlayedSeconds)}` : "Unavailable"} />,
-    <MiniStat key="longest" icon={<Clock />} label="Longest Current Session" value={formatCurrentSession(longestSessionRow?.sessionSeconds) ?? "Unavailable"} />,
-  ] : [
-    <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatNumber(summary.totalProgress)} />,
-    <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />,
-    <MiniStat key="top" icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />,
-    <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
-  ];
-  return (
-    <div className="panel leaderboard-page">
-      <header className="members-topbar leaderboard-topbar">
-        <div>
-          <h2>Leaderboard</h2>
-          <p>Compare settlement members across contribution, professions, market history, activity, and online status.</p>
-        </div>
-        <div className="dashboard-top-meta">
-          <div className="dashboard-meta-cluster">
-            <span><Trophy size={14} /> {formatNumber(summary.contributorCount)} contributors</span>
-            <span><Factory size={14} /> {formatNumber(summary.recordedCrafts)} crafts</span>
-            <span>{summary.lastContributedAt ? `Updated ${timeAgo(summary.lastContributedAt)}` : "No history yet"}</span>
-          </div>
-        </div>
-      </header>
-      <nav className="leaderboard-tabs" aria-label="Leaderboard categories">
-        {LEADERBOARD_TABS.map((tab) => (
-          <button key={tab.id} className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>
-            {tab.icon}
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </nav>
-      <div className="summary-grid leaderboard-summary">
-        {tabSummary}
-      </div>
-      <section className="dashboard-card leaderboard-card leaderboard-context">
-        <header className="dashboard-card-title"><span>{activeTabMeta.icon} {activeTabMeta.label}</span></header>
-        <p>{activeTab === "activity" || activeTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : activeTab === "professions" ? "This tab uses current BitJita citizen profession data for the monitored settlement." : activeTab === "online" ? "This tab uses current member and player detail data when BitJita provides it." : "This tab uses recorded BitJita craft contribution data observed by the app."}</p>
-      </section>
-      {activeTab === "contribution" ? (
-      <section className="dashboard-card leaderboard-card">
-        <header className="dashboard-card-title">
-          <span><Trophy size={14} /> Member standings</span>
-          <label className="inline-field leaderboard-filter"><span>Profession</span>
-            <select className="select-control" value={professionFilter} onChange={(event) => setProfessionFilter(event.target.value)}>
-              <option value="All">All professions</option>
-              {professions.map((profession) => <option key={profession.profession} value={profession.profession}>{profession.profession}</option>)}
-            </select>
-          </label>
-        </header>
-        {state.loading ? <div className="empty-state"><RefreshCw /> Loading contribution history...</div> : null}
-        {state.error ? <div className="error">Failed to load leaderboard: {state.error}</div> : null}
-        {!state.loading && !state.error && !contributors.length ? (
-          <div className="empty-state"><Trophy />No craft contributions have been recorded yet. The leaderboard starts filling as settlement craft contribution data is observed during refreshes.</div>
-        ) : null}
-        {filteredContributors.length ? (
-          <DataTable
-            rows={filteredContributors}
-            columns={[
-              ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Progress", (entry) => formatNumber(entry.totalProgress)],
-              ["Estimated XP", (entry) => formatNumber(entry.totalXp)],
-              ["Crafts", (entry) => formatNumber(entry.craftCount)],
-              ["Top professions", (entry) => (
-                <div className="leaderboard-profession-tags">
-                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatNumber(profession.progress)}</b></span>)}
-                </div>
-              )],
-              ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"],
-            ]}
-          />
-        ) : null}
-      </section>
-      ) : null}
-      {activeTab === "professions" ? (
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title">
-            <span><GraduationCap size={14} /> Profession comparison</span>
-            <div className="leaderboard-control-row">
-              <label className="inline-field leaderboard-filter"><span>Profession</span>
-                <select className="select-control" value={professionFilter} onChange={(event) => setProfessionFilter(event.target.value)}>
-                  <option value="All">All professions</option>
-                  {professionIds.map((id) => <option key={id} value={professionLabel(id)}>{professionLabel(id)}</option>)}
-                </select>
-              </label>
-              <label className="inline-field leaderboard-filter"><span>Sort by</span>
-                <select className="select-control" value={professionSort} onChange={(event) => setProfessionSort(event.target.value)}>
-                  <option value="totalLevel">Total levels</option>
-                  <option value="totalXp">Total XP</option>
-                  <option value="highestLevel">Highest level</option>
-                  <option value="selectedLevel">Selected profession</option>
-                </select>
-              </label>
-            </div>
-          </header>
-          {!sortedProfessionRows.length ? <div className="empty-state"><GraduationCap />No citizen profession data is available for tracked settlement members.</div> : (
-            <DataTable rows={sortedProfessionRows} columns={[
-              ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],
-              ["Total levels", (entry) => formatNumber(entry.totalLevel)],
-              ["Total XP", (entry) => entry.totalXp ? formatNumber(entry.totalXp) : "-"],
-              ["Highest tier", (entry) => entry.highestTier ? <TierBadge tier={entry.highestTier} /> : "No tier"],
-              ["Profession levels", (entry) => <div className="leaderboard-profession-tags">{entry.levels.filter((level: AnyRecord) => toNumber(level.level) > 0).slice(0, 6).map((level: AnyRecord) => <span key={level.id}>{level.name} <b>{formatNumber(level.level)}</b></span>)}</div>],
-            ]} />
-          )}
-        </section>
-      ) : null}
-      {activeTab === "activity" ? (
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title">
-            <span><Activity size={14} /> Recorded activity</span>
-            <label className="inline-field leaderboard-filter"><span>Sort by</span>
-              <select className="select-control" value={activitySort} onChange={(event) => setActivitySort(event.target.value)}>
-                <option value="totalEvents">Total events</option>
-                <option value="marketEvents">Market events</option>
-                <option value="storageEvents">Storage events</option>
-                <option value="productionEvents">Production events</option>
-                <option value="constructionEvents">Construction events</option>
-              </select>
-            </label>
-          </header>
-          {!sortedActivityRows.length ? <div className="empty-state"><Activity />No member activity has been recorded with identifiable member names yet.</div> : (
-            <DataTable rows={sortedActivityRows} columns={[
-              ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Total events", (entry) => formatNumber(entry.totalEvents)],
-              ["Market", (entry) => formatNumber(entry.marketEvents)],
-              ["Storage", (entry) => formatNumber(entry.storageEvents)],
-              ["Production", (entry) => formatNumber(entry.productionEvents)],
-              ["Construction", (entry) => formatNumber(entry.constructionEvents)],
-              ["Latest", (entry) => entry.lastActivityAt ? timeAgo(entry.lastActivityAt) : "Unknown"],
-            ]} />
-          )}
-        </section>
-      ) : null}
-      {activeTab === "market" ? (
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title">
-            <span><CircleDollarSign size={14} /> Market comparison</span>
-            <label className="inline-field leaderboard-filter"><span>Sort by</span>
-              <select className="select-control" value={marketSort} onChange={(event) => setMarketSort(event.target.value)}>
-                <option value="confirmedSaleValue">Confirmed sale value</option>
-                <option value="confirmedSales">Confirmed sales</option>
-                <option value="unitsSold">Units sold</option>
-                <option value="activeListingValue">Active listing value</option>
-                <option value="activeListings">Active listings</option>
-              </select>
-            </label>
-          </header>
-          {!sortedMarketRows.length ? <div className="empty-state"><CircleDollarSign />No settlement market listings or confirmed sales have been recorded yet.</div> : (
-            <DataTable rows={sortedMarketRows} columns={[
-              ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Active listings", (entry) => formatNumber(entry.activeListings)],
-              ["Listing value", (entry) => `${formatNumber(entry.activeListingValue)}g`],
-              ["Confirmed sales", (entry) => formatNumber(entry.confirmedSales)],
-              ["Sale value", (entry) => `${formatNumber(entry.confirmedSaleValue)}g`],
-              ["Units sold", (entry) => formatNumber(entry.unitsSold)],
-              ["Last sale", (entry) => entry.lastSaleAt ? timeAgo(entry.lastSaleAt) : "No sales"],
-            ]} />
-          )}
-        </section>
-      ) : null}
-      {activeTab === "online" ? (
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title"><span><Users size={14} /> Online and sessions</span></header>
-          {!onlineRows.length ? <div className="empty-state"><Users />No tracked settlement members are available.</div> : (
-            <DataTable rows={onlineRows} columns={[
-              ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} /></strong>],
-              ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
-              ["Current session", (entry) => {
-                const sessionLabel = formatCurrentSession(entry.sessionSeconds);
-                return entry.signedIn && sessionLabel ? `Playing ${sessionLabel}` : "-";
-              }],
-              ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds)],
-              ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds)],
-              ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown"],
-            ]} />
-          )}
-        </section>
-      ) : null}
-      {activeTab === "contribution" ? (
-      <div className="leaderboard-grid">
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title"><span><GraduationCap size={14} /> Profession totals</span></header>
-          <div className="leaderboard-profession-list">
-            {professions.map((profession) => (
-              <article key={profession.profession}>
-                <div>
-                  <strong>{profession.profession}</strong>
-                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatNumber(profession.craftCount)} craft records</small>
-                </div>
-                <span>{formatNumber(profession.totalProgress)}</span>
-                <em>Top: {profession.topContributor || "Unknown"}</em>
-              </article>
-            ))}
-            {!professions.length ? <div className="empty-state compact"><GraduationCap />No profession totals yet.</div> : null}
-          </div>
-        </section>
-        <section className="dashboard-card leaderboard-card">
-          <header className="dashboard-card-title"><span><Activity size={14} /> Recent recorded contributions</span></header>
-          <div className="leaderboard-recent-list">
-            {recent.slice(0, 12).map((entry, index) => (
-              <article key={`${entry.contributorId}-${entry.craftLabel}-${index}`}>
-                <span className="activity-dot" />
-                <div>
-                  <strong>{entry.contributorName}</strong>
-                  <small>{entry.profession || "Unknown profession"} - {entry.craftLabel} at {entry.structureName}</small>
-                </div>
-                <span>{formatNumber(entry.totalProgress)}</span>
-                <time>{entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"}</time>
-              </article>
-            ))}
-            {!recent.length ? <div className="empty-state compact"><Activity />No recent contribution rows yet.</div> : null}
-          </div>
-        </section>
-      </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
@@ -2244,151 +1843,6 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
           </div></> : null}
         </aside>
         <iframe key={currentFrameUrl} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
-      </div>
-    </div>
-  );
-}
-
-const ACTIVITY_FILTERS = [
-  ["all", "All"],
-  ["storage", "Storage"],
-  ["treasury", "Treasury"],
-  ["supplies", "Supplies"],
-  ["market", "Market"],
-  ["members", "Members"],
-  ["buildings", "Structures"],
-] as const;
-
-export function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null }) {
-  const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
-  const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
-  const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
-  const [searchState, setSearchState] = React.useState<{ loading: boolean; error: string | null; events: AnyRecord[]; total: number; query: string }>({ loading: false, error: null, events: [], total: 0, query: "" });
-  const [compact, setCompact] = usePersistedState("activity.compact", true);
-  const [members, setMembers] = React.useState<AnyRecord[]>([]);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${API}/claims/${claimId}/members`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`members HTTP ${response.status}`)))
-      .then((payload) => setMembers(unwrap<AnyRecord[]>(payload, "members", [])))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [claimId]);
-  const trimmedSearch = searchQuery.trim();
-  React.useEffect(() => {
-    if (!trimmedSearch) {
-      setSearchState({ loading: false, error: null, events: [], total: 0, query: "" });
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setSearchState((current) => ({ ...current, loading: true, error: null, query: trimmedSearch }));
-      fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)))
-        .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
-        .catch((searchError) => {
-          if (!controller.signal.aborted) setSearchState({ loading: false, error: searchError instanceof Error ? searchError.message : String(searchError), events: [], total: 0, query: trimmedSearch });
-        });
-    }, 250);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [claimId, trimmedSearch]);
-  const searching = Boolean(trimmedSearch);
-  const sourceActivity = searching ? searchState.events : activity;
-  const sourceTotal = searching ? searchState.total : activityTotal;
-  const combined = [...sourceActivity].sort((a, b) => timestampMs(b.occurred_at ?? b.occurredAt) - timestampMs(a.occurred_at ?? a.occurredAt) || toNumber(b.id) - toNumber(a.id));
-  const memberOptions = unique(members.map((member) => String(member.userName ?? member.username ?? "")).filter(Boolean)).sort((a, b) => a.localeCompare(b));
-  React.useEffect(() => {
-    if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
-  }, [memberFilter, memberOptions.join("|")]);
-  const memberActivity = memberFilter === "All" ? combined : combined.filter((item) => activityActorName(item).toLowerCase() === memberFilter.toLowerCase());
-  const baseFiltered = filter === "all" ? memberActivity : memberActivity.filter((item) => String(item.event_type ?? "").includes(filter));
-  const filtered = compact ? compactActivity(baseFiltered) : baseFiltered;
-  const filterCounts = new Map(ACTIVITY_FILTERS.map(([id]) => [id, id === "all" ? memberActivity.length : memberActivity.filter((item) => String(item.event_type ?? "").includes(id)).length]));
-  const storageMoves = memberActivity.filter((item) => item.event_type === "storage").length;
-  const settlementChanges = memberActivity.length - storageMoves;
-  const latestEvent = memberActivity[0]?.occurred_at ?? memberActivity[0]?.occurredAt;
-  const scopeLabel = memberFilter === "All" ? "settlement" : memberFilter;
-  return (
-    <div className="panel activity-panel">
-      <header className="members-topbar activity-topbar">
-        <div>
-          <h2>Activity</h2>
-          <p>A live audit trail of settlement updates and owned-storage movements.</p>
-        </div>
-        <div className="dashboard-top-meta" aria-label="Activity status">
-          <div className="dashboard-meta-cluster">
-            <span><Activity size={15} /> {formatNumber(memberActivity.length)} {searching ? "matching" : "recent"} events</span>
-            <span>{latestEvent ? `Last event ${timeAgo(latestEvent)}` : "Awaiting activity"}</span>
-          </div>
-          <div className="dashboard-meta-cluster">
-            <span>{memberFilter === "All" ? "All members" : memberFilter}</span>
-            <span>{filter === "all" ? "All categories" : ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1]}</span>
-          </div>
-        </div>
-      </header>
-      {error ? <div className="error">Local history unavailable: {error}</div> : null}
-      {searchState.error ? <div className="error">Activity search failed: {searchState.error}</div> : null}
-      <div className="activity-overview">
-        <MiniStat icon={<Activity />} label={searching ? "Search Matches" : memberFilter === "All" ? "Total History" : "Member Events"} value={formatNumber(memberFilter === "All" ? sourceTotal : memberActivity.length)} title={searching ? `${formatNumber(combined.length)} matching rows loaded from full database search` : memberFilter === "All" ? `${formatNumber(combined.length)} recent events loaded` : `Attributed to ${memberFilter}`} />
-        <MiniStat icon={<Box />} label="Storage Moves" value={formatNumber(storageMoves)} title="Settlement containers only" />
-        <MiniStat icon={<Building2 />} label={memberFilter === "All" ? "System Changes" : "Other Changes"} value={formatNumber(settlementChanges)} title={memberFilter === "All" ? "Within loaded history" : "Not attributed to members"} />
-        <MiniStat icon={<RefreshCw />} label="Latest Event" value={latestEvent ? timeAgo(latestEvent) : "-"} title={latestEvent ? dateLabel(latestEvent) : "Awaiting activity"} />
-      </div>
-      <section className="production-command-panel activity-command-panel" aria-label="Activity filters">
-        <div className="activity-command-head">
-          <strong><Activity size={16} /> Activity Filters</strong>
-          <span>Showing {filtered.length} of {memberActivity.length} recent {scopeLabel} events{memberFilter === "All" && activityTotal > combined.length ? ` - ${formatNumber(activityTotal)} retained` : ""}</span>
-        </div>
-        <div className="activity-filter-grid">
-          <label className="field activity-search-field">
-            <span>Search full history</span>
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search player, item, chest, event, date..."
-            />
-          </label>
-          <label className="field">
-            <span>Member</span>
-            <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("activity_member_filter_used", { scope: event.target.value === "All" ? "all_members" : "member" }); }}>
-              <option value="All">All members</option>
-              {memberOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </label>
-          <div className="activity-filters" role="group" aria-label="Activity categories">
-            {ACTIVITY_FILTERS.map(([id, label]) => (
-              <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
-                <span>{label}</span>
-                <strong>{filterCounts.get(id) ?? 0}</strong>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="activity-options">
-          <label className="check-control"><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /> Combine repeated treasury changes</label>
-          <span>{searching ? `Searching all stored activity for "${searchState.query || trimmedSearch}". Showing up to 500 newest matches.` : memberFilter !== "All" ? "Member filtering only includes attributed storage and market events." : "Activity is limited to monitored settlement history."}</span>
-          {searching ? <button className="toolbar-button" onClick={() => setSearchQuery("")}>Clear search</button> : null}
-        </div>
-      </section>
-      {searchState.loading ? <div className="loading activity-search-loading"><RefreshCw size={15} /> Searching full activity history...</div> : null}
-      <div className="activity-timeline">
-        {filtered.length ? filtered.map((item) => {
-          const display = activityStyle(item);
-          return (
-            <article className={`activity-event ${display.tone}`} key={item.id ?? `${item.occurred_at}-${item.summary}`}>
-              <div className="activity-event-icon">{display.icon}</div>
-              <div className="activity-event-body">
-                <header><span>{display.label}</span><time>{timeAgo(item.occurred_at ?? item.occurredAt)}</time></header>
-                <p>{activitySummary(item)}</p>
-                {activityContainerName(item) ? <small><Box size={12} /> {activityContainerName(item)}</small> : null}
-              </div>
-              <time className="activity-event-date">{dateLabel(item.occurred_at ?? item.occurredAt)}</time>
-            </article>
-          );
-        }) : <div className="empty-state activity-empty"><Activity />{combined.length ? "No activity matches this filter." : "No activity has been returned yet."}</div>}
       </div>
     </div>
   );
