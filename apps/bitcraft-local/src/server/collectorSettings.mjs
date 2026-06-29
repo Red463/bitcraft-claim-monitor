@@ -17,6 +17,8 @@ export const domainCollectorDefaults = {
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
   snapshotHistory: { label: "Snapshot and history", intervalSeconds: 900 },
+  marketListings: { label: "Market listing sync", intervalSeconds: 60 },
+  productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
   storageActivity: { label: "Storage activity", intervalSeconds: 60 },
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };
@@ -65,6 +67,8 @@ export const collectorCurrentTables = {
   buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
   mapCatalog: ["domain_payload_current"],
   snapshotHistory: ["snapshots"],
+  marketListings: ["market_listings", "market_events", "market_trades"],
+  productionContributions: ["production_jobs", "production_contributions"],
   storageActivity: ["activity_events"],
   marketTrades: ["market_trades"],
 };

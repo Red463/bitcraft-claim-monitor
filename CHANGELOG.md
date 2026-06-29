@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.100] - 2026-06-30
+
+### Changed
+
+- Moved market-listing sync and production contribution sync out of snapshot-history recording into separate worker collector phases with their own schedules and status tracking.
+
 ## [1.0.0-beta.99] - 2026-06-30
 
 ### Changed
