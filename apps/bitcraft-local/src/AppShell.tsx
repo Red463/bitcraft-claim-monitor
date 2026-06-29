@@ -140,7 +140,8 @@ import { Inventory } from "./pages/InventoryPage";
 import { Leaderboard } from "./pages/LeaderboardPage";
 import { MapPanel } from "./pages/MapPage";
 import { PublicCraftFinder } from "./pages/PublicCraftFinderPage";
-import { Market, Production } from "./pages/MainPages";
+import { Production } from "./pages/ProductionPage";
+import { Market } from "./pages/MarketPage";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { MAP_CATEGORY_ORDER, MAP_CATEGORY_SET } from "./mapCategories";
 import {

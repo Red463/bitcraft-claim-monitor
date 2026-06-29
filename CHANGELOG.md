@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.87] - 2026-06-29
+
+### Changed
+
+- Improved release-readiness structure by removing the legacy main page bundle after moving Production and Market into dedicated page modules.
+- Split Market price finder and buy-order finder tools into focused market-owned components.
+- Updated developer and release-readiness documentation with the latest page and market tool boundaries.
+
 ## [1.0.0-beta.86] - 2026-06-29
 
 ### Changed

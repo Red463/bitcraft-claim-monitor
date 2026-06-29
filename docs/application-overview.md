@@ -35,7 +35,7 @@ flowchart LR
 | Layer | Primary files | Responsibilities |
 | --- | --- | --- |
 | Frontend shell | `apps/bitcraft-local/src/main.tsx`, `src/AppShell.tsx` | React bootstrap, route selection, global refresh, app settings, admin shell, auth, local settings, help/legal chrome, analytics consent, toasts, and notification drawer orchestration. |
-| Main pages | `apps/bitcraft-local/src/pages/*`, `src/pages/MainPages.tsx` | Extracted pages plus remaining legacy page glue for market, production, and admin until each page boundary is split safely. |
+| Routed pages | `apps/bitcraft-local/src/pages/*` | Feature-owned page modules for Dashboard, Activity, Inventory, Market, Map, Production, Public Craft Finder, and other routes. The legacy `MainPages.tsx` bundle has been removed. |
 | Bot dashboard components | `apps/bitcraft-local/src/components/bot/*`, `src/styles/bot-dashboard.css` | Individual `/bot` dashboard tabs for setup, channels, notifications, role panels, colour roles, moderation, diagnostics, tests, safety, members, and role management, with dedicated shell/navigation styles. |
 | Shared frontend utilities | `apps/bitcraft-local/src/api/*`, `src/hooks/*`, `src/utils/*`, `src/main-app-data.ts`, `src/notifications/*` | BitJita/local fetch hooks, history hooks, normalization, formatting, ownership helpers, recipe tree building, market order parsing, item metadata helpers, notification generation, dedupe, settings normalization, and smoke-verification helpers. |
 | Backend | `apps/bitcraft-local/server.mjs`, `src/server/*` | HTTP routing, static serving, BitJita proxy/cache/rate limits, SQLite migrations, auth, RBAC, domain collectors, history collection, Discord bot, scheduled jobs, and dependency-light helpers for HTTP policy, request/response handling, privacy, notification activity redaction, deal-alert payload formatting, market activity normalization, production activity normalization, recipe catalog normalization, and scheduled-job schedule handling. |
@@ -53,13 +53,13 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 | `/?page=leaderboard` | Leaderboard | Recorded settlement craft contribution by member/profession. | `src/main.tsx` (`Leaderboard`) | Public |
 | `/?page=members` | Members | Settlement roster, online state, equipment, details. | `src/pages/MembersPage.tsx` | Public |
 | `/?page=skills` | Professions | Profession levels, tiers, coverage. | `src/pages/SkillsPage.tsx` | Public |
-| `/?page=production` | Production | Current crafts, member eligibility, passive crafts. | `src/main.tsx` (`Production`) | Public |
+| `/?page=production` | Production | Current crafts, member eligibility, passive crafts. | `src/pages/ProductionPage.tsx` (`Production`) | Public |
 | `/?page=publiccrafts` | Public Craft Finder | Find public crafts by profession/region. | `src/pages/PublicCraftFinderPage.tsx` (`PublicCraftFinder`) | Public |
 | `/?page=craftcalc` | Craft Calculator | Build recipe trees and material steps. | `src/pages/CraftCalculatorPage.tsx`, `src/utils/recipeTree.ts` | Public |
 | `/?page=inventory` | Inventory | Containers and core material stock. | `src/pages/InventoryPage.tsx` (`Inventory`) | Public |
 | `/?page=construction` | Construction | Active construction projects and material needs. | `src/pages/ConstructionPage.tsx` | Public |
 | `/?page=research` | Research | Research/unlock state. | `src/pages/ResearchPage.tsx` | Public |
-| `/?page=market` | Market | Listings, analytics, price finder, buy order finder. | `src/main.tsx` (`Market`), `src/utils/marketOrders.ts` | Public |
+| `/?page=market` | Market | Listings, analytics, price finder, buy order finder. | `src/pages/MarketPage.tsx` (`Market`), `src/utils/marketOrders.ts` | Public |
 | `/?page=empire` | Region | Regional settlement context and rankings. | `src/pages/RegionPage.tsx` | Public |
 | `/?page=map` | Map | Embedded map with resource/player/region helpers. | `src/pages/MapPage.tsx` (`MapPanel`) | Public |
 | `/?page=sync` | Sync | Optional BitCraft Sync embed. | `src/pages/SyncPage.tsx` | Public |
@@ -124,14 +124,14 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=production`
 - Purpose: active settlement crafting jobs, passive crafts, member filter/eligibility, private-craft visibility.
-- Key components/functions: `Production` in `src/main.tsx`; backend `/api/local/production/crafts`; utility helpers in `src/utils/crafts.ts` and `src/utils/items.ts`.
+- Key components/functions: `Production` and `MemberPassiveCrafts` in `src/pages/ProductionPage.tsx`; backend `/api/local/production/crafts`; production metric helpers in `src/pages/production/productionUtils.ts`; item/tool helpers in `src/utils/items.ts`.
 - Data needs: claim crafts, members, citizens/professions, member details/toolbelt where available, passive craft output.
 - Data source: direct BitJita `/crafts?claimEntityId=...&completed=false` plus local `/api/local/production/crafts`; passive crafts from `/api/local/passive-crafts`.
 - Fetching/transformation: `useBitjitaData` first fetches baseline BitJita endpoints, then posts member data to `/api/local/production/crafts` to enrich with player/crafter details and contribution records. Errors from this enrichment are added as partial errors rather than blanking the whole page.
 - Actions: member filter, sort/direction, show private crafts toggle.
 - Auth: public.
 - Loading/error/empty states: global refresh warning banner; production empty state when no active jobs; partial error if local production enrichment fails.
-- Related files: `src/main.tsx`, `src/api/bitjita.ts`, `server.mjs`, `src/utils/crafts.ts`, `src/utils/items.ts`.
+- Related files: `src/pages/ProductionPage.tsx`, `src/pages/production/productionUtils.ts`, `src/api/bitjita.ts`, `server.mjs`, `src/utils/items.ts`.
 - Needs review: BitJita can temporarily report stale/missing craft contribution fields; the app should avoid inventing fallback contribution.
 
 ### Public Craft Finder
@@ -205,14 +205,14 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 
 - Route: `/?page=market`
 - Purpose: live settlement listings, market analytics, price finder, and buy order finder.
-- Key components/functions: `Market` in `src/main.tsx`; market helpers in `src/utils/marketOrders.ts`.
+- Key components/functions: `Market` in `src/pages/MarketPage.tsx`; `PriceFinder` in `src/pages/market/PriceFinder.tsx`; `BuyOrderFinder` in `src/pages/market/BuyOrderFinder.tsx`; market helpers in `src/pages/market/*` and `src/utils/marketOrders.ts`.
 - Data needs: current claim market listings, listing events/trades, price history, buy orders, item search.
 - Data source: `/claims/:claimId/market/listings` through `useBitjitaData`; local market history through `/api/local/history` and SQLite tables; price/order endpoints through `/api/bitjita/*`.
 - Fetching/transformation: frontend paginates all claim market listings in `requestAllMarketListings`; backend polling stores listings, events, trades, and sale/removal transitions.
 - Actions: tab switching, member filter, pricing item search, buy order region filter.
 - Auth: public.
 - Loading/error/empty states: tab-specific empty states; API warning banner for failed refreshes.
-- Related files: `src/main.tsx`, `src/api/bitjita.ts`, `src/api/localHistory.ts`, `src/utils/marketOrders.ts`, `server.mjs`.
+- Related files: `src/pages/MarketPage.tsx`, `src/pages/market/*`, `src/api/bitjita.ts`, `src/api/localHistory.ts`, `src/utils/marketOrders.ts`, `server.mjs`.
 - Needs review: sales/removal classification depends on BitJita listing and trade history fields. Avoid implying certainty where BitJita does not expose buyer/seller fields.
 
 ### Region
@@ -619,7 +619,7 @@ Route permissions are mapped by `adminPermissionFor` in `server.mjs`.
 ## Known Complexity / Risk Areas
 
 1. `server.mjs` is a high-risk file because it combines routing, schema migrations, polling, BitJita proxying, auth, Discord bot logic, scheduled jobs, and diagnostics.
-2. `src/main.tsx` is still broad. Several large main pages are inline while others have been extracted to `src/pages`.
+2. `src/AppShell.tsx` is still broad. Routed page components have been extracted to `src/pages`, but admin shell and cross-cutting orchestration remain large.
 3. BitJita response shapes are adapted from observed wrappers and endpoints. `unwrap`, `normalizeData`, and page logic handle several possible nesting patterns, but field semantics can still change upstream.
 4. Production contribution must come from BitJita. Fallback inference from craft progress would be misleading and should be avoided.
 5. Market sale/removal analytics depend on listing/trade fields being available and stable. Buyer/seller details may be missing for some endpoints.
