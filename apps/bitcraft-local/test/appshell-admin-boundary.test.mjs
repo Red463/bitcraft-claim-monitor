@@ -39,3 +39,13 @@ test("AdminPanel keeps sensitive admin controls explicit", () => {
   assert.match(adminPanel, /No administrator actions have been recorded yet/);
   assert.match(adminPanel, /No database backups have been created yet/);
 });
+test("Admin diagnostics and collector settings stay bounded", () => {
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+
+  assert.match(adminCss, /\.map-url-diagnostics code \{/);
+  assert.match(adminCss, /max-height:\s*150px/);
+  assert.match(adminCss, /overflow-wrap:\s*anywhere/);
+  assert.match(adminCss, /\.map-url-log-list \{/);
+  assert.match(adminCss, /max-height:\s*220px/);
+  assert.match(adminCss, /\.collector-setting-row \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { normalizeNotificationSoundSettings, normalizeUserToastSettings } from "../src/notifications/userToastSettings.ts";
-import { playNotificationSound } from "../src/utils/notificationSounds.ts";
+import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../src/utils/notificationSounds.ts";
 
 class FakeAudioParam {
   constructor() {
@@ -110,7 +110,12 @@ test("playNotificationSound schedules the selected generated tone at the configu
   assert.deepEqual(context.oscillators[0].startCalls, [10]);
   assert.deepEqual(context.oscillators[0].stopCalls, [10.2]);
 });
-test("normalizeNotificationSoundSettings falls back for missing or corrupted saved sound settings", () => {
+
+test("every listed notification sound option is accepted by settings normalization", () => {
+  for (const sound of NOTIFICATION_SOUND_OPTIONS) {
+    assert.equal(normalizeNotificationSoundSettings({ soundId: sound.id, soundVolume: 0.5 }).soundId, sound.id);
+  }
+});test("normalizeNotificationSoundSettings falls back for missing or corrupted saved sound settings", () => {
   assert.deepEqual(normalizeNotificationSoundSettings(null), {
     soundEnabled: true,
     soundId: "alert-pop",

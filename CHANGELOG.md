@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.106] - 2026-06-30
+
+### Changed
+
+- Added more browser notification sound choices and fixed the volume slider so 100% fills the full track.
+- Improved admin diagnostics and background collection settings so long logs and collector controls stay inside their cards.
+- Improved production contributor names so settlement-owner crowns stay aligned with the player name.
+
 ## [1.0.0-beta.105] - 2026-06-30
 
 ### Changed

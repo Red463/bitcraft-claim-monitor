@@ -6,7 +6,7 @@ import type { ActivePanel } from "./app";
 // token/secret fields are write-only in practice: public config responses should
 // expose "configured" flags rather than returning sensitive values.
 export type BrandingAsset = { fileName: string; contentType: string; updatedAt: string; url: string };
-export type NotificationSoundId = "soft-chime" | "clear-ping" | "deep-bell" | "alert-pop";
+export type NotificationSoundId = "soft-chime" | "clear-ping" | "deep-bell" | "alert-pop" | "bright-ping" | "double-ping" | "coin-ding" | "success-chime" | "warning-blip" | "soft-bell" | "urgent-pulse" | "crystal-tap" | "low-thud" | "arcade-beep";
 export type UserToastSettings = { marketListings: boolean; marketSales: boolean; production: boolean; soundEnabled: boolean; soundId: NotificationSoundId; soundVolume: number };
 export type ActiveRegion = { regionId: string; regionName?: string; active?: boolean; syncing?: boolean; signedInPlayers?: number; playersInQueue?: number; updatedAt?: string | null; source?: string };
 export type AppUser = {

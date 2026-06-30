@@ -172,6 +172,7 @@ export function UserSettingsDialog({
   };
   const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
   const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
+  const handleSoundVolumeChange = (event: React.FormEvent<HTMLInputElement>) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.currentTarget.value) / 100 });
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
   const statusLabel = auth.user?.characterStatus === "approved"
     ? "Approved"
@@ -436,7 +437,7 @@ export function UserSettingsDialog({
               <label className="field notification-volume-field">
                 <span>Volume</span>
                 <div>
-                  <input type="range" min="0" max="100" step="1" value={soundVolumePercent} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.target.value) / 100 })} />
+                  <input type="range" min="0" max="100" step="1" value={soundVolumePercent} style={{ "--volume-percent": `${soundVolumePercent}%` } as React.CSSProperties} onInput={handleSoundVolumeChange} onChange={handleSoundVolumeChange} />
                   <strong>{soundVolumePercent}%</strong>
                 </div>
               </label>

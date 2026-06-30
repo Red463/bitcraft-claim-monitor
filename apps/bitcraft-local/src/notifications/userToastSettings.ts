@@ -15,7 +15,22 @@ export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = {
   ...DEFAULT_NOTIFICATION_SOUND_SETTINGS,
 };
 
-const NOTIFICATION_SOUND_IDS: ReadonlySet<NotificationSoundId> = new Set(["soft-chime", "clear-ping", "deep-bell", "alert-pop"]);
+const NOTIFICATION_SOUND_IDS: ReadonlySet<NotificationSoundId> = new Set([
+  "soft-chime",
+  "clear-ping",
+  "deep-bell",
+  "alert-pop",
+  "bright-ping",
+  "double-ping",
+  "coin-ding",
+  "success-chime",
+  "warning-blip",
+  "soft-bell",
+  "urgent-pulse",
+  "crystal-tap",
+  "low-thud",
+  "arcade-beep",
+]);
 
 function clampVolume(value: unknown): number {
   const number = typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_NOTIFICATION_SOUND_SETTINGS.soundVolume;

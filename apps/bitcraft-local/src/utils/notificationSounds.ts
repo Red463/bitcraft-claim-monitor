@@ -9,6 +9,16 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
   { id: "clear-ping", label: "Clear ping", description: "Bright compact ping" },
   { id: "deep-bell", label: "Deep bell", description: "Lower alert bell" },
   { id: "alert-pop", label: "Alert pop", description: "Short crisp pop" },
+  { id: "bright-ping", label: "Bright ping", description: "High clean ping" },
+  { id: "double-ping", label: "Double ping", description: "Two quick bright pings" },
+  { id: "coin-ding", label: "Coin ding", description: "Market-style coin sound" },
+  { id: "success-chime", label: "Success chime", description: "Positive rising chime" },
+  { id: "warning-blip", label: "Warning blip", description: "Short attention blip" },
+  { id: "soft-bell", label: "Soft bell", description: "Gentle rounded bell" },
+  { id: "urgent-pulse", label: "Urgent pulse", description: "Fast repeating alert" },
+  { id: "crystal-tap", label: "Crystal tap", description: "Light glassy tap" },
+  { id: "low-thud", label: "Low thud", description: "Subtle low notification" },
+  { id: "arcade-beep", label: "Arcade beep", description: "Retro square beep" },
 ];
 
 type ToneStep = { frequency: number; start: number; duration: number; type?: OscillatorType; gain?: number };
@@ -28,6 +38,47 @@ const SOUND_PATTERNS: Record<NotificationSoundId, ToneStep[]> = {
   "alert-pop": [
     { frequency: 740, start: 0, duration: 0.08, type: "square", gain: 0.35 },
     { frequency: 988, start: 0.08, duration: 0.09, type: "triangle", gain: 0.6 },
+  ],
+  "bright-ping": [
+    { frequency: 1174.66, start: 0, duration: 0.16, type: "triangle", gain: 0.78 },
+  ],
+  "double-ping": [
+    { frequency: 880, start: 0, duration: 0.09, type: "sine", gain: 0.68 },
+    { frequency: 1174.66, start: 0.12, duration: 0.11, type: "sine", gain: 0.62 },
+  ],
+  "coin-ding": [
+    { frequency: 1318.51, start: 0, duration: 0.08, type: "triangle", gain: 0.58 },
+    { frequency: 1760, start: 0.055, duration: 0.16, type: "sine", gain: 0.42 },
+  ],
+  "success-chime": [
+    { frequency: 523.25, start: 0, duration: 0.13, type: "sine", gain: 0.55 },
+    { frequency: 659.25, start: 0.11, duration: 0.15, type: "sine", gain: 0.55 },
+    { frequency: 783.99, start: 0.22, duration: 0.18, type: "sine", gain: 0.5 },
+  ],
+  "warning-blip": [
+    { frequency: 554.37, start: 0, duration: 0.1, type: "sawtooth", gain: 0.36 },
+    { frequency: 466.16, start: 0.1, duration: 0.12, type: "square", gain: 0.3 },
+  ],
+  "soft-bell": [
+    { frequency: 587.33, start: 0, duration: 0.28, type: "sine", gain: 0.5 },
+    { frequency: 880, start: 0.02, duration: 0.22, type: "sine", gain: 0.25 },
+  ],
+  "urgent-pulse": [
+    { frequency: 784, start: 0, duration: 0.07, type: "square", gain: 0.32 },
+    { frequency: 784, start: 0.1, duration: 0.07, type: "square", gain: 0.32 },
+    { frequency: 988, start: 0.2, duration: 0.08, type: "square", gain: 0.3 },
+  ],
+  "crystal-tap": [
+    { frequency: 1567.98, start: 0, duration: 0.09, type: "triangle", gain: 0.48 },
+    { frequency: 2093, start: 0.025, duration: 0.1, type: "sine", gain: 0.22 },
+  ],
+  "low-thud": [
+    { frequency: 164.81, start: 0, duration: 0.12, type: "sine", gain: 0.7 },
+    { frequency: 220, start: 0.03, duration: 0.11, type: "triangle", gain: 0.32 },
+  ],
+  "arcade-beep": [
+    { frequency: 659.25, start: 0, duration: 0.09, type: "square", gain: 0.25 },
+    { frequency: 987.77, start: 0.095, duration: 0.11, type: "square", gain: 0.22 },
   ],
 };
 

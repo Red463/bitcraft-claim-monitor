@@ -570,8 +570,8 @@
 }
 .collector-setting-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 128px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   align-items: stretch;
   min-width: 0;
   padding: 10px;
@@ -589,10 +589,68 @@
 .collector-toggle > span { display: grid; gap: 2px; min-width: 0; }
 .collector-toggle strong { color: #fff; font-size: 13px; }
 .collector-toggle small { color: #8793a4; font-size: 11px; line-height: 1.35; }
-.collector-setting-row .compact-field { gap: 5px; }
+.collector-setting-row .compact-field { gap: 5px; align-items: stretch; }
 .collector-setting-row .compact-field input { text-align: center; }
 .collector-interval-field .unit-input { min-height: var(--control-height); }
 .collector-interval-field .unit-input em { min-width: 42px; }
+.map-url-diagnostics {
+  min-width: 0;
+  overflow: hidden;
+}
+.map-url-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+.map-url-diagnostics code {
+  display: block;
+  max-width: 100%;
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(108,123,145,.2);
+  border-radius: 7px;
+  background: rgba(3,6,10,.72);
+  color: #c8d4e4;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.map-url-log-list {
+  display: grid;
+  gap: 7px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.map-url-log-list article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid rgba(108,123,145,.16);
+  border-radius: 7px;
+  background: rgba(255,255,255,.018);
+  padding: 8px;
+}
+.map-url-log-list time {
+  color: #f0c64f;
+  font-size: 11px;
+  font-weight: 800;
+}
+.map-url-log-list span,
+.map-url-log-list small {
+  min-width: 0;
+  color: #aab5c4;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.map-url-log-list small {
+  grid-column: 2;
+  color: #7f8da0;
+}
 
 .brand-upload { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); background: var(--panel-2); border-radius: 7px; padding: 9px; }
 .brand-upload > div { margin-right: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; }
@@ -644,7 +702,8 @@
 
 @media (max-width: 1180px) {
   .collector-summary,
-  .collector-settings-list { grid-template-columns: 1fr; }
+  .collector-settings-list,
+  .map-url-diagnostic-grid { grid-template-columns: 1fr; }
 }
 .admin-page .status-detail .info-row {
   min-height: 76px;

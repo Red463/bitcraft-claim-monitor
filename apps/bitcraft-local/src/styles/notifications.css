@@ -43,7 +43,12 @@
 .notification-sound-settings { gap: 12px; }
 .notification-sound-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr); gap: 12px; align-items: end; }
 .notification-volume-field > div { min-height: 39px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px; align-items: center; padding: 0 11px; }
-.notification-volume-field input[type="range"] { width: 100%; accent-color: var(--active-color); }
+.notification-volume-field input[type="range"] { --volume-percent: 55%; width: 100%; height: 18px; appearance: none; background: linear-gradient(90deg, var(--active-color) 0 var(--volume-percent), rgba(108,123,145,.42) var(--volume-percent) 100%); border-radius: 99px; cursor: pointer; }
+.notification-volume-field input[type="range"]::-webkit-slider-runnable-track { height: 7px; border-radius: 99px; background: transparent; }
+.notification-volume-field input[type="range"]::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -4.5px; border: 2px solid var(--active-color); border-radius: 50%; background: var(--active-color); box-shadow: 0 0 0 3px rgba(245,201,74,.14); }
+.notification-volume-field input[type="range"]::-moz-range-track { height: 7px; border-radius: 99px; background: transparent; }
+.notification-volume-field input[type="range"]::-moz-range-progress { height: 7px; border-radius: 99px; background: var(--active-color); }
+.notification-volume-field input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 2px solid var(--active-color); border-radius: 50%; background: var(--active-color); box-shadow: 0 0 0 3px rgba(245,201,74,.14); }
 .notification-volume-field strong { color: var(--text); font-size: 12px; text-align: right; }
 
 .drawer-overlay { position: fixed; inset: 0; z-index: 29; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }

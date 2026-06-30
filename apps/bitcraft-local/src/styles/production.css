@@ -327,9 +327,23 @@
 .production-page .contributors span strong {
   min-width: 0;
   color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+}
+.production-page .contributors span strong .tracked-owner-name {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.production-page .contributors span strong .tracked-owner-name svg {
+  flex: 0 0 auto;
 }
 .production-page .settlement-passive-crafts {
   margin-top: 8px;
