@@ -289,6 +289,40 @@ export function createPreparedStatements(db) {
   `),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
   pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
+  listDiscordYouTubeChannels: db.prepare("SELECT * FROM discord_youtube_channels ORDER BY title COLLATE NOCASE, channel_id"),
+  getDiscordYouTubeChannel: db.prepare("SELECT * FROM discord_youtube_channels WHERE channel_id = ?"),
+  upsertDiscordYouTubeChannel: db.prepare(`
+    INSERT INTO discord_youtube_channels (channel_id, input, title, url, enabled, last_checked_at, last_success_at, last_error, last_video_id, last_video_title, last_video_published_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      input = excluded.input,
+      title = COALESCE(excluded.title, discord_youtube_channels.title),
+      url = COALESCE(excluded.url, discord_youtube_channels.url),
+      enabled = excluded.enabled,
+      last_checked_at = COALESCE(excluded.last_checked_at, discord_youtube_channels.last_checked_at),
+      last_success_at = COALESCE(excluded.last_success_at, discord_youtube_channels.last_success_at),
+      last_error = excluded.last_error,
+      last_video_id = COALESCE(excluded.last_video_id, discord_youtube_channels.last_video_id),
+      last_video_title = COALESCE(excluded.last_video_title, discord_youtube_channels.last_video_title),
+      last_video_published_at = COALESCE(excluded.last_video_published_at, discord_youtube_channels.last_video_published_at),
+      updated_at = excluded.updated_at
+  `),
+  setDiscordYouTubeChannelEnabled: db.prepare("UPDATE discord_youtube_channels SET enabled = ?, updated_at = ? WHERE channel_id = ?"),
+  updateDiscordYouTubeChannelStatus: db.prepare("UPDATE discord_youtube_channels SET title = COALESCE(?, title), url = COALESCE(?, url), last_checked_at = ?, last_success_at = ?, last_error = ?, last_video_id = COALESCE(?, last_video_id), last_video_title = COALESCE(?, last_video_title), last_video_published_at = COALESCE(?, last_video_published_at), updated_at = ? WHERE channel_id = ?"),
+  deleteDiscordYouTubeChannel: db.prepare("DELETE FROM discord_youtube_channels WHERE channel_id = ?"),
+  deleteDiscordYouTubeVideosForChannel: db.prepare("DELETE FROM discord_youtube_videos WHERE channel_id = ?"),
+  listDiscordYouTubeVideosForChannel: db.prepare("SELECT * FROM discord_youtube_videos WHERE channel_id = ?"),
+  getDiscordYouTubeVideo: db.prepare("SELECT * FROM discord_youtube_videos WHERE video_id = ?"),
+  insertDiscordYouTubeVideo: db.prepare(`
+    INSERT INTO discord_youtube_videos (video_id, channel_id, title, url, thumbnail_url, published_at, seen_at, notified_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(video_id) DO UPDATE SET
+      title = excluded.title,
+      url = excluded.url,
+      thumbnail_url = excluded.thumbnail_url,
+      published_at = excluded.published_at,
+      notified_at = COALESCE(discord_youtube_videos.notified_at, excluded.notified_at)
+  `),
   upsertDiscordCraftWatch: db.prepare(`
     INSERT INTO discord_craft_watches (guild_id, user_id, profession_key, profession_name, mode, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)

@@ -37,6 +37,7 @@ export const defaultCraftRoles = {
 
 export const defaultDiscordChannels = {
   notifications: "",
+  announcements: "",
   modNotes: "1509972023927902218",
   modLog: "",
   ...defaultCraftChannels,
@@ -47,6 +48,7 @@ export const defaultNotificationChannels = {
   marketSales: "notifications",
   lowSupplies: "notifications",
   appUpdates: "notifications",
+  youtubeVideos: "announcements",
   supplyReport: "modNotes",
   productionStarted: "profession",
   productionCompleted: "profession",
@@ -111,6 +113,11 @@ export const defaultWelcomeFlow = {
   showNextStep: true,
 };
 
+export const defaultYouTubeMonitorSettings = {
+  enabled: true,
+  pollIntervalMinutes: 10,
+};
+
 export const defaultDiscordPresence = {
   enabled: true,
   status: "online",
@@ -130,6 +137,7 @@ export const defaultDiscordSettings = {
   productionMinAgeMinutes: 5,
   productionUsers: "",
   supplyReportIntervalDays: 3,
+  youtube: defaultYouTubeMonitorSettings,
   channels: defaultDiscordChannels,
   notificationChannels: defaultNotificationChannels,
   craftChannels: defaultCraftChannels,
@@ -149,6 +157,7 @@ export const defaultDiscordSettings = {
     lowSupplies: false,
     appUpdates: true,
     supplyReports: true,
+    youtubeVideos: true,
   },
 };
 
@@ -206,6 +215,18 @@ export function normalizeDiscordPresence(value = {}) {
   };
 }
 
+export function normalizeYouTubeMonitorSettings(value = {}) {
+  return {
+    ...defaultYouTubeMonitorSettings,
+    enabled: value.enabled !== false,
+    pollIntervalMinutes: Math.min(Math.max(toNumber(value.pollIntervalMinutes) || defaultYouTubeMonitorSettings.pollIntervalMinutes, 1), 1440),
+  };
+}
+
+function normalizeChannelMap(value = {}) {
+  return Object.fromEntries(Object.entries({ ...defaultDiscordChannels, ...(value ?? {}) }).map(([key, channelId]) => [key, String(channelId ?? "").trim()]));
+}
+
 export function normalizeDiscordSettings(value = {}) {
   const notify = { ...defaultDiscordSettings.notify, ...(value.notify ?? {}) };
   const savedColourRoles = Array.isArray(value.colourRoles) ? value.colourRoles : [];
@@ -225,7 +246,8 @@ export function normalizeDiscordSettings(value = {}) {
     productionMinAgeMinutes: Math.max((value.productionMinAgeMinutes ?? value.productionMinAgeMins) == null ? 5 : toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins), 0),
     productionUsers: String(value.productionUsers ?? "").trim(),
     supplyReportIntervalDays: Math.max(toNumber(value.supplyReportIntervalDays) || 3, 1),
-    channels: { ...defaultDiscordChannels, ...(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
+    youtube: normalizeYouTubeMonitorSettings(value.youtube ?? {}),
+    channels: { ...normalizeChannelMap(value.channels ?? {}), notifications: String(value.channelId ?? value.channels?.notifications ?? "").trim() },
     notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
     craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
     craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
@@ -256,6 +278,7 @@ export function normalizeDiscordSettings(value = {}) {
       lowSupplies: notify.lowSupplies === true,
       appUpdates: notify.appUpdates !== false,
       supplyReports: notify.supplyReports !== false,
+      youtubeVideos: notify.youtubeVideos !== false,
     },
   };
 }

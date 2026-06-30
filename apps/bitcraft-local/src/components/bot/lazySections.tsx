@@ -16,3 +16,5 @@ export const DiscordSafetySection = React.lazy(() => import("./DiscordSafetySect
 export const DiscordSetupSection = React.lazy(() => import("./DiscordSetupSection").then((module) => ({ default: module.DiscordSetupSection })));
 export const DiscordDiagnosticsPanel = React.lazy(() => import("./DiscordDiagnosticsPanel").then((module) => ({ default: module.DiscordDiagnosticsPanel })));
 export const DiscordTestsPanel = React.lazy(() => import("./DiscordTestsPanel").then((module) => ({ default: module.DiscordTestsPanel })));
+export const DiscordYouTubeMonitorSection = React.lazy(() => import("./DiscordYouTubeMonitorSection").then((module) => ({ default: module.DiscordYouTubeMonitorSection })));
+

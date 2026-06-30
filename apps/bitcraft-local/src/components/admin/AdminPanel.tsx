@@ -59,6 +59,7 @@ import {
   DiscordSafetySection,
   DiscordSetupSection,
   DiscordTestsPanel,
+  DiscordYouTubeMonitorSection,
 } from "../bot/lazySections";
 import { Header, TablePanel, ToolbarButton } from "../main/AppChrome";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
@@ -740,11 +741,12 @@ export function AdminPanel({
   }, null);
   const discordChannelLabel = (key: string) => {
     if (key === "notifications") return "Default notifications";
+    if (key === "announcements") return "Announcements";
     if (key === "modNotes") return "Mod notes";
     if (key === "modLog") return "Mod log";
     return key[0].toUpperCase() + key.slice(1);
   };
-  const channelOptions = Object.entries(draft.discord.channels ?? {}).map(([key, id]) => ({ key, label: discordChannelLabel(key), id })).filter((entry) => entry.id || entry.key === "notifications");
+  const channelOptions = Object.entries(draft.discord.channels ?? {}).map(([key, id]) => ({ key, label: discordChannelLabel(key), id })).filter((entry) => entry.id || entry.key === "notifications" || entry.key === "announcements");
   const channelSelect = (key: string, value: string, allowProfession = false) => (
     <select value={value} onChange={(event) => updateNotificationChannel(key, event.target.value)}>
       {allowProfession ? <option value="profession">Profession channel</option> : null}
@@ -1860,6 +1862,17 @@ export function AdminPanel({
             </div>
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
+          {(!botOnly || botSection === "youtube") ? (
+            <DiscordYouTubeMonitorSection
+              api={api}
+              busyButtonClass={busyButtonClass}
+              channelSelect={channelSelect}
+              discord={draft.discord}
+              run={run}
+              updateDiscord={updateDiscord}
+              updateDiscordNotify={updateDiscordNotify}
+            />
+          ) : null}
           {(!botOnly || botSection === "notifications") ? (
             <DiscordNotificationsSection
               channelSelect={channelSelect}
@@ -2018,4 +2031,6 @@ export function AdminPanel({
     </div>
   );
 }
+
+
 

@@ -3,6 +3,7 @@ import {
   Activity,
   Bell,
   Command,
+  Youtube,
   FileText,
   Hash,
   Lock,
@@ -17,6 +18,7 @@ import {
 export const BOT_SECTIONS = [
   ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs", "Core"],
   ["notifications", "Notifications", <Bell size={15} />, "Market, craft, supply and update rules", "Automation"],
+  ["youtube", "YouTube Monitor", <Youtube size={15} />, "New videos and announcements", "Automation"],
   ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing", "Routing"],
   ["roleManager", "Role Manager", <Users size={15} />, "Create and inspect Discord roles", "Roles"],
   ["roles", "Craft Watch", <Bell size={15} />, "Profession notification roles", "Roles"],

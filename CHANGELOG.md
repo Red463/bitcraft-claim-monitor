@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.109] - 2026-06-30
+
+### Added
+
+- Added a Discord bot YouTube Monitor for announcing new videos from configured YouTube channels without requiring a YouTube API key.
+
 ## [1.0.0-beta.108] - 2026-06-30
 
 ### Changed
@@ -1963,3 +1969,5 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
+
+

@@ -156,6 +156,7 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
       ...((config as AnyRecord)?.discord ?? {}),
       channels: { ...DEFAULT_DISCORD_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), notifications: (config as AnyRecord)?.discord?.channelId ?? (config as AnyRecord)?.discord?.channels?.notifications ?? "" },
       notificationChannels: { ...DEFAULT_NOTIFICATION_CHANNELS, ...((config as AnyRecord)?.discord?.notificationChannels ?? {}) },
+      youtube: { enabled: (config as AnyRecord)?.discord?.youtube?.enabled !== false, pollIntervalMinutes: Math.min(Math.max(toNumber((config as AnyRecord)?.discord?.youtube?.pollIntervalMinutes) || DEFAULT_SETTINGS.discord.youtube.pollIntervalMinutes, 1), 1440) },
       craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       craftRoles: { ...DEFAULT_CRAFT_ROLES, ...((config as AnyRecord)?.discord?.craftRoles ?? {}) },
       colourRolesChannelId: String((config as AnyRecord)?.discord?.colourRolesChannelId ?? ""),

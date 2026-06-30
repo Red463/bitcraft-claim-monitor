@@ -21,6 +21,9 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     "getSetting",
     "upsertSetting",
     "insertDiscordAdmin",
+    "listDiscordYouTubeChannels",
+    "upsertDiscordYouTubeChannel",
+    "insertDiscordYouTubeVideo",
     "insertUserSession",
     "upsertDiscordCraftWatch",
     "dueDiscordTempBans",
@@ -31,5 +34,7 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   assert.match(statements.upsertListing.sql, /INSERT INTO market_listings/);
   assert.match(statements.upsertSetting.sql, /INSERT INTO app_settings/);
   assert.match(statements.insertDiscordAdmin.sql, /INSERT INTO admin_users/);
+  assert.match(statements.upsertDiscordYouTubeChannel.sql, /INSERT INTO discord_youtube_channels/);
+  assert.match(statements.insertDiscordYouTubeVideo.sql, /INSERT INTO discord_youtube_videos/);
   assert.ok(sqlByKey.length > 70, "expected the server statement bundle to be prepared together");
 });

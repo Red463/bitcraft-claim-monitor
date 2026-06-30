@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -193,4 +194,9 @@ test("scheduledJobsStatus recovers stale jobs before returning public status", (
   assert.equal(status.jobs.length, 1);
   assert.equal(status.jobs[0].scheduleLabel, "Every 2 minutes");
   assert.equal(status.jobs[0].running, true);
+});
+test("server registers the YouTube channel monitor scheduled job", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /youtube_channel_monitor/);
+  assert.match(server, /interval@600/);
 });

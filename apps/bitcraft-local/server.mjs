@@ -24,6 +24,7 @@ import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatch
 import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
+import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -363,6 +364,13 @@ const scheduledJobRegistry = {
     enabled: true,
     run: runRegionalBuyOrderSaleBaselineRefreshJob,
   },
+  youtube_channel_monitor: {
+    label: "YouTube channel monitor",
+    description: "Checks monitored YouTube channels for new videos and posts announcements to Discord.",
+    schedule: "interval@600",
+    enabled: true,
+    run: runYouTubeChannelMonitorJob,
+  },
   market_deal_watch: {
     label: "Market deal watch",
     description: "Checks watched Price Finder items for sell listings below confirmed regional sale averages.",
@@ -444,6 +452,121 @@ function checkScheduledJobs() {
 
 seedScheduledJobs();
 
+function publicDiscordYouTubeChannel(row) {
+  return row ? {
+    channelId: String(row.channel_id ?? ""),
+    input: String(row.input ?? ""),
+    title: String(row.title ?? ""),
+    url: String(row.url ?? ""),
+    enabled: row.enabled !== 0,
+    lastCheckedAt: row.last_checked_at ?? null,
+    lastSuccessAt: row.last_success_at ?? null,
+    lastError: row.last_error ?? null,
+    lastVideoId: row.last_video_id ?? null,
+    lastVideoTitle: row.last_video_title ?? null,
+    lastVideoPublishedAt: row.last_video_published_at ?? null,
+    createdAt: row.created_at ?? null,
+    updatedAt: row.updated_at ?? null,
+  } : null;
+}
+
+function discordYouTubeStatus(extra = {}) {
+  const settings = getDiscordSettingsRaw();
+  return {
+    enabled: Boolean(settings.youtube?.enabled && settings.notify?.youtubeVideos),
+    youtube: settings.youtube,
+    announcementsChannelId: settings.channels?.[settings.notificationChannels?.youtubeVideos ?? "announcements"] || settings.channels?.announcements || "",
+    channels: statements.listDiscordYouTubeChannels.all().map(publicDiscordYouTubeChannel),
+    scheduledJob: scheduledJobRow(statements.getScheduledJob.get("youtube_channel_monitor")),
+    ...extra,
+  };
+}
+
+async function fetchYouTubeChannelFeed(channelId, fetchImpl = fetch) {
+  const response = await fetchImpl(youtubeFeedUrl(channelId), { headers: { "user-agent": appIdentifier } });
+  if (!response.ok) throw new Error(`YouTube feed HTTP ${response.status}`);
+  return parseYouTubeFeed(await response.text());
+}
+
+function recordYouTubeVideo(channelId, video, seenAt, notifiedAt = null) {
+  statements.insertDiscordYouTubeVideo.run(
+    video.videoId,
+    channelId,
+    String(video.title ?? video.videoId),
+    String(video.url ?? `https://www.youtube.com/watch?v=${video.videoId}`),
+    String(video.thumbnailUrl ?? ""),
+    String(video.publishedAt ?? ""),
+    seenAt,
+    notifiedAt,
+  );
+}
+
+async function addDiscordYouTubeChannel(input) {
+  const resolved = await resolveYouTubeChannelInput(input, fetch);
+  const now = new Date().toISOString();
+  const parsed = await fetchYouTubeChannelFeed(resolved.channelId);
+  const latest = parsed.videos[0] ?? null;
+  statements.upsertDiscordYouTubeChannel.run(
+    resolved.channelId,
+    String(input ?? "").trim(),
+    parsed.channelTitle || resolved.channelId,
+    `https://www.youtube.com/channel/${resolved.channelId}`,
+    1,
+    now,
+    now,
+    null,
+    latest?.videoId ?? null,
+    latest?.title ?? null,
+    latest?.publishedAt ?? null,
+    now,
+    now,
+  );
+  for (const video of parsed.videos) recordYouTubeVideo(resolved.channelId, video, now, null);
+  return discordYouTubeStatus({ added: publicDiscordYouTubeChannel(statements.getDiscordYouTubeChannel.get(resolved.channelId)), seededVideos: parsed.videos.length });
+}
+
+async function checkDiscordYouTubeChannel(channel, { limit = 3 } = {}) {
+  const checkedAt = new Date().toISOString();
+  try {
+    const parsed = await fetchYouTubeChannelFeed(channel.channel_id);
+    const seenRows = statements.listDiscordYouTubeVideosForChannel.all(channel.channel_id);
+    const seenVideoIds = new Set(seenRows.map((row) => String(row.video_id)));
+    const toNotify = youtubeVideosToNotify({ videos: parsed.videos, seenVideoIds, limit });
+    for (const video of parsed.videos) {
+      if (!seenVideoIds.has(video.videoId)) recordYouTubeVideo(channel.channel_id, video, checkedAt, null);
+    }
+    let sent = 0;
+    for (const video of toNotify) {
+      await sendDiscordActivity("youtube_video", `${parsed.channelTitle || channel.title || "YouTube"}: ${video.title}`, video.publishedAt || checkedAt, {
+        channelId: channel.channel_id,
+        channelTitle: parsed.channelTitle || channel.title || channel.channel_id,
+        videoId: video.videoId,
+        videoTitle: video.title,
+        url: video.url,
+        thumbnailUrl: video.thumbnailUrl,
+        publishedAt: video.publishedAt,
+      });
+      recordYouTubeVideo(channel.channel_id, video, checkedAt, new Date().toISOString());
+      sent += 1;
+    }
+    const latest = parsed.videos[0] ?? null;
+    statements.updateDiscordYouTubeChannelStatus.run(parsed.channelTitle || null, `https://www.youtube.com/channel/${channel.channel_id}`, checkedAt, checkedAt, null, latest?.videoId ?? null, latest?.title ?? null, latest?.publishedAt ?? null, checkedAt, channel.channel_id);
+    return { channelId: channel.channel_id, checked: true, videos: parsed.videos.length, notified: sent };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    statements.updateDiscordYouTubeChannelStatus.run(null, null, checkedAt, null, message, null, null, null, checkedAt, channel.channel_id);
+    return { channelId: channel.channel_id, checked: false, notified: 0, error: message };
+  }
+}
+
+async function runYouTubeChannelMonitorJob({ channelId = "" } = {}) {
+  const settings = getDiscordSettingsRaw();
+  if (!settings.youtube?.enabled) return { skipped: true, reason: "YouTube monitoring is disabled" };
+  const channels = statements.listDiscordYouTubeChannels.all().filter((channel) => channel.enabled !== 0 && (!channelId || String(channel.channel_id) === String(channelId)));
+  const results = [];
+  for (const channel of channels) results.push(await checkDiscordYouTubeChannel(channel));
+  return { checked: results.length, notified: results.reduce((sum, result) => sum + toNumber(result.notified), 0), results };
+}
 function currentAppBuildId() {
   return resolveCurrentAppBuildId({ repoRoot });
 }
@@ -1874,6 +1997,7 @@ function discordEnabledFor(eventType, settings, metadata) {
   if (eventType === "production_completed") return settings.notify.production && settings.notify.productionCompleted && productionNotificationAllowed(eventType, metadata, settings);
   if (eventType === "supplies") return !lowSupplyNotificationSkipReason(metadata, settings);
   if (eventType === "app_update") return settings.notify.appUpdates;
+  if (eventType === "youtube_video") return settings.notify.youtubeVideos && Boolean(discordChannelForEvent(eventType, metadata, settings));
   return false;
 }
 
@@ -1927,6 +2051,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
     : eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
     : eventType === "supplies" ? "lowSupplies"
     : eventType === "app_update" ? "appUpdates"
+    : eventType === "youtube_video" ? "youtubeVideos"
     : "";
   if (selection) return settings.channels?.[settings.notificationChannels?.[selection]] || settings.channelId;
   return settings.channelId;
@@ -1944,6 +2069,7 @@ function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDisco
   if (eventType === "supplies") return settings.notificationChannels?.lowSupplies ?? "notifications";
   if (eventType === "supply_report") return settings.notificationChannels?.supplyReport ?? "modNotes";
   if (eventType === "app_update") return settings.notificationChannels?.appUpdates ?? "notifications";
+  if (eventType === "youtube_video") return settings.notificationChannels?.youtubeVideos ?? "announcements";
   return "notifications";
 }
 
@@ -2105,7 +2231,8 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     const reason = eventType === "production_started" || eventType === "production_completed"
       ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
       : eventType === "supplies" ? lowSupplyNotificationSkipReason(metadata, settings) || "Low supply notification disabled or above threshold"
-      : eventType === "app_update" ? "App update notifications are disabled" : "Notification disabled or below configured threshold";
+      : eventType === "app_update" ? "App update notifications are disabled"
+      : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured" : "Notification disabled or below configured threshold";
     recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true };
   }
@@ -2142,7 +2269,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   };
   const isProduction = eventType === "production_started" || eventType === "production_completed";
   const tier = isProduction ? toNumber(metadata.tier ?? metadata.itemTier) : 0;
-  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : isProduction && tierColors[tier] ? tierColors[tier] : isProduction ? 0x65b7fa : eventType === "app_update" ? 0xa349af : 0xef6461;
+  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : isProduction && tierColors[tier] ? tierColors[tier] : isProduction ? 0x65b7fa : eventType === "app_update" ? 0xa349af : eventType === "youtube_video" ? 0xff0033 : 0xef6461;
   const fields = [];
   if (metadata.itemName) fields.push({ name: "Item", value: String(metadata.itemName), inline: true });
   if (metadata.owner) fields.push({ name: "Member", value: String(metadata.owner), inline: true });
@@ -2161,12 +2288,15 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
   if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
   if (metadata.changeNotes) fields.push({ name: "Changes", value: String(metadata.changeNotes).slice(0, 1024), inline: false });
   if (metadata.changelogUrl) fields.push({ name: "Changelog", value: `[View changes](${metadata.changelogUrl})`, inline: false });
+  if (metadata.channelTitle) fields.push({ name: "Channel", value: String(metadata.channelTitle), inline: true });
+  if (metadata.publishedAt) fields.push({ name: "Published", value: new Date(metadata.publishedAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: true });
   const title = eventType === "market_new_listing" ? "Market Listing"
     : eventType.includes("sale") ? "Market Sale"
     : eventType === "production_started" ? "Craft Started"
     : eventType === "production_completed" ? "Craft Completed"
     : eventType === "supplies" ? "Supply Watch"
     : eventType === "app_update" ? "App Update"
+    : eventType === "youtube_video" ? "New YouTube Video"
     : "Settlement Update";
   return {
     author: { name: "Timbersteel Trade" },
@@ -2177,6 +2307,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
     fields: fields.slice(0, 8),
     timestamp: occurredAt,
     footer: { text: "BitCraft settlement monitor" },
+    ...(metadata.thumbnailUrl ? { thumbnail: { url: String(metadata.thumbnailUrl) } } : {}),
   };
 }
 
@@ -7361,6 +7492,36 @@ const server = createServer(async (req, res) => {
         audit(user, "discord.register_commands", { count: Array.isArray(commands) ? commands.length : 0 });
         return send(res, 200, { commands });
       }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/discord/youtube") return send(res, 200, discordYouTubeStatus());
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/youtube/channels") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const result = await addDiscordYouTubeChannel(body.input ?? body.url ?? body.channelId);
+        audit(user, "discord.youtube_channel.add", { channelId: result.added?.channelId, input: body.input ?? body.url ?? body.channelId, seededVideos: result.seededVideos });
+        return send(res, 200, result);
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/discord/youtube/channels") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const channelId = String(body.channelId ?? "").trim();
+        if (!channelId) return send(res, 400, { error: "YouTube channel ID is required" });
+        statements.setDiscordYouTubeChannelEnabled.run(body.enabled === false ? 0 : 1, new Date().toISOString(), channelId);
+        audit(user, "discord.youtube_channel.toggle", { channelId, enabled: body.enabled !== false });
+        return send(res, 200, discordYouTubeStatus());
+      }
+      if (req.method === "DELETE" && url.pathname === "/api/local/admin/discord/youtube/channels") {
+        const channelId = String(url.searchParams.get("channelId") ?? "").trim();
+        if (!channelId) return send(res, 400, { error: "YouTube channel ID is required" });
+        statements.deleteDiscordYouTubeVideosForChannel.run(channelId);
+        statements.deleteDiscordYouTubeChannel.run(channelId);
+        audit(user, "discord.youtube_channel.delete", { channelId });
+        return send(res, 200, discordYouTubeStatus());
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/youtube/check") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const channelId = String(body.channelId ?? "").trim();
+        const result = await runYouTubeChannelMonitorJob({ manual: true, channelId });
+        audit(user, "discord.youtube_channel.check", { channelId, checked: result.checked, notified: result.notified });
+        return send(res, 200, discordYouTubeStatus({ result }));
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/discord/discovery") {
         const discovery = await discordGuildDiscovery();
         audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, members: discovery.memberCount });
@@ -7588,6 +7749,10 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
         statements.upsertSetting.run("market_deal_watch_json", JSON.stringify(marketDealWatch), updatedAt);
         statements.upsertSetting.run("discord_json", JSON.stringify(discordSettings), updatedAt);
+        const youtubePollSeconds = Math.max(60, Math.round(toNumber(discordSettings.youtube?.pollIntervalMinutes) * 60) || 600);
+        const youtubeSchedule = `interval@${youtubePollSeconds}`;
+        const youtubeJob = statements.getScheduledJob.get("youtube_channel_monitor");
+        if (youtubeJob) statements.updateScheduledJobSettings.run(youtubeSchedule, youtubeJob.enabled === 0 ? 0 : 1, nextScheduledRunIso(youtubeSchedule), updatedAt, "youtube_channel_monitor");
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         activeRegionsCache = null;
@@ -8027,3 +8192,5 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
+
+

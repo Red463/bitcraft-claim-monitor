@@ -357,6 +357,32 @@ export const schemaBootstrapSql = `
     response_json TEXT,
     occurred_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS discord_youtube_channels (
+    channel_id TEXT PRIMARY KEY,
+    input TEXT NOT NULL,
+    title TEXT,
+    url TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_checked_at TEXT,
+    last_success_at TEXT,
+    last_error TEXT,
+    last_video_id TEXT,
+    last_video_title TEXT,
+    last_video_published_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS discord_youtube_videos (
+    video_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    thumbnail_url TEXT,
+    published_at TEXT,
+    seen_at TEXT NOT NULL,
+    notified_at TEXT,
+    FOREIGN KEY (channel_id) REFERENCES discord_youtube_channels(channel_id) ON DELETE CASCADE
+  );
   CREATE TABLE IF NOT EXISTS discord_craft_watches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
@@ -443,6 +469,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_discord_youtube_videos_channel ON discord_youtube_videos (channel_id, published_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_watches_profession ON discord_craft_watches (guild_id, profession_key, mode);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);

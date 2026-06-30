@@ -34,6 +34,7 @@ export type DiscordRoleOption = { key: string; label: string; roleId: string; em
 export type DiscordRolePanel = { key: string; label: string; channelId: string; messageId: string; title: string; description: string; mode: "single" | "multi"; showHelperText: boolean; options: DiscordRoleOption[] };
 export type DiscordWelcomeFlow = { enabled: boolean; channelId: string; messageId: string; title: string; message: string; readyRoleId: string; showNextStep: boolean };
 export type DiscordPresence = { enabled: boolean; status: "online" | "idle" | "dnd" | "invisible"; activityType: "playing" | "watching" | "listening" | "competing"; activityText: string };
+export type DiscordYouTubeSettings = { enabled: boolean; pollIntervalMinutes: number };
 export type DiscordSettings = {
   enabled: boolean;
   applicationId: string;
@@ -56,7 +57,8 @@ export type DiscordSettings = {
   rolePanels: DiscordRolePanel[];
   welcomeFlow: DiscordWelcomeFlow;
   presence: DiscordPresence;
-  notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean };
+  youtube: DiscordYouTubeSettings;
+  notify: { marketListings: boolean; marketSales: boolean; production: boolean; productionStarted: boolean; productionCompleted: boolean; lowSupplies: boolean; appUpdates: boolean; supplyReports: boolean; youtubeVideos: boolean };
   botToken?: string;
   clearBotToken?: boolean;
   botTokenConfigured?: boolean;

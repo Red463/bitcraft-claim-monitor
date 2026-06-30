@@ -23,6 +23,7 @@ test("discord settings normalization preserves release-safe defaults", () => {
     },
     channels: {
       notifications: "old-alerts",
+      announcements: "  announcements  ",
       forestry: "custom-forestry",
     },
   });
@@ -39,6 +40,10 @@ test("discord settings normalization preserves release-safe defaults", () => {
   assert.equal(settings.productionUsers, "user-a, user-b");
   assert.equal(settings.supplyReportIntervalDays, 3);
   assert.equal(settings.channels.notifications, "alerts");
+  assert.equal(settings.channels.announcements, "announcements");
+  assert.equal(settings.notificationChannels.youtubeVideos, "announcements");
+  assert.equal(settings.notify.youtubeVideos, true);
+  assert.deepEqual(settings.youtube, { enabled: true, pollIntervalMinutes: 10 });
   assert.equal(settings.craftChannels.forestry, "custom-forestry");
   assert.equal(settings.notify.marketListings, false);
   assert.equal(settings.notify.marketSales, true);

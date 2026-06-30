@@ -31,6 +31,7 @@ export const DEFAULT_CRAFT_CHANNELS: Record<string, string> = {
 
 export const DEFAULT_DISCORD_CHANNELS: Record<string, string> = {
   notifications: "",
+  announcements: "",
   modNotes: "1509972023927902218",
   modLog: "",
   ...DEFAULT_CRAFT_CHANNELS,
@@ -59,6 +60,7 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
   marketSales: "notifications",
   lowSupplies: "notifications",
   appUpdates: "notifications",
+  youtubeVideos: "announcements",
   supplyReport: "modNotes",
   productionStarted: "profession",
   productionCompleted: "profession",
@@ -194,7 +196,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     rolePanels: DEFAULT_ROLE_PANELS,
     welcomeFlow: DEFAULT_WELCOME_FLOW,
     presence: DEFAULT_DISCORD_PRESENCE,
-    notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true },
+    youtube: { enabled: true, pollIntervalMinutes: 10 },
+    notify: { marketListings: true, marketSales: true, production: true, productionStarted: true, productionCompleted: true, lowSupplies: false, appUpdates: true, supplyReports: true, youtubeVideos: true },
     botTokenConfigured: false,
     botTokenSource: null,
     interactionUrl: "/api/discord/interactions",
