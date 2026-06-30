@@ -69,15 +69,8 @@ function compactDate(value: unknown): string {
   return `${timeAgo(value)} (${dateLabel(value)})`;
 }
 
-function permissionLabel(member: AnyRecord): string {
-  const labels = [];
-  if (member.hasStorage) labels.push("Storage");
-  if (member.canAddHexite) labels.push("Can add hexite");
-  return labels.join(", ") || "No relevant access";
-}
-
 function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () => void }) {
-  const accessMembers: AnyRecord[] = Array.isArray(tower.accessMembers) ? tower.accessMembers : [];
+  const members: AnyRecord[] = Array.isArray(tower.members) ? tower.members : [];
   return (
     <div className="help-overlay" onClick={onClose}>
       <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
@@ -91,10 +84,10 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
           {mapHref(tower) ? <a className="toolbar-button" href={mapHref(tower) ?? "#"}><MapPin size={14} /> Open on map</a> : null}
         </div>
         <div className="tower-access-note">
-          Showing empire members BitJita reports with storage access or likely claim-management access for adding hexite.
+          Showing all empire members BitJita reports for this empire, with last login and relevant watchtower access flags.
         </div>
         <div className="tower-access-list">
-          {accessMembers.length ? accessMembers.map((member) => (
+          {members.length ? members.map((member) => (
             <article key={member.entityId || member.username}>
               <div>
                 <strong>{member.username ?? "Unknown"}</strong>
@@ -106,7 +99,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
               </div>
               <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
             </article>
-          )) : <div className="empty-state compact">No storage or hexite-capable members were returned for this empire.</div>}
+          )) : <div className="empty-state compact">No empire members were returned for this empire.</div>}
         </div>
       </section>
     </div>
@@ -157,10 +150,10 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const overviewSummary = overview.data?.summary ?? {};
   const towerSummary = watchtowers.data?.summary ?? {};
   const largestEmpire = overviewSummary.largestEmpireName ?? "-";
-  const accessMembersByEmpire = React.useMemo(() => {
+  const membersByEmpire = React.useMemo(() => {
     const map = new Map<string, AnyRecord[]>();
     for (const empire of (watchtowers.data?.empires ?? []) as AnyRecord[]) {
-      map.set(String(empire.entityId ?? empire.empireId ?? ""), Array.isArray(empire.accessMembers) ? empire.accessMembers : []);
+      map.set(String(empire.entityId ?? empire.empireId ?? ""), Array.isArray(empire.members) ? empire.members : []);
     }
     return map;
   }, [watchtowers.data]);
@@ -178,8 +171,8 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const towerColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
     ["Empire", (row) => <strong>{row.empireName}</strong>],
     ["Tower", (row) => {
-      const accessMembers = accessMembersByEmpire.get(String(row.empireId ?? "")) ?? [];
-      return <span className="tower-name-cell"><strong>{row.nickname ?? "Watchtower"}</strong><small>{accessMembers.length ? `${formatNumber(accessMembers.length)} access members` : "No access members returned"}</small></span>;
+      const members = membersByEmpire.get(String(row.empireId ?? "")) ?? [];
+      return <span className="tower-name-cell"><strong>{row.nickname ?? "Watchtower"}</strong><small>{members.length ? `${formatNumber(members.length)} empire members` : "No members returned"}</small></span>;
     }],
     ["Coordinates", (row) => {
       const href = mapHref(row);
@@ -245,7 +238,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : `${formatNumber(towerRows.length)} shown`}</span></div>
-            <DataTable rows={towerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, accessMembers: accessMembersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
+            <DataTable rows={towerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
           </section>
         </>
       )}

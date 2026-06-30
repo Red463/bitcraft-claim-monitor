@@ -3853,7 +3853,7 @@ function nestedCoordinate(source, axis) {
   return null;
 }
 
-function normalizeEmpireAccessMember(member) {
+function normalizeEmpireMember(member) {
   const permissions = parseMemberPermissions(member);
   const rawHexiteAccess = member?.canAddHexite ?? member?.addHexitePermission ?? member?.hexitePermission ?? member?.canContributeHexite ?? member?.claimHexitePermission;
   const canAddHexite = rawHexiteAccess != null ? Boolean(rawHexiteAccess === true || rawHexiteAccess === 1 || String(rawHexiteAccess).toLowerCase() === "true") : Boolean(permissions.coOwnerPermission || permissions.officerPermission || permissions.buildPermission);
@@ -3868,6 +3868,11 @@ function normalizeEmpireAccessMember(member) {
     canAddHexite,
     permissions,
   };
+}
+
+function compareEmpireMembers(a, b) {
+  if (Boolean(a.signedIn) !== Boolean(b.signedIn)) return a.signedIn ? -1 : 1;
+  return lastLoginMs(b.lastLoginTimestamp) - lastLoginMs(a.lastLoginTimestamp) || String(a.username).localeCompare(String(b.username));
 }
 
 function normalizeEmpireTower(tower, empire, inactivity) {
@@ -3906,7 +3911,7 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
     const empireRows = await mapWithConcurrency(overview.empires, 2, async (empire) => {
       if (Date.now() - startedAt > deadlineMs) {
         deadlineHit = true;
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Skipped because the watchtower scan deadline was reached", accessMembers: [], towerCount: 0, towers: [] };
+        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Skipped because the watchtower scan deadline was reached", members: [], accessMembers: [], towerCount: 0, towers: [] };
       }
       try {
         const [detailPayload, towerPayload] = await Promise.all([
@@ -3917,17 +3922,19 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
         const members = unwrap(detailPayload, "members", []);
         const towers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
         const inactivity = empireInactivity({ ...empire, ...detailEmpire }, members, days);
-        const accessMembers = members.map(normalizeEmpireAccessMember).filter((member) => member.hasStorage || member.canAddHexite);
+        const normalizedMembers = members.map(normalizeEmpireMember).sort(compareEmpireMembers);
+        const accessMembers = normalizedMembers.filter((member) => member.hasStorage || member.canAddHexite);
         return {
           ...empire,
           ...inactivity,
+          members: normalizedMembers,
           accessMembers,
           towerCount: towers.length,
           towers: towers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId),
         };
       } catch (error) {
         errors.push(`${empire.name}: ${error instanceof Error ? error.message : String(error)}`);
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", accessMembers: [], towerCount: 0, towers: [] };
+        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", members: [], accessMembers: [], towerCount: 0, towers: [] };
       }
     });
     if (deadlineHit) errors.push("Watchtower scan stopped early to avoid timing out. Showing partial results; retry after the cache refreshes.");

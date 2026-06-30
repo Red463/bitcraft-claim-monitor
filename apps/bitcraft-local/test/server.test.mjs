@@ -251,8 +251,9 @@ test("server collection paginates listings and protects production mutations", a
       members: [
         { entityId: "leader-1", playerName: "Leader One", rankTitle: "The Earth King", lastLoginTimestamp: "2026-05-01T12:00:00.000Z", buildPermission: true },
         { entityId: "citizen-1", playerName: "Citizen One", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
+        { entityId: "citizen-2", playerName: "Citizen Two", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-21T12:00:00.000Z" },
       ],
-      count: 2,
+      count: 3,
     });
     if (url.pathname === "/api/empires/empire-1/towers") return json(res, [
       { entityId: "tower-1", locationX: 111, locationZ: 222, locationDimension: 0, energy: 75, upkeep: 10, active: true, nickname: "North Tower", siege: [] },
@@ -457,6 +458,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.towers[0].locationX, 111);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);
+  assert.equal(regionalWatchtowers.empires[0].members.length, 3);
+  assert.equal(regionalWatchtowers.empires[0].members[0].username, "Citizen Two");
+  assert.equal(regionalWatchtowers.empires[0].members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
+  assert.equal(regionalWatchtowers.empires[0].members.some((member) => member.username === "Citizen Two" && !member.hasStorage && !member.canAddHexite), true);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.hasStorage), true);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.canAddHexite), true);
   assert.equal(regionalWatchtowers.unclaimedAvailable, false);

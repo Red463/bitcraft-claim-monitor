@@ -120,7 +120,8 @@
 .coordinate-cell a:hover { text-decoration: underline; }
 .tower-name-cell { display: grid; gap: 3px; }
 .tower-name-cell small { color: var(--muted); font-size: 11px; font-weight: 600; }
-.tower-access-dialog { width: min(780px, calc(100vw - 32px)); }
+.empires-page .help-overlay { position: fixed; inset: 0; align-items: center; justify-items: center; overflow: auto; }
+.tower-access-dialog { width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: hidden; }
 .tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(4,8,14,.42); }
 .tower-dialog-summary span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .tower-access-note { color: var(--muted); font-size: 13px; line-height: 1.45; }

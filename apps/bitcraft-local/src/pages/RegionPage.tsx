@@ -20,14 +20,20 @@ import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatCompactNumber, formatNumber } from "../utils/format";
 import { getOwnerName } from "../utils/ownership";
 import { normalizeData } from "../utils/normalize";
+import { regionScoreMaxima, settlementRegionScore } from "../utils/regionScore";
 
 // Region compares the monitored settlement against other visible settlements in
 // the same active region. Rankings are derived from the current BitJita claim
 // list and should be treated as a snapshot, not a complete historical ranking.
 export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
-  const [sortKey, setSortKey] = usePersistedState("region.sort", "tier");
-  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction", "desc");
+  const [sortKey, setSortKey] = usePersistedState("region.sort.v2", "score");
+  const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction.v2", "desc");
+  const allRows = data.region;
+  const scoreMaxima = regionScoreMaxima(allRows);
+  const scoreFormulaTitle = "Score = 75% tier + 15% supplies + 7% treasury + 3% tiles. Treasury uses log scaling so huge treasuries do not dominate the ranking.";
+  const scoreFor = (row: AnyRecord) => settlementRegionScore(row, scoreMaxima);
   const sorters: Record<string, (row: AnyRecord) => string | number> = {
+    score: scoreFor,
     name: (row) => String(row.name ?? ""),
     owner: getOwnerName,
     tier: (row) => toNumber(row.tier),
@@ -35,7 +41,6 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     treasury: (row) => toNumber(row.treasury),
     numTiles: (row) => toNumber(row.numTiles),
   };
-  const allRows = data.region;
   const rows = [...allRows].sort((a, b) => {
     const aVal = sorters[sortKey]?.(a) ?? 0;
     const bVal = sorters[sortKey]?.(b) ?? 0;
@@ -47,6 +52,11 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const mine = allRows.find((row) => String(row.entityId) === String(data.claim.entityId));
   const rank = (field: string) => {
     const sorted = [...allRows].sort((a, b) => toNumber(b[field]) - toNumber(a[field]));
+    const idx = sorted.findIndex((row) => String(row.entityId) === String(data.claim.entityId));
+    return idx >= 0 ? `#${idx + 1}` : "-";
+  };
+  const scoreRank = () => {
+    const sorted = [...allRows].sort((a, b) => scoreFor(b) - scoreFor(a));
     const idx = sorted.findIndex((row) => String(row.entityId) === String(data.claim.entityId));
     return idx >= 0 ? `#${idx + 1}` : "-";
   };
@@ -74,6 +84,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     ["#", "rank", (_r, i) => i + 1],
     ["Claim", "name", (r) => <span className={String(r.entityId) === String(data.claim.entityId) ? "mine-text" : ""}>{String(r.entityId) === String(data.claim.entityId) ? <Crown size={13} /> : null}{r.name}</span>],
     ["Owner", "owner", (r) => <TrackedOwnerName name={getOwnerName(r)} claim={data.claim} />],
+    ["Score", "score", (r) => <strong title={scoreFormulaTitle}>{formatNumber(scoreFor(r), 0)}</strong>],
     ["Tier", "tier", (r) => <TierBadge tier={r.tier} />],
     ["Supplies", "supplies", (r) => formatNumber(r.supplies)],
     ["Treasury", "treasury", (r) => `${formatNumber(r.treasury)}g`],
@@ -85,7 +96,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       <header className="members-topbar region-topbar">
         <div>
           <h2>{data.claim.regionName ?? "Region"}</h2>
-          <p>{formatNumber(allRows.length)} settlements compared across supplies, treasury, tiles, and tier</p>
+          <p>{formatNumber(allRows.length)} settlements ranked by weighted score: tier, supplies, treasury, and tiles</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -102,7 +113,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       </header>
       {mine ? (
         <div className="rank-grid region-rank-grid">
-          <MiniStat icon={<Crown />} label="Tier Rank" value={rank("tier")} />
+          <MiniStat icon={<Crown />} label="Score Rank" value={scoreRank()} />
           <MiniStat icon={<Box />} label="Supply Rank" value={rank("supplies")} />
           <MiniStat icon={<CircleDollarSign />} label="Treasury Rank" value={rank("treasury")} />
           <MiniStat icon={<Hammer />} label="Tile Rank" value={rank("numTiles")} />
@@ -136,12 +147,12 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       <section className="command-filter-panel region-table-panel">
         <div className="command-filter-header">
           <span className="command-filter-title"><Globe2 size={15} /> Regional rankings</span>
-          <span>Click a column heading to sort</span>
+          <span>Default sort uses weighted score: 75% tier, 15% supplies, 7% treasury, 3% tiles</span>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
-              <tr>{columns.map(([label, key]) => <th key={label}><button className="sort-button" onClick={() => key !== "rank" && changeSort(key)} disabled={key === "rank"}>{label}{key !== "rank" ? (sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />) : null}</button></th>)}</tr>
+              <tr>{columns.map(([label, key]) => <th key={label}><button className="sort-button" title={key === "score" ? scoreFormulaTitle : undefined} onClick={() => key !== "rank" && changeSort(key)} disabled={key === "rank"}>{label}{key !== "rank" ? (sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />) : null}</button></th>)}</tr>
             </thead>
             <tbody>
               {rows.map((row, index) => <tr className={String(row.entityId) === String(data.claim.entityId) ? "mine-row" : ""} key={row.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}</tr>)}

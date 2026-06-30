@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.107] - 2026-06-30
+
+### Changed
+
+- Added weighted regional settlement scores to the Region rankings, prioritising tier, supplies, treasury, and tiles with hover details explaining the formula.
+- Improved watchtower details so the popup stays in the visible viewport and shows all empire members with their latest login status.
+
 ## [1.0.0-beta.106] - 2026-06-30
 
 ### Changed
