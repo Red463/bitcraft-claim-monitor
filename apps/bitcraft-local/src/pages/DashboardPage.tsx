@@ -23,9 +23,10 @@ import { normalizeData } from "../utils/normalize";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, activitySummary, signedDelta } from "./activity/activityUtils";
 import { activityStyle } from "./activity/activityDisplay";
+import { buildMarketIncomeSummary } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
-export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+export function Dashboard({ data, activity, snapshots, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   // The dashboard intentionally mixes live BitJita data with local historical
   // snapshots. Snapshot-backed trends only appear when enough history exists;
   // the page should never fabricate trend data.
@@ -71,11 +72,13 @@ export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpd
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const treasuryTrend = [...snapshots]
-    .map((snapshot) => ({ at: String(snapshot.captured_at ?? snapshot.capturedAt ?? ""), value: toNumber(snapshot.treasury) }))
-    .filter((point) => point.at && point.value > 0)
-    .sort((a, b) => timestampMs(a.at) - timestampMs(b.at))
-    .slice(-48);
+  const marketIncome = buildMarketIncomeSummary(Array.isArray(marketHistory?.daily) ? marketHistory.daily : []);
+  const confirmedMarketSales = toNumber(marketHistory?.totals?.salesCount) || marketIncome.salesCount;
+  const confirmedMarketUnits = toNumber(marketHistory?.totals?.unitsSold) || marketIncome.unitsSold;
+  const confirmedMarketIncome = toNumber(marketHistory?.totals?.totalValue) || marketIncome.totalValue;
+  const marketIncomeDetail = confirmedMarketSales
+    ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
+    : "No confirmed sales tracked yet";
   const dashboardSummaryActivity = Array.isArray(dashboardSummary?.recentActivity) ? dashboardSummary.recentActivity : null;
   const dashboardActivity = [...(dashboardSummaryActivity ?? activity)]
     .filter((event) => !["treasury", "supplies"].includes(String(event.event_type ?? "")))
@@ -136,21 +139,20 @@ export function Dashboard({ data, activity, snapshots, dashboardSummary, lastUpd
       <section className="dashboard-kpis">
         <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
-        <DashboardMetric icon={<Hammer />} label="Construction" value={activeProjects} detail={`${activeProjects} current project${activeProjects === 1 ? "" : "s"}`} onClick={() => onNavigate("construction")} />
+        <DashboardMetric icon={<CircleDollarSign />} label="Treasury" value={`${formatNumber(treasury)}g`} detail={`${signedDelta(treasuryNetToday, 0, "g")} net today`} tone="gold" onClick={() => onNavigate("activity")} />
         <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatCompactNumber(marketListingValue)} total listing value`} tone="green" onClick={() => onNavigate("market")} />
         <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
       </section>
 
       <section className="dashboard-main-grid">
         <article className="dashboard-card dashboard-card-chart">
-          <DashboardCardHeader title="Treasury Over Time" icon={<CircleDollarSign size={15} />} action="7 Days" />
+          <DashboardCardHeader title="Market Income Over Time" icon={<CircleDollarSign size={15} />} action="Tracked Sales" />
           <div className="dashboard-money-row">
-            <strong>{formatNumber(treasury)}g</strong>
-            <span className={treasuryNetToday < 0 ? "negative" : treasuryNetToday > 0 ? "positive" : ""}>{signedDelta(treasuryNetToday, 0, "g")} net today</span>
+            <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
+            <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
-          <DashboardTrend points={treasuryTrend} suffix="g" />
+          <DashboardTrend points={marketIncome.trend} suffix="g" ariaLabel="Market income trend" emptyMessage="No confirmed market sales tracked yet." />
         </article>
-
         <article className="dashboard-card dashboard-card-supply">
           <DashboardCardHeader title="Supply Status" icon={<Package size={15} />} />
           <div className="dashboard-supply-lead"><strong>{formatDaysAndHours(supplyDays)}</strong><span>until full depletion</span></div>

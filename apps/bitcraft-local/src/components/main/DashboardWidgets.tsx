@@ -44,13 +44,13 @@ export function DashboardCardHeader({ title, icon, action, onClick }: { title: s
   );
 }
 
-export function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: string; value: number }>; suffix?: string }) {
+export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily trend appears after snapshots exist for at least two days.", ariaLabel = "Dashboard trend" }: { points: Array<{ at: string; value: number }>; suffix?: string; emptyMessage?: string; ariaLabel?: string }) {
   const datedPoints = points
     .map((point) => ({ ...point, ms: timestampMs(point.at) }))
     .filter((point) => point.ms > 0)
     .sort((a, b) => a.ms - b.ms);
   if (datedPoints.length < 2) {
-    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Daily trend appears after snapshots exist for at least two days.</span></div>;
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>{emptyMessage}</span></div>;
   }
   const width = 560;
   const height = 230;
@@ -74,7 +74,7 @@ export function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: st
   }
   const chartPoints = [...dailyPoints.values()].sort((a, b) => a.dayMs - b.dayMs);
   if (chartPoints.length < 2) {
-    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>Daily trend appears after snapshots exist for at least two days.</span></div>;
+    return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>{emptyMessage}</span></div>;
   }
   const values = chartPoints.map((point) => point.value);
   const min = Math.min(...values);
@@ -95,7 +95,7 @@ export function DashboardTrend({ points, suffix = "" }: { points: Array<{ at: st
   const axisDays = Array.from({ length: 7 }, (_, index) => new Date(startMs + index * dayMs));
   return (
     <div className="dashboard-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} aria-label={`Treasury trend ending at ${formatNumber(latest.value)}${suffix}`}>
+      <svg viewBox={`0 0 ${width} ${height}`} aria-label={`${ariaLabel} ending at ${formatNumber(latest.value)}${suffix}`}>
         <defs>
           <linearGradient id="dashboardAreaGold" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgba(247, 200, 54, .46)" />

@@ -32,11 +32,15 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(payloadDomainCollector.tradeVolume, "market");
   assert.equal(payloadDomainCollector.regionalBuyOrders, "buyOrders");
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
+  assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
+  assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
   assert.deepEqual(collectorCurrentTables.buyOrders, ["market_buy_orders_current", "market_regional_sale_averages_current"]);
 });
 
-test("snapshot history default interval is long enough not to monopolize production", () => {
+test("snapshot and side-effect collector intervals do not monopolize production", () => {
   assert.equal(domainCollectorDefaults.snapshotHistory.intervalSeconds, 900);
+  assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
+  assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
   assert.equal(normalizeCollectorSettings({}).snapshotHistory.intervalSeconds, 900);
 });
 

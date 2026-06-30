@@ -737,6 +737,14 @@ function collectorFailure(key, startedAt, error) {
   });
 }
 
+function sideEffectCollectorDue(key, force = false) {
+  if (force) return true;
+  const settings = getCollectorSettings()[key];
+  if (!settings || settings.enabled === false) return false;
+  const lastSuccessAt = pollStatus.collectors[key]?.lastSuccessAt;
+  if (!lastSuccessAt) return true;
+  return Date.now() - new Date(lastSuccessAt).getTime() >= settings.intervalSeconds * 1000;
+}
 function blankCollectionMetrics() {
   return {
     startedAt: new Date().toISOString(),
@@ -3644,10 +3652,6 @@ async function recordSnapshot(payload) {
   if (!claimId) throw new Error("Missing claim id");
 
   writeSettlementSnapshot(claimId, now, payload, summary);
-  await syncMarketListingsForSnapshot(claimId, payload.market ?? { listings: [] }, now);
-  const productionResult = await syncProductionForSnapshot(claimId, payload.crafts, now);
-  for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
-  await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
   return { ok: true, capturedAt: now };
 }
 async function fetchBitjita(pathname, options = {}) {
@@ -5694,6 +5698,31 @@ function enqueueSnapshot(payload) {
   return queued;
 }
 
+async function runMarketListingsCollector(claimId, currentData, force = false) {
+  if (!sideEffectCollectorDue("marketListings", force)) return;
+  const startedAt = collectorAttempt("marketListings");
+  try {
+    await syncMarketListingsForSnapshot(claimId, currentData.market ?? { listings: [] }, new Date().toISOString());
+    collectorSuccess("marketListings", startedAt);
+  } catch (error) {
+    collectorFailure("marketListings", startedAt, error);
+    throw error;
+  }
+}
+
+async function runProductionContributionCollector(claimId, currentData, force = false) {
+  if (!sideEffectCollectorDue("productionContributions", force)) return;
+  const startedAt = collectorAttempt("productionContributions");
+  try {
+    const productionResult = await syncProductionForSnapshot(claimId, currentData.crafts, new Date().toISOString());
+    for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
+    await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
+    collectorSuccess("productionContributions", startedAt);
+  } catch (error) {
+    collectorFailure("productionContributions", startedAt, error);
+    throw error;
+  }
+}
 async function collectServerSnapshot(force = false) {
   // Polling is a side-effect loop: it records snapshots, imports activity/trade
   // history, and drives Discord notifications. Browser tabs should treat this as
@@ -5722,6 +5751,8 @@ async function collectServerSnapshot(force = false) {
       source: "server_poll",
     });
     collectorSuccess("snapshotHistory", snapshotStartedAt);
+    await runMarketListingsCollector(claimId, currentData, force);
+    await runProductionContributionCollector(claimId, currentData, force);
     const storageStartedAt = collectorAttempt("storageActivity");
     pollStatus.storageLastAttemptAt = new Date().toISOString();
     const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] }, { budget: storageActivityJobBudget });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
+import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
 
 test("buildMarketTopItems aggregates sales by item and sorts by units then value", () => {
   const topItems = buildMarketTopItems([
@@ -32,6 +32,20 @@ test("buildMarketDaily groups sales into chronological day buckets", () => {
   ]);
 });
 
+test("buildMarketIncomeSummary totals confirmed daily market sales", () => {
+  const summary = buildMarketIncomeSummary([
+    { day: "2026-06-27", salesCount: 1, unitsSold: 2, totalValue: 12 },
+    { day: "2026-06-28", salesCount: 2, unitsSold: 5, totalValue: 42 },
+  ]);
+
+  assert.equal(summary.totalValue, 54);
+  assert.equal(summary.salesCount, 3);
+  assert.equal(summary.unitsSold, 7);
+  assert.deepEqual(summary.trend, [
+    { at: "2026-06-27", value: 12 },
+    { at: "2026-06-28", value: 42 },
+  ]);
+});
 test("formatMarketDay formats ISO days and preserves unknown labels", () => {
   assert.match(formatMarketDay("2026-06-28"), /28|Jun/);
   assert.equal(formatMarketDay("Unknown"), "Unknown");

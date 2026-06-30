@@ -149,6 +149,8 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
   snapshotHistory: { label: "Snapshot and history", enabled: true, intervalSeconds: 900 },
+  marketListings: { label: "Market listing sync", enabled: true, intervalSeconds: 60 },
+  productionContributions: { label: "Production contribution sync", enabled: true, intervalSeconds: 300 },
   storageActivity: { label: "Storage activity", enabled: true, intervalSeconds: 60 },
   marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },
 };
