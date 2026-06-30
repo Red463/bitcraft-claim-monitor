@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.110] - 2026-06-30
+
+### Fixed
+
+- Fixed YouTube Monitor channel selection so any synced Discord channel can be used for video announcements.
+- Fixed Discord app update announcements so worker-side scheduled checks recover missed release notifications after deploys.
+
 ## [1.0.0-beta.109] - 2026-06-30
 
 ### Added
@@ -1969,5 +1976,4 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-
 

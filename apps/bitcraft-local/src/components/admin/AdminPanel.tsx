@@ -769,6 +769,7 @@ export function AdminPanel({
       {discoveredChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.label ?? `#${channel.name}`} ({channel.id})</option>)}
     </select>
   );
+  const notificationChannelIdSelect = (key: string, value: string) => channelIdSelect(value, (nextValue) => updateNotificationChannel(key, nextValue));
   const memberIdSelect = (value: string, onChange: (value: string) => void) => (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a member</option>
@@ -1866,7 +1867,7 @@ export function AdminPanel({
             <DiscordYouTubeMonitorSection
               api={api}
               busyButtonClass={busyButtonClass}
-              channelSelect={channelSelect}
+              channelIdSelect={notificationChannelIdSelect}
               discord={draft.discord}
               run={run}
               updateDiscord={updateDiscord}
@@ -2031,6 +2032,4 @@ export function AdminPanel({
     </div>
   );
 }
-
-
 

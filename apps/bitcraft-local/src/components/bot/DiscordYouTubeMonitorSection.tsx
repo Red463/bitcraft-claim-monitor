@@ -8,14 +8,14 @@ type Api = (path: string, options?: RequestInit) => Promise<AnyRecord>;
 type Props = {
   api: Api;
   busyButtonClass: (key: string, className?: string) => string;
-  channelSelect: (key: string, value: string) => React.ReactNode;
+  channelIdSelect: (key: string, value: string) => React.ReactNode;
   discord: AnyRecord;
   run: (task: () => Promise<unknown>, success?: string, busyKey?: string) => Promise<void>;
   updateDiscord: (patch: Partial<AnyRecord>) => void;
   updateDiscordNotify: (key: string, value: boolean) => void;
 };
 
-export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelSelect, discord, run, updateDiscord, updateDiscordNotify }: Props) {
+export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSelect, discord, run, updateDiscord, updateDiscordNotify }: Props) {
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [input, setInput] = React.useState("");
 
@@ -65,9 +65,9 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelSele
           <h4>Announcements</h4>
           <label className="field">
             <span>Discord channel</span>
-            {channelSelect("youtubeVideos", discord.notificationChannels.youtubeVideos ?? "announcements")}
+            {channelIdSelect("youtubeVideos", discord.notificationChannels.youtubeVideos ?? discord.channels?.announcements ?? "")}
           </label>
-          <p className="legend">Select the announcements channel in Channels first, then save settings.</p>
+          <p className="legend">Choose any synced Discord channel for YouTube video announcements, then save settings.</p>
         </div>
       </div>
       <div className="discord-tool-form-card youtube-add-card">

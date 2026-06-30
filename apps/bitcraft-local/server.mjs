@@ -371,6 +371,13 @@ const scheduledJobRegistry = {
     enabled: true,
     run: runYouTubeChannelMonitorJob,
   },
+  discord_app_update_announcer: {
+    label: "Discord app update announcer",
+    description: "Checks for newly deployed app versions and posts update notes to Discord.",
+    schedule: "interval@300",
+    enabled: true,
+    run: runDiscordAppUpdateAnnouncementJob,
+  },
   market_deal_watch: {
     label: "Market deal watch",
     description: "Checks watched Price Finder items for sell listings below confirmed regional sale averages.",
@@ -475,7 +482,7 @@ function discordYouTubeStatus(extra = {}) {
   return {
     enabled: Boolean(settings.youtube?.enabled && settings.notify?.youtubeVideos),
     youtube: settings.youtube,
-    announcementsChannelId: settings.channels?.[settings.notificationChannels?.youtubeVideos ?? "announcements"] || settings.channels?.announcements || "",
+    announcementsChannelId: youtubeChannelSelection(settings) || "",
     channels: statements.listDiscordYouTubeChannels.all().map(publicDiscordYouTubeChannel),
     scheduledJob: scheduledJobRow(statements.getScheduledJob.get("youtube_channel_monitor")),
     ...extra,
@@ -2040,7 +2047,13 @@ function productionNotificationAllowed(eventType, metadata = {}, settings = getD
   return !productionNotificationSkipReason(eventType, metadata, settings);
 }
 
+function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
+  const selection = String(settings.notificationChannels?.youtubeVideos ?? "announcements").trim();
+  return settings.channels?.[selection] || (validDiscordId(selection) ? selection : settings.channelId);
+}
+
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "youtube_video") return youtubeChannelSelection(settings);
   if (eventType === "production_started" || eventType === "production_completed") {
     const selection = settings.notificationChannels?.[eventType === "production_started" ? "productionStarted" : "productionCompleted"] ?? "profession";
     if (selection && selection !== "profession") return settings.channels?.[selection] || settings.channelId;
@@ -2051,7 +2064,6 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
     : eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
     : eventType === "supplies" ? "lowSupplies"
     : eventType === "app_update" ? "appUpdates"
-    : eventType === "youtube_video" ? "youtubeVideos"
     : "";
   if (selection) return settings.channels?.[settings.notificationChannels?.[selection]] || settings.channelId;
   return settings.channelId;
@@ -3327,7 +3339,7 @@ async function sendDiscordTestNotification(kind = "basic") {
   }
 }
 
-async function announceDiscordAppUpdateIfNeeded() {
+async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
   const settings = getDiscordSettingsRaw();
   const releaseKey = currentAppReleaseKey();
   if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) {
@@ -3336,8 +3348,8 @@ async function announceDiscordAppUpdateIfNeeded() {
   }
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
   if (lastAnnounced === releaseKey) {
-    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Release ${releaseKey} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl, lastAnnounced }, settings) });
-    return;
+    if (recordAlreadyAnnounced) recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Release ${releaseKey} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl, lastAnnounced }, settings) });
+    return { skipped: true, reason: `Release ${releaseKey} already announced` };
   }
   const updateDetails = await currentAppUpdateDetails();
   const result = await sendDiscordActivity(
@@ -3348,6 +3360,11 @@ async function announceDiscordAppUpdateIfNeeded() {
     settings,
   );
   if (result.ok && !result.skipped) statements.upsertSetting.run("discord_last_announced_version", releaseKey, new Date().toISOString());
+  return result;
+}
+
+async function runDiscordAppUpdateAnnouncementJob() {
+  return announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced: false });
 }
 
 function discordSupplyEmbed(claim) {
@@ -8192,5 +8209,4 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
-
 
