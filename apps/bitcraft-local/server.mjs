@@ -124,8 +124,9 @@ function errorMessage(error) {
 }
 
 // Scheduled jobs and Discord/background tasks intentionally run outside request
-// lifetimes. A transient upstream timeout must be logged and surfaced in admin
-// diagnostics, but it must not terminate the whole Node process.
+// lifetimes. A transient async failure must be logged and surfaced in admin
+// diagnostics, but it must not terminate the whole Node process. An uncaught
+// exception is different: mark the process failed so systemd restarts workers.
 process.on("unhandledRejection", (reason) => {
   const detail = reason instanceof Error && reason.stack ? reason.stack : errorMessage(reason);
   console.error(`Unhandled async task failed: ${detail}`);
@@ -133,6 +134,8 @@ process.on("unhandledRejection", (reason) => {
 
 process.on("uncaughtException", (error) => {
   console.error(`Uncaught exception: ${error.stack ?? errorMessage(error)}`);
+  process.exitCode = 1;
+  setImmediate(() => process.exit(1));
 });
 
 const databasePath = path.join(dataDir, "bitcraft-local.sqlite");

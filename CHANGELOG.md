@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.113] - 2026-06-30
+
+### Fixed
+
+- Fixed the production background worker so a brief SQLite startup lock is retried instead of leaving Discord notifications and collectors stopped.
+- Fixed fatal worker startup crashes so systemd treats them as failures and restarts the worker instead of leaving it inactive.
+
 ## [1.0.0-beta.112] - 2026-06-30
 
 ### Changed
