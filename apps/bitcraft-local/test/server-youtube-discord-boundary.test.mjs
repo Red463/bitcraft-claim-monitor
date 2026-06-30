@@ -8,7 +8,7 @@ test("youtube_video Discord events route to announcements with video embeds", ()
   assert.match(server, /eventType === "youtube_video"/);
   assert.match(server, /settings\.notify\.youtubeVideos/);
   assert.match(server, /settings\.notificationChannels\?\.youtubeVideos \?\? "announcements"/);
-  assert.match(server, /validDiscordId\(selection\) \? selection : settings\.channelId/);
+  assert.match(server, /resolveDiscordChannelSelection\(settings\.notificationChannels\?\.youtubeVideos \?\? "announcements", settings, settings\.channelId\)/);
   assert.match(server, /youtubeChannelSelection/);
   assert.match(server, /metadata\.discordChannelId/);
   assert.match(server, /discordChannelId: channel\.discord_channel_id/);

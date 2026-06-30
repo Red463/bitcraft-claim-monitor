@@ -24,6 +24,7 @@ import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatch
 import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
+import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
@@ -86,6 +87,9 @@ const processRoleConfig = processRoleCapabilities(processRole);
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
+const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
+const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
+let discordNotificationOutboxRunning = false;
 const storageActivityJobBudget = normalizeJobBudget({
   maxRuntimeMs: process.env.STORAGE_ACTIVITY_MAX_RUNTIME_MS ?? 15000,
   batchSize: process.env.STORAGE_ACTIVITY_BATCH_SIZE ?? 25,
@@ -546,7 +550,7 @@ async function checkDiscordYouTubeChannel(channel, { limit = 3 } = {}) {
     }
     let sent = 0;
     for (const video of toNotify) {
-      await sendDiscordActivity("youtube_video", `${parsed.channelTitle || channel.title || "YouTube"}: ${video.title}`, video.publishedAt || checkedAt, {
+      await enqueueDiscordActivity("youtube_video", `${parsed.channelTitle || channel.title || "YouTube"}: ${video.title}`, video.publishedAt || checkedAt, {
         channelId: channel.channel_id,
         channelTitle: parsed.channelTitle || channel.title || channel.channel_id,
         discordChannelId: channel.discord_channel_id,
@@ -555,7 +559,7 @@ async function checkDiscordYouTubeChannel(channel, { limit = 3 } = {}) {
         url: video.url,
         thumbnailUrl: video.thumbnailUrl,
         publishedAt: video.publishedAt,
-      });
+      }, { sourceKey: `youtube_video:${video.videoId}` });
       recordYouTubeVideo(channel.channel_id, video, checkedAt, new Date().toISOString());
       sent += 1;
     }
@@ -651,7 +655,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
         continue;
       }
       statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
-      pendingNotifications.push({ jobKey: job.key, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
+      pendingNotifications.push({ jobKey: job.key, sourceKey: `production_started:${job.key}`, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
       statements.markProductionStartNotified.run(job.key);
     }
   }
@@ -685,7 +689,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       continue;
     }
     statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
-    pendingNotifications.push({ jobKey: key, eventType: "production_completed", summary, occurredAt, metadata });
+    pendingNotifications.push({ jobKey: key, sourceKey: `production_completed:${key}`, eventType: "production_completed", summary, occurredAt, metadata });
   }
   return { pendingNotifications, diagnostics };
 }
@@ -693,9 +697,9 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
 async function deliverProductionNotifications(pendingNotifications = []) {
   for (const notification of pendingNotifications) {
     try {
-      await sendDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata);
+      await enqueueDiscordActivity(notification.eventType, notification.summary, notification.occurredAt, notification.metadata, { sourceKey: notification.sourceKey });
     } catch (error) {
-      console.warn(`Discord production notification failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`Discord production notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -2051,8 +2055,7 @@ function productionNotificationAllowed(eventType, metadata = {}, settings = getD
 }
 
 function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
-  const selection = String(settings.notificationChannels?.youtubeVideos ?? "announcements").trim();
-  return settings.channels?.[selection] || (validDiscordId(selection) ? selection : settings.channelId);
+  return resolveDiscordChannelSelection(settings.notificationChannels?.youtubeVideos ?? "announcements", settings, settings.channelId);
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
@@ -2062,7 +2065,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
   }
   if (eventType === "production_started" || eventType === "production_completed") {
     const selection = settings.notificationChannels?.[eventType === "production_started" ? "productionStarted" : "productionCompleted"] ?? "profession";
-    if (selection && selection !== "profession") return settings.channels?.[selection] || settings.channelId;
+    if (selection && selection !== "profession") return resolveDiscordChannelSelection(selection, settings, settings.channelId);
     const professionKey = String(metadata.professionKey ?? "").toLowerCase();
     return settings.craftChannels?.[professionKey] || settings.channelId;
   }
@@ -2071,7 +2074,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
     : eventType === "supplies" ? "lowSupplies"
     : eventType === "app_update" ? "appUpdates"
     : "";
-  if (selection) return settings.channels?.[settings.notificationChannels?.[selection]] || settings.channelId;
+  if (selection) return resolveDiscordChannelSelection(settings.notificationChannels?.[selection], settings, settings.channelId);
   return settings.channelId;
 }
 
@@ -2136,16 +2139,17 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
     accountId: userRow.id,
   };
   if (!settings.enabled || !settings.botToken || !channelId) {
+    const reason = "Discord disabled, bot token missing, or mod-log channel not configured";
     recordDiscordDeliverySafe({
       status: "skipped",
       eventType,
       channelId,
       channelKey,
       summary: `Character link requested: ${characterName}`,
-      reason: "Discord disabled, bot token missing, or mod-log channel not configured",
+      reason,
       metadata: diagnostics,
     });
-    return { ok: true, skipped: true };
+    return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
     const response = await sendDiscordMessage({
@@ -2166,7 +2170,7 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
       metadata: diagnostics,
       response: { id: response?.id, channel_id: response?.channel_id },
     });
-    return { ok: true, skipped: false };
+    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({
@@ -2252,7 +2256,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       : eventType === "app_update" ? "App update notifications are disabled"
       : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured" : "Notification disabled or below configured threshold";
     recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
-    return { ok: true, skipped: true };
+    return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
     const role = craftWatchRole(metadata, settings);
@@ -2264,7 +2268,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     }, settings, channelId);
     recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
-    return { ok: true, skipped: false };
+    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
@@ -2272,6 +2276,57 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   }
 }
 
+function discordOutboxSourceKey(eventType, summary, occurredAt, metadata = {}) {
+  const stable = metadata.sourceKey ?? metadata.videoId ?? metadata.releaseKey ?? metadata.key ?? metadata.jobKey ?? "";
+  return `${eventType}:${String(stable || `${summary}:${occurredAt}`).slice(0, 240)}`;
+}
+
+async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+  const now = new Date().toISOString();
+  const sourceKey = String(options.sourceKey ?? discordOutboxSourceKey(eventType, summary, occurredAt, metadata));
+  statements.enqueueDiscordNotification.run(sourceKey, eventType, summary, occurredAt, JSON.stringify(metadata ?? {}), now, now, now);
+  void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+  return { ok: true, queued: true, sourceKey };
+}
+
+function discordNotificationRetryAt(attempts) {
+  const delayMs = Math.min(5 * 60 * 1000, Math.max(5000, 5000 * (attempts + 1)));
+  return new Date(Date.now() + delayMs).toISOString();
+}
+
+async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
+  if (discordNotificationOutboxRunning) return { skipped: true, reason: "Discord notification outbox already running" };
+  discordNotificationOutboxRunning = true;
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+  try {
+    const rows = statements.pendingDiscordNotifications.all(discordNotificationMaxAttempts, new Date().toISOString(), limit);
+    for (const row of rows) {
+      const metadata = safeJson(row.metadata_json, {});
+      try {
+        const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
+        const finishedAt = new Date().toISOString();
+        if (result?.skipped) {
+          statements.markDiscordNotificationSkipped.run(finishedAt, result.reason ?? "Notification skipped by sender", finishedAt, row.id);
+          skipped += 1;
+        } else {
+          statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
+          if (row.event_type === "app_update" && metadata.releaseKey) statements.upsertSetting.run("discord_last_announced_version", String(metadata.releaseKey), finishedAt);
+          sent += 1;
+        }
+      } catch (error) {
+        const failedAt = new Date().toISOString();
+        const message = error instanceof Error ? error.message : String(error);
+        statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+        failed += 1;
+      }
+    }
+    return { checked: rows.length, sent, skipped, failed };
+  } finally {
+    discordNotificationOutboxRunning = false;
+  }
+}
 function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
   const tierColors = {
     1: 0x838e9e,
@@ -2330,7 +2385,7 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) 
 }
 
 function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
-  void sendDiscordActivity(eventType, summary, occurredAt, metadata).catch((error) => console.warn(`Discord notification failed: ${error instanceof Error ? error.message : String(error)}`));
+  void enqueueDiscordActivity(eventType, summary, occurredAt, metadata, { sourceKey: `${eventType}:${claimId}:${metadata.sourceKey ?? metadata.id ?? summary}` }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
@@ -2405,7 +2460,6 @@ function discordColourButtonEmoji(role) {
   if (label.includes("white") || color === 0xf4f4f4) return "⚪";
   return "🎨";
 }
-
 async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   const channelId = String(settings.colourRolesChannelId || settings.channels?.notifications || settings.channelId || "").trim();
   if (!channelId) throw new Error("Choose a colour-role channel before posting the selector.");
@@ -3330,19 +3384,7 @@ async function sendDiscordTestNotification(kind = "basic") {
   const updateDetails = sample.eventType === "app_update" ? await currentAppUpdateDetails() : null;
   const summary = updateDetails?.summary ?? sample.summary;
   const metadata = updateDetails ? { ...sample.metadata, changeNotes: updateDetails.changeNotes } : sample.metadata;
-  const channelId = discordChannelForEvent(sample.eventType, sample.metadata, settings);
-  const channelKey = discordChannelKeyForEvent(sample.eventType, sample.metadata, settings);
-  try {
-    const response = await sendDiscordMessage({
-      embeds: [discordEmbedForActivity(sample.eventType, summary, new Date().toISOString(), metadata)],
-      allowed_mentions: { parse: [] },
-    }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType: `test_${sample.eventType}`, channelId, channelKey, summary, metadata: discordDiagnosticContext(sample.eventType, metadata, settings), response: { id: response?.id, channel_id: response?.channel_id } });
-    return response;
-  } catch (error) {
-    recordDiscordDeliverySafe({ status: "failed", eventType: `test_${sample.eventType}`, channelId, channelKey, summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext(sample.eventType, metadata, settings) });
-    throw error;
-  }
+  return sendDiscordActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings);
 }
 
 async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
@@ -3358,15 +3400,13 @@ async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true 
     return { skipped: true, reason: `Release ${releaseKey} already announced` };
   }
   const updateDetails = await currentAppUpdateDetails();
-  const result = await sendDiscordActivity(
+  return enqueueDiscordActivity(
     "app_update",
     updateDetails.summary,
     new Date().toISOString(),
     { version: appVersion, releaseKey, changelogUrl, changeNotes: updateDetails.changeNotes },
-    settings,
+    { sourceKey: `app_update:${releaseKey}`, settings },
   );
-  if (result.ok && !result.skipped) statements.upsertSetting.run("discord_last_announced_version", releaseKey, new Date().toISOString());
-  return result;
 }
 
 async function runDiscordAppUpdateAnnouncementJob() {
@@ -3395,7 +3435,7 @@ async function sendScheduledSupplyReportIfDue(claim) {
   const intervalMs = settings.supplyReportIntervalDays * 24 * 60 * 60 * 1000;
   if (lastSentMs && Date.now() - lastSentMs < intervalMs) return;
   const channelKey = settings.notificationChannels?.supplyReport ?? "modNotes";
-  const channelId = settings.channels?.[channelKey] || settings.channelId;
+  const channelId = resolveDiscordChannelSelection(channelKey, settings, settings.channelId);
   try {
     const response = await sendDiscordMessage({
       embeds: [discordSupplyEmbed(claim)],
@@ -6547,6 +6587,7 @@ function databaseStatus() {
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
+  const discordOutboxCounts = Object.fromEntries(statements.discordNotificationOutboxCounts.all().map((row) => [row.status, toNumber(row.count)]));
   const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
     ...row,
     metadata: safeJson(row.metadata_json, {}),
@@ -6559,7 +6600,7 @@ function databaseStatus() {
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: collectorStatusPayload(),
-    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, gateway: { ...discordGatewayStatus } },
+    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, outbox: discordOutboxCounts, gateway: { ...discordGatewayStatus } },
     settings: getSettings(),
   };
 }
@@ -7564,9 +7605,9 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
         const body = await readJson(req);
         const kind = String(body.kind ?? "basic");
-        await sendDiscordTestNotification(kind);
-        audit(user, "discord.test_message", { kind });
-        return send(res, 200, { ok: true });
+        const result = await sendDiscordTestNotification(kind);
+        audit(user, "discord.test_message", { kind, status: result?.skipped ? "skipped" : "sent" });
+        return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {
         const response = await postDiscordColourSelector();
@@ -8203,6 +8244,8 @@ function scheduleServerPolling(delayMs = 0) {
 
 function startBackgroundTasks() {
   startDiscordGateway();
+  void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+  setInterval(processDiscordNotificationOutbox, discordNotificationOutboxIntervalMs);
   setTimeout(() => {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);

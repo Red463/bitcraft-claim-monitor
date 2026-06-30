@@ -1908,7 +1908,8 @@ export function AdminPanel({
               }
               onSendTest={(kind, label) =>
                 run(async () => {
-                  await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) });
+                  const result = await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) });
+                  setDiscordToolResults((current) => ({ ...current, tests: { ...result, __type: "botAction" } }));
                 }, `${label} Discord test sent.`)
               }
             />

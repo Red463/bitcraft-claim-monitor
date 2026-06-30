@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.112] - 2026-06-30
+
+### Changed
+
+- Improved Discord notifications so worker-collected events are queued, retried, and delivered quickly by the background worker instead of depending on long request paths.
+- Improved Discord notification routing so raw Discord channel IDs and named channel selections work consistently across craft, market, YouTube, supply, and app update notifications.
+
+### Fixed
+
+- Fixed Discord notification tests in the admin console so they use the same sender path as real notifications and show the actual sent, skipped, or failed result.
+
 ## [1.0.0-beta.111] - 2026-06-30
 
 ### Changed

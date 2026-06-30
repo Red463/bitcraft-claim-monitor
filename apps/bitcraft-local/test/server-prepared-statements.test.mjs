@@ -24,6 +24,10 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     "listDiscordYouTubeChannels",
     "upsertDiscordYouTubeChannel",
     "insertDiscordYouTubeVideo",
+    "enqueueDiscordNotification",
+    "pendingDiscordNotifications",
+    "markDiscordNotificationSent",
+    "markDiscordNotificationFailed",
     "setDiscordYouTubeChannelDiscordChannel",
     "insertUserSession",
     "upsertDiscordCraftWatch",
@@ -38,5 +42,6 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   assert.match(statements.upsertDiscordYouTubeChannel.sql, /INSERT INTO discord_youtube_channels/);
   assert.match(statements.setDiscordYouTubeChannelDiscordChannel.sql, /discord_channel_id/);
   assert.match(statements.insertDiscordYouTubeVideo.sql, /INSERT INTO discord_youtube_videos/);
+  assert.match(statements.enqueueDiscordNotification.sql, /INSERT INTO discord_notification_outbox/);
   assert.ok(sqlByKey.length > 70, "expected the server statement bundle to be prepared together");
 });

@@ -287,6 +287,26 @@ export function createPreparedStatements(db) {
     INSERT INTO discord_delivery_log (event_type, status, summary, channel_id, channel_key, reason, error, metadata_json, response_json, occurred_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
+  enqueueDiscordNotification: db.prepare(`
+    INSERT INTO discord_notification_outbox (source_key, event_type, summary, occurred_at, metadata_json, status, attempts, next_attempt_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+    ON CONFLICT(source_key) DO UPDATE SET
+      summary = excluded.summary,
+      occurred_at = excluded.occurred_at,
+      metadata_json = excluded.metadata_json,
+      status = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.status ELSE 'pending' END,
+      attempts = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.attempts ELSE 0 END,
+      next_attempt_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.next_attempt_at ELSE excluded.next_attempt_at END,
+      skipped_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.skipped_at ELSE NULL END,
+      failed_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.failed_at ELSE NULL END,
+      last_error = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.last_error ELSE NULL END,
+      updated_at = excluded.updated_at
+  `),
+  pendingDiscordNotifications: db.prepare("SELECT * FROM discord_notification_outbox WHERE status IN ('pending', 'failed') AND attempts < ? AND next_attempt_at <= ? ORDER BY created_at ASC, id ASC LIMIT ?"),
+  markDiscordNotificationSent: db.prepare("UPDATE discord_notification_outbox SET status = 'sent', sent_at = ?, response_json = ?, last_error = NULL, updated_at = ? WHERE id = ?"),
+  markDiscordNotificationSkipped: db.prepare("UPDATE discord_notification_outbox SET status = 'skipped', skipped_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
+  markDiscordNotificationFailed: db.prepare("UPDATE discord_notification_outbox SET status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END, attempts = attempts + 1, next_attempt_at = ?, failed_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
+  discordNotificationOutboxCounts: db.prepare("SELECT status, COUNT(*) AS count FROM discord_notification_outbox GROUP BY status"),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
   pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
   listDiscordYouTubeChannels: db.prepare("SELECT * FROM discord_youtube_channels ORDER BY title COLLATE NOCASE, channel_id"),
