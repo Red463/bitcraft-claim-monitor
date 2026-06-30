@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { localHistoryIncludeForPanel } from "../src/api/localHistoryInclude.ts";
+
+test("dashboard local history includes market data for the income chart", () => {
+  assert.equal(localHistoryIncludeForPanel("dashboard"), "activity,market,snapshots,dashboard");
+});
+
+test("market local history keeps requesting the market history slice", () => {
+  assert.equal(localHistoryIncludeForPanel("market"), "activity,market");
+});

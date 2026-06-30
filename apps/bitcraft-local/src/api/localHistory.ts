@@ -2,6 +2,7 @@ import React from "react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";
 import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
+import { localHistoryIncludeForPanel } from "./localHistoryInclude";
 
 const LOCAL_API = "/api/local";
 
@@ -19,7 +20,7 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
     const controller = new AbortController();
     async function load() {
       try {
-        const include = ["activity", activePanel === "market" ? "market" : "", activePanel === "dashboard" ? "snapshots,dashboard" : ""].filter(Boolean).join(",");
+        const include = localHistoryIncludeForPanel(activePanel);
         const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
         const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { signal: controller.signal });
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
@@ -27,7 +28,7 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
         const activity = history.activity ?? {};
         const snapshots = history.snapshots ?? {};
         setState((prev) => ({
-          market: history.market ?? (activePanel === "market" ? null : prev.market),
+          market: history.market ?? (activePanel === "market" || activePanel === "dashboard" ? null : prev.market),
           activity: activity.events ?? [],
           activityTotal: toNumber(activity.total ?? activity.events?.length),
           snapshots: snapshots.snapshots ?? (activePanel === "dashboard" ? [] : prev.snapshots),
@@ -120,3 +121,4 @@ export function useDealAlerts(refreshToken: number): DealAlertsState {
 
   return state;
 }
+
