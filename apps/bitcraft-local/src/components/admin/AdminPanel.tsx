@@ -769,7 +769,18 @@ export function AdminPanel({
       {discoveredChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.label ?? `#${channel.name}`} ({channel.id})</option>)}
     </select>
   );
-  const notificationChannelIdSelect = (key: string, value: string) => channelIdSelect(value, (nextValue) => updateNotificationChannel(key, nextValue));
+  const resolvedNotificationChannelValue = (value: string) => {
+    const selected = String(value ?? "").trim();
+    return draft.discord.channels?.[selected] || (/^\d{15,25}$/.test(selected) ? selected : "");
+  };
+  const notificationChannelIdSelect = (key: string, value: string) => channelIdSelect(resolvedNotificationChannelValue(value), (nextValue) => updateNotificationChannel(key, nextValue));
+  const optionalChannelIdSelect = (value: string, onChange: (value: string) => void, defaultLabel = "Use default channel") => (
+    <select value={value ?? ""} onChange={(event) => onChange(event.target.value)}>
+      <option value="">{defaultLabel}</option>
+      {value && !discoveredChannels.some((channel) => String(channel.id) === String(value)) ? <option value={value}>Unknown channel ({value})</option> : null}
+      {discoveredChannels.map((channel) => <option key={channel.id} value={channel.id}>{channel.label ?? `#${channel.name}`} ({channel.id})</option>)}
+    </select>
+  );
   const memberIdSelect = (value: string, onChange: (value: string) => void) => (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">Select a member</option>
@@ -1868,6 +1879,7 @@ export function AdminPanel({
               api={api}
               busyButtonClass={busyButtonClass}
               channelIdSelect={notificationChannelIdSelect}
+              optionalChannelIdSelect={optionalChannelIdSelect}
               discord={draft.discord}
               run={run}
               updateDiscord={updateDiscord}
@@ -2032,4 +2044,3 @@ export function AdminPanel({
     </div>
   );
 }
-

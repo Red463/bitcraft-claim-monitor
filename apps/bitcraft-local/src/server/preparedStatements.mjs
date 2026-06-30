@@ -292,12 +292,13 @@ export function createPreparedStatements(db) {
   listDiscordYouTubeChannels: db.prepare("SELECT * FROM discord_youtube_channels ORDER BY title COLLATE NOCASE, channel_id"),
   getDiscordYouTubeChannel: db.prepare("SELECT * FROM discord_youtube_channels WHERE channel_id = ?"),
   upsertDiscordYouTubeChannel: db.prepare(`
-    INSERT INTO discord_youtube_channels (channel_id, input, title, url, enabled, last_checked_at, last_success_at, last_error, last_video_id, last_video_title, last_video_published_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO discord_youtube_channels (channel_id, input, title, url, discord_channel_id, enabled, last_checked_at, last_success_at, last_error, last_video_id, last_video_title, last_video_published_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(channel_id) DO UPDATE SET
       input = excluded.input,
       title = COALESCE(excluded.title, discord_youtube_channels.title),
       url = COALESCE(excluded.url, discord_youtube_channels.url),
+      discord_channel_id = COALESCE(excluded.discord_channel_id, discord_youtube_channels.discord_channel_id),
       enabled = excluded.enabled,
       last_checked_at = COALESCE(excluded.last_checked_at, discord_youtube_channels.last_checked_at),
       last_success_at = COALESCE(excluded.last_success_at, discord_youtube_channels.last_success_at),
@@ -308,6 +309,7 @@ export function createPreparedStatements(db) {
       updated_at = excluded.updated_at
   `),
   setDiscordYouTubeChannelEnabled: db.prepare("UPDATE discord_youtube_channels SET enabled = ?, updated_at = ? WHERE channel_id = ?"),
+  setDiscordYouTubeChannelDiscordChannel: db.prepare("UPDATE discord_youtube_channels SET discord_channel_id = ?, updated_at = ? WHERE channel_id = ?"),
   updateDiscordYouTubeChannelStatus: db.prepare("UPDATE discord_youtube_channels SET title = COALESCE(?, title), url = COALESCE(?, url), last_checked_at = ?, last_success_at = ?, last_error = ?, last_video_id = COALESCE(?, last_video_id), last_video_title = COALESCE(?, last_video_title), last_video_published_at = COALESCE(?, last_video_published_at), updated_at = ? WHERE channel_id = ?"),
   deleteDiscordYouTubeChannel: db.prepare("DELETE FROM discord_youtube_channels WHERE channel_id = ?"),
   deleteDiscordYouTubeVideosForChannel: db.prepare("DELETE FROM discord_youtube_videos WHERE channel_id = ?"),

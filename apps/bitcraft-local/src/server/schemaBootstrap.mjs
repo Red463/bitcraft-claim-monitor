@@ -362,6 +362,7 @@ export const schemaBootstrapSql = `
     input TEXT NOT NULL,
     title TEXT,
     url TEXT,
+    discord_channel_id TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     last_checked_at TEXT,
     last_success_at TEXT,

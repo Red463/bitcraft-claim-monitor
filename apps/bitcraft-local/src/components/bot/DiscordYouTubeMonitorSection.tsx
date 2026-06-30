@@ -9,13 +9,14 @@ type Props = {
   api: Api;
   busyButtonClass: (key: string, className?: string) => string;
   channelIdSelect: (key: string, value: string) => React.ReactNode;
+  optionalChannelIdSelect: (value: string, onChange: (value: string) => void, defaultLabel?: string) => React.ReactNode;
   discord: AnyRecord;
   run: (task: () => Promise<unknown>, success?: string, busyKey?: string) => Promise<void>;
   updateDiscord: (patch: Partial<AnyRecord>) => void;
   updateDiscordNotify: (key: string, value: boolean) => void;
 };
 
-export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSelect, discord, run, updateDiscord, updateDiscordNotify }: Props) {
+export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSelect, optionalChannelIdSelect, discord, run, updateDiscord, updateDiscordNotify }: Props) {
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [input, setInput] = React.useState("");
 
@@ -67,7 +68,7 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
             <span>Discord channel</span>
             {channelIdSelect("youtubeVideos", discord.notificationChannels.youtubeVideos ?? discord.channels?.announcements ?? "")}
           </label>
-          <p className="legend">Choose any synced Discord channel for YouTube video announcements, then save settings.</p>
+          <p className="legend">Choose any synced Discord channel as the default. Individual YouTube channels can override it below.</p>
         </div>
       </div>
       <div className="discord-tool-form-card youtube-add-card">
@@ -76,6 +77,7 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
           <span>YouTube channel URL, @handle, or channel ID</span>
           <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="https://www.youtube.com/@channel or UC..." />
         </label>
+        <p className="legend">Existing videos are marked as seen when a channel is added. Only videos published after setup are announced.</p>
         <button className="toolbar-button primary" disabled={!input.trim()} onClick={() => run(async () => {
           const result = await api("/admin/discord/youtube/channels", { method: "POST", body: JSON.stringify({ input }) });
           setStatus(result);
@@ -91,6 +93,10 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
               <span>{channel.channelId}</span>
               <small>Last check {dateLabel(channel.lastCheckedAt)} | Last video {channel.lastVideoTitle || "None"}</small>
               {channel.lastError ? <small className="error">{channel.lastError}</small> : null}
+              <label className="field youtube-channel-target">
+                <span>Announcement channel</span>
+                {optionalChannelIdSelect(channel.discordChannelId ?? "", (value) => run(async () => setStatus(await api("/admin/discord/youtube/channels", { method: "PUT", body: JSON.stringify({ channelId: channel.channelId, discordChannelId: value }) })), "YouTube announcement channel updated."), "Use default")}
+              </label>
             </div>
             <div className="toolbar youtube-channel-actions">
               {channel.url ? <a className="toolbar-button" href={channel.url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open</a> : null}
@@ -109,4 +115,3 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
     </section>
   );
 }
-

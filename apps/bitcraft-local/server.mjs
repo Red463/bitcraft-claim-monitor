@@ -465,6 +465,7 @@ function publicDiscordYouTubeChannel(row) {
     input: String(row.input ?? ""),
     title: String(row.title ?? ""),
     url: String(row.url ?? ""),
+    discordChannelId: String(row.discord_channel_id ?? ""),
     enabled: row.enabled !== 0,
     lastCheckedAt: row.last_checked_at ?? null,
     lastSuccessAt: row.last_success_at ?? null,
@@ -518,6 +519,7 @@ async function addDiscordYouTubeChannel(input) {
     String(input ?? "").trim(),
     parsed.channelTitle || resolved.channelId,
     `https://www.youtube.com/channel/${resolved.channelId}`,
+    null,
     1,
     now,
     now,
@@ -547,6 +549,7 @@ async function checkDiscordYouTubeChannel(channel, { limit = 3 } = {}) {
       await sendDiscordActivity("youtube_video", `${parsed.channelTitle || channel.title || "YouTube"}: ${video.title}`, video.publishedAt || checkedAt, {
         channelId: channel.channel_id,
         channelTitle: parsed.channelTitle || channel.title || channel.channel_id,
+        discordChannelId: channel.discord_channel_id,
         videoId: video.videoId,
         videoTitle: video.title,
         url: video.url,
@@ -2053,7 +2056,10 @@ function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
-  if (eventType === "youtube_video") return youtubeChannelSelection(settings);
+  if (eventType === "youtube_video") {
+    const overrideChannelId = String(metadata.discordChannelId ?? "").trim();
+    return validDiscordId(overrideChannelId) ? overrideChannelId : youtubeChannelSelection(settings);
+  }
   if (eventType === "production_started" || eventType === "production_completed") {
     const selection = settings.notificationChannels?.[eventType === "production_started" ? "productionStarted" : "productionCompleted"] ?? "profession";
     if (selection && selection !== "profession") return settings.channels?.[selection] || settings.channelId;
@@ -7520,8 +7526,19 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.settings);
         const channelId = String(body.channelId ?? "").trim();
         if (!channelId) return send(res, 400, { error: "YouTube channel ID is required" });
-        statements.setDiscordYouTubeChannelEnabled.run(body.enabled === false ? 0 : 1, new Date().toISOString(), channelId);
-        audit(user, "discord.youtube_channel.toggle", { channelId, enabled: body.enabled !== false });
+        const now = new Date().toISOString();
+        const patch = { channelId };
+        if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
+          statements.setDiscordYouTubeChannelEnabled.run(body.enabled === false ? 0 : 1, now, channelId);
+          patch.enabled = body.enabled !== false;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "discordChannelId")) {
+          const discordChannelId = String(body.discordChannelId ?? "").trim();
+          if (discordChannelId && !validDiscordId(discordChannelId)) return send(res, 400, { error: "Discord channel ID is invalid" });
+          statements.setDiscordYouTubeChannelDiscordChannel.run(discordChannelId, now, channelId);
+          patch.discordChannelId = discordChannelId;
+        }
+        audit(user, "discord.youtube_channel.update", patch);
         return send(res, 200, discordYouTubeStatus());
       }
       if (req.method === "DELETE" && url.pathname === "/api/local/admin/discord/youtube/channels") {
@@ -8209,4 +8226,3 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
-

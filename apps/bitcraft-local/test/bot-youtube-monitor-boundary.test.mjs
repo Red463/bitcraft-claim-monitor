@@ -14,6 +14,7 @@ test("bot dashboard exposes YouTube monitor automation section", () => {
   assert.match(admin, /botSection === "youtube"/);
   assert.match(admin, /channelIdSelect=\{notificationChannelIdSelect\}/);
   assert.match(section, /channelIdSelect\("youtubeVideos"/);
+  assert.match(section, /optionalChannelIdSelect/);
+  assert.match(section, /Existing videos are marked as seen/);
   assert.match(section, /api\("\/admin\/discord\/youtube"/);
 });
-
