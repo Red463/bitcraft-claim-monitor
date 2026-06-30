@@ -32,18 +32,20 @@ test("buildMarketDaily groups sales into chronological day buckets", () => {
   ]);
 });
 
-test("buildMarketIncomeSummary totals confirmed daily market sales", () => {
+test("buildMarketIncomeSummary totals confirmed daily market sales and plots cumulative income", () => {
   const summary = buildMarketIncomeSummary([
     { day: "2026-06-27", salesCount: 1, unitsSold: 2, totalValue: 12 },
-    { day: "2026-06-28", salesCount: 2, unitsSold: 5, totalValue: 42 },
-  ]);
+    { day: "2026-06-29", salesCount: 2, unitsSold: 5, totalValue: 42 },
+  ], "2026-06-30");
 
   assert.equal(summary.totalValue, 54);
   assert.equal(summary.salesCount, 3);
   assert.equal(summary.unitsSold, 7);
   assert.deepEqual(summary.trend, [
     { at: "2026-06-27", value: 12 },
-    { at: "2026-06-28", value: 42 },
+    { at: "2026-06-28", value: 12 },
+    { at: "2026-06-29", value: 54 },
+    { at: "2026-06-30", value: 54 },
   ]);
 });
 test("formatMarketDay formats ISO days and preserves unknown labels", () => {

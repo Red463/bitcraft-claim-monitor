@@ -289,7 +289,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                 {contributors.length ? (
                   <div className="contributors">
                     <small>Contributors</small>
-                    {contributors.slice(0, 3).map((person) => (
+                    {contributors.map((person) => (
                       <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
                     ))}
                   </div>

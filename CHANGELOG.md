@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.105] - 2026-06-30
+
+### Changed
+
+- Changed the dashboard market income chart to show cumulative tracked sales over time, including flat days without sales.
+- Improved admin tab navigation spacing so the grouped controls stay compact.
+- Improved production contributor lists so all contributors wrap into compact rows instead of stretching cards vertically.
+
 ## [1.0.0-beta.104] - 2026-06-30
 
 ### Changed

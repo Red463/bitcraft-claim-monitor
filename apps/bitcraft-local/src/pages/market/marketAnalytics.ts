@@ -59,7 +59,7 @@ export function buildMarketDaily(events: AnyRecord[]) {
   return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
 }
 
-export function buildMarketIncomeSummary(dailyRows: AnyRecord[]) {
+export function buildMarketIncomeSummary(dailyRows: AnyRecord[], endAt?: string | Date | null) {
   const rows = [...dailyRows]
     .map((row) => ({
       day: String(row.day ?? ""),
@@ -67,16 +67,35 @@ export function buildMarketIncomeSummary(dailyRows: AnyRecord[]) {
       unitsSold: toNumber(row.unitsSold ?? row.units_sold),
       totalValue: toNumber(row.totalValue ?? row.total_value),
     }))
-    .filter((row) => row.day && row.totalValue > 0)
+    .filter((row) => row.day)
     .sort((a, b) => a.day.localeCompare(b.day));
+  const rowByDay = new Map(rows.map((row) => [row.day, row]));
+  const firstDay = rows[0]?.day;
+  const lastSaleDay = rows[rows.length - 1]?.day;
+  const requestedEndDay = parseDateValue(endAt)?.toISOString().slice(0, 10);
+  const lastDay = requestedEndDay && lastSaleDay && requestedEndDay > lastSaleDay ? requestedEndDay : lastSaleDay;
+  const cumulativeTrend: Array<{ at: string; value: number }> = [];
+  let runningTotal = 0;
+
+  if (firstDay && lastDay) {
+    const cursor = new Date(`${firstDay}T00:00:00.000Z`);
+    const end = new Date(`${lastDay}T00:00:00.000Z`);
+    while (cursor <= end) {
+      const day = cursor.toISOString().slice(0, 10);
+      runningTotal += toNumber(rowByDay.get(day)?.totalValue);
+      cumulativeTrend.push({ at: day, value: runningTotal });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
 
   return {
     totalValue: rows.reduce((total, row) => total + row.totalValue, 0),
     salesCount: rows.reduce((total, row) => total + row.salesCount, 0),
     unitsSold: rows.reduce((total, row) => total + row.unitsSold, 0),
-    trend: rows.map((row) => ({ at: row.day, value: row.totalValue })),
+    trend: cumulativeTrend,
   };
 }
+
 export function formatMarketDay(value: string): string {
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;

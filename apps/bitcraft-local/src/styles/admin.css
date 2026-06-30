@@ -252,21 +252,23 @@
   align-items: center;
 }
 .admin-tab-groups {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  align-items: stretch;
-}
-.admin-tab-group {
-  min-width: 0;
+  align-items: flex-start;
   border: 1px solid rgba(108,123,145,.22);
   border-radius: 7px;
   background: linear-gradient(180deg, rgba(11,16,22,.94), rgba(6,9,14,.96));
   padding: 10px;
 }
+.admin-tab-group {
+  min-width: min(100%, 220px);
+  flex: 1 1 260px;
+  display: grid;
+  gap: 7px;
+}
 .admin-tab-group > span {
   display: block;
-  margin: 0 0 8px;
   color: #7f8da0;
   font-size: 11px;
   font-weight: 900;
@@ -274,15 +276,16 @@
   text-transform: uppercase;
 }
 .admin-tabs {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .admin-tabs button {
-  min-height: 64px;
-  width: 100%;
+  min-height: 38px;
+  max-width: 100%;
   border: 1px solid rgba(108,123,145,.2);
   border-radius: 7px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: #b8c2cf;
   background: rgba(255,255,255,.018);
   cursor: pointer;
@@ -291,7 +294,7 @@
 }
 .admin-tabs button strong,
 .admin-tabs button small {
-  display: block;
+  display: inline;
   min-width: 0;
 }
 .admin-tabs button strong {
@@ -300,7 +303,7 @@
   line-height: 1.2;
 }
 .admin-tabs button small {
-  margin-top: 4px;
+  margin-left: 8px;
   color: #8f9bad;
   font-size: 11px;
   font-weight: 650;
@@ -315,6 +318,7 @@
   color: #f0c64f;
   background: linear-gradient(180deg, rgba(240,198,79,.18), rgba(240,198,79,.07));
   border-color: rgba(240,198,79,.46);
+  box-shadow: inset 3px 0 0 rgba(240,198,79,.8);
 }
 .admin-tabs button.active small {
   color: #d6c277;
@@ -639,7 +643,6 @@
 .analytics-admin .analytics-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 
 @media (max-width: 1180px) {
-  .admin-tab-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .collector-summary,
   .collector-settings-list { grid-template-columns: 1fr; }
 }
@@ -844,7 +847,6 @@
 }
 
 @media (max-width: 860px) {
-  .admin-tab-groups { grid-template-columns: 1fr; }
   .admin-grid,
   .admin-metrics,
   .analytics-admin .analytics-metrics,

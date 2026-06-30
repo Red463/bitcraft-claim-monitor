@@ -72,7 +72,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const marketIncome = buildMarketIncomeSummary(Array.isArray(marketHistory?.daily) ? marketHistory.daily : []);
+  const marketIncome = buildMarketIncomeSummary(Array.isArray(marketHistory?.daily) ? marketHistory.daily : [], lastUpdated ?? new Date());
   const confirmedMarketSales = toNumber(marketHistory?.totals?.salesCount) || marketIncome.salesCount;
   const confirmedMarketUnits = toNumber(marketHistory?.totals?.unitsSold) || marketIncome.unitsSold;
   const confirmedMarketIncome = toNumber(marketHistory?.totals?.totalValue) || marketIncome.totalValue;
@@ -146,12 +146,12 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
 
       <section className="dashboard-main-grid">
         <article className="dashboard-card dashboard-card-chart">
-          <DashboardCardHeader title="Market Income Over Time" icon={<CircleDollarSign size={15} />} action="Tracked Sales" />
+          <DashboardCardHeader title="Market Income Total Over Time" icon={<CircleDollarSign size={15} />} action="Cumulative Sales" />
           <div className="dashboard-money-row">
             <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
             <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
-          <DashboardTrend points={marketIncome.trend} suffix="g" ariaLabel="Market income trend" emptyMessage="No confirmed market sales tracked yet." />
+          <DashboardTrend points={marketIncome.trend} suffix="g" ariaLabel="Cumulative market income trend" emptyMessage="No confirmed market sales tracked yet." />
         </article>
         <article className="dashboard-card dashboard-card-supply">
           <DashboardCardHeader title="Supply Status" icon={<Package size={15} />} />
