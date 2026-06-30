@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.108] - 2026-06-30
+
+### Changed
+
+- Improved watchtower details so the popup opens in the visible browser area and member lists can be filtered by empire rank.
+
 ## [1.0.0-beta.107] - 2026-06-30
 
 ### Changed

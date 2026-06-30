@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, Castle, Clock, Copy, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
 import { MiniStat } from "../components/main/Stats";
@@ -71,8 +72,15 @@ function compactDate(value: unknown): string {
 
 function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () => void }) {
   const members: AnyRecord[] = Array.isArray(tower.members) ? tower.members : [];
-  return (
-    <div className="help-overlay" onClick={onClose}>
+  const [rankFilters, setRankFilters] = React.useState<string[]>([]);
+  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.rankTitle ?? "Citizen")))).sort((a, b) => a.localeCompare(b)), [members]);
+  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.rankTitle ?? "Citizen"))) : members;
+  const toggleRankFilter = (rank: string) => {
+    setRankFilters((current) => current.includes(rank) ? current.filter((value) => value !== rank) : [...current, rank]);
+  };
+
+  return createPortal(
+    <div className="help-overlay empires-watchtower-overlay" onClick={onClose}>
       <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
         <header>
           <div><RadioTower /><h2 id="tower-access-title">{tower.nickname ?? "Watchtower"}</h2></div>
@@ -86,8 +94,17 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
         <div className="tower-access-note">
           Showing all empire members BitJita reports for this empire, with last login and relevant watchtower access flags.
         </div>
+        {rankOptions.length ? (
+          <div className="tower-rank-filter" aria-label="Filter members by rank">
+            <span>Ranks</span>
+            <button type="button" className={rankFilters.length === 0 ? "active" : ""} aria-label="Show all ranks" onClick={() => setRankFilters([])}>All</button>
+            {rankOptions.map((rank) => (
+              <button key={rank} type="button" className={rankFilters.includes(rank) ? "active" : ""} onClick={() => toggleRankFilter(rank)}>{rank}</button>
+            ))}
+          </div>
+        ) : null}
         <div className="tower-access-list">
-          {members.length ? members.map((member) => (
+          {visibleMembers.length ? visibleMembers.map((member) => (
             <article key={member.entityId || member.username}>
               <div>
                 <strong>{member.username ?? "Unknown"}</strong>
@@ -99,10 +116,11 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
               </div>
               <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
             </article>
-          )) : <div className="empty-state compact">No empire members were returned for this empire.</div>}
+          )) : <div className="empty-state compact">{members.length ? "No members match the selected ranks." : "No empire members were returned for this empire."}</div>}
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

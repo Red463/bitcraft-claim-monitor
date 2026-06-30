@@ -120,13 +120,20 @@
 .coordinate-cell a:hover { text-decoration: underline; }
 .tower-name-cell { display: grid; gap: 3px; }
 .tower-name-cell small { color: var(--muted); font-size: 11px; font-weight: 600; }
-.empires-page .help-overlay { position: fixed; inset: 0; align-items: center; justify-items: center; overflow: auto; }
+.empires-watchtower-overlay { position: fixed; inset: 0; align-items: center; justify-items: center; overflow: auto; }
 .tower-access-dialog { width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: hidden; }
-.tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(4,8,14,.42); }
+.tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
 .tower-dialog-summary span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .tower-access-note { color: var(--muted); font-size: 13px; line-height: 1.45; }
-.tower-access-list { display: grid; gap: 8px; max-height: min(430px, 48vh); overflow: auto; padding-right: 4px; }
-.tower-access-list article { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(180px, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(5,9,15,.62); }
+.tower-rank-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
+.tower-rank-filter span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
+.tower-rank-filter button { border: 1px solid rgba(148,163,184,.24); border-radius: 999px; background: rgba(15,23,42,.72); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.tower-rank-filter button:hover { border-color: rgba(240,198,79,.5); color: #fff; }
+.tower-rank-filter button.active { border-color: rgba(240,198,79,.78); background: rgba(240,198,79,.18); color: var(--active-color); }
+.tower-access-list { display: grid; gap: 8px; max-height: min(430px, 48vh); overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+.tower-access-list article { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(118px, auto); align-items: center; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(5,9,15,.62); }
+.tower-access-list article > * { min-width: 0; }
+.tower-access-list .status-pill { justify-self: end; max-width: 100%; white-space: normal; text-align: right; }
 .tower-access-list article strong { color: #fff; }
 .tower-access-list article small { display: block; color: var(--muted); margin-top: 3px; }
 .tower-access-flags { display: flex; flex-wrap: wrap; gap: 6px; }

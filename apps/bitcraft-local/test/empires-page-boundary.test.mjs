@@ -6,10 +6,19 @@ test("watchtower dialog stays viewport bounded and renders all empire members", 
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
 
+  assert.match(page, /import \{ createPortal \} from "react-dom";/);
+  assert.match(page, /return createPortal\(/);
+  assert.match(page, /document\.body/);
+  assert.match(page, /rankFilters/);
+  assert.match(page, /visibleMembers/);
+  assert.match(page, /tower-rank-filter/);
+  assert.match(page, /aria-label="Show all ranks"/);
   assert.match(page, /const members:[\s\S]*tower\.members/);
   assert.match(page, /setSelectedTower\(\{ \.\.\.row, members:/);
   assert.doesNotMatch(page, /No storage or hexite-capable members were returned/);
-  assert.match(css, /\.empires-page \.help-overlay \{/);
+  assert.match(css, /\.empires-watchtower-overlay \{/);
+  assert.match(css, /\.tower-rank-filter \{/);
+  assert.match(css, /\.tower-rank-filter button\.active/);
   assert.match(css, /position:\s*fixed/);
   assert.match(css, /align-items:\s*center/);
   assert.match(css, /max-height:\s*calc\(100vh - 40px\)/);
