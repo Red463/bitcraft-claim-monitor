@@ -6,6 +6,14 @@ function cleanLower(value) {
   return clean(value).toLowerCase();
 }
 
+function safeJson(value, fallback = {}) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function saleOwnerKeys(metadata = {}) {
   const ids = new Set([
     clean(metadata.ownerEntityId),
@@ -25,11 +33,18 @@ function saleOwnerKeys(metadata = {}) {
   return { ids, names };
 }
 
-export function linkedDiscordRecipientsForMarketSale(metadata = {}, accounts = []) {
+function discordMarketSaleDmEnabled(account = {}) {
+  const settings = safeJson(account.settings_json, {});
+  return settings.discordMarketSaleDm !== false;
+}
+
+export function marketSaleDiscordRecipientDecision(metadata = {}, accounts = []) {
   const { ids, names } = saleOwnerKeys(metadata);
-  if (!ids.size && !names.size) return [];
+  if (!ids.size && !names.size) return { recipients: [], matched: 0, optedOut: 0 };
   const recipients = [];
   const seen = new Set();
+  let matched = 0;
+  let optedOut = 0;
   for (const account of accounts ?? []) {
     if (String(account?.character_status ?? "") !== "approved") continue;
     const discordId = clean(account?.discord_id);
@@ -37,9 +52,18 @@ export function linkedDiscordRecipientsForMarketSale(metadata = {}, accounts = [
     const characterId = clean(account?.character_player_id);
     const characterName = cleanLower(account?.character_name);
     if ((characterId && ids.has(characterId)) || (characterName && names.has(characterName))) {
+      matched += 1;
+      if (!discordMarketSaleDmEnabled(account)) {
+        optedOut += 1;
+        continue;
+      }
       seen.add(discordId);
       recipients.push(discordId);
     }
   }
-  return recipients;
+  return { recipients, matched, optedOut };
+}
+
+export function linkedDiscordRecipientsForMarketSale(metadata = {}, accounts = []) {
+  return marketSaleDiscordRecipientDecision(metadata, accounts).recipients;
 }

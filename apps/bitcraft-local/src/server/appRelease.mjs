@@ -25,3 +25,12 @@ export function currentAppBuildId({
 export function currentAppReleaseKey({ appVersion, buildId = "" }) {
   return buildId ? `${appVersion}+${buildId}` : appVersion;
 }
+export function currentAppAnnouncementKey({ appVersion }) {
+  return String(appVersion ?? "").trim();
+}
+
+export function releaseVersionAlreadyAnnounced({ lastAnnounced = "", appVersion = "" }) {
+  const version = currentAppAnnouncementKey({ appVersion });
+  const previous = String(lastAnnounced ?? "").trim();
+  return Boolean(version && (previous === version || previous.startsWith(`${version}+`)));
+}

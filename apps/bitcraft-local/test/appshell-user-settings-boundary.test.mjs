@@ -14,3 +14,12 @@ test("AppShell delegates browser-local user settings to a focused dialog compone
   assert.match(dialog, /export function UserSettingsDialog\b/);
   assert.match(dialog, /type UserSettingsDialogProps = \{/);
 });
+
+test("User settings exposes Discord market sale DM opt-out controls", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /discordMarketSaleDm/);
+  assert.match(dialog, /onDiscordMarketSaleDmChange/);
+  assert.match(dialog, /Send me Discord DMs for my confirmed market sales/);
+});

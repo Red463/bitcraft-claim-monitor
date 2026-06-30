@@ -8,6 +8,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.115] - 2026-06-30
+
+### Added
+
+- Added a user-controlled opt-out for Discord direct messages about confirmed market sales.
+
+### Fixed
+
+- Fixed app update Discord announcements so rebuilding the same beta version does not repost the same update.
 ## [1.0.0-beta.114] - 2026-06-30
 
 ### Changed

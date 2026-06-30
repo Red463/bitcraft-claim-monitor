@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { currentAppBuildId, currentAppReleaseKey } from "../src/server/appRelease.mjs";
+import { currentAppAnnouncementKey, currentAppBuildId, currentAppReleaseKey, releaseVersionAlreadyAnnounced } from "../src/server/appRelease.mjs";
 
 test("currentAppBuildId prefers release environment revisions in deploy order", () => {
   assert.equal(currentAppBuildId({ env: { SOURCE_VERSION: "abcdef1234567890" } }), "abcdef123456");
@@ -46,4 +46,10 @@ test("currentAppBuildId reads detached HEAD commits and safely falls back", () =
 test("currentAppReleaseKey appends the build id when available", () => {
   assert.equal(currentAppReleaseKey({ appVersion: "1.0.0-beta.41", buildId: "abcdef123456" }), "1.0.0-beta.41+abcdef123456");
   assert.equal(currentAppReleaseKey({ appVersion: "1.0.0-beta.41", buildId: "" }), "1.0.0-beta.41");
+});
+
+test("app update announcements dedupe by app version instead of rebuild id", () => {
+  assert.equal(currentAppAnnouncementKey({ appVersion: "1.0.0-beta.114", buildId: "abcdef123456" }), "1.0.0-beta.114");
+  assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "1.0.0-beta.114+oldbuild", appVersion: "1.0.0-beta.114" }), true);
+  assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "1.0.0-beta.113+oldbuild", appVersion: "1.0.0-beta.114" }), false);
 });

@@ -57,6 +57,7 @@ export type UserSettingsDialogProps = {
   onDiscordLogin: () => void;
   onDiscordLogout: () => Promise<void>;
   onLinkCharacter: (member: AnyRecord | null) => Promise<void>;
+  onDiscordMarketSaleDmChange: (enabled: boolean) => Promise<void>;
   onSaveAccountSettings: () => Promise<void>;
   onLoadAccountSettings: () => void;
   showAdminTools: boolean;
@@ -77,6 +78,7 @@ export function UserSettingsDialog({
   onDiscordLogin,
   onDiscordLogout,
   onLinkCharacter,
+  onDiscordMarketSaleDmChange,
   onSaveAccountSettings,
   onLoadAccountSettings,
   showAdminTools,
@@ -174,6 +176,7 @@ export function UserSettingsDialog({
   const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
   const handleSoundVolumeChange = (event: React.FormEvent<HTMLInputElement>) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.currentTarget.value) / 100 });
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
+  const discordMarketSaleDm = auth.user?.settings?.discordMarketSaleDm !== false;
   const statusLabel = auth.user?.characterStatus === "approved"
     ? "Approved"
     : auth.user?.characterStatus === "pending"
@@ -251,6 +254,7 @@ export function UserSettingsDialog({
                   </label>
                   <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>
                 </div>
+                <label className="toggle-row"><input type="checkbox" checked={discordMarketSaleDm} onChange={(event) => runAccountAction(() => onDiscordMarketSaleDmChange(event.target.checked), event.target.checked ? "Discord market sale DMs enabled." : "Discord market sale DMs disabled.")} /><span>Send me Discord DMs for my confirmed market sales</span></label>
                 <div className="settings-account-actions">
                   <button className="toolbar-button" onClick={() => runAccountAction(onSaveAccountSettings, "Settings saved to your Discord account.")}><Save size={14} /> Save settings to account</button>
                   <button className="toolbar-button" disabled={!auth.user.settings || !Object.keys(auth.user.settings).length} onClick={onLoadAccountSettings}><Download size={14} /> Load saved settings</button>
@@ -417,6 +421,11 @@ export function UserSettingsDialog({
             {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
               <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
             ))}
+          </section> : null}
+          {settingsSection === "preferences" && auth.user ? <section>
+            <h3>Discord Direct Messages</h3>
+            <label className="toggle-row"><input type="checkbox" checked={discordMarketSaleDm} onChange={(event) => runAccountAction(() => onDiscordMarketSaleDmChange(event.target.checked), event.target.checked ? "Discord market sale DMs enabled." : "Discord market sale DMs disabled.")} /><span>Send me Discord DMs for my confirmed market sales</span></label>
+            <p className="legend">Only applies when admins route confirmed market sale alerts to direct messages. You must keep your Discord account linked and character approved.</p>
           </section> : null}
           {settingsSection === "preferences" ? <section className="notification-sound-settings">
             <div className="settings-section-heading">

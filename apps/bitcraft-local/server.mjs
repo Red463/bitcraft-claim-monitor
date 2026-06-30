@@ -25,7 +25,7 @@ import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
-import { linkedDiscordRecipientsForMarketSale } from "./src/server/marketSaleDiscordRecipients.mjs";
+import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
@@ -45,7 +45,7 @@ import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
-import { currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey } from "./src/server/appRelease.mjs";
+import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { snapshotActivityChanges, snapshotSummary } from "./src/server/snapshotPlanning.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
@@ -591,6 +591,10 @@ function currentAppBuildId() {
 
 function currentAppReleaseKey() {
   return resolveCurrentAppReleaseKey({ appVersion, buildId: currentAppBuildId() });
+}
+
+function currentAppAnnouncementKey() {
+  return resolveCurrentAppAnnouncementKey({ appVersion });
 }
 
 function unwrap(payload, key, fallback) {
@@ -2255,10 +2259,11 @@ function isMarketSaleDiscordEvent(eventType) {
 }
 
 async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}) {
-  const recipients = linkedDiscordRecipientsForMarketSale(metadata, statements.listUserAccounts.all());
+  const decision = marketSaleDiscordRecipientDecision(metadata, statements.listUserAccounts.all());
+  const recipients = decision.recipients;
   if (!recipients.length) {
-    const reason = "No verified linked Discord account matched sale owner";
-    recordDiscordDeliverySafe({ status: "skipped", eventType, channelKey: "dm", summary, reason, metadata: { ...diagnostics, matchedRecipients: 0 } });
+    const reason = decision.optedOut > 0 ? "Verified linked sale owner opted out of Discord market sale DMs" : "No verified linked Discord account matched sale owner";
+    recordDiscordDeliverySafe({ status: "skipped", eventType, channelKey: "dm", summary, reason, metadata: { ...diagnostics, matchedRecipients: decision.matched, optedOutRecipients: decision.optedOut } });
     return { ok: true, skipped: true, reason, channelKey: "dm" };
   }
   const payload = {
@@ -2275,7 +2280,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
     eventType,
     channelKey: "dm",
     summary,
-    metadata: { ...diagnostics, matchedRecipients: recipients.length, recipientIds: recipients },
+    metadata: { ...diagnostics, matchedRecipients: decision.matched, optedOutRecipients: decision.optedOut, recipientIds: recipients },
     response: { count: responses.length, responses },
   });
   return { ok: true, skipped: false, channelKey: "dm", response: { count: responses.length } };
@@ -2353,7 +2358,7 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
           skipped += 1;
         } else {
           statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
-          if (row.event_type === "app_update" && metadata.releaseKey) statements.upsertSetting.run("discord_last_announced_version", String(metadata.releaseKey), finishedAt);
+          if (row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
           sent += 1;
         }
       } catch (error) {
@@ -3431,25 +3436,25 @@ async function sendDiscordTestNotification(kind = "basic") {
 async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
   const settings = getDiscordSettingsRaw();
   const releaseKey = currentAppReleaseKey();
+  const announcementKey = currentAppAnnouncementKey();
   if (!settings.enabled || !settings.botToken || !settings.notify.appUpdates) {
-    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl }, settings) });
+    recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is now live.`, reason: "Discord disabled, bot token missing, or app update notifications disabled", metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, announcementKey, changelogUrl }, settings) });
     return;
   }
   const lastAnnounced = statements.getSetting.get("discord_last_announced_version")?.value ?? "";
-  if (lastAnnounced === releaseKey) {
-    if (recordAlreadyAnnounced) recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Release ${releaseKey} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, changelogUrl, lastAnnounced }, settings) });
-    return { skipped: true, reason: `Release ${releaseKey} already announced` };
+  if (releaseVersionAlreadyAnnounced({ lastAnnounced, appVersion })) {
+    if (recordAlreadyAnnounced) recordDiscordDeliverySafe({ status: "skipped", eventType: "app_update", summary: `Version ${appVersion} is already announced.`, reason: `Version ${announcementKey} already announced`, metadata: discordDiagnosticContext("app_update", { version: appVersion, releaseKey, announcementKey, changelogUrl, lastAnnounced }, settings) });
+    return { skipped: true, reason: `Version ${announcementKey} already announced` };
   }
   const updateDetails = await currentAppUpdateDetails();
   return enqueueDiscordActivity(
     "app_update",
     updateDetails.summary,
     new Date().toISOString(),
-    { version: appVersion, releaseKey, changelogUrl, changeNotes: updateDetails.changeNotes },
-    { sourceKey: `app_update:${releaseKey}`, settings },
+    { version: appVersion, releaseKey, announcementKey, changelogUrl, changeNotes: updateDetails.changeNotes },
+    { sourceKey: `app_update:${announcementKey}`, settings },
   );
 }
-
 async function runDiscordAppUpdateAnnouncementJob() {
   return announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced: false });
 }
