@@ -5118,6 +5118,25 @@ async function settlementProductionCrafts(body) {
     };
   }, { forceRefresh: body?.forceRefresh === true });
 }
+function storedDashboardDataFallback(claimId, error) {
+  const rowsByDomain = readDomainPayloadMap(claimId);
+  if (!Object.keys(rowsByDomain).length) return null;
+  const value = domainRowsToAppData(claimId, rowsByDomain);
+  const message = error instanceof Error ? error.message : String(error);
+  const partialErrors = Array.isArray(value.partialErrors) ? value.partialErrors : [];
+  return {
+    ...value,
+    stale: true,
+    partialErrors: [...new Set([...partialErrors, `Dashboard refresh failed: ${message}`])],
+    serverFreshness: {
+      ...(value.serverFreshness ?? {}),
+      cacheState: "stored-stale-if-error",
+      cachedAt: value.serverFreshness?.lastSuccessAt ?? value.serverFreshness?.collectedAt ?? null,
+      stale: true,
+      lastError: message,
+    },
+  };
+}
 async function dashboardData(claimId, options = {}) {
   const id = String(claimId ?? "").trim();
   if (!/^\d{8,}$/.test(id)) {
@@ -5155,6 +5174,8 @@ async function dashboardData(claimId, options = {}) {
           serverFreshness: { ...(stale.value.serverFreshness ?? {}), cacheState: "stale-if-error", cachedAt: stale.cachedAt },
         };
       }
+      const storedFallback = storedDashboardDataFallback(id, error);
+      if (storedFallback) return storedFallback;
       throw error;
     } finally {
       dashboardDataInflight.delete(id);

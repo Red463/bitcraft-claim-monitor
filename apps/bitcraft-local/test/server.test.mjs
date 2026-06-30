@@ -1225,18 +1225,25 @@ test("background polling failures keep the server online", async (t) => {
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
+  const fallbackDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  const fallbackCollectedAt = "2026-06-30T09:00:00.000Z";
+  const fallbackPayload = fallbackDb.prepare(`
+    INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  fallbackPayload.run(claimId, "claim", JSON.stringify({ claim: { entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" } }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  fallbackPayload.run(claimId, "members", JSON.stringify({ members: [{ playerEntityId: "player-1", userName: "Cached Tester" }] }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  fallbackDb.close();
+  const fallbackDashboardResponse = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`);
+  assert.equal(fallbackDashboardResponse.status, 200);
+  const fallbackDashboard = await fallbackDashboardResponse.json();
+  assert.equal(fallbackDashboard.stale, true);
+  assert.equal(fallbackDashboard.serverFreshness.cacheState, "stored-stale-if-error");
+  assert.equal(fallbackDashboard.claim.claim.entityId, claimId);
+  assert.match(fallbackDashboard.partialErrors.join("\n"), /Dashboard refresh failed/);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(child.exitCode, null);
   const health = await fetch(`${origin}/api/local/health`).then((response) => response.json());
   assert.equal(health.ok, true);
   assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
 });
-
-
-
-
-
-
-
-
-
