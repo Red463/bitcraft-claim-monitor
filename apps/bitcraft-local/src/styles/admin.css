@@ -251,24 +251,60 @@
   display: flex;
   align-items: center;
 }
-.admin-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.admin-tab-groups {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.admin-tab-group {
+  min-width: 0;
   border: 1px solid rgba(108,123,145,.22);
   border-radius: 7px;
   background: linear-gradient(180deg, rgba(11,16,22,.94), rgba(6,9,14,.96));
   padding: 10px;
 }
+.admin-tab-group > span {
+  display: block;
+  margin: 0 0 8px;
+  color: #7f8da0;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.admin-tabs {
+  display: grid;
+  gap: 8px;
+}
 .admin-tabs button {
-  min-height: 40px;
+  min-height: 64px;
+  width: 100%;
   border: 1px solid rgba(108,123,145,.2);
   border-radius: 7px;
-  padding: 0 16px;
+  padding: 10px 12px;
   color: #b8c2cf;
   background: rgba(255,255,255,.018);
   cursor: pointer;
   font-weight: 800;
+  text-align: left;
+}
+.admin-tabs button strong,
+.admin-tabs button small {
+  display: block;
+  min-width: 0;
+}
+.admin-tabs button strong {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+}
+.admin-tabs button small {
+  margin-top: 4px;
+  color: #8f9bad;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
 }
 .admin-tabs button:hover {
   color: #fff;
@@ -279,6 +315,35 @@
   color: #f0c64f;
   background: linear-gradient(180deg, rgba(240,198,79,.18), rgba(240,198,79,.07));
   border-color: rgba(240,198,79,.46);
+}
+.admin-tabs button.active small {
+  color: #d6c277;
+}
+.admin-tab-heading {
+  border: 1px solid rgba(108,123,145,.2);
+  border-radius: 7px;
+  background: rgba(255,255,255,.018);
+  padding: 14px 16px;
+}
+.admin-tab-heading span {
+  display: block;
+  color: #7f8da0;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.admin-tab-heading h3 {
+  margin: 4px 0 2px;
+  color: #f4f7fb;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.admin-tab-heading p {
+  margin: 0;
+  color: #aab5c4;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .admin-message {
   border: 1px solid rgba(240,198,79,.3);
@@ -574,6 +639,7 @@
 .analytics-admin .analytics-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 
 @media (max-width: 1180px) {
+  .admin-tab-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .collector-summary,
   .collector-settings-list { grid-template-columns: 1fr; }
 }
@@ -778,6 +844,7 @@
 }
 
 @media (max-width: 860px) {
+  .admin-tab-groups { grid-template-columns: 1fr; }
   .admin-grid,
   .admin-metrics,
   .analytics-admin .analytics-metrics,

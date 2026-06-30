@@ -115,6 +115,51 @@ const LOCAL_API = "/api/local";
 
 type AdminTab = "status" | "analytics" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
+type AdminTabMeta = {
+  key: AdminTab;
+  label: string;
+  description: string;
+};
+
+type AdminTabGroup = {
+  label: string;
+  tabs: AdminTabMeta[];
+};
+
+const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
+  {
+    label: "Operations",
+    tabs: [
+      { key: "status", label: "Status", description: "Health, collection, jobs, and endpoint checks" },
+      { key: "configuration", label: "Configuration", description: "Settlement defaults, privacy, collectors, and branding" },
+      { key: "diagnostics", label: "Diagnostics", description: "Browser and map troubleshooting data" },
+    ],
+  },
+  {
+    label: "Insights",
+    tabs: [
+      { key: "analytics", label: "Analytics", description: "Usage, security, location, and request logs" },
+      { key: "database", label: "Database", description: "SQLite inspection and exports" },
+    ],
+  },
+  {
+    label: "Access",
+    tabs: [
+      { key: "users", label: "Administrators", description: "Admin roles, status, and sessions" },
+      { key: "accounts", label: "Linked Accounts", description: "Discord sign-ins and character link approvals" },
+      { key: "audit", label: "Audit", description: "Admin action and sign-in history" },
+    ],
+  },
+  {
+    label: "Maintenance",
+    tabs: [
+      { key: "backups", label: "Backups", description: "Database backups and retention maintenance" },
+    ],
+  },
+];
+
+const ADMIN_TABS = ADMIN_TAB_GROUPS.flatMap((group) => group.tabs);
+
 /**
  * Admin console for installation-wide settings and diagnostics.
  *
@@ -604,16 +649,15 @@ export function AdminPanel({
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs = React.useMemo<Array<[AdminTab, string]>>(
-    () => botOnly ? [] : [["status", "Status"], ["analytics", "Analytics"], ["configuration", "Configuration"], ["diagnostics", "Diagnostics"], ["database", "Database"], ["users", "Administrators"], ["accounts", "Linked Accounts"], ["audit", "Audit"], ["backups", "Backups"]],
-    [botOnly],
-  );
+  const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : ADMIN_TABS, [botOnly]);
+  const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
+  const activeTabGroup = activeTabMeta ? ADMIN_TAB_GROUPS.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
   React.useEffect(() => {
     if (botOnly) {
       if (tab !== "discord") setTab("discord");
       return;
     }
-    if (!tabs.some(([key]) => key === tab)) setTab("status");
+    if (!tabs.some((item) => item.key === tab)) setTab("status");
   }, [botOnly, setTab, tab, tabs]);
   const discordTestButtons = [
     ["basic", "Basic"],
@@ -949,8 +993,38 @@ export function AdminPanel({
           </div>
         </header>
       )}
-      {tabs.length ? <div className="admin-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div> : null}
+      {tabs.length ? (
+        <nav className="admin-tab-groups" aria-label="Admin sections">
+          {ADMIN_TAB_GROUPS.map((group) => (
+            <section className="admin-tab-group" key={group.label}>
+              <span>{group.label}</span>
+              <div className="admin-tabs">
+                {group.tabs.map((item) => (
+                  <button
+                    key={item.key}
+                    className={tab === item.key ? "active" : ""}
+                    onClick={() => setTab(item.key)}
+                    title={item.description}
+                  >
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </nav>
+      ) : null}
       {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
+      {!botOnly && activeTabMeta ? (
+        <section className="admin-tab-heading" aria-label={`${activeTabMeta.label} overview`}>
+          <div>
+            <span>Admin / {activeTabGroup?.label ?? "General"}</span>
+            <h3>{activeTabMeta.label}</h3>
+            <p>{activeTabMeta.description}</p>
+          </div>
+        </section>
+      ) : null}
 
       {tab === "status" ? (
         <div className="admin-section">
@@ -1061,6 +1135,7 @@ export function AdminPanel({
                       </label>
                       <button
                         className={busyButtonClass(`job-run:${job.key}`)}
+                        title="Start this background job now without changing its saved schedule."
                         disabled={Boolean(job.running) || isBusyAction(`job-run:${job.key}`)}
                         onClick={() => run(async () => {
                           const result = await api("/admin/jobs/run", { method: "POST", body: JSON.stringify({ key: job.key }) });
@@ -1107,6 +1182,7 @@ export function AdminPanel({
                         <div className="scheduled-job-editor-actions">
                           <button
                             className="toolbar-button"
+                            title="Discard unsaved schedule edits for this job."
                             onClick={() => setScheduledJobDrafts((current) => {
                               const next = { ...current };
                               delete next[String(job.key)];
@@ -1117,6 +1193,7 @@ export function AdminPanel({
                           </button>
                           <button
                             className="toolbar-button primary"
+                            title="Save this job schedule. It does not run the job immediately."
                             onClick={() => run(async () => {
                               const result = await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: Boolean(job.enabled), scheduleConfig: scheduledJobConfig(job) }) });
                               setScheduledJobs(result);
@@ -1145,7 +1222,7 @@ export function AdminPanel({
                 <h3><Activity size={17} /> BitJita Endpoint Check</h3>
                 <p className="legend">Runs live timing checks for public data sources and settlement storage containers.</p>
               </div>
-              <button className={busyButtonClass("endpoint-checks")} disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
+              <button className={busyButtonClass("endpoint-checks")} title="Run live timing checks against public BitJita endpoints and storage containers." disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
             </div>
             {diagnostics.length ? (
               <div className="endpoint-check-panel">
@@ -1175,7 +1252,7 @@ export function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <h3><TrendingUp size={17} /> Usage Analytics</h3>
-              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
+              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" title="Delete all opt-in usage analytics records. Security request logs are separate." onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
             </div>
             <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
             <div className="metric-grid analytics-metrics">
@@ -1283,7 +1360,7 @@ export function AdminPanel({
             <div className="split-header">
               <div>
                 <h3><Activity size={17} /> Diagnostics</h3>
-                <p className="legend">Troubleshooting tools for local browser state, API refresh behaviour and generated external URLs.</p>
+                <p className="legend">Troubleshoot browser-side map state and generated BitCraft Map URLs.</p>
               </div>
             </div>
             <div className="status-detail">
@@ -1297,9 +1374,9 @@ export function AdminPanel({
             <div className="split-header">
               <div>
                 <h3><MapIcon size={17} /> Map URL Diagnostics</h3>
-                <p className="legend">Records the generated BitCraft map URL whenever the Map page changes tracked players, resources, regions or focus. Use this to diagnose player tracking flicker.</p>
+                <p className="legend">Records the generated BitCraft map URL whenever the Map page changes tracked players, resources, regions or focus. Use this to verify which player, resource, region, and focus parameters the app sends to BitCraft Map.</p>
               </div>
-              <button className="toolbar-button" disabled={!mapUrlLog.length} onClick={() => setMapUrlLog([])}><X size={14} /> Clear Log</button>
+              <button className="toolbar-button" title="Delete saved map diagnostic entries from this browser." disabled={!mapUrlLog.length} onClick={() => setMapUrlLog([])}><X size={14} /> Clear Log</button>
             </div>
             {mapUrlLog.length ? (
               <>
@@ -1407,7 +1484,7 @@ export function AdminPanel({
                   </div>
                   <div className="toolbar-row">
                     <span className={draft.visitorSecurity.geoipLicenseKeyConfigured ? "status-pill ok" : "status-pill"}>{draft.visitorSecurity.geoipLicenseKeyConfigured ? "License key configured" : "No license key saved"}</span>
-                    {draft.visitorSecurity.geoipLicenseKeyConfigured ? <button className="toolbar-button" type="button" onClick={() => updateVisitorSecuritySetting({ geoipLicenseKey: "", geoipLicenseKeyConfigured: false, geoipClearLicenseKey: true })}>Clear saved key</button> : null}
+                    {draft.visitorSecurity.geoipLicenseKeyConfigured ? <button className="toolbar-button" type="button" title="Mark the saved MaxMind key for removal when configuration is saved." onClick={() => updateVisitorSecuritySetting({ geoipLicenseKey: "", geoipLicenseKeyConfigured: false, geoipClearLicenseKey: true })}>Clear saved key</button> : null}
                   </div>
                 </>
               ) : null}
@@ -1822,7 +1899,7 @@ export function AdminPanel({
           <div className="database-browser-header">
             <div>
               <h3><Database size={17} /> Database Browser</h3>
-              <p className="legend">Inspect current SQLite tables, search records, and export filtered data for debugging.</p>
+              <p className="legend">Inspect SQLite tables and export filtered records. Use this for support and diagnostics, not normal settlement operations.</p>
             </div>
             <label className="field database-table-select">
               <span>Table</span>
@@ -1838,8 +1915,8 @@ export function AdminPanel({
           <div className="database-toolbar">
             <SearchBox value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Search across visible table records" />
             <div className="database-export-actions">
-              <a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export CSV</a>
-              <a className="toolbar-button" href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export JSON</a>
+              <a className="toolbar-button" title="Download the selected table with the current search filter as CSV." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export CSV</a>
+              <a className="toolbar-button" title="Download the selected table with the current search filter as JSON." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export JSON</a>
             </div>
           </div>
           {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
@@ -1856,11 +1933,11 @@ export function AdminPanel({
             <label className="field"><span>Discord user ID</span><input value={newUser.discordId} onChange={(event) => setNewUser({ ...newUser, discordId: event.target.value })} placeholder="145544610234630144" /></label>
             <label className="field"><span>Display name</span><input value={newUser.displayName} onChange={(event) => setNewUser({ ...newUser, displayName: event.target.value })} placeholder="red463" /></label>
             <label className="field"><span>Role</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
-            <button className="toolbar-button primary" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.")}><UserPlus size={15} /> Add Administrator</button>
+            <button className="toolbar-button primary" title="Create an admin allow-list entry for this Discord user." disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.")}><UserPlus size={15} /> Add Administrator</button>
           </section>
           <section className="form-card">
             <h3><Users size={17} /> Administrators</h3>
-            <div className="admin-users">{users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | Discord ID {entry.discord_id || "not linked"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>)}</div>
+            <div className="admin-users">{users.length ? users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | Discord ID {entry.discord_id || "not linked"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" title="Sign this administrator out of all active sessions." disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" title={entry.active ? "Disable this administrator account." : "Re-enable this administrator account."} disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>) : <p className="legend">No administrator accounts are configured yet.</p>}</div>
           </section>
         </div>
       ) : null}
@@ -1892,6 +1969,7 @@ export function AdminPanel({
                     <button
                       className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
                       disabled={!account.characterPlayerId}
+                      title={`Mark this character link as ${status}.`}
                       key={status}
                       onClick={() => run(async () => {
                         const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) });
@@ -1911,22 +1989,22 @@ export function AdminPanel({
 
       {tab === "audit" ? (
         <div className="admin-grid audit-grid">
-          <section className="form-card"><h3><Activity size={17} /> Admin Actions</h3><div className="audit-list">{auditData.auditLog.map((entry: AnyRecord) => <div key={entry.id}><strong>{entry.action}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)}</span></div>)}</div></section>
-          <section className="form-card"><h3><Lock size={17} /> Sign-in History</h3><div className="audit-list">{auditData.logins.map((entry: AnyRecord) => <div key={entry.id} className={entry.successful ? "" : "failed"}><strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)} | {entry.remote_address ?? "-"}</span></div>)}</div></section>
+          <section className="form-card"><h3><Activity size={17} /> Admin Actions</h3><p className="legend">Recent administrator changes made through this console.</p><div className="audit-list">{auditData.auditLog.length ? auditData.auditLog.map((entry: AnyRecord) => <div key={entry.id}><strong>{entry.action}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)}</span></div>) : <p className="legend">No administrator actions have been recorded yet.</p>}</div></section>
+          <section className="form-card"><h3><Lock size={17} /> Sign-in History</h3><p className="legend">Successful and failed administrator sign-in attempts.</p><div className="audit-list">{auditData.logins.length ? auditData.logins.map((entry: AnyRecord) => <div key={entry.id} className={entry.successful ? "" : "failed"}><strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)} | {entry.remote_address ?? "-"}</span></div>) : <p className="legend">No administrator sign-ins have been recorded yet.</p>}</div></section>
         </div>
       ) : null}
 
       {tab === "backups" ? (
         <div className="admin-section">
           <section className="form-card">
-            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.")}><Save size={15} /> Create Backup</button></div>
-            <p className="legend">Backups are SQLite copies stored on the server. Restoration is intentionally performed on the VPS while the service is stopped.</p>
-            <div className="backup-list">{backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>)}</div>
+            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" title="Create a downloadable SQLite backup on the server." onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.")}><Save size={15} /> Create Backup</button></div>
+            <p className="legend">Downloadable SQLite copies are stored on the server. Restore them manually on the VPS while services are stopped.</p>
+            <div className="backup-list">{backups.length ? backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" title="Download this database backup file." href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>) : <p className="legend">No database backups have been created yet.</p>}</div>
           </section>
           <section className="form-card maintenance-card">
             <h3><Database size={17} /> Retention Maintenance</h3>
             <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
-            <button className="toolbar-button" onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
+            <button className="toolbar-button" title="Remove expired snapshot rows only. Market trades and activity history are retained." onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
           </section>
         </div>
       ) : null}

@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.104] - 2026-06-30
+
+### Changed
+
+- Improved the admin console layout with grouped navigation, clearer tab descriptions, safer action tooltips, and empty states for admin lists, audit history, and backups.
+
 ## [1.0.0-beta.103] - 2026-06-30
 
 ### Fixed

@@ -15,3 +15,27 @@ test("AppShell delegates admin console rendering to a focused admin component", 
   assert.match(adminPanel, /export function AdminPanel\b/);
   assert.match(adminPanel, /type AdminPanelProps = \{/);
 });
+
+test("AdminPanel groups admin tabs by operational purpose", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /const ADMIN_TAB_GROUPS\s*:/);
+  assert.match(adminPanel, /Operations/);
+  assert.match(adminPanel, /Insights/);
+  assert.match(adminPanel, /Access/);
+  assert.match(adminPanel, /Maintenance/);
+  assert.match(adminPanel, /admin-tab-group/);
+});
+test("AdminPanel keeps sensitive admin controls explicit", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /Delete all opt-in usage analytics records/);
+  assert.match(adminPanel, /Start this background job now without changing its saved schedule/);
+  assert.match(adminPanel, /Save this job schedule\. It does not run the job immediately/);
+  assert.match(adminPanel, /Create an admin allow-list entry/);
+  assert.match(adminPanel, /Sign this administrator out of all active sessions/);
+  assert.match(adminPanel, /Create a downloadable SQLite backup/);
+  assert.match(adminPanel, /No administrator accounts are configured yet/);
+  assert.match(adminPanel, /No administrator actions have been recorded yet/);
+  assert.match(adminPanel, /No database backups have been created yet/);
+});
