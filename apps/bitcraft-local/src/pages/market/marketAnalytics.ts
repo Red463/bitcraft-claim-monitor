@@ -59,6 +59,24 @@ export function buildMarketDaily(events: AnyRecord[]) {
   return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
 }
 
+export function buildMarketIncomeSummary(dailyRows: AnyRecord[]) {
+  const rows = [...dailyRows]
+    .map((row) => ({
+      day: String(row.day ?? ""),
+      salesCount: toNumber(row.salesCount ?? row.sales_count),
+      unitsSold: toNumber(row.unitsSold ?? row.units_sold),
+      totalValue: toNumber(row.totalValue ?? row.total_value),
+    }))
+    .filter((row) => row.day && row.totalValue > 0)
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  return {
+    totalValue: rows.reduce((total, row) => total + row.totalValue, 0),
+    salesCount: rows.reduce((total, row) => total + row.salesCount, 0),
+    unitsSold: rows.reduce((total, row) => total + row.unitsSold, 0),
+    trend: rows.map((row) => ({ at: row.day, value: row.totalValue })),
+  };
+}
 export function formatMarketDay(value: string): string {
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;

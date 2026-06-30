@@ -8,6 +8,11 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.101] - 2026-06-30
+
+### Changed
+
+- Updated the dashboard summary cards to show current treasury and confirmed monitored-market income history instead of construction and treasury trend cards.
 ## [1.0.0-beta.100] - 2026-06-30
 
 ### Changed
