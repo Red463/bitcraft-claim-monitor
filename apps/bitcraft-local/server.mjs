@@ -25,6 +25,7 @@ import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
+import { linkedDiscordRecipientsForMarketSale } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
@@ -2006,7 +2007,7 @@ function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
 
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken) return false;
-  if (eventType === "market_new_listing") return settings.notify.marketListings;
+  if (eventType === "market_new_listing") return false;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
     return settings.notify.marketSales && toNumber(metadata?.totalValue ?? metadata?.totalPrice ?? toNumber(metadata?.quantity) * toNumber(metadata?.price)) >= settings.minSaleValue;
   }
@@ -2062,6 +2063,8 @@ function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "market_new_listing") return "";
+  if ((eventType === "market_sale" || eventType === "market_sale_confirmed") && settings.marketSalesDelivery === "dm") return "";
   if (eventType === "youtube_video") {
     const overrideChannelId = String(metadata.discordChannelId ?? "").trim();
     return validDiscordId(overrideChannelId) ? overrideChannelId : youtubeChannelSelection(settings);
@@ -2072,8 +2075,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
     const professionKey = String(metadata.professionKey ?? "").toLowerCase();
     return settings.craftChannels?.[professionKey] || settings.channelId;
   }
-  const selection = eventType === "market_new_listing" ? "marketListings"
-    : eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
+  const selection = eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
     : eventType === "supplies" ? "lowSupplies"
     : eventType === "app_update" ? "appUpdates"
     : "";
@@ -2088,8 +2090,8 @@ function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDisco
     if (selection === "profession") return normalizeProfessionKey(metadata.professionKey ?? metadata.skillName) || "profession";
     return selection;
   }
-  if (eventType === "market_new_listing") return settings.notificationChannels?.marketListings ?? "notifications";
-  if (eventType === "market_sale" || eventType === "market_sale_confirmed") return settings.notificationChannels?.marketSales ?? "notifications";
+  if (eventType === "market_new_listing") return "disabled";
+  if (eventType === "market_sale" || eventType === "market_sale_confirmed") return settings.marketSalesDelivery === "dm" ? "dm" : settings.notificationChannels?.marketSales ?? "notifications";
   if (eventType === "supplies") return settings.notificationChannels?.lowSupplies ?? "notifications";
   if (eventType === "supply_report") return settings.notificationChannels?.supplyReport ?? "modNotes";
   if (eventType === "app_update") return settings.notificationChannels?.appUpdates ?? "notifications";
@@ -2248,6 +2250,37 @@ function discordCraftWatchComponents(eventType, metadata = {}) {
   }];
 }
 
+function isMarketSaleDiscordEvent(eventType) {
+  return eventType === "market_sale" || eventType === "market_sale_confirmed";
+}
+
+async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}) {
+  const recipients = linkedDiscordRecipientsForMarketSale(metadata, statements.listUserAccounts.all());
+  if (!recipients.length) {
+    const reason = "No verified linked Discord account matched sale owner";
+    recordDiscordDeliverySafe({ status: "skipped", eventType, channelKey: "dm", summary, reason, metadata: { ...diagnostics, matchedRecipients: 0 } });
+    return { ok: true, skipped: true, reason, channelKey: "dm" };
+  }
+  const payload = {
+    embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
+    allowed_mentions: { parse: [] },
+  };
+  const responses = [];
+  for (const recipientId of recipients) {
+    const response = await sendDiscordDirectMessage(recipientId, payload, settings);
+    responses.push({ recipientId, id: response?.id, channel_id: response?.channel_id });
+  }
+  recordDiscordDeliverySafe({
+    status: "sent",
+    eventType,
+    channelKey: "dm",
+    summary,
+    metadata: { ...diagnostics, matchedRecipients: recipients.length, recipientIds: recipients },
+    response: { count: responses.length, responses },
+  });
+  return { ok: true, skipped: false, channelKey: "dm", response: { count: responses.length } };
+}
+
 async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
   const channelId = discordChannelForEvent(eventType, metadata, settings);
   const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
@@ -2257,11 +2290,16 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       ? productionNotificationSkipReason(eventType, metadata, settings) || "Craft notification disabled by settings"
       : eventType === "supplies" ? lowSupplyNotificationSkipReason(metadata, settings) || "Low supply notification disabled or above threshold"
       : eventType === "app_update" ? "App update notifications are disabled"
-      : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured" : "Notification disabled or below configured threshold";
+      : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured"
+      : eventType === "market_new_listing" ? "Market listing Discord notifications are disabled"
+      : "Notification disabled or below configured threshold";
     recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
+    if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
+      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
+    }
     const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
       content: role?.mention,

@@ -132,6 +132,7 @@ export const defaultDiscordSettings = {
   guildId: "",
   channelId: "",
   minSaleValue: 0,
+  marketSalesDelivery: "channel",
   supplyRunwayDaysThreshold: 7,
   productionMinXp: 40000,
   productionMinAgeMinutes: 5,
@@ -149,7 +150,7 @@ export const defaultDiscordSettings = {
   welcomeFlow: defaultWelcomeFlow,
   presence: defaultDiscordPresence,
   notify: {
-    marketListings: true,
+    marketListings: false,
     marketSales: true,
     production: true,
     productionStarted: true,
@@ -241,6 +242,7 @@ export function normalizeDiscordSettings(value = {}) {
     guildId: String(value.guildId ?? "").trim(),
     channelId: String(value.channelId ?? "").trim(),
     minSaleValue: Math.max(toNumber(value.minSaleValue), 0),
+    marketSalesDelivery: String(value.marketSalesDelivery ?? "channel") === "dm" ? "dm" : "channel",
     supplyRunwayDaysThreshold: Math.max(toNumber(value.supplyRunwayDaysThreshold) || 7, 0.25),
     productionMinXp: Math.max(value.productionMinXp == null ? 40000 : toNumber(value.productionMinXp), 0),
     productionMinAgeMinutes: Math.max((value.productionMinAgeMinutes ?? value.productionMinAgeMins) == null ? 5 : toNumber(value.productionMinAgeMinutes ?? value.productionMinAgeMins), 0),
@@ -270,7 +272,7 @@ export function normalizeDiscordSettings(value = {}) {
     welcomeFlow: normalizeDiscordWelcomeFlow(value.welcomeFlow ?? {}),
     presence: normalizeDiscordPresence(value.presence ?? {}),
     notify: {
-      marketListings: notify.marketListings !== false,
+      marketListings: false,
       marketSales: notify.marketSales !== false,
       production: notify.production !== false,
       productionStarted: notify.productionStarted ?? notify.production ?? true,

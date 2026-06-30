@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.114] - 2026-06-30
+
+### Changed
+
+- Removed Discord market new-listing alerts so the bot only handles confirmed market sales.
+- Added a confirmed-sale delivery mode so market sale alerts can be sent to a Discord channel or directly to verified linked sellers without channel fallback.
+
 ## [1.0.0-beta.113] - 2026-06-30
 
 ### Fixed

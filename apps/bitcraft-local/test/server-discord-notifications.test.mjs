@@ -36,3 +36,9 @@ test("discordChannelForEvent resolves raw channel IDs for every notification fam
   assert.equal(discordChannelForEvent("production_completed", { professionKey: "carpentry" }, settings), rawChannelId);
   assert.equal(discordChannelForEvent("production_started", { professionKey: "carpentry" }, settings), "555555555555555555");
 });
+
+test("market listing Discord delivery is disabled while market sales keep channel routing", () => {
+  assert.equal(discordChannelForEvent("market_new_listing", {}, settings), "");
+  assert.equal(discordChannelForEvent("market_sale_confirmed", {}, { ...settings, marketSalesDelivery: "channel" }), "222222222222222222");
+  assert.equal(discordChannelForEvent("market_sale_confirmed", {}, { ...settings, marketSalesDelivery: "dm" }), "");
+});

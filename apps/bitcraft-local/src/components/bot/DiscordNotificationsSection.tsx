@@ -36,27 +36,28 @@ export function DiscordNotificationsSection({
           <label className="toggle-line">
             <input
               type="checkbox"
-              checked={discord.notify.marketListings}
-              onChange={(event) => updateDiscordNotify("marketListings", event.target.checked)}
-            />
-            <span>New listings</span>
-          </label>
-          <label className="field">
-            <span>Listings channel</span>
-            {channelSelect("marketListings", discord.notificationChannels.marketListings)}
-          </label>
-          <label className="toggle-line">
-            <input
-              type="checkbox"
               checked={discord.notify.marketSales}
               onChange={(event) => updateDiscordNotify("marketSales", event.target.checked)}
             />
             <span>Confirmed sales</span>
           </label>
           <label className="field">
-            <span>Sales channel</span>
-            {channelSelect("marketSales", discord.notificationChannels.marketSales)}
+            <span>Delivery</span>
+            <select
+              className="select-control"
+              value={discord.marketSalesDelivery ?? "channel"}
+              onChange={(event) => updateDiscord({ marketSalesDelivery: event.target.value })}
+            >
+              <option value="channel">Channel</option>
+              <option value="dm">Direct message</option>
+            </select>
           </label>
+          {(discord.marketSalesDelivery ?? "channel") === "channel" ? (
+            <label className="field">
+              <span>Sales channel</span>
+              {channelSelect("marketSales", discord.notificationChannels.marketSales)}
+            </label>
+          ) : null}
           <label className="field">
             <span>Minimum sale value</span>
             <input

@@ -42,6 +42,7 @@ test("discord settings normalization preserves release-safe defaults", () => {
   assert.equal(settings.channels.notifications, "alerts");
   assert.equal(settings.channels.announcements, "announcements");
   assert.equal(settings.notificationChannels.youtubeVideos, "announcements");
+  assert.equal(settings.marketSalesDelivery, "channel");
   assert.equal(settings.notify.youtubeVideos, true);
   assert.deepEqual(settings.youtube, { enabled: true, pollIntervalMinutes: 10 });
   assert.equal(settings.craftChannels.forestry, "custom-forestry");
@@ -98,4 +99,10 @@ test("discord role panels and colour roles normalize custom dashboard input", ()
   assert.equal(settings.presence.status, "online");
   assert.equal(settings.presence.activityType, "watching");
   assert.equal(settings.presence.activityText, "app.timbersteeltrade.com");
+});
+
+test("discord settings keep market sale delivery mode explicit and disable listing Discord alerts", () => {
+  assert.equal(normalizeDiscordSettings({ marketSalesDelivery: "dm", notify: { marketListings: true } }).marketSalesDelivery, "dm");
+  assert.equal(normalizeDiscordSettings({ marketSalesDelivery: "invalid" }).marketSalesDelivery, "channel");
+  assert.equal(normalizeDiscordSettings({ notify: { marketListings: true } }).notify.marketListings, false);
 });

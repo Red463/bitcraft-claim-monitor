@@ -15,6 +15,8 @@ export function youtubeChannelSelection(settings = {}) {
 }
 
 export function discordChannelForEvent(eventType, metadata = {}, settings = {}) {
+  if (eventType === "market_new_listing") return "";
+  if ((eventType === "market_sale" || eventType === "market_sale_confirmed") && settings.marketSalesDelivery === "dm") return "";
   if (eventType === "youtube_video") {
     const overrideChannelId = String(metadata.discordChannelId ?? "").trim();
     return validDiscordId(overrideChannelId) ? overrideChannelId : youtubeChannelSelection(settings);
@@ -25,8 +27,7 @@ export function discordChannelForEvent(eventType, metadata = {}, settings = {}) 
     const professionKey = normalizeProfessionKey(metadata.professionKey ?? metadata.skillName);
     return String(settings.craftChannels?.[professionKey] ?? settings.channelId ?? "").trim();
   }
-  const selectionKey = eventType === "market_new_listing" ? "marketListings"
-    : eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
+  const selectionKey = eventType === "market_sale" || eventType === "market_sale_confirmed" ? "marketSales"
     : eventType === "supplies" ? "lowSupplies"
     : eventType === "app_update" ? "appUpdates"
     : "";
@@ -41,8 +42,8 @@ export function discordChannelKeyForEvent(eventType, metadata = {}, settings = {
     if (selection === "profession") return normalizeProfessionKey(metadata.professionKey ?? metadata.skillName) || "profession";
     return selection;
   }
-  if (eventType === "market_new_listing") return settings.notificationChannels?.marketListings ?? "notifications";
-  if (eventType === "market_sale" || eventType === "market_sale_confirmed") return settings.notificationChannels?.marketSales ?? "notifications";
+  if (eventType === "market_new_listing") return "disabled";
+  if (eventType === "market_sale" || eventType === "market_sale_confirmed") return settings.marketSalesDelivery === "dm" ? "dm" : settings.notificationChannels?.marketSales ?? "notifications";
   if (eventType === "supplies") return settings.notificationChannels?.lowSupplies ?? "notifications";
   if (eventType === "supply_report") return settings.notificationChannels?.supplyReport ?? "modNotes";
   if (eventType === "app_update") return settings.notificationChannels?.appUpdates ?? "notifications";
