@@ -49,3 +49,41 @@ test("Admin diagnostics and collector settings stay bounded", () => {
   assert.match(adminCss, /max-height:\s*220px/);
   assert.match(adminCss, /\.collector-setting-row \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
+test("Admin console uses compact navigation and bounded audit tools", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /admin-section-tabs/);
+  assert.match(adminPanel, /admin-tab-overview/);
+  assert.match(adminPanel, /setAuditFilter/);
+  assert.match(adminPanel, /filteredAuditLog/);
+  assert.match(adminPanel, /auditData\.auditLog\.length > auditVisibleCount/);
+  assert.match(adminPanel, /Load more actions/);
+  assert.match(adminCss, /\.admin-tab-groups\s*\{[\s\S]*display:\s*grid/);
+  assert.match(adminCss, /\.admin-section-tabs\s*\{[\s\S]*overflow-x:\s*auto/);
+  assert.match(adminCss, /\.audit-table/);
+});
+
+test("Admin diagnostics exposes support-oriented health tools", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /Support snapshot/);
+  assert.match(adminPanel, /Copy Support Snapshot/);
+  assert.match(adminPanel, /Runtime/);
+  assert.match(adminPanel, /Public popup count/);
+  assert.match(adminPanel, /Local API health/);
+});
+
+test("App popup admin uses a compact list and modal editor", () => {
+  const popupsSection = readFileSync(new URL("../src/components/admin/AdminPopupsSection.tsx", import.meta.url), "utf8");
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+
+  assert.match(popupsSection, /popupEditorOpen/);
+  assert.match(popupsSection, /openPopupEditor/);
+  assert.match(popupsSection, /Save Popup/);
+  assert.match(popupsSection, /admin-modal-backdrop/);
+  assert.match(popupsSection, /popup-admin-table/);
+  assert.doesNotMatch(popupsSection, /popup-builder-grid/);
+  assert.match(adminCss, /\.admin-modal-backdrop/);
+  assert.match(adminCss, /\.popup-admin-table/);
+});

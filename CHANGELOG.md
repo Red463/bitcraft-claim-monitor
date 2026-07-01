@@ -8,6 +8,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.121] - 2026-07-01
+
+### Changed
+
+- Improved the admin console navigation, spacing, diagnostics, audit trail, and popup management experience.
+- Replaced inline app popup editing with a compact popup list and modal editor.
+- Reworked collection status into a clearer health summary for live API and background collection state.
+
 ## [1.0.0-beta.120] - 2026-07-01
 
 ### Changed

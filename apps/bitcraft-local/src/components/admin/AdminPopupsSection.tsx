@@ -1,9 +1,11 @@
 import React from "react";
-import { Bell, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Bell, Edit3, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { POPUP_MODES, POPUP_TYPES, type AppPopup, type PopupMode, type PopupType } from "../../popups/appPopups";
 import type { AnyRecord } from "../../main-app-data";
 
 const EMPTY_DRAFT = { id: "", title: "", message: "", type: "info" as PopupType, mode: "oneTime" as PopupMode, enabled: true };
+
+type PopupDraft = typeof EMPTY_DRAFT;
 
 type AdminPopupsSectionProps = {
   api: (path: string, options?: RequestInit) => Promise<AnyRecord>;
@@ -18,9 +20,23 @@ function stampPopup(popup: AppPopup): AppPopup {
   return { ...popup, updatedAt: new Date().toISOString() };
 }
 
+function popupModeLabel(mode: PopupMode) {
+  return mode === "oneTime" ? "One-time OK" : "Repeat until do not show again";
+}
+
+function popupTypeLabel(type: PopupType) {
+  return type[0].toUpperCase() + type.slice(1);
+}
+
+function draftFromPopup(popup?: AppPopup): PopupDraft {
+  return popup ? { id: popup.id, title: popup.title, message: popup.message, type: popup.type, mode: popup.mode, enabled: popup.enabled } : EMPTY_DRAFT;
+}
+
 export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
   const [popups, setPopups] = React.useState<AppPopup[]>([]);
-  const [draft, setDraft] = React.useState(EMPTY_DRAFT);
+  const [editorDraft, setEditorDraft] = React.useState<PopupDraft>(EMPTY_DRAFT);
+  const [editingPopupIndex, setEditingPopupIndex] = React.useState<number | null>(null);
+  const [popupEditorOpen, setPopupEditorOpen] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -41,22 +57,42 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
     void refresh();
   }, []);
 
-  function addPopup() {
-    const title = draft.title.trim();
-    const body = draft.message.trim();
-    if (!title || !body) {
-      setMessage("Add a title and message before adding a popup.");
-      return;
-    }
-    const id = draft.id.trim() || popupIdFromTitle(title);
-    const next = stampPopup({ id, title, message: body, type: draft.type, mode: draft.mode, enabled: draft.enabled, updatedAt: "" });
-    setPopups((current) => [...current.filter((popup) => popup.id !== id), next]);
-    setDraft(EMPTY_DRAFT);
-    setMessage("Popup added. Save changes to publish it.");
+  function openPopupEditor(index: number | null = null) {
+    setEditingPopupIndex(index);
+    setEditorDraft(draftFromPopup(index === null ? undefined : popups[index]));
+    setPopupEditorOpen(true);
+    setMessage(null);
   }
 
-  function updatePopup(index: number, patch: Partial<AppPopup>) {
-    setPopups((current) => current.map((popup, currentIndex) => currentIndex === index ? stampPopup({ ...popup, ...patch }) : popup));
+  function closePopupEditor() {
+    setPopupEditorOpen(false);
+    setEditingPopupIndex(null);
+    setEditorDraft(EMPTY_DRAFT);
+  }
+
+  function savePopupDraft() {
+    const title = editorDraft.title.trim();
+    const body = editorDraft.message.trim();
+    if (!title || !body) {
+      setMessage("Add a title and message before saving this popup.");
+      return;
+    }
+    const id = editorDraft.id.trim() || popupIdFromTitle(title);
+    const next = stampPopup({ id, title, message: body, type: editorDraft.type, mode: editorDraft.mode, enabled: editorDraft.enabled, updatedAt: "" });
+    setPopups((current) => {
+      if (editingPopupIndex === null) return [...current.filter((popup) => popup.id !== id), next];
+      return current.flatMap((popup, index) => {
+        if (index === editingPopupIndex) return [next];
+        if (popup.id === id) return [];
+        return [popup];
+      });
+    });
+    closePopupEditor();
+    setMessage(editingPopupIndex === null ? "Popup added. Save changes to publish it." : "Popup updated. Save changes to publish it.");
+  }
+
+  function togglePopup(index: number, enabled: boolean) {
+    setPopups((current) => current.map((popup, currentIndex) => currentIndex === index ? stampPopup({ ...popup, enabled }) : popup));
   }
 
   async function savePopups() {
@@ -77,37 +113,68 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
       <div className="split-header">
         <div>
           <h3><Bell size={17} /> App Popups</h3>
-          <p className="legend">Publish short in-app messages. One-time popups are dismissed with OK; repeatable tips return on the next visit unless users choose Do not show again.</p>
+          <p className="legend">Publish short in-app messages without filling the admin page with editing forms.</p>
         </div>
         <div className="toolbar">
           <button className="toolbar-button" disabled={busy} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+          <button className="toolbar-button" onClick={() => openPopupEditor()}><Plus size={14} /> New Popup</button>
           <button className="toolbar-button primary" disabled={busy} onClick={savePopups}><Save size={14} /> Save Popups</button>
         </div>
       </div>
-      {message ? <div className={`admin-message ${message.includes("saved") || message.includes("added") ? "success" : "info"}`}>{message}</div> : null}
-      <div className="popup-builder-grid">
-        <label className="field"><span>Key</span><input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} placeholder="auto from title" /></label>
-        <label className="field"><span>Title</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-        <label className="field"><span>Type</span><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as PopupType })}>{POPUP_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-        <label className="field"><span>Dismissal</span><select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value as PopupMode })}>{POPUP_MODES.map((mode) => <option key={mode} value={mode}>{mode === "oneTime" ? "One-time OK" : "Repeat until do not show again"}</option>)}</select></label>
-        <label className="field popup-message-field"><span>Message</span><textarea value={draft.message} onChange={(event) => setDraft({ ...draft, message: event.target.value })} /></label>
-        <label className="toggle-line compact-toggle"><span>Enabled</span><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /></label>
-        <button className="toolbar-button" onClick={addPopup}><Plus size={14} /> Add Popup</button>
-      </div>
-      <div className="popup-admin-list">
+      {message ? <div className={`admin-message ${message.includes("saved") || message.includes("added") || message.includes("updated") ? "success" : "info"}`}>{message}</div> : null}
+      <div className="popup-admin-table" role="table" aria-label="Configured app popups">
+        <div className="popup-admin-table-row header" role="row">
+          <span>Status</span>
+          <span>Title</span>
+          <span>Type</span>
+          <span>Dismissal</span>
+          <span>Message</span>
+          <span>Actions</span>
+        </div>
         {popups.length ? popups.map((popup, index) => (
-          <article className={`popup-admin-row ${popup.enabled ? "" : "is-disabled"}`} key={popup.id}>
-            <div className="popup-admin-controls">
-              <label className="toggle-line compact-toggle"><span>{popup.enabled ? "Enabled" : "Disabled"}</span><input type="checkbox" checked={popup.enabled} onChange={(event) => updatePopup(index, { enabled: event.target.checked })} /></label>
-              <label className="field"><span>Title</span><input value={popup.title} onChange={(event) => updatePopup(index, { title: event.target.value })} /></label>
-              <label className="field"><span>Type</span><select value={popup.type} onChange={(event) => updatePopup(index, { type: event.target.value as PopupType })}>{POPUP_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-              <label className="field"><span>Dismissal</span><select value={popup.mode} onChange={(event) => updatePopup(index, { mode: event.target.value as PopupMode })}>{POPUP_MODES.map((mode) => <option key={mode} value={mode}>{mode === "oneTime" ? "One-time OK" : "Repeat until do not show again"}</option>)}</select></label>
+          <div className={`popup-admin-table-row ${popup.enabled ? "" : "is-disabled"}`} role="row" key={popup.id}>
+            <label className="toggle-line compact-toggle"><span>{popup.enabled ? "Enabled" : "Disabled"}</span><input type="checkbox" checked={popup.enabled} onChange={(event) => togglePopup(index, event.target.checked)} /></label>
+            <strong>{popup.title}</strong>
+            <span className={`popup-type-badge ${popup.type}`}>{popupTypeLabel(popup.type)}</span>
+            <span>{popupModeLabel(popup.mode)}</span>
+            <small>{popup.message}</small>
+            <div className="toolbar popup-row-actions">
+              <button className="toolbar-button" onClick={() => openPopupEditor(index)}><Edit3 size={14} /> Edit</button>
+              <button className="toolbar-button danger" title="Remove this popup after saving." onClick={() => setPopups((current) => current.filter((_, currentIndex) => currentIndex !== index))}><Trash2 size={14} /> Remove</button>
             </div>
-            <label className="field popup-message-field"><span>Message</span><textarea value={popup.message} onChange={(event) => updatePopup(index, { message: event.target.value })} /></label>
-            <button className="toolbar-button danger" title="Remove this popup after saving." onClick={() => setPopups((current) => current.filter((_, currentIndex) => currentIndex !== index))}><Trash2 size={14} /> Remove</button>
-          </article>
-        )) : <p className="legend">No popups are configured yet.</p>}
+          </div>
+        )) : <div className="empty-state"><Bell size={28} /><strong>No popups configured</strong><span>Create an app popup when you need an announcement, warning, or reusable tip.</span></div>}
       </div>
+      {popupEditorOpen ? (
+        <div className="admin-modal-backdrop" role="presentation">
+          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="popup-editor-title">
+            <div className="split-header">
+              <div>
+                <h3 id="popup-editor-title"><Bell size={17} /> {editingPopupIndex === null ? "New Popup" : "Edit Popup"}</h3>
+                <p className="legend">Choose the content and dismissal behavior users will see in the app.</p>
+              </div>
+              <button className="toolbar-button icon-only" aria-label="Close popup editor" onClick={closePopupEditor}><X size={16} /></button>
+            </div>
+            <div className="popup-editor-grid">
+              <label className="field"><span>Key</span><input value={editorDraft.id} onChange={(event) => setEditorDraft({ ...editorDraft, id: event.target.value })} placeholder="auto from title" /></label>
+              <label className="field"><span>Title</span><input value={editorDraft.title} onChange={(event) => setEditorDraft({ ...editorDraft, title: event.target.value })} /></label>
+              <label className="field"><span>Type</span><select value={editorDraft.type} onChange={(event) => setEditorDraft({ ...editorDraft, type: event.target.value as PopupType })}>{POPUP_TYPES.map((type) => <option key={type} value={type}>{popupTypeLabel(type)}</option>)}</select></label>
+              <label className="field"><span>Dismissal</span><select value={editorDraft.mode} onChange={(event) => setEditorDraft({ ...editorDraft, mode: event.target.value as PopupMode })}>{POPUP_MODES.map((mode) => <option key={mode} value={mode}>{popupModeLabel(mode)}</option>)}</select></label>
+              <label className="field popup-message-field"><span>Message</span><textarea value={editorDraft.message} onChange={(event) => setEditorDraft({ ...editorDraft, message: event.target.value })} /></label>
+              <label className="toggle-line compact-toggle"><span>Enabled</span><input type="checkbox" checked={editorDraft.enabled} onChange={(event) => setEditorDraft({ ...editorDraft, enabled: event.target.checked })} /></label>
+            </div>
+            <div className={`popup-editor-preview app-popup-${editorDraft.type}`}>
+              <strong>{editorDraft.title.trim() || "Popup title"}</strong>
+              <span>{editorDraft.message.trim() || "Popup message preview"}</span>
+              <small>{popupModeLabel(editorDraft.mode)}</small>
+            </div>
+            <div className="modal-actions">
+              <button className="toolbar-button" onClick={closePopupEditor}>Cancel</button>
+              <button className="toolbar-button primary" onClick={savePopupDraft}><Save size={14} /> Save Popup</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

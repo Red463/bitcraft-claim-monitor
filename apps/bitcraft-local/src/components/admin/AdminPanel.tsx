@@ -208,6 +208,9 @@ export function AdminPanel({
   const [linkedAccounts, setLinkedAccounts] = React.useState<AppUser[]>([]);
   const [newUser, setNewUser] = React.useState({ discordId: "", displayName: "", role: "admin" });
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
+  const [auditFilter, setAuditFilter] = React.useState("");
+  const [auditVisibleCount, setAuditVisibleCount] = React.useState(30);
+  const [popupDiagnostics, setPopupDiagnostics] = React.useState<AnyRecord | null>(null);
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
@@ -337,6 +340,11 @@ export function AdminPanel({
 
   async function refreshAudit() {
     setAuditData(await api("/admin/audit?limit=100"));
+    setAuditVisibleCount(30);
+  }
+
+  async function refreshPopupDiagnostics() {
+    setPopupDiagnostics(await api("/admin/popups"));
   }
 
   async function refreshBackups() {
@@ -388,6 +396,7 @@ export function AdminPanel({
       if (tab === "users") await refreshUsers();
       if (tab === "accounts") await refreshLinkedAccounts();
       if (tab === "audit") await refreshAudit();
+      if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
       if (tab === "backups") await refreshBackups();
     });
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize]);
@@ -654,6 +663,13 @@ export function AdminPanel({
   const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : ADMIN_TABS, [botOnly]);
   const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
   const activeTabGroup = activeTabMeta ? ADMIN_TAB_GROUPS.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
+  const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
+  const loginRows: AnyRecord[] = Array.isArray(auditData.logins) ? auditData.logins : [];
+  const normalizedAuditFilter = auditFilter.trim().toLowerCase();
+  const filteredAuditLog = normalizedAuditFilter ? auditRows.filter((entry) => `${entry.action ?? ""} ${entry.username ?? ""} ${entry.details ?? ""}`.toLowerCase().includes(normalizedAuditFilter)) : auditRows;
+  const filteredLoginRows = normalizedAuditFilter ? loginRows.filter((entry) => `${entry.username ?? ""} ${entry.remote_address ?? ""} ${entry.successful ? "successful" : "failed"}`.toLowerCase().includes(normalizedAuditFilter)) : loginRows;
+  const visibleAuditLog = filteredAuditLog.slice(0, auditVisibleCount);
+  const visibleLoginRows = filteredLoginRows.slice(0, auditVisibleCount);
   React.useEffect(() => {
     if (botOnly) {
       if (tab !== "discord") setTab("discord");
@@ -740,6 +756,21 @@ export function AdminPanel({
     if (!fastest || toNumber(check.durationMs) < toNumber(fastest.durationMs)) return check;
     return fastest;
   }, null);
+  const publicPopupCount = (popupDiagnostics?.popups ?? []).filter((popup: AnyRecord) => popup.enabled).length;
+  const supportSnapshot = {
+    generatedAt: new Date().toISOString(),
+    runtime: { environment: status?.environment ?? "unknown", storage: status?.storageLabel ?? "unknown", databaseSize: status?.databaseSize ?? null },
+    localApiHealth: status ? "loaded" : "not loaded",
+    polling: { enabled: Boolean(status?.polling?.enabled), lastSuccessAt: status?.polling?.lastSuccessAt ?? null, lastError: status?.polling?.lastError ?? null },
+    counts: status?.counts ?? {},
+    diagnostics: { endpointChecks: endpointChecks.length, endpointFailures: endpointFailures.length, mapUrlLogEntries: mapUrlLog.length, publicPopupCount },
+    audit: { actionsLoaded: auditRows.length, signInsLoaded: loginRows.length },
+  };
+  const copySupportSnapshot = async () => {
+    await navigator.clipboard.writeText(JSON.stringify(supportSnapshot, null, 2));
+    setMessageKind("success");
+    setMessage("Support snapshot copied to clipboard.");
+  };
   const discordChannelLabel = (key: string) => {
     if (key === "notifications") return "Default notifications";
     if (key === "announcements") return "Announcements";
@@ -1008,38 +1039,29 @@ export function AdminPanel({
           </div>
         </header>
       )}
-      {tabs.length ? (
+      {tabs.length && activeTabMeta ? (
         <nav className="admin-tab-groups" aria-label="Admin sections">
-          {ADMIN_TAB_GROUPS.map((group) => (
-            <section className="admin-tab-group" key={group.label}>
-              <span>{group.label}</span>
-              <div className="admin-tabs">
-                {group.tabs.map((item) => (
-                  <button
-                    key={item.key}
-                    className={tab === item.key ? "active" : ""}
-                    onClick={() => setTab(item.key)}
-                    title={item.description}
-                  >
-                    <strong>{item.label}</strong>
-                    <small>{item.description}</small>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
-        </nav>
-      ) : null}
-      {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
-      {!botOnly && activeTabMeta ? (
-        <section className="admin-tab-heading" aria-label={`${activeTabMeta.label} overview`}>
-          <div>
+          <div className="admin-section-tabs" aria-label="Admin section groups">
+            {ADMIN_TAB_GROUPS.map((group) => {
+              const selected = group.label === activeTabGroup?.label;
+              return <button key={group.label} className={selected ? "active" : ""} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
+            })}
+          </div>
+          <div className="admin-tabs" aria-label={`${activeTabGroup?.label ?? "Admin"} pages`}>
+            {(activeTabGroup?.tabs ?? tabs).map((item) => (
+              <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)} title={item.description}>
+                <strong>{item.label}</strong>
+              </button>
+            ))}
+          </div>
+          <div className="admin-tab-overview" aria-label={`${activeTabMeta.label} overview`}>
             <span>Admin / {activeTabGroup?.label ?? "General"}</span>
             <h3>{activeTabMeta.label}</h3>
             <p>{activeTabMeta.description}</p>
           </div>
-        </section>
+        </nav>
       ) : null}
+      {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
 
       {tab === "status" ? (
         <div className="admin-section">
@@ -1069,9 +1091,9 @@ export function AdminPanel({
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">
-            <div className="split-header"><h3><Server size={17} /> Collection Status</h3><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
+            <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Live pages use the BitJita proxy. Background collection is only for history, notifications, cached tools, analytics, and diagnostics.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
             <div className="status-detail">
-              <Info label="Server polling" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled"} />
+              <Info label="Background collection" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled; live pages still use the API proxy"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
               <Info label="Next scheduled collection" value={dateLabel(status?.polling?.nextRunAt)} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
@@ -1371,41 +1393,53 @@ export function AdminPanel({
 
       {tab === "diagnostics" ? (
         <div className="admin-section diagnostics-admin">
-          <section className="form-card">
+          <section className="form-card diagnostics-support-card">
             <div className="split-header">
               <div>
-                <h3><Activity size={17} /> Diagnostics</h3>
-                <p className="legend">Troubleshoot browser-side map state and generated BitCraft Map URLs.</p>
+                <h3><Activity size={17} /> Support snapshot</h3>
+                <p className="legend">Quick, redacted state for debugging the local app without exposing tokens or secrets.</p>
+              </div>
+              <div className="toolbar">
+                <button className={busyButtonClass("diagnostics-refresh")} disabled={isBusyAction("diagnostics-refresh")} onClick={() => run(async () => { await refreshStatus(); await refreshPopupDiagnostics(); }, "Diagnostics refreshed.", "diagnostics-refresh")}><RefreshCw size={15} /> Refresh</button>
+                <button className="toolbar-button" onClick={() => run(copySupportSnapshot, undefined, "copy-support-snapshot")}><Save size={15} /> Copy Support Snapshot</button>
               </div>
             </div>
-            <div className="status-detail">
+            <div className="status-detail diagnostics-health-grid">
+              <Info label="Runtime" value={status?.environment ?? "Not loaded"} />
+              <Info label="Local API health" value={status ? "Responding" : "Not checked"} />
+              <Info label="Storage" value={status?.storageLabel ?? "-"} />
+              <Info label="Database size" value={bytesLabel(status?.databaseSize)} />
+              <Info label="Endpoint checks" value={diagnostics.length ? `${formatNumber(endpointFailures.length)} failing, ${formatNumber(endpointSuccesses.length)} passing` : "Not run"} />
+              <Info label="Public popup count" value={popupDiagnostics ? formatNumber(publicPopupCount) : "Not loaded"} />
+              <Info label="Audit rows loaded" value={`${formatNumber(auditRows.length)} actions, ${formatNumber(loginRows.length)} sign-ins`} />
               <Info label="Map URL log entries" value={formatNumber(mapUrlLog.length)} />
-              <Info label="Latest map log" value={mapUrlLog[0]?.at ? dateLabel(mapUrlLog[0].at) : "Not recorded"} />
-              <Info label="Latest tracked players" value={formatNumber(mapUrlLog[0]?.selectedPlayerIds?.length)} />
-              <Info label="Latest detail failures" value={formatNumber(mapUrlLog[0]?.playerDetailFailed)} />
             </div>
+            <code className="support-snapshot-code">{JSON.stringify(supportSnapshot, null, 2)}</code>
           </section>
           <section className="form-card map-url-diagnostics">
             <div className="split-header">
               <div>
                 <h3><MapIcon size={17} /> Map URL Diagnostics</h3>
-                <p className="legend">Records the generated BitCraft map URL whenever the Map page changes tracked players, resources, regions or focus. Use this to verify which player, resource, region, and focus parameters the app sends to BitCraft Map.</p>
+                <p className="legend">Records generated BitCraft map URLs so you can confirm player, resource, region, and focus parameters.</p>
               </div>
               <button className="toolbar-button" title="Delete saved map diagnostic entries from this browser." disabled={!mapUrlLog.length} onClick={() => setMapUrlLog([])}><X size={14} /> Clear Log</button>
             </div>
             {mapUrlLog.length ? (
               <>
                 <div className="map-url-diagnostic-grid">
+                  <Info label="Latest map log" value={mapUrlLog[0]?.at ? dateLabel(mapUrlLog[0].at) : "Not recorded"} />
                   <Info label="Roster source" value={String(mapUrlLog[0].rosterSource ?? "-")} />
                   <Info label="Settlement members" value={formatNumber(mapUrlLog[0].memberCount)} />
                   <Info label="Roster players" value={formatNumber(mapUrlLog[0].rosterCount)} />
                   <Info label="Detail failures" value={formatNumber(mapUrlLog[0].playerDetailFailed)} />
                   <Info label="Tracked players" value={formatNumber(mapUrlLog[0].selectedPlayerIds?.length)} />
-                  <Info label="Mode" value={mapUrlLog[0].selectedMode === "auto-online" ? "Auto online" : "Manual"} />
                 </div>
-                <code>{JSON.stringify(mapUrlLog[0], null, 2)}</code>
+                <details className="diagnostics-raw-details">
+                  <summary>Latest raw map entry</summary>
+                  <code>{JSON.stringify(mapUrlLog[0], null, 2)}</code>
+                </details>
                 <div className="map-url-log-list">
-                  {mapUrlLog.map((entry) => (
+                  {mapUrlLog.slice(0, 30).map((entry) => (
                     <article key={`${entry.at}-${entry.url}`}>
                       <time>{new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
                       <span>{entry.rosterSource ?? "unknown"} roster, {formatNumber(entry.selectedPlayerIds?.length)} players, R {entry.regionIdParam || "-"}</span>
@@ -2017,9 +2051,51 @@ export function AdminPanel({
       ) : null}
 
       {tab === "audit" ? (
-        <div className="admin-grid audit-grid">
-          <section className="form-card"><h3><Activity size={17} /> Admin Actions</h3><p className="legend">Recent administrator changes made through this console.</p><div className="audit-list">{auditData.auditLog.length ? auditData.auditLog.map((entry: AnyRecord) => <div key={entry.id}><strong>{entry.action}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)}</span></div>) : <p className="legend">No administrator actions have been recorded yet.</p>}</div></section>
-          <section className="form-card"><h3><Lock size={17} /> Sign-in History</h3><p className="legend">Successful and failed administrator sign-in attempts.</p><div className="audit-list">{auditData.logins.length ? auditData.logins.map((entry: AnyRecord) => <div key={entry.id} className={entry.successful ? "" : "failed"}><strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong><span>{entry.username} | {dateLabel(entry.occurred_at)} | {entry.remote_address ?? "-"}</span></div>) : <p className="legend">No administrator sign-ins have been recorded yet.</p>}</div></section>
+        <div className="admin-section audit-section">
+          <section className="form-card audit-console-card">
+            <div className="split-header">
+              <div>
+                <h3><Activity size={17} /> Audit Trail</h3>
+                <p className="legend">Search recent administrator actions and sign-ins. Results are bounded so the page stays usable.</p>
+              </div>
+              <button className={busyButtonClass("audit-refresh")} disabled={isBusyAction("audit-refresh")} onClick={() => run(refreshAudit, undefined, "audit-refresh")}><RefreshCw size={15} /> Refresh</button>
+            </div>
+            <div className="audit-toolbar">
+              <label className="field"><span>Search audit records</span><input value={auditFilter} onChange={(event) => { setAuditFilter(event.target.value); setAuditVisibleCount(30); }} placeholder="Action, admin, IP, result" /></label>
+              <div className="audit-summary-strip">
+                <Info label="Actions shown" value={`${formatNumber(Math.min(visibleAuditLog.length, filteredAuditLog.length))} of ${formatNumber(filteredAuditLog.length)}`} />
+                <Info label="Sign-ins shown" value={`${formatNumber(Math.min(visibleLoginRows.length, filteredLoginRows.length))} of ${formatNumber(filteredLoginRows.length)}`} />
+              </div>
+            </div>
+            <div className="audit-table" role="table" aria-label="Admin actions">
+              <div className="audit-table-row header" role="row"><span>Action</span><span>Admin</span><span>When</span><span>Details</span></div>
+              {visibleAuditLog.length ? visibleAuditLog.map((entry: AnyRecord) => (
+                <div className="audit-table-row" role="row" key={entry.id}>
+                  <strong>{entry.action}</strong>
+                  <span>{entry.username ?? "Unknown"}</span>
+                  <time>{dateLabel(entry.occurred_at)}</time>
+                  <small>{entry.details ? String(safeDisplayJson(entry.details)) : "-"}</small>
+                </div>
+              )) : <p className="legend">{normalizedAuditFilter ? "No administrator actions match this filter." : "No administrator actions have been recorded yet."}</p>}
+            </div>
+            {auditData.auditLog.length > auditVisibleCount || filteredAuditLog.length > visibleAuditLog.length ? (
+              <button className="toolbar-button audit-load-more" onClick={() => setAuditVisibleCount((count) => count + 30)}>Load more actions</button>
+            ) : null}
+          </section>
+          <section className="form-card audit-console-card">
+            <h3><Lock size={17} /> Sign-in History</h3>
+            <div className="audit-table compact" role="table" aria-label="Admin sign-in history">
+              <div className="audit-table-row header" role="row"><span>Result</span><span>Admin</span><span>When</span><span>Remote address</span></div>
+              {visibleLoginRows.length ? visibleLoginRows.map((entry: AnyRecord) => (
+                <div key={entry.id} className={`audit-table-row ${entry.successful ? "" : "failed"}`} role="row">
+                  <strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong>
+                  <span>{entry.username ?? "Unknown"}</span>
+                  <time>{dateLabel(entry.occurred_at)}</time>
+                  <small>{entry.remote_address ?? "-"}</small>
+                </div>
+              )) : <p className="legend">No administrator sign-ins match this filter.</p>}
+            </div>
+          </section>
         </div>
       ) : null}
 
