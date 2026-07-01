@@ -97,10 +97,12 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
       <div className="popup-admin-list">
         {popups.length ? popups.map((popup, index) => (
           <article className={`popup-admin-row ${popup.enabled ? "" : "is-disabled"}`} key={popup.id}>
-            <label className="toggle-line compact-toggle"><span>{popup.enabled ? "Enabled" : "Disabled"}</span><input type="checkbox" checked={popup.enabled} onChange={(event) => updatePopup(index, { enabled: event.target.checked })} /></label>
-            <label className="field"><span>Title</span><input value={popup.title} onChange={(event) => updatePopup(index, { title: event.target.value })} /></label>
-            <label className="field"><span>Type</span><select value={popup.type} onChange={(event) => updatePopup(index, { type: event.target.value as PopupType })}>{POPUP_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-            <label className="field"><span>Dismissal</span><select value={popup.mode} onChange={(event) => updatePopup(index, { mode: event.target.value as PopupMode })}>{POPUP_MODES.map((mode) => <option key={mode} value={mode}>{mode === "oneTime" ? "One-time OK" : "Repeat until do not show again"}</option>)}</select></label>
+            <div className="popup-admin-controls">
+              <label className="toggle-line compact-toggle"><span>{popup.enabled ? "Enabled" : "Disabled"}</span><input type="checkbox" checked={popup.enabled} onChange={(event) => updatePopup(index, { enabled: event.target.checked })} /></label>
+              <label className="field"><span>Title</span><input value={popup.title} onChange={(event) => updatePopup(index, { title: event.target.value })} /></label>
+              <label className="field"><span>Type</span><select value={popup.type} onChange={(event) => updatePopup(index, { type: event.target.value as PopupType })}>{POPUP_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+              <label className="field"><span>Dismissal</span><select value={popup.mode} onChange={(event) => updatePopup(index, { mode: event.target.value as PopupMode })}>{POPUP_MODES.map((mode) => <option key={mode} value={mode}>{mode === "oneTime" ? "One-time OK" : "Repeat until do not show again"}</option>)}</select></label>
+            </div>
             <label className="field popup-message-field"><span>Message</span><textarea value={popup.message} onChange={(event) => updatePopup(index, { message: event.target.value })} /></label>
             <button className="toolbar-button danger" title="Remove this popup after saving." onClick={() => setPopups((current) => current.filter((_, currentIndex) => currentIndex !== index))}><Trash2 size={14} /> Remove</button>
           </article>
