@@ -30,7 +30,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction.v2", "desc");
   const allRows = data.region;
   const scoreMaxima = regionScoreMaxima(allRows);
-  const scoreFormulaTitle = "Score = 75% tier + 15% supplies + 7% treasury + 3% tiles. Treasury uses log scaling so huge treasuries do not dominate the ranking.";
+  const scoreFormulaTitle = "Score = 90% tier + 7% treasury + 3% tiles. Supplies remain visible in the table but do not affect ranking. Treasury uses log scaling so huge treasuries do not dominate the ranking.";
   const scoreFor = (row: AnyRecord) => settlementRegionScore(row, scoreMaxima);
   const sorters: Record<string, (row: AnyRecord) => string | number> = {
     score: scoreFor,
@@ -96,7 +96,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       <header className="members-topbar region-topbar">
         <div>
           <h2>{data.claim.regionName ?? "Region"}</h2>
-          <p>{formatNumber(allRows.length)} settlements ranked by weighted score: tier, supplies, treasury, and tiles</p>
+          <p>{formatNumber(allRows.length)} settlements ranked by weighted score: tier, treasury, and tiles</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -147,7 +147,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
       <section className="command-filter-panel region-table-panel">
         <div className="command-filter-header">
           <span className="command-filter-title"><Globe2 size={15} /> Regional rankings</span>
-          <span>Default sort uses weighted score: 75% tier, 15% supplies, 7% treasury, 3% tiles</span>
+          <span>Default sort uses weighted score: 90% tier, 7% treasury, 3% tiles</span>
         </div>
         <div className="table-wrap">
           <table>

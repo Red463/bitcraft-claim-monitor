@@ -23,8 +23,7 @@ function normalizedLog(value: unknown, max: number): number {
 
 export function settlementRegionScore(row: AnyRecord, maxima: RegionScoreMaxima): number {
   const score =
-    normalizedLinear(row.tier, maxima.tier) * 0.75 +
-    normalizedLinear(row.supplies, maxima.supplies) * 0.15 +
+    normalizedLinear(row.tier, maxima.tier) * 0.9 +
     normalizedLog(row.treasury, maxima.treasury) * 0.07 +
     normalizedLinear(row.numTiles, maxima.numTiles) * 0.03;
   return Math.round(score * 1000);

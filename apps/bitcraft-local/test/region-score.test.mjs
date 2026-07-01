@@ -10,17 +10,17 @@ test("settlementRegionScore weights tier as the dominant regional ranking factor
   ];
   const maxima = regionScoreMaxima(rows);
 
-  assert.equal(settlementRegionScore(rows[0], maxima), 790);
-  assert.equal(settlementRegionScore(rows[1], maxima), 906);
-  assert.equal(settlementRegionScore(rows[1], maxima) > settlementRegionScore(rows[0], maxima), true);
+  assert.equal(settlementRegionScore(rows[0], maxima), 938);
+  assert.equal(settlementRegionScore(rows[1], maxima), 888);
+  assert.equal(settlementRegionScore(rows[0], maxima) > settlementRegionScore(rows[1], maxima), true);
 });
 
-test("settlementRegionScore uses supplies before treasury and tiles within the same tier", () => {
+test("settlementRegionScore ignores supplies and uses treasury then tiles as same-tier tie breakers", () => {
   const rows = [
     { name: "Supply Lead", tier: 5, supplies: 90000, treasury: 10000, numTiles: 1000 },
-    { name: "Treasury Lead", tier: 5, supplies: 30000, treasury: 1000000, numTiles: 10000 },
+    { name: "Tie Break Lead", tier: 5, supplies: 30000, treasury: 1000000, numTiles: 10000 },
   ];
   const maxima = regionScoreMaxima(rows);
 
-  assert.equal(settlementRegionScore(rows[0], maxima) > settlementRegionScore(rows[1], maxima), true);
+  assert.equal(settlementRegionScore(rows[1], maxima) > settlementRegionScore(rows[0], maxima), true);
 });

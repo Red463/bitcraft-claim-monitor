@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.5] - 2026-07-01
+
+### Changed
+
+- Changed regional ranking scores to exclude supplies, making tier the main factor while treasury and tiles act as tie breakers.
+
 ## [0.31.1-beta.4] - 2026-07-01
 
 ### Fixed

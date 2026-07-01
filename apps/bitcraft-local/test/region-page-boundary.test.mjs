@@ -7,7 +7,9 @@ test("Region page defaults rankings to weighted settlement score", () => {
 
   assert.match(page, /usePersistedState\("region\.sort\.v2", "score"\)/);
   assert.match(page, /\["Score", "score"/);
-  assert.match(page, /75% tier, 15% supplies, 7% treasury, 3% tiles/);
+  assert.match(page, /\["Supplies", "supplies"/);
+  assert.match(page, /90% tier, 7% treasury, 3% tiles/);
+  assert.match(page, /Supplies remain visible in the table but do not affect ranking/);
   assert.match(page, /title=\{key === "score" \? scoreFormulaTitle : undefined\}/);
   assert.match(page, /<strong title=\{scoreFormulaTitle\}>/);
 });
