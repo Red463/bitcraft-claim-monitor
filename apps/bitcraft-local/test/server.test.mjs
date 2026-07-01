@@ -900,6 +900,41 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ characterPlayerId: "player-1", characterName: "Tester" }),
   });
   assert.equal(anonymousCharacterLink.status, 401);
+  const savedAccountSettings = await fetch(`${origin}/api/local/auth/settings`, {
+    method: "PUT",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    body: JSON.stringify({ settings: { density: "compact", selectedMemberId: "player-42", toastSettings: { marketListings: false, marketSales: true, production: false } } }),
+  });
+  assert.equal(savedAccountSettings.status, 200);
+  assert.equal((await savedAccountSettings.json()).user.settings.density, "compact");
+  const reloadedAccountSettings = await fetch(`${origin}/api/local/auth/me`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
+  assert.equal(reloadedAccountSettings.user.discordId, "deal-discord-user");
+  assert.equal(reloadedAccountSettings.user.settings.selectedMemberId, "player-42");
+  assert.equal(reloadedAccountSettings.user.settings.toastSettings.marketListings, false);
+  const approvedLinkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  approvedLinkDb.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = 'approved' WHERE discord_id = ?")
+    .run("12345678", "Approved Character", "deal-discord-user");
+  approvedLinkDb.close();
+  const blockedRelink = await fetch(`${origin}/api/local/auth/character`, {
+    method: "PUT",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    body: JSON.stringify({ characterPlayerId: "87654321", characterName: "Different Character" }),
+  });
+  assert.equal(blockedRelink.status, 409);
+  assert.match((await blockedRelink.json()).error, /unlink/i);
+  const unlinkApprovedCharacter = await fetch(`${origin}/api/local/auth/character`, {
+    method: "PUT",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    body: JSON.stringify({ characterPlayerId: "", characterName: "" }),
+  });
+  assert.equal(unlinkApprovedCharacter.status, 200);
+  const relinkAfterUnlink = await fetch(`${origin}/api/local/auth/character`, {
+    method: "PUT",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    body: JSON.stringify({ characterPlayerId: "87654321", characterName: "Different Character" }),
+  });
+  assert.equal(relinkAfterUnlink.status, 200);
+  assert.equal((await relinkAfterUnlink.json()).user.characterStatus, "pending");
   const linkedAccounts = await fetch(`${origin}/api/local/admin/user-accounts`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
@@ -1298,3 +1333,4 @@ test("background polling failures keep the server online", async (t) => {
   assert.equal(health.ok, true);
   assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
 });
+

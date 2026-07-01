@@ -114,6 +114,7 @@ function DashboardApp() {
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
+  const [accountSettingsHydratedFor, setAccountSettingsHydratedFor] = React.useState("");
   const state = useBitjitaData(refreshToken, claimId, active);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
@@ -167,22 +168,8 @@ function DashboardApp() {
     if (!response.ok) throw new Error(body.error ?? "Unable to save character link request");
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, []);
-  const saveAccountSettings = React.useCallback(async () => {
-    const settings = { ...(userAuth.user?.settings ?? {}), density, toastSettings: normalizedUserToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
-    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "Unable to save account settings");
-    setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [browserTheme, density, normalizedUserToastSettings, selectedMemberId, sidebarCollapsed, sidebarGroups, userAuth.user?.settings]);
-  const setDiscordMarketSaleDm = React.useCallback(async (enabled: boolean) => {
-    const settings = { ...(userAuth.user?.settings ?? {}), discordMarketSaleDm: enabled };
-    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "Unable to save Discord notification preference");
-    setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [userAuth.user?.settings]);
-  const loadAccountSettings = React.useCallback(() => {
-    const saved = userAuth.user?.settings ?? {};
+  const accountSettingsFingerprint = React.useMemo(() => JSON.stringify(userAuth.user?.settings ?? {}), [userAuth.user?.settings]);
+  const applyAccountSettings = React.useCallback((saved: AnyRecord) => {
     if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
     if (saved.toastSettings && typeof saved.toastSettings === "object") setUserToastSettings(normalizeUserToastSettings(saved.toastSettings));
     const savedTheme = normalizeThemeCandidate(saved.theme)?.theme;
@@ -190,7 +177,39 @@ function DashboardApp() {
     if (typeof saved.sidebarCollapsed === "boolean") setSidebarCollapsed(saved.sidebarCollapsed);
     if (saved.sidebarGroups && typeof saved.sidebarGroups === "object" && !Array.isArray(saved.sidebarGroups)) setSidebarGroups({ ...DEFAULT_SIDEBAR_GROUPS, ...saved.sidebarGroups });
     if (typeof saved.selectedMemberId === "string") setSelectedMemberId(saved.selectedMemberId);
-  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings, userAuth.user?.settings]);
+  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings]);
+  React.useEffect(() => {
+    const discordId = userAuth.user?.discordId ?? "";
+    if (!discordId) {
+      setAccountSettingsHydratedFor("");
+      return;
+    }
+    applyAccountSettings(userAuth.user?.settings ?? {});
+    setAccountSettingsHydratedFor(`${discordId}:${accountSettingsFingerprint}`);
+  }, [accountSettingsFingerprint, applyAccountSettings, userAuth.user?.discordId, userAuth.user?.settings]);
+  const syncAccountSettings = React.useCallback(async (settings: AnyRecord) => {
+    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to sync account settings");
+    setUserAuth((current) => ({ ...current, user: body.user }));
+  }, []);
+  React.useEffect(() => {
+    const discordId = userAuth.user?.discordId ?? "";
+    if (!discordId || accountSettingsHydratedFor !== `${discordId}:${accountSettingsFingerprint}`) return;
+    const settings = { ...(userAuth.user?.settings ?? {}), density, toastSettings: normalizedUserToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
+    if (JSON.stringify(settings) === accountSettingsFingerprint) return;
+    const timeout = window.setTimeout(() => {
+      void syncAccountSettings(settings).catch(() => undefined);
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [accountSettingsFingerprint, accountSettingsHydratedFor, browserTheme, density, normalizedUserToastSettings, selectedMemberId, sidebarCollapsed, sidebarGroups, syncAccountSettings, userAuth.user?.discordId, userAuth.user?.settings]);
+  const setDiscordMarketSaleDm = React.useCallback(async (enabled: boolean) => {
+    const settings = { ...(userAuth.user?.settings ?? {}), discordMarketSaleDm: enabled };
+    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to save Discord notification preference");
+    setUserAuth((current) => ({ ...current, user: body.user }));
+  }, [userAuth.user?.settings]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -526,7 +545,7 @@ function DashboardApp() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={NAV} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} onSaveAccountSettings={saveAccountSettings} onLoadAccountSettings={loadAccountSettings} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
@@ -575,8 +594,4 @@ export default function App() {
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }
-
-
-
-
 

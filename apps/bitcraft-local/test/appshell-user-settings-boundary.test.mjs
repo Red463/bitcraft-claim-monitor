@@ -23,3 +23,27 @@ test("User settings exposes Discord market sale DM opt-out controls", () => {
   assert.match(dialog, /onDiscordMarketSaleDmChange/);
   assert.match(dialog, /Send me Discord DMs for my confirmed market sales/);
 });
+
+test("signed-in Discord settings autosync without manual save and load buttons", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /syncAccountSettings/);
+  assert.match(appShell, /applyAccountSettings/);
+  assert.match(appShell, /userAuth\.user\?\.discordId/);
+  assert.doesNotMatch(dialog, /onSaveAccountSettings/);
+  assert.doesNotMatch(dialog, /onLoadAccountSettings/);
+  assert.doesNotMatch(dialog, /Save settings to account/);
+  assert.doesNotMatch(dialog, /Load saved settings/);
+  assert.match(dialog, /Settings sync automatically while you are signed in with Discord/);
+});
+
+test("approved Discord character links require unlink before relink", () => {
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(dialog, /characterLinkApproved/);
+  assert.match(dialog, /disabled=\{characterLinkApproved\}/);
+  assert.match(dialog, /Unlink character/);
+  assert.match(dialog, /onLinkCharacter\(null\)/);
+});
+

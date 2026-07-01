@@ -58,8 +58,6 @@ export type UserSettingsDialogProps = {
   onDiscordLogout: () => Promise<void>;
   onLinkCharacter: (member: AnyRecord | null) => Promise<void>;
   onDiscordMarketSaleDmChange: (enabled: boolean) => Promise<void>;
-  onSaveAccountSettings: () => Promise<void>;
-  onLoadAccountSettings: () => void;
   showAdminTools: boolean;
   onOpenAdmin: () => void;
   onResetSettings: () => void;
@@ -79,8 +77,6 @@ export function UserSettingsDialog({
   onDiscordLogout,
   onLinkCharacter,
   onDiscordMarketSaleDmChange,
-  onSaveAccountSettings,
-  onLoadAccountSettings,
   showAdminTools,
   onOpenAdmin,
   onResetSettings,
@@ -177,6 +173,7 @@ export function UserSettingsDialog({
   const handleSoundVolumeChange = (event: React.FormEvent<HTMLInputElement>) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.currentTarget.value) / 100 });
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
   const discordMarketSaleDm = auth.user?.settings?.discordMarketSaleDm !== false;
+  const characterLinkApproved = auth.user?.characterStatus === "approved" && Boolean(auth.user?.characterPlayerId);
   const statusLabel = auth.user?.characterStatus === "approved"
     ? "Approved"
     : auth.user?.characterStatus === "pending"
@@ -246,26 +243,23 @@ export function UserSettingsDialog({
                 <div className="account-link-grid">
                   <label className="field">
                     <span>BitCraft character</span>
-                    <select value={selectedCharacterId} onChange={(event) => setSelectedCharacterId(event.target.value)}>
+                    <select value={selectedCharacterId} disabled={characterLinkApproved} onChange={(event) => setSelectedCharacterId(event.target.value)}>
                       <option value="">Select your character</option>
                       {auth.user.characterPlayerId && !members.some((member) => String(member.playerEntityId) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
                       {members.map((member) => <option key={member.playerEntityId ?? memberDisplayName(member)} value={String(member.playerEntityId ?? "")}>{memberDisplayName(member)}</option>)}
                     </select>
                   </label>
-                  <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>
+                  {characterLinkApproved ? <button className="toolbar-button" onClick={() => runAccountAction(() => onLinkCharacter(null), "Character link removed. You can request a new character link now.")}><RefreshCw size={14} /> Unlink character</button> : <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>}
                 </div>
                 <label className="toggle-row"><input type="checkbox" checked={discordMarketSaleDm} onChange={(event) => runAccountAction(() => onDiscordMarketSaleDmChange(event.target.checked), event.target.checked ? "Discord market sale DMs enabled." : "Discord market sale DMs disabled.")} /><span>Send me Discord DMs for my confirmed market sales</span></label>
-                <div className="settings-account-actions">
-                  <button className="toolbar-button" onClick={() => runAccountAction(onSaveAccountSettings, "Settings saved to your Discord account.")}><Save size={14} /> Save settings to account</button>
-                  <button className="toolbar-button" disabled={!auth.user.settings || !Object.keys(auth.user.settings).length} onClick={onLoadAccountSettings}><Download size={14} /> Load saved settings</button>
-                </div>
+                <p className="theme-share-status">Settings sync automatically while you are signed in with Discord.</p>
                 {accountStatus ? <p className="theme-share-status">{accountStatus}</p> : null}
               </div>
             )}
           </section> : null}
           {settingsSection === "account" ? <section>
             <h3>This Browser</h3>
-            <p className="legend">Your page, filters, density and notification preferences are saved in this browser only. This uses local browser storage, not analytics cookies, so it works even if analytics cookies are declined.</p>
+            <p className="legend">When signed in with Discord, your page, filters, density and notification preferences sync to your account. Local storage is still used on this device for signed-out browsing and instant loading.</p>
           </section> : null}
           {settingsSection === "account" && showAdminTools ? <section>
             <h3>Admin Tools</h3>
@@ -276,7 +270,7 @@ export function UserSettingsDialog({
             <div className="settings-section-heading">
               <div>
                 <h3>Theme</h3>
-                <p className="legend">Saved locally for this browser. Presets apply instantly and advanced controls can be fine-tuned below.</p>
+                <p className="legend">When signed in with Discord, your selected theme syncs to your account. Presets apply instantly and advanced controls can be fine-tuned below.</p>
               </div>
               <div className="settings-heading-actions">
                 <button className="toolbar-button" onClick={() => { onThemeChange(DEFAULT_THEME); setLastThemeChoice("default"); setThemeExpanded(false); }}><RefreshCw size={14} /> Reset Default</button>

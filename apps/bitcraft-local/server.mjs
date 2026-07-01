@@ -7497,6 +7497,9 @@ const server = createServer(async (req, res) => {
         statements.updateUserCharacter.run("", "", "unlinked", user.id);
         return send(res, 200, { user: publicAppUser(getAppUser(req)) });
       }
+      if (String(user.character_status ?? "") === "approved" && String(user.character_player_id ?? "") && String(user.character_player_id) !== characterPlayerId) {
+        return send(res, 409, { error: "Unlink your approved character before linking a different one" });
+      }
       if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
       if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
       statements.updateUserCharacter.run(characterPlayerId, characterName, "pending", user.id);
@@ -8373,3 +8376,4 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
+
