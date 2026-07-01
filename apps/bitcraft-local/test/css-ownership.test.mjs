@@ -45,6 +45,20 @@ test("shared command panel primitives use neutral class names", () => {
   assert.equal(globalCss.includes(".command-filter-header"), true);
   assert.deepEqual(forbidden, []);
 });
+
+test("shared panel headers keep title and count separated", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const panelHeadRule = globalCss.match(/\.panel-head\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const panelHeadStrongRule = globalCss.match(/\.panel-head strong\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const panelHeadMetaRule = globalCss.match(/\.panel-head > span\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(panelHeadRule, /display:\s*flex\b/);
+  assert.match(panelHeadRule, /justify-content:\s*space-between\b/);
+  assert.match(panelHeadRule, /gap:\s*12px\b/);
+  assert.match(panelHeadStrongRule, /gap:\s*7px\b/);
+  assert.match(panelHeadStrongRule, /min-width:\s*0\b/);
+  assert.match(panelHeadMetaRule, /white-space:\s*nowrap\b/);
+});
 test("shared table sort buttons keep a usable click target", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const sortRule = globalCss.match(/\.table-sort-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
@@ -640,3 +654,4 @@ test("Discord admin and bot section styles live in the Discord admin stylesheet"
     assert.equal(discordAdminCss.includes(selector), true, `${selector} should live in discord-admin.css`);
   }
 });
+

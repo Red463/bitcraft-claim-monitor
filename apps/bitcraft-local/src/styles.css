@@ -126,6 +126,25 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .nav-tools-menu a { width: 100%; justify-content: flex-start; }
 .toolbar-button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 6px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
 .toolbar-button:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panel-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.panel-head > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
 .toolbar-button.is-loading {
   color: var(--gold);
   border-color: rgba(240,198,79,.3);
@@ -1469,3 +1488,4 @@ body .market-page tbody tr:hover td {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+

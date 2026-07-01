@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.4] - 2026-07-01
+
+### Fixed
+
+- Fixed shared panel headers so titles and count text keep visible spacing across the app.
+
 ## [0.31.1-beta.3] - 2026-07-01
 
 ### Changed
