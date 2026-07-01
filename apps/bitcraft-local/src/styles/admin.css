@@ -909,7 +909,7 @@
 .popup-admin-table-row { min-width: 0; display: grid; grid-template-columns: 42px minmax(130px, .95fr) 92px minmax(150px, .9fr) minmax(120px, 1fr) auto; gap: 10px; align-items: center; border: 1px solid rgba(108,123,145,.18); border-radius: 7px; background: rgba(255,255,255,.018); padding: 9px 10px; }
 .popup-admin-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
 .popup-admin-table-row.header span:first-child { color: transparent; }
-.popup-admin-table-row .compact-toggle { min-height: 40px; justify-content: center; padding: 0; }
+.popup-admin-table-row .compact-toggle { width: 34px; min-width: 0; max-width: 34px; min-height: 20px; justify-self: center; justify-content: center; gap: 0; padding: 0; border: 0; background: transparent; }
 .popup-admin-table-row .compact-toggle > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .popup-admin-table-row.is-disabled { opacity: .68; }
 .popup-admin-table-row strong, .popup-admin-table-row small, .popup-admin-table-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

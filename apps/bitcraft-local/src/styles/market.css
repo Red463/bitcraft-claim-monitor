@@ -49,7 +49,8 @@
   color: #fff;
   font-family: Outfit, system-ui, sans-serif;
   font-size: 28px;
-  line-height: 1;
+  line-height: 1.18;
+  padding-bottom: 1px;
   font-weight: 800;
 }
 .market-command-panel,

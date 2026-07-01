@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.1] - 2026-07-01
+
+### Fixed
+
+- Fixed the admin app popup list so enabled switches no longer overlap popup titles.
+- Fixed market analytics date sorting so recent confirmed sales order by the actual date and time.
+- Fixed market analytics stat values so gold suffixes with descenders are not clipped.
+
 ## [0.31.0-beta.1] - 2026-07-01
 
 ### Changed
@@ -2323,5 +2331,3 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-
-

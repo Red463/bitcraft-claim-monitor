@@ -14,3 +14,10 @@ test("Market page replaces the legacy MainPages bundle", () => {
   assert.match(appShell, /from "\.\/pages\/MarketPage"/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
 });
+test("Market mini-stat values leave room for descenders", () => {
+  const marketCss = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+  const valueRule = marketCss.match(/\.market-page \.mini-stat strong\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(valueRule, /line-height:\s*1\.18\b/);
+  assert.match(valueRule, /padding-bottom:\s*1px\b/);
+});
