@@ -34,25 +34,57 @@
 
 .empires-watch-controls {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin: 0 0 14px;
 }
 
-.empires-watch-controls > strong,
+.inactivity-threshold-card {
+  border-color: rgba(240,198,79,.24);
+  background: linear-gradient(135deg, rgba(240,198,79,.08), rgba(9,13,20,.72) 46%, rgba(86,213,255,.04));
+  padding: 14px 16px;
+}
+
+.threshold-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.threshold-copy strong,
 .coordinate-cell {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
 
+.threshold-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inactivity-threshold-card .compact-field {
+  min-width: 160px;
+  max-width: 220px;
+}
+
+.inactivity-threshold-card input {
+  text-align: center;
+  font-weight: 850;
+  font-size: 16px;
+}
+
 .coordinate-cell {
   white-space: nowrap;
 }
 
-.watchtower-coordinate-note {
+.watchtower-filter-bar {
+  display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -2px 0 10px;
 }
 
 .watchtower-empire-filter {
@@ -60,7 +92,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 7px;
-  margin: -2px 0 10px;
+  min-width: 0;
 }
 
 .watchtower-empire-filter button {
@@ -97,6 +129,51 @@
   background: rgba(255,255,255,.08);
   color: inherit;
   text-align: center;
+}
+.watchtower-risk-toggle {
+  min-height: 30px;
+  border: 1px solid rgba(239,100,97,.28);
+  border-radius: 999px;
+  background: rgba(239,100,97,.08);
+  color: #ffcfca;
+  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.watchtower-risk-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.watchtower-risk-toggle:hover,
+.watchtower-risk-toggle.active {
+  border-color: rgba(239,100,97,.6);
+  background: rgba(239,100,97,.15);
+  color: #ffd6d3;
+}
+
+.watchtower-risk-toggle small {
+  min-width: 20px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: rgba(255,255,255,.1);
+  color: inherit;
+  text-align: center;
+}
+
+.compact-map-action {
+  width: max-content;
+  padding-inline: 9px;
+  min-height: 30px;
+  white-space: nowrap;
 }
 
 .icon-inline-button {
@@ -153,7 +230,8 @@
 
 @media (max-width: 900px) {
   .page-title-row,
-  .empires-watch-controls {
+  .empires-watch-controls,
+  .watchtower-filter-bar {
     flex-direction: column;
     align-items: stretch;
   }
@@ -190,3 +268,4 @@
 @media (max-width: 760px) {
   .tower-access-list article { grid-template-columns: 1fr; align-items: start; }
 }
+

@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.3] - 2026-07-01
+
+### Changed
+
+- Simplified the claimed watchtowers table by replacing coordinate text with Open on map actions.
+- Improved the watchtower inactivity threshold control and removed extra explanatory note cards from the Watchtowers view.
+
+### Added
+
+- Added an At risk only filter for claimed watchtowers with active siege or risky leader activity.
+
 ## [0.31.1-beta.2] - 2026-07-01
 
 ### Added

@@ -23,16 +23,25 @@ test("watchtower dialog stays viewport bounded and renders all empire members", 
   assert.match(css, /align-items:\s*center/);
   assert.match(css, /max-height:\s*calc\(100vh - 40px\)/);
 });
-test("watchtower table labels BitJita coordinates and exposes empire filters", () => {
+
+test("watchtower table exposes empire and risk filters with open-map actions", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
 
   assert.match(page, /empires\.watchtowerEmpire/);
+  assert.match(page, /empires\.watchtowerRiskOnly/);
   assert.match(page, /watchtower-empire-filter/);
-  assert.match(page, /Map coords/);
+  assert.match(page, /watchtower-risk-toggle/);
+  assert.match(page, /At risk only/);
+  assert.match(page, /Open on map/);
+  assert.match(page, /\["Map",/);
   assert.doesNotMatch(page, /\["Coordinates"/);
-  assert.match(page, /BitJita exposes map coordinates for claimed towers/);
-  assert.match(page, /Copy map coordinates/);
+  assert.doesNotMatch(page, /\["Map coords"/);
+  assert.doesNotMatch(page, /BitJita exposes map coordinates for claimed towers/);
+  assert.doesNotMatch(page, /Unclaimed watchtowers are not exposed/);
+  assert.doesNotMatch(page, /Copy map coordinates/);
+  assert.match(css, /\.watchtower-filter-bar/);
   assert.match(css, /\.watchtower-empire-filter/);
-  assert.match(css, /\.watchtower-coordinate-note/);
+  assert.match(css, /\.watchtower-risk-toggle/);
+  assert.match(css, /\.inactivity-threshold-card/);
 });

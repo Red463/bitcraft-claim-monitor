@@ -1,12 +1,12 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Castle, Clock, Copy, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
-import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, mapCoordinateLabel, presentWatchtowerRows } from "./empires/watchtowerPresentation";
+import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 
 const LOCAL_API = "/api/local";
 
@@ -87,7 +87,6 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
         </header>
         <div className="tower-dialog-summary">
           <span><Landmark size={14} /> {tower.empireName ?? "Unknown empire"}</span>
-          <span><MapPin size={14} /> {mapCoordinateLabel(tower)}</span>
           {mapHref(tower) ? <a className="toolbar-button" href={mapHref(tower) ?? "#"}><MapPin size={14} /> Open on map</a> : null}
         </div>
         <div className="tower-access-note">
@@ -129,6 +128,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const [regionId, setRegionId] = usePersistedState("empires.region", initialRegion);
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
+  const [watchtowerRiskOnly, setWatchtowerRiskOnly] = usePersistedState("empires.watchtowerRiskOnly", false);
   const regions = useEmpireRegions(monitoredRegionId);
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
@@ -167,7 +167,8 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];
   const presentedTowerRows = React.useMemo(() => presentWatchtowerRows(towerRows), [towerRows]);
   const watchtowerEmpireFilters = React.useMemo(() => buildWatchtowerEmpireFilters(watchtowers.data?.empires ?? [], presentedTowerRows), [presentedTowerRows, watchtowers.data]);
-  const visibleTowerRows = React.useMemo(() => filterWatchtowerRows(presentedTowerRows, selectedWatchtowerEmpire), [presentedTowerRows, selectedWatchtowerEmpire]);
+  const visibleTowerRows = React.useMemo(() => filterWatchtowerRows(presentedTowerRows, selectedWatchtowerEmpire, watchtowerRiskOnly), [presentedTowerRows, selectedWatchtowerEmpire, watchtowerRiskOnly]);
+  const selectedEmpireRiskCount = React.useMemo(() => filterWatchtowerRows(presentedTowerRows, selectedWatchtowerEmpire, true).length, [presentedTowerRows, selectedWatchtowerEmpire]);
   React.useEffect(() => {
     if (selectedWatchtowerEmpire !== "all" && watchtowerEmpireFilters.length && !watchtowerEmpireFilters.some((filter) => filter.id === selectedWatchtowerEmpire)) setSelectedWatchtowerEmpire("all");
   }, [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire, watchtowerEmpireFilters]);
@@ -198,9 +199,9 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
       const members = membersByEmpire.get(String(row.empireId ?? "")) ?? [];
       return <span className="tower-name-cell"><strong>{row.displayName ?? "Watchtower"}</strong>{row.rawNickname ? <small>{row.rawNickname}</small> : null}<small>{members.length ? `${formatNumber(members.length)} empire members` : "No members returned"}{row.shortTowerId ? ` - ${row.shortTowerId}` : ""}</small></span>;
     }],
-    ["Map coords", (row) => {
+    ["Map", (row) => {
       const href = mapHref(row);
-      return <span className="coordinate-cell"><MapPin size={13} /> {href ? <a href={href} onClick={(event) => event.stopPropagation()}>{mapCoordinateLabel(row)}</a> : mapCoordinateLabel(row)} <button className="icon-inline-button" type="button" title="Copy map coordinates" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(mapCoordinateLabel(row)); }}><Copy size={13} /></button></span>;
+      return href ? <a className="toolbar-button compact-map-action" href={href} onClick={(event) => event.stopPropagation()}><MapPin size={13} /> Open on map</a> : <span className="status-pill muted">No map</span>;
     }],
     ["Energy", (row) => formatNumber(row.energy)],
     ["Upkeep", (row) => formatNumber(row.upkeep)],
@@ -253,22 +254,31 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
             <MiniStat icon={<Shield />} label="Under siege" value={formatNumber(towerSummary.underSiege)} />
             <MiniStat icon={<Zap />} label="Active towers" value={formatNumber(towerSummary.activeTowers)} />
           </div>
-          <section className="command-filter-panel empires-watch-controls">
-            <strong><Clock size={15} /> Inactivity threshold</strong>
+          <section className="command-filter-panel empires-watch-controls inactivity-threshold-card">
+            <div className="threshold-copy">
+              <strong><Clock size={15} /> Inactivity threshold</strong>
+              <span>Marks leader activity as risk after this many days offline.</span>
+            </div>
             <label className="field compact-field"><span>Days offline</span><input value={inactiveDays} onChange={(event) => setInactiveDays(event.target.value.replace(/\D/g, "").slice(0, 3) || "1")} /></label>
           </section>
-          <div className="info-card empires-unclaimed-note"><AlertTriangle size={16} /> {watchtowers.data?.unclaimedMessage ?? "Unclaimed watchtowers are not exposed by the current BitJita public API."}</div>
-          <div className="info-card watchtower-coordinate-note"><MapPin size={16} /> BitJita exposes map coordinates for claimed towers; these may differ from the in-game coordinate readout.</div>
           {watchtowers.error ? <div className="error-card"><AlertTriangle /> {watchtowers.error}</div> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
-            <div className="watchtower-empire-filter" aria-label="Filter watchtowers by empire">
-              {watchtowerEmpireFilters.map((filter) => (
-                <button key={filter.id} type="button" className={selectedWatchtowerEmpire === filter.id ? "active" : ""} onClick={() => setSelectedWatchtowerEmpire(filter.id)}>
-                  <span>{filter.label}</span><small>{formatNumber(filter.count)}</small>
-                </button>
-              ))}
+            <div className="watchtower-filter-bar">
+              <div className="watchtower-empire-filter" aria-label="Filter watchtowers by empire">
+                {watchtowerEmpireFilters.map((filter) => (
+                  <button key={filter.id} type="button" className={selectedWatchtowerEmpire === filter.id ? "active" : ""} onClick={() => setSelectedWatchtowerEmpire(filter.id)}>
+                    <span>{filter.label}</span><small>{formatNumber(filter.count)}</small>
+                  </button>
+                ))}
+              </div>
+              <label className={`watchtower-risk-toggle ${watchtowerRiskOnly ? "active" : ""}`}>
+                <input type="checkbox" checked={watchtowerRiskOnly} onChange={(event) => setWatchtowerRiskOnly(event.target.checked)} />
+                <Shield size={14} />
+                <span>At risk only</span>
+                <small>{formatNumber(selectedEmpireRiskCount)}</small>
+              </label>
             </div>
             <DataTable rows={visibleTowerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
           </section>
@@ -278,3 +288,4 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
     </div>
   );
 }
+

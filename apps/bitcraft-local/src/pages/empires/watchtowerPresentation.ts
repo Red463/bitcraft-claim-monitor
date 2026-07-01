@@ -18,6 +18,12 @@ const GENERIC_WATCHTOWER_NAMES = new Set([
   "watchtower",
 ]);
 
+function numericValue(value: unknown) {
+  if (value == null || value === "") return 0;
+  const number = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
 function numericCoordinate(row: AnyRecord, key: "locationX" | "locationZ") {
   const value = row[key];
   if (value == null || value === "") return Number.POSITIVE_INFINITY;
@@ -46,8 +52,9 @@ export function coordinateText(row: AnyRecord): string {
   return `${xNumber.toLocaleString(undefined, { maximumFractionDigits: 0 })}, ${zNumber.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
-export function mapCoordinateLabel(row: AnyRecord): string {
-  return `Map coords ${coordinateText(row)}`;
+export function isWatchtowerAtRisk(row: AnyRecord): boolean {
+  const inactiveRisk = row.inactiveRisk === true || String(row.inactiveRisk ?? "").toLowerCase() === "true";
+  return numericValue(row.siegeCount) > 0 || inactiveRisk;
 }
 
 export function presentWatchtowerRows(rows: AnyRecord[]): PresentedWatchtower[] {
@@ -76,7 +83,6 @@ export function presentWatchtowerRows(rows: AnyRecord[]): PresentedWatchtower[] 
   }
 
   return presented;
-
 }
 
 export function buildWatchtowerEmpireFilters(empires: AnyRecord[], rows: AnyRecord[]): WatchtowerFilter[] {
@@ -98,8 +104,10 @@ export function buildWatchtowerEmpireFilters(empires: AnyRecord[], rows: AnyReco
   return [{ id: "all", label: "All empires", count: rows.length }, ...filters];
 }
 
-export function filterWatchtowerRows(rows: PresentedWatchtower[], selectedEmpireId: string): PresentedWatchtower[] {
-  if (!selectedEmpireId || selectedEmpireId === "all") return rows;
-  const filtered = rows.filter((row) => String(row.empireId ?? "") === selectedEmpireId);
-  return filtered.length ? filtered : rows;
+export function filterWatchtowerRows(rows: PresentedWatchtower[], selectedEmpireId: string, atRiskOnly = false): PresentedWatchtower[] {
+  const empireRows = !selectedEmpireId || selectedEmpireId === "all"
+    ? rows
+    : rows.filter((row) => String(row.empireId ?? "") === selectedEmpireId);
+  const filteredByEmpire = empireRows.length ? empireRows : rows;
+  return atRiskOnly ? filteredByEmpire.filter(isWatchtowerAtRisk) : filteredByEmpire;
 }

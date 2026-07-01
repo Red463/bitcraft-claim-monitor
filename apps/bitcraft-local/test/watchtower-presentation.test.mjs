@@ -4,14 +4,14 @@ import test from "node:test";
 import {
   buildWatchtowerEmpireFilters,
   filterWatchtowerRows,
-  mapCoordinateLabel,
+  isWatchtowerAtRisk,
   presentWatchtowerRows,
 } from "../src/pages/empires/watchtowerPresentation.ts";
 
 const towers = [
-  { towerId: "tower-a-2", empireId: "earth", empireName: "The Earth Kingdom", nickname: "Fallen Empire's Watchtower", locationX: 20, locationZ: 5 },
-  { towerId: "tower-a-1", empireId: "earth", empireName: "The Earth Kingdom", nickname: "Fallen Empire's Watchtower", locationX: 10, locationZ: 8 },
-  { towerId: "tower-b-1", empireId: "flame", empireName: "Flame Empire", nickname: "Western Signal", locationX: 30, locationZ: 2 },
+  { towerId: "tower-a-2", empireId: "earth", empireName: "The Earth Kingdom", nickname: "Fallen Empire's Watchtower", locationX: 20, locationZ: 5, siegeCount: 0, inactiveRisk: false },
+  { towerId: "tower-a-1", empireId: "earth", empireName: "The Earth Kingdom", nickname: "Fallen Empire's Watchtower", locationX: 10, locationZ: 8, siegeCount: 1, inactiveRisk: false },
+  { towerId: "tower-b-1", empireId: "flame", empireName: "Flame Empire", nickname: "Western Signal", locationX: 30, locationZ: 2, siegeCount: 0, inactiveRisk: true },
 ];
 
 const empires = [
@@ -42,11 +42,19 @@ test("buildWatchtowerEmpireFilters includes all empires and sorts by tower count
 test("filterWatchtowerRows falls back to all rows when an empire selection is stale", () => {
   const rows = presentWatchtowerRows(towers);
 
-  assert.deepEqual(filterWatchtowerRows(rows, "earth").map((row) => row.towerId), ["tower-a-1", "tower-a-2"]);
-  assert.deepEqual(filterWatchtowerRows(rows, "missing").map((row) => row.towerId), rows.map((row) => row.towerId));
+  assert.deepEqual(filterWatchtowerRows(rows, "earth", false).map((row) => row.towerId), ["tower-a-1", "tower-a-2"]);
+  assert.deepEqual(filterWatchtowerRows(rows, "missing", false).map((row) => row.towerId), rows.map((row) => row.towerId));
 });
 
-test("mapCoordinateLabel clearly labels BitJita coordinates as map coordinates", () => {
-  assert.equal(mapCoordinateLabel({ locationX: 28684, locationZ: 25875 }), "Map coords 28,684, 25,875");
-  assert.equal(mapCoordinateLabel({}), "Map coords -");
+test("isWatchtowerAtRisk flags active siege or leader activity risk", () => {
+  assert.equal(isWatchtowerAtRisk({ siegeCount: 1, inactiveRisk: false }), true);
+  assert.equal(isWatchtowerAtRisk({ siegeCount: 0, inactiveRisk: true }), true);
+  assert.equal(isWatchtowerAtRisk({ siegeCount: 0, inactiveRisk: false }), false);
+});
+
+test("filterWatchtowerRows can show only at-risk towers after empire filtering", () => {
+  const rows = presentWatchtowerRows(towers);
+
+  assert.deepEqual(filterWatchtowerRows(rows, "all", true).map((row) => row.towerId), ["tower-a-1", "tower-b-1"]);
+  assert.deepEqual(filterWatchtowerRows(rows, "earth", true).map((row) => row.towerId), ["tower-a-1"]);
 });
