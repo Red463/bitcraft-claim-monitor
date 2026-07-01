@@ -82,10 +82,17 @@ test("App popup admin uses a compact list and modal editor", () => {
   assert.match(popupsSection, /popupEditorOpen/);
   assert.match(popupsSection, /openPopupEditor/);
   assert.match(popupsSection, /Save Popup/);
+  assert.match(popupsSection, /import \{ createPortal \} from "react-dom";/);
+  assert.match(popupsSection, /createPortal\(/);
+  assert.match(popupsSection, /document\.body/);
   assert.match(popupsSection, /admin-modal-backdrop/);
   assert.match(popupsSection, /popup-admin-table/);
   assert.doesNotMatch(popupsSection, /popup-builder-grid/);
   assert.match(adminCss, /\.admin-modal-backdrop/);
+  assert.match(adminCss, /\.admin-modal-backdrop\s*\{[^}]*position:\s*fixed/);
+  assert.match(adminCss, /\.admin-modal-backdrop\s*\{[^}]*inset:\s*0/);
+  assert.match(adminCss, /\.admin-modal-backdrop\s*\{[^}]*overflow:\s*auto/);
+  assert.match(adminCss, /\.admin-modal\s*\{[^}]*max-height:\s*calc\(100vh - 36px\)/);
   assert.match(adminCss, /\.popup-admin-table/);
 });
 test("App popup admin table fits its card without horizontal scrolling", () => {
@@ -99,3 +106,4 @@ test("App popup admin table fits its card without horizontal scrolling", () => {
   assert.match(adminCss, /\.popup-admin-table-row \.compact-toggle > span\s*\{[^}]*clip-path:\s*inset\(50%\)/);
   assert.match(adminCss, /\.popup-message-preview/);
 });
+

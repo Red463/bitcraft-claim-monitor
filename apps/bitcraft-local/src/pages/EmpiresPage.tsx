@@ -6,6 +6,7 @@ import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
+import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, mapCoordinateLabel, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 
 const LOCAL_API = "/api/local";
 
@@ -48,16 +49,14 @@ function rawCoordinate(row: AnyRecord, axis: "x" | "z"): number | null {
 }
 
 function coordinates(row: AnyRecord): string {
-  const x = rawCoordinate(row, "x");
-  const z = rawCoordinate(row, "z");
-  return x == null || z == null ? "-" : `${formatNumber(x, 0)}, ${formatNumber(z, 0)}`;
+  return coordinateText(row);
 }
 
 function mapHref(row: AnyRecord): string | null {
   const x = rawCoordinate(row, "x");
   const z = rawCoordinate(row, "z");
   if (x == null || z == null) return null;
-  const name = `${row.nickname ?? "Watchtower"} - ${row.empireName ?? "Empire"}`;
+  const name = `${row.displayName ?? row.nickname ?? "Watchtower"} - ${row.empireName ?? "Empire"}`;
   return `/?page=map&mapName=${encodeURIComponent(name)}&mapX=${encodeURIComponent(String(x))}&mapZ=${encodeURIComponent(String(z))}`;
 }
 
@@ -83,12 +82,12 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
     <div className="help-overlay empires-watchtower-overlay" onClick={onClose}>
       <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
         <header>
-          <div><RadioTower /><h2 id="tower-access-title">{tower.nickname ?? "Watchtower"}</h2></div>
+          <div><RadioTower /><h2 id="tower-access-title">{tower.displayName ?? tower.nickname ?? "Watchtower"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close tower details"><X size={16} /></button>
         </header>
         <div className="tower-dialog-summary">
           <span><Landmark size={14} /> {tower.empireName ?? "Unknown empire"}</span>
-          <span><MapPin size={14} /> {coordinates(tower)}</span>
+          <span><MapPin size={14} /> {mapCoordinateLabel(tower)}</span>
           {mapHref(tower) ? <a className="toolbar-button" href={mapHref(tower) ?? "#"}><MapPin size={14} /> Open on map</a> : null}
         </div>
         <div className="tower-access-note">
@@ -129,6 +128,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
   const [regionId, setRegionId] = usePersistedState("empires.region", initialRegion);
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
+  const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
   const regions = useEmpireRegions(monitoredRegionId);
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
@@ -165,6 +165,12 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
 
   const overviewRows: AnyRecord[] = overview.data?.empires ?? [];
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];
+  const presentedTowerRows = React.useMemo(() => presentWatchtowerRows(towerRows), [towerRows]);
+  const watchtowerEmpireFilters = React.useMemo(() => buildWatchtowerEmpireFilters(watchtowers.data?.empires ?? [], presentedTowerRows), [presentedTowerRows, watchtowers.data]);
+  const visibleTowerRows = React.useMemo(() => filterWatchtowerRows(presentedTowerRows, selectedWatchtowerEmpire), [presentedTowerRows, selectedWatchtowerEmpire]);
+  React.useEffect(() => {
+    if (selectedWatchtowerEmpire !== "all" && watchtowerEmpireFilters.length && !watchtowerEmpireFilters.some((filter) => filter.id === selectedWatchtowerEmpire)) setSelectedWatchtowerEmpire("all");
+  }, [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire, watchtowerEmpireFilters]);
   const overviewSummary = overview.data?.summary ?? {};
   const towerSummary = watchtowers.data?.summary ?? {};
   const largestEmpire = overviewSummary.largestEmpireName ?? "-";
@@ -190,11 +196,11 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
     ["Empire", (row) => <strong>{row.empireName}</strong>],
     ["Tower", (row) => {
       const members = membersByEmpire.get(String(row.empireId ?? "")) ?? [];
-      return <span className="tower-name-cell"><strong>{row.nickname ?? "Watchtower"}</strong><small>{members.length ? `${formatNumber(members.length)} empire members` : "No members returned"}</small></span>;
+      return <span className="tower-name-cell"><strong>{row.displayName ?? "Watchtower"}</strong>{row.rawNickname ? <small>{row.rawNickname}</small> : null}<small>{members.length ? `${formatNumber(members.length)} empire members` : "No members returned"}{row.shortTowerId ? ` - ${row.shortTowerId}` : ""}</small></span>;
     }],
-    ["Coordinates", (row) => {
+    ["Map coords", (row) => {
       const href = mapHref(row);
-      return <span className="coordinate-cell"><MapPin size={13} /> {href ? <a href={href} onClick={(event) => event.stopPropagation()}>{coordinates(row)}</a> : coordinates(row)} <button className="icon-inline-button" type="button" title="Copy coordinates" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(coordinates(row)); }}><Copy size={13} /></button></span>;
+      return <span className="coordinate-cell"><MapPin size={13} /> {href ? <a href={href} onClick={(event) => event.stopPropagation()}>{mapCoordinateLabel(row)}</a> : mapCoordinateLabel(row)} <button className="icon-inline-button" type="button" title="Copy map coordinates" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(mapCoordinateLabel(row)); }}><Copy size={13} /></button></span>;
     }],
     ["Energy", (row) => formatNumber(row.energy)],
     ["Upkeep", (row) => formatNumber(row.upkeep)],
@@ -252,11 +258,19 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
             <label className="field compact-field"><span>Days offline</span><input value={inactiveDays} onChange={(event) => setInactiveDays(event.target.value.replace(/\D/g, "").slice(0, 3) || "1")} /></label>
           </section>
           <div className="info-card empires-unclaimed-note"><AlertTriangle size={16} /> {watchtowers.data?.unclaimedMessage ?? "Unclaimed watchtowers are not exposed by the current BitJita public API."}</div>
+          <div className="info-card watchtower-coordinate-note"><MapPin size={16} /> BitJita exposes map coordinates for claimed towers; these may differ from the in-game coordinate readout.</div>
           {watchtowers.error ? <div className="error-card"><AlertTriangle /> {watchtowers.error}</div> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel">
-            <div className="panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : `${formatNumber(towerRows.length)} shown`}</span></div>
-            <DataTable rows={towerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
+            <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
+            <div className="watchtower-empire-filter" aria-label="Filter watchtowers by empire">
+              {watchtowerEmpireFilters.map((filter) => (
+                <button key={filter.id} type="button" className={selectedWatchtowerEmpire === filter.id ? "active" : ""} onClick={() => setSelectedWatchtowerEmpire(filter.id)}>
+                  <span>{filter.label}</span><small>{formatNumber(filter.count)}</small>
+                </button>
+              ))}
+            </div>
+            <DataTable rows={visibleTowerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
           </section>
         </>
       )}

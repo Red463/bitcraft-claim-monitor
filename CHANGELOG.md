@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.2] - 2026-07-01
+
+### Added
+
+- Added empire filter chips to the claimed watchtowers table so towers can be viewed by empire.
+
+### Changed
+
+- Renamed claimed watchtower coordinates to map coordinates and added explanatory copy to avoid implying they are exact in-game coordinates.
+- Replaced repeated generic watchtower names with stable per-empire labels such as Watchtower #1.
+
+### Fixed
+
+- Fixed the admin app popup editor so it opens in the current viewport instead of following the page scroll position.
+
 ## [0.31.1-beta.1] - 2026-07-01
 
 ### Fixed
@@ -2331,3 +2346,4 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
+

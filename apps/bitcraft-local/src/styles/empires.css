@@ -51,6 +51,54 @@
   white-space: nowrap;
 }
 
+.watchtower-coordinate-note {
+  align-items: flex-start;
+}
+
+.watchtower-empire-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: -2px 0 10px;
+}
+
+.watchtower-empire-filter button {
+  min-height: 30px;
+  border: 1px solid rgba(148,163,184,.24);
+  border-radius: 999px;
+  background: rgba(15,23,42,.62);
+  color: var(--text);
+  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.watchtower-empire-filter button:hover {
+  border-color: rgba(240,198,79,.5);
+  color: #fff;
+}
+
+.watchtower-empire-filter button.active {
+  border-color: rgba(240,198,79,.78);
+  background: rgba(240,198,79,.18);
+  color: var(--active-color);
+}
+
+.watchtower-empire-filter small {
+  min-width: 20px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: rgba(255,255,255,.08);
+  color: inherit;
+  text-align: center;
+}
+
 .icon-inline-button {
   width: 26px;
   height: 26px;

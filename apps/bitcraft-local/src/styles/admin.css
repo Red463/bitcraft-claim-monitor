@@ -920,7 +920,7 @@
 .popup-type-badge.warning { color: #ffcf86; border-color: rgba(255,179,71,.32); background: rgba(255,179,71,.09); }
 .popup-type-badge.danger { color: #ffaaa8; border-color: rgba(239,100,97,.34); background: rgba(239,100,97,.09); }
 .popup-type-badge.success { color: #a9f7c9; border-color: rgba(99,235,165,.32); background: rgba(99,235,165,.08); }
-.admin-modal-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 4); display: grid; place-items: center; padding: 18px; background: rgba(2,4,8,.68); backdrop-filter: blur(3px); }
+.admin-modal-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 4); display: grid; place-items: center; overflow: auto; padding: 18px; background: rgba(2,4,8,.68); backdrop-filter: blur(3px); overscroll-behavior: contain; }
 .admin-modal { width: min(760px, calc(100vw - 28px)); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid rgba(108,123,145,.34); border-radius: 9px; background: linear-gradient(180deg, rgba(14,19,27,.98), rgba(6,9,14,.99)); box-shadow: 0 28px 80px rgba(0,0,0,.55); padding: 16px; display: grid; gap: 14px; }
 .popup-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .popup-editor-grid .popup-message-field { grid-column: 1 / -1; }
@@ -948,3 +948,4 @@
 .audit-load-more { justify-self: center; }
 @media (max-width: 1040px) { .admin-tab-groups { align-items: flex-start; } .admin-nav-divider { display: none; } .admin-tabs { flex-basis: 100%; } .admin-tab-overview { flex-basis: 100%; min-width: 0; margin-left: 0; border-left: 0; border-top: 1px solid rgba(108,123,145,.18); padding: 8px 0 0; } .diagnostics-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .audit-toolbar { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .diagnostics-health-grid, .audit-summary-strip { grid-template-columns: 1fr; } }
+

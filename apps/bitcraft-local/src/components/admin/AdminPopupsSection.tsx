@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { Bell, Edit3, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { POPUP_MODES, POPUP_TYPES, type AppPopup, type PopupMode, type PopupType } from "../../popups/appPopups";
 import type { AnyRecord } from "../../main-app-data";
@@ -145,9 +146,9 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
           </div>
         )) : <div className="empty-state"><Bell size={28} /><strong>No popups configured</strong><span>Create an app popup when you need an announcement, warning, or reusable tip.</span></div>}
       </div>
-      {popupEditorOpen ? (
-        <div className="admin-modal-backdrop" role="presentation">
-          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="popup-editor-title">
+      {popupEditorOpen ? createPortal(
+        <div className="admin-modal-backdrop" role="presentation" onClick={closePopupEditor}>
+          <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="popup-editor-title" onClick={(event) => event.stopPropagation()}>
             <div className="split-header">
               <div>
                 <h3 id="popup-editor-title"><Bell size={17} /> {editingPopupIndex === null ? "New Popup" : "Edit Popup"}</h3>
@@ -173,8 +174,10 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
               <button className="toolbar-button primary" onClick={savePopupDraft}><Save size={14} /> Save Popup</button>
             </div>
           </section>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </section>
   );
 }
+
