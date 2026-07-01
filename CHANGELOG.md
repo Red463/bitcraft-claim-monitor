@@ -8,6 +8,11 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.122] - 2026-07-01
+
+### Fixed
+
+- Improved the admin popup and navigation layouts so they fit cleanly without unwanted scrollbars.
 ## [1.0.0-beta.121] - 2026-07-01
 
 ### Changed

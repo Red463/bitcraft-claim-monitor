@@ -55,12 +55,13 @@ test("Admin console uses compact navigation and bounded audit tools", () => {
 
   assert.match(adminPanel, /admin-section-tabs/);
   assert.match(adminPanel, /admin-tab-overview/);
+  assert.match(adminCss, /admin-nav-divider/);
   assert.match(adminPanel, /setAuditFilter/);
   assert.match(adminPanel, /filteredAuditLog/);
   assert.match(adminPanel, /auditData\.auditLog\.length > auditVisibleCount/);
   assert.match(adminPanel, /Load more actions/);
-  assert.match(adminCss, /\.admin-tab-groups\s*\{[\s\S]*display:\s*grid/);
-  assert.match(adminCss, /\.admin-section-tabs\s*\{[\s\S]*overflow-x:\s*auto/);
+  assert.match(adminCss, /\.admin-tab-groups\s*\{[\s\S]*display:\s*flex/);
+  assert.doesNotMatch(adminCss, /\.admin-section-tabs\s*\{[^}]*overflow-x:\s*auto/);
   assert.match(adminCss, /\.audit-table/);
 });
 
@@ -87,3 +88,11 @@ test("App popup admin uses a compact list and modal editor", () => {
   assert.match(adminCss, /\.admin-modal-backdrop/);
   assert.match(adminCss, /\.popup-admin-table/);
 });
+test("App popup admin table fits its card without horizontal scrolling", () => {
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(adminCss, /\.popup-admin-table\s*\{[^}]*overflow-x:\s*auto/);
+  assert.doesNotMatch(adminCss, /\.popup-admin-table-row\s*\{[^}]*min-width:\s*\d+px/);
+  assert.match(adminCss, /\.popup-message-preview/);
+});
+

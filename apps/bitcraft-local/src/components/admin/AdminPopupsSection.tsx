@@ -137,7 +137,7 @@ export function AdminPopupsSection({ api }: AdminPopupsSectionProps) {
             <strong>{popup.title}</strong>
             <span className={`popup-type-badge ${popup.type}`}>{popupTypeLabel(popup.type)}</span>
             <span>{popupModeLabel(popup.mode)}</span>
-            <small>{popup.message}</small>
+            <small className="popup-message-preview">{popup.message}</small>
             <div className="toolbar popup-row-actions">
               <button className="toolbar-button" onClick={() => openPopupEditor(index)}><Edit3 size={14} /> Edit</button>
               <button className="toolbar-button danger" title="Remove this popup after saving." onClick={() => setPopups((current) => current.filter((_, currentIndex) => currentIndex !== index))}><Trash2 size={14} /> Remove</button>

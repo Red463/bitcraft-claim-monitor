@@ -252,34 +252,46 @@
   align-items: center;
 }
 .admin-tab-groups {
-  display: grid;
-  grid-template-columns: minmax(0, 190px) minmax(0, 1fr) minmax(260px, 360px);
-  gap: 10px;
-  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   border: 1px solid rgba(108,123,145,.22);
   border-radius: 7px;
-  background: linear-gradient(180deg, rgba(11,16,22,.94), rgba(6,9,14,.96));
-  padding: 10px;
+  background: linear-gradient(180deg, rgba(13,18,25,.95), rgba(7,10,15,.96));
+  padding: 8px 10px;
 }
 .admin-section-tabs {
-  display: grid;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   gap: 6px;
-  align-content: start;
-  overflow-x: auto;
+  align-items: center;
+  min-width: 0;
+}
+.admin-nav-divider {
+  width: 1px;
+  height: 28px;
+  flex: 0 0 1px;
+  background: rgba(108,123,145,.22);
 }
 .admin-section-tabs button,
 .admin-tabs button {
-  min-height: 36px;
+  min-height: 34px;
   max-width: 100%;
   border: 1px solid rgba(108,123,145,.2);
   border-radius: 7px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   color: #b8c2cf;
   background: rgba(255,255,255,.018);
   cursor: pointer;
   font-weight: 850;
-  text-align: left;
+  text-align: center;
   white-space: nowrap;
+}
+.admin-section-tabs button {
+  color: #d7dfeb;
+  background: rgba(255,255,255,.028);
 }
 .admin-section-tabs button:hover,
 .admin-tabs button:hover {
@@ -295,18 +307,22 @@
 }
 .admin-tabs {
   display: flex;
+  flex: 1 1 260px;
   flex-wrap: wrap;
   gap: 6px;
-  align-content: start;
+  align-items: center;
+  min-width: 0;
 }
 .admin-tabs button strong { color: inherit; font-size: 13px; line-height: 1.2; }
 .admin-tab-overview {
-  min-width: 0;
+  flex: 0 1 360px;
+  min-width: 220px;
+  margin-left: auto;
   border-left: 1px solid rgba(108,123,145,.18);
-  padding-left: 12px;
+  padding-left: 10px;
   display: grid;
   align-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 .admin-tab-overview span {
   display: block;
@@ -316,8 +332,8 @@
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.admin-tab-overview h3 { margin: 0; color: #f4f7fb; font-size: 17px; line-height: 1.2; }
-.admin-tab-overview p { margin: 0; color: #aab5c4; font-size: 12px; line-height: 1.35; }
+.admin-tab-overview h3 { margin: 0; color: #f4f7fb; font-size: 14px; line-height: 1.2; }
+.admin-tab-overview p { margin: 0; color: #aab5c4; font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-message {
   border: 1px solid rgba(240,198,79,.3);
   border-radius: 7px;
@@ -889,12 +905,15 @@
 }
 
 .app-popups-card { gap: 14px; }
-.popup-admin-table { display: grid; gap: 7px; overflow-x: auto; }
-.popup-admin-table-row { min-width: 860px; display: grid; grid-template-columns: 150px minmax(160px, 1.1fr) 100px 190px minmax(220px, 1.4fr) 180px; gap: 10px; align-items: center; border: 1px solid rgba(108,123,145,.18); border-radius: 7px; background: rgba(255,255,255,.018); padding: 9px 10px; }
+.popup-admin-table { display: grid; gap: 7px; min-width: 0; }
+.popup-admin-table-row { min-width: 0; display: grid; grid-template-columns: 42px minmax(130px, .95fr) 92px minmax(150px, .9fr) minmax(120px, 1fr) auto; gap: 10px; align-items: center; border: 1px solid rgba(108,123,145,.18); border-radius: 7px; background: rgba(255,255,255,.018); padding: 9px 10px; }
 .popup-admin-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
+.popup-admin-table-row.header span:first-child { color: transparent; }
 .popup-admin-table-row.is-disabled { opacity: .68; }
-.popup-admin-table-row strong, .popup-admin-table-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.popup-row-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.popup-admin-table-row strong, .popup-admin-table-row small, .popup-admin-table-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.popup-message-preview { white-space: nowrap; }
+.popup-row-actions { justify-content: flex-end; flex-wrap: nowrap; min-width: 0; }
+.popup-row-actions .toolbar-button { padding-inline: 9px; }
 .popup-type-badge { width: fit-content; border: 1px solid rgba(86,213,255,.28); border-radius: 999px; padding: 3px 8px; color: #9ee8ff; background: rgba(86,213,255,.08); font-size: 12px; font-weight: 850; }
 .popup-type-badge.warning { color: #ffcf86; border-color: rgba(255,179,71,.32); background: rgba(255,179,71,.09); }
 .popup-type-badge.danger { color: #ffaaa8; border-color: rgba(239,100,97,.34); background: rgba(239,100,97,.09); }
@@ -909,7 +928,7 @@
 .popup-editor-preview span { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .popup-editor-preview small { color: #8f9bad; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-@media (max-width: 860px) { .popup-editor-grid { grid-template-columns: 1fr; } .popup-admin-table-row { min-width: 760px; } }
+@media (max-width: 860px) { .popup-editor-grid { grid-template-columns: 1fr; } .popup-admin-table-row { grid-template-columns: 36px minmax(0, 1fr) auto; } .popup-admin-table-row.header { display: none; } .popup-admin-table-row > span:nth-child(4), .popup-message-preview { grid-column: 2 / -1; } .popup-row-actions { grid-column: 2 / -1; justify-content: flex-start; } }
 
 .diagnostics-support-card, .audit-console-card { gap: 14px; }
 .diagnostics-health-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -925,5 +944,5 @@
 .audit-table-row.failed { border-color: rgba(239,100,97,.22); background: rgba(239,100,97,.055); }
 .audit-table-row strong, .audit-table-row span, .audit-table-row small, .audit-table-row time { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audit-load-more { justify-self: center; }
-@media (max-width: 1040px) { .admin-tab-groups { grid-template-columns: 1fr; } .admin-section-tabs { grid-auto-flow: column; grid-auto-columns: max-content; } .admin-tab-overview { border-left: 0; border-top: 1px solid rgba(108,123,145,.18); padding: 10px 0 0; } .diagnostics-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .audit-toolbar { grid-template-columns: 1fr; } }
+@media (max-width: 1040px) { .admin-tab-groups { align-items: flex-start; } .admin-nav-divider { display: none; } .admin-tabs { flex-basis: 100%; } .admin-tab-overview { flex-basis: 100%; min-width: 0; margin-left: 0; border-left: 0; border-top: 1px solid rgba(108,123,145,.18); padding: 8px 0 0; } .diagnostics-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .audit-toolbar { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .diagnostics-health-grid, .audit-summary-strip { grid-template-columns: 1fr; } }

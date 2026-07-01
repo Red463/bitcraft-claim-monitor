@@ -1047,6 +1047,7 @@ export function AdminPanel({
               return <button key={group.label} className={selected ? "active" : ""} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
             })}
           </div>
+          <div className="admin-nav-divider" aria-hidden="true" />
           <div className="admin-tabs" aria-label={`${activeTabGroup?.label ?? "Admin"} pages`}>
             {(activeTabGroup?.tabs ?? tabs).map((item) => (
               <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)} title={item.description}>
