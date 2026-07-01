@@ -93,6 +93,7 @@ test("App popup admin table fits its card without horizontal scrolling", () => {
 
   assert.doesNotMatch(adminCss, /\.popup-admin-table\s*\{[^}]*overflow-x:\s*auto/);
   assert.doesNotMatch(adminCss, /\.popup-admin-table-row\s*\{[^}]*min-width:\s*\d+px/);
+  assert.match(adminCss, /\.popup-admin-table-row \.compact-toggle > span\s*\{[^}]*clip-path:\s*inset\(50%\)/);
   assert.match(adminCss, /\.popup-message-preview/);
 });
 
