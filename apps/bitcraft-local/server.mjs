@@ -29,6 +29,7 @@ import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDisco
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
+import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -766,6 +767,10 @@ migrateBuyOrderCollectorInterval();
 
 function marketDealWatchSettings() {
   return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
+}
+
+function appPopupConfig() {
+  return normalizePopupConfig(safeJson(statements.getSetting.get("app_popups_json")?.value, { popups: [] }));
 }
 
 function getSettings() {
@@ -7445,6 +7450,7 @@ const server = createServer(async (req, res) => {
       return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
     if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
       try {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
@@ -7855,6 +7861,14 @@ const server = createServer(async (req, res) => {
         const result = await sendDiscordCleanEmbed(await readJson(req));
         audit(user, "discord.embed_post", { messageId: result.response?.id });
         return send(res, 200, result);
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/popups") return send(res, 200, appPopupConfig());
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/popups") {
+        const updatedAt = new Date().toISOString();
+        const config = normalizePopupConfig(await readJson(req, BODY_LIMITS.settings), { defaultUpdatedAt: updatedAt });
+        statements.upsertSetting.run("app_popups_json", JSON.stringify(config), updatedAt);
+        audit(user, "popups.update", { count: config.popups.length, enabledCount: publicPopups(config).length });
+        return send(res, 200, appPopupConfig());
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/settings") return send(res, 200, getSettings());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/settings") {

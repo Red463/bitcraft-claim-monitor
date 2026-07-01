@@ -918,3 +918,14 @@
   .floating-save .toolbar-button { justify-content: center; }
   .database-toolbar, .backup-list > div { align-items: stretch; flex-direction: column; }
 }
+
+.app-popups-card { gap: 14px; }
+.popup-builder-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.popup-builder-grid .popup-message-field { grid-column: span 3; }
+.popup-builder-grid > .toolbar-button { min-height: 38px; }
+.popup-admin-list { display: grid; gap: 10px; }
+.popup-admin-row { border: 1px solid rgba(108,123,145,.26); border-radius: 8px; background: rgba(8,12,18,.52); padding: 10px; display: grid; grid-template-columns: minmax(115px, .6fr) minmax(180px, 1fr) minmax(120px, .55fr) minmax(170px, .9fr) minmax(220px, 1.4fr) auto; gap: 10px; align-items: end; }
+.popup-admin-row.is-disabled { opacity: .68; }
+.popup-admin-row textarea, .popup-builder-grid textarea { min-height: 78px; resize: vertical; }
+@media (max-width: 1100px) { .popup-builder-grid, .popup-admin-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .popup-builder-grid .popup-message-field, .popup-admin-row .popup-message-field { grid-column: 1 / -1; } }
+@media (max-width: 680px) { .popup-builder-grid, .popup-admin-row { grid-template-columns: 1fr; } }

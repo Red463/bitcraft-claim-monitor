@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,16 @@ async function stopRecordedServer() {
   } catch (error) {
     if (error?.code !== "ESRCH") fail(`Could not stop recorded smoke server PID ${pid}: ${error.message ?? error}`);
   }
+  if (process.platform === "win32") {
+    try {
+      await execFileWithTimeout("taskkill.exe", ["/PID", String(pid), "/T", "/F"], 5_000);
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      if (!message.includes("not found") && !message.includes("not running")) {
+        fail(`Windows taskkill could not stop recorded smoke server PID ${pid}: ${message}`);
+      }
+    }
+  }
 
   const stopped = await waitForStopped();
   if (stopped) {
@@ -150,7 +160,9 @@ async function main() {
         APP_HOST: "127.0.0.1",
         APP_PORT: port,
         SERVE_STATIC: "true",
+        BITCRAFT_PROCESS_ROLE: "web",
         ENABLE_SERVER_POLLING: "false",
+        ENABLE_SCHEDULED_JOBS: "false",
         ENABLE_DISCORD_STARTUP: "false",
         BITCRAFT_LOCAL_DATA_DIR: path.join(repoRoot, ".dev-data"),
       },
@@ -158,6 +170,8 @@ async function main() {
 
     writeFileSync(pidFile, `${child.pid}\n`);
     child.unref();
+    closeSync(out);
+    closeSync(err);
 
     log(`Waiting for health at ${healthUrl}...`);
     if (await waitForHealth()) {

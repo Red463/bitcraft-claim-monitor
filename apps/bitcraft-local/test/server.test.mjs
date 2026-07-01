@@ -727,6 +727,29 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
   assert.equal(initialConfig.collectorSettings.buyOrders.intervalSeconds, 1800);
+  const initialPublicPopups = await fetch(`${origin}/api/local/popups`).then((response) => response.json());
+  assert.deepEqual(initialPublicPopups, { popups: [] });
+  const anonymousAdminPopups = await fetch(`${origin}/api/local/admin/popups`);
+  assert.equal(anonymousAdminPopups.status, 401);
+  const savedPopupsResponse = await fetch(`${origin}/api/local/admin/popups`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      popups: [
+        { id: "release-warning", title: "Release warning", message: "Read this once.", type: "warning", mode: "oneTime", enabled: true, updatedAt: "popup-version-1" },
+        { id: "disabled-tip", title: "Disabled tip", message: "Hidden from users.", type: "info", mode: "repeatUntilDismissed", enabled: false, updatedAt: "popup-version-1" },
+        { id: "", title: "Invalid", message: "Ignored", enabled: true },
+      ],
+    }),
+  });
+  assert.equal(savedPopupsResponse.status, 200);
+  const savedPopups = await savedPopupsResponse.json();
+  assert.deepEqual(savedPopups.popups.map((popup) => popup.id), ["release-warning", "disabled-tip"]);
+  assert.equal(savedPopups.popups[0].type, "warning");
+  assert.equal(savedPopups.popups[0].mode, "oneTime");
+  const publicPopups = await fetch(`${origin}/api/local/popups`).then((response) => response.json());
+  assert.deepEqual(publicPopups.popups.map((popup) => popup.id), ["release-warning"]);
+  assert.equal(publicPopups.popups[0].message, "Read this once.");
   const geoipSettingsResponse = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

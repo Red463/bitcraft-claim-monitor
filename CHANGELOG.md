@@ -8,6 +8,17 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.118] - 2026-07-01
+
+### Added
+
+- Added admin-managed in-app popups with informational, success, warning, and danger message types.
+- Added one-time and repeat-until-dismissed popup modes for user-facing app messages.
+
+### Fixed
+
+- Fixed the local smoke server launcher so restart checks return quickly and smoke runs do not start background scheduled jobs.
+
 ## [1.0.0-beta.117] - 2026-07-01
 
 ### Fixed

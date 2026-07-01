@@ -62,6 +62,7 @@ import {
   DiscordYouTubeMonitorSection,
 } from "../bot/lazySections";
 import { Header, TablePanel, ToolbarButton } from "../main/AppChrome";
+import { AdminPopupsSection } from "./AdminPopupsSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
 import { DataTable } from "../main/DataTable";
@@ -1528,6 +1529,7 @@ export function AdminPanel({
             </div>
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
+          <AdminPopupsSection api={api} />
           <section className="form-card">
             <div className="split-header">
               <div>

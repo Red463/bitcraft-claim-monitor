@@ -45,3 +45,10 @@ test("mimeType and staticCacheControl keep frontend asset responses predictable"
   assert.equal(staticCacheControl("index.html"), "no-cache");
   assert.equal(staticCacheControl("assets/index.js"), "public, max-age=31536000, immutable");
 });
+
+import { adminPermissionFor } from "../src/server/adminPermissions.mjs";
+
+test("admin popup routes use settings permissions", () => {
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/popups"), "settings.view");
+  assert.equal(adminPermissionFor("PUT", "/api/local/admin/popups"), "settings.manage");
+});
