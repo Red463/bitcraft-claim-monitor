@@ -129,6 +129,7 @@ test("server collection paginates listings and protects production mutations", a
   ];
   let currentListings = listings;
   const historicalTrade = { id: "historic-1", orderEntityId: "historic-order", itemId: 30, itemType: "0", itemName: "Leather", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 5, unitPrice: 10, totalPrice: 50, createdAt: "2026-05-20T12:00:00.000Z" };
+  let historicalTrades = [historicalTrade];
   const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
   let trades = [historicalTrade];
   let proxyCacheRequests = 0;
@@ -321,7 +322,7 @@ test("server collection paginates listings and protects production mutations", a
     });
     if (url.pathname === "/api/market/player/player-1/trades") {
       const orderId = url.searchParams.get("orderEntityId");
-      if (orderId === "historic-order") return json(res, { trades: [historicalTrade] });
+      if (orderId === "historic-order") return json(res, { trades: historicalTrades });
       if (orderId === "foreign-order") return json(res, { trades: [foreignTrade] });
       return json(res, { trades });
     }
@@ -1150,6 +1151,25 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.storageEvents === 1), true);
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.totalEvents > 0), true);
   assert.equal(contributionLeaderboard.activity.summary.ignoredRows > 0, true);
+
+  historicalTrades = [
+    ...historicalTrades,
+    { id: "history-new-1", orderEntityId: "historic-order", itemId: 40, itemType: "0", itemName: "Sturdy Leather Belt", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 1, unitPrice: 1, totalPrice: 1, createdAt: "2099-05-21T12:00:00.000Z" },
+  ];
+  const historyOnlyPoll = await fetch(`${origin}/api/local/admin/poll`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(historyOnlyPoll.status, 200);
+  const historyOnlyNotificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  const historyOnlySale = historyOnlyNotificationActivity.events.find((event) => event.source_key === "market_sale_confirmed:trade:history-new-1");
+  assert.ok(historyOnlySale);
+  assert.equal(historyOnlySale.event_type, "market_sale_confirmed");
+  assert.equal(historyOnlySale.summary, "Confirmed sale: Sturdy Leather Belt x1 at 1g");
+  const historyOnlySaleMetadata = JSON.parse(historyOnlySale.metadata_json);
+  assert.equal(historyOnlySaleMetadata.sellerEntityId, "player-1");
+  assert.equal(historyOnlySaleMetadata.totalValue, 1);
 
   const opportunityDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   const opportunityNow = new Date().toISOString();

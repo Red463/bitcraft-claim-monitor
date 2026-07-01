@@ -4740,7 +4740,7 @@ async function fetchOrderTrades(playerId, orderEntityId) {
   const trades = [];
   let offset = 0;
   while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/trades?type=sell&limit=200&offset=${offset}&orderEntityId=${encodeURIComponent(String(orderEntityId))}`);
+    const payload = await fetchBitjita(`/market/player/${playerId}/trades?type=sell&limit=200&offset=${offset}&orderEntityId=${encodeURIComponent(String(orderEntityId))}`, { cache: false });
     const page = unwrap(payload, "trades", []);
     trades.push(...page);
     if (page.length < 200) break;
@@ -4757,14 +4757,14 @@ async function fetchMemberSettlementSellTrades(claimId, member) {
   const claimOrders = [];
   let offset = 0;
   while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/history?type=sell&status=COMPLETED&limit=200&offset=${offset}`);
+    const payload = await fetchBitjita(`/market/player/${playerId}/history?type=sell&status=COMPLETED&limit=200&offset=${offset}`, { cache: false });
     const page = unwrap(payload, "sellOrderHistory", []);
     claimOrders.push(...page.filter((order) => String(order.claimEntityId ?? "") === String(claimId)));
     if (isBackfilled || page.length < 200 || offset + page.length >= toNumber(payload.totalSellOrders)) break;
     offset += page.length;
   }
   const tradePages = await mapWithConcurrency(claimOrders, 3, (order) => fetchOrderTrades(playerId, order.entityId));
-  return { key, member, trades: tradePages.flat() };
+  return { key, member, trades: tradePages.flat(), isBackfilled };
 }
 
 function tradeOccurredAt(trade, importedAt) {
@@ -4807,7 +4807,42 @@ async function importMemberSellTrades(claimId, members, options = {}) {
   try {
     for (const result of imports.filter(Boolean)) {
       for (const trade of result.trades) {
-        inserted += insertConfirmedMarketTrade(claimId, trade, { owner: result.member.userName ?? result.member.username }, importedAt);
+        const listing = { owner: result.member.userName ?? result.member.username, ownerEntityId: result.member.playerEntityId ?? result.member.entityId };
+        const changed = insertConfirmedMarketTrade(claimId, trade, listing, importedAt);
+        inserted += changed;
+        if (changed > 0 && result.isBackfilled) {
+          const quantity = toNumber(trade.quantity);
+          const unitPrice = toNumber(trade.unitPrice ?? trade.price);
+          const occurredAt = tradeOccurredAt(trade, importedAt);
+          const itemName = String(trade.itemName ?? "Unknown item");
+          const metadata = {
+            itemName,
+            itemId: trade.itemId == null ? null : String(trade.itemId),
+            itemType: trade.itemType == null ? null : String(trade.itemType),
+            owner: trade.sellerUsername ?? listing.owner,
+            ownerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
+            sellerName: trade.sellerUsername ?? listing.owner,
+            sellerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
+            purchaserName: trade.purchaserUsername ?? null,
+            purchaserEntityId: trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
+            quantity,
+            price: unitPrice,
+            unitPrice,
+            totalValue: toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice,
+            tradeId: String(trade.id ?? ""),
+            tier: trade.itemTier == null ? null : String(trade.itemTier),
+            rarity: trade.itemRarityStr ?? null,
+            raw: trade,
+          };
+          addActivity(
+            claimId,
+            "market_sale_confirmed",
+            `Confirmed sale: ${itemName} x${quantity.toLocaleString()} at ${unitPrice.toLocaleString()}g`,
+            occurredAt,
+            metadata,
+            `market_sale_confirmed:trade:${trade.id ?? ""}`,
+          );
+        }
       }
       statements.upsertSetting.run(result.key, "complete", importedAt);
     }

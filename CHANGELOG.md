@@ -8,6 +8,13 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.116] - 2026-07-01
+
+### Fixed
+
+- Fixed confirmed market sales imported from BitJita sell history so they create in-app and Discord market sale notifications after the initial quiet backfill.
+- Improved confirmed market sale freshness by bypassing cached BitJita sell-history and trade responses for the notification-driving importer.
+
 ## [1.0.0-beta.115] - 2026-06-30
 
 ### Added
