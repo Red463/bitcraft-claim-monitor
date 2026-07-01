@@ -1,70 +1,77 @@
 # Versioning Policy
 
-BitCraft Claim Monitor follows Semantic Versioning:
+BitCraft Claim Monitor uses Semantic Versioning, with a pre-1.0 beta convention while the app is still moving quickly:
 
 ```txt
-MAJOR.MINOR.PATCH
+0.MINOR.PATCH-beta.N
 ```
 
-The app is still in beta, so public beta releases use a pre-release suffix:
+This keeps familiar version numbers while avoiding one endless beta counter such as `1.0.0-beta.123`.
+
+## Current Beta Format
+
+Use this format for every beta release before stable `1.0.0`:
 
 ```txt
-1.0.0-beta.N
+0.MINOR.PATCH-beta.N
 ```
 
-For the current beta train, increment `N` for each release. Do not increment the patch number for every beta.
-
-## Version Meanings
-
-### MAJOR
-
-Use a major version bump for breaking changes, major architecture rewrites, data migrations that may break existing deployments, changed setup/config behaviour, or incompatible API changes.
-
-Example:
+Examples:
 
 ```txt
-2.0.0
+0.25.0-beta.1
+0.25.0-beta.2
+0.25.1-beta.1
+0.26.0-beta.1
 ```
 
 ### MINOR
 
-Use a minor version bump for backwards-compatible features or significant improvements.
+Increment `MINOR` when starting a new release line for a feature area, milestone, or meaningful batch of work.
 
-Example after stable release:
+Examples:
 
 ```txt
-1.1.0
+0.25.0-beta.1 = admin popup and admin console polish line
+0.26.0-beta.1 = next feature or release theme
 ```
+
+For ordinary rapid iteration on the same feature area, keep the same `MINOR` and increment only `N`.
 
 ### PATCH
 
-Use a patch version bump for bug fixes, small UI fixes, copy changes, dependency bumps, and minor refactors with no user-facing behaviour change.
+Increment `PATCH` when starting a fix-only line for an already released beta line.
 
-Example after stable release:
-
-```txt
-1.0.1
-```
-
-## Beta Releases
-
-Before stable `1.0.0`, use:
+Examples:
 
 ```txt
-1.0.0-beta.40
-1.0.0-beta.41
-1.0.0-beta.42
+0.25.0-beta.4 = fourth beta while building or polishing the 0.25 feature line
+0.25.1-beta.1 = first fix-only beta after the 0.25.0 line
 ```
 
-Avoid:
+Do not increment `PATCH` for every small fix during active same-line iteration. Use the beta counter for rapid repeated updates.
+
+### Beta Counter
+
+`N` is the counter for the current `0.MINOR.PATCH` line.
+
+Increment `N` for each release on the same line:
 
 ```txt
-1.0.40-beta.1
-1.0.41-beta.1
-1.0.42-beta.1
+0.25.0-beta.1
+0.25.0-beta.2
+0.25.0-beta.3
 ```
 
-The beta number is the release counter for the current `1.0.0` beta train.
+Reset `N` to `1` whenever `MINOR` or `PATCH` changes:
+
+```txt
+0.25.0-beta.8
+0.25.1-beta.1
+0.26.0-beta.1
+```
+
+This supports many same-day updates without producing meaningless product versions.
 
 ## Stable Release
 
@@ -74,13 +81,19 @@ When the app is ready to leave beta, release:
 1.0.0
 ```
 
-After that:
+After stable release, use normal SemVer:
 
 ```txt
 1.0.1 = backwards-compatible bug fix
 1.1.0 = backwards-compatible feature
 2.0.0 = breaking change
 ```
+
+## Historical Changelog Migration
+
+Historical changelog entries were migrated to this policy by preserving every entry and date, assigning each historical calendar day to a pre-1.0 release line, and incrementing `beta.N` within that day from oldest to newest.
+
+This was a documentation cleanup only. It did not change the behavior or release content of old versions.
 
 ## Changelog Rules
 
@@ -95,4 +108,23 @@ Fixed
 Security
 ```
 
-Do not dump commit logs into the changelog. Write entries from the user's point of view and call out migrations, breaking changes, deployment-impacting changes, and required admin action clearly.
+Use changelog entries for user-visible or operator-visible changes. Do not dump commit logs into the changelog.
+
+Write entries from the user's point of view:
+
+```txt
+- Added Discord colour-role management.
+- Fixed market history filtering for the selected settlement.
+- Improved mobile spacing on the bot dashboard.
+```
+
+Avoid entries like:
+
+```txt
+- Updates.
+- Refactored files.
+- Changed main.tsx.
+- Fixed stuff.
+```
+
+Call out breaking changes, removals, migrations, deployment-impacting changes, required admin action, and VPS action clearly.

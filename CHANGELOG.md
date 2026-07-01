@@ -2,25 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses beta semantic versioning. See [VERSIONING.md](VERSIONING.md) for the release policy.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses pre-1.0 SemVer beta versioning. See [VERSIONING.md](VERSIONING.md) for the release policy.
 
-Historical beta version headings have been normalised to follow SemVer more closely. The original `1.0.0-beta.1` entry is preserved as the first beta, and earlier patch-heavy beta versions such as `1.0.40-beta.1` are now represented as `1.0.0-beta.41`. Release dates and changelog content have been preserved.
+Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existing dates and changelog content have been preserved.
+
 
 ## [Unreleased]
 
-## [1.0.0-beta.123] - 2026-07-01
+## [0.31.0-beta.1] - 2026-07-01
+
+### Changed
+
+- Changed beta release versioning to `0.MINOR.PATCH-beta.N` and migrated existing changelog headings to the new standard.
+- Updated Codex release instructions so future changes choose versions from the new release policy.
+
+## [0.30.0-beta.8] - 2026-07-01
 
 ### Fixed
 
 - Fixed the admin popup list status toggle so it no longer overlaps popup titles.
 
-## [1.0.0-beta.122] - 2026-07-01
+
+## [0.30.0-beta.7] - 2026-07-01
 
 ### Fixed
 
 - Improved the admin popup and navigation layouts so they fit cleanly without unwanted scrollbars.
 
-## [1.0.0-beta.121] - 2026-07-01
+
+## [0.30.0-beta.6] - 2026-07-01
 
 ### Changed
 
@@ -28,7 +38,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Replaced inline app popup editing with a compact popup list and modal editor.
 - Reworked collection status into a clearer health summary for live API and background collection state.
 
-## [1.0.0-beta.120] - 2026-07-01
+
+## [0.30.0-beta.5] - 2026-07-01
 
 ### Changed
 
@@ -39,13 +50,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Prevented approved Discord character links from being changed until the existing character is unlinked.
 
-## [1.0.0-beta.119] - 2026-07-01
+
+## [0.30.0-beta.4] - 2026-07-01
 
 ### Changed
 
 - Improved the admin popup editor layout so saved popup messages and actions are easier to read and edit.
 
-## [1.0.0-beta.118] - 2026-07-01
+
+## [0.30.0-beta.3] - 2026-07-01
 
 ### Added
 
@@ -56,20 +69,23 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the local smoke server launcher so restart checks return quickly and smoke runs do not start background scheduled jobs.
 
-## [1.0.0-beta.117] - 2026-07-01
+
+## [0.30.0-beta.2] - 2026-07-01
 
 ### Fixed
 
 - Fixed recent confirmed market sales so they still notify when a seller's trade-history backfill marker is missing or recovered.
 
-## [1.0.0-beta.116] - 2026-07-01
+
+## [0.30.0-beta.1] - 2026-07-01
 
 ### Fixed
 
 - Fixed confirmed market sales imported from BitJita sell history so they create in-app and Discord market sale notifications after the initial quiet backfill.
 - Improved confirmed market sale freshness by bypassing cached BitJita sell-history and trade responses for the notification-driving importer.
 
-## [1.0.0-beta.115] - 2026-06-30
+
+## [0.29.0-beta.18] - 2026-06-30
 
 ### Added
 
@@ -78,21 +94,24 @@ Historical beta version headings have been normalised to follow SemVer more clos
 ### Fixed
 
 - Fixed app update Discord announcements so rebuilding the same beta version does not repost the same update.
-## [1.0.0-beta.114] - 2026-06-30
+
+## [0.29.0-beta.17] - 2026-06-30
 
 ### Changed
 
 - Removed Discord market new-listing alerts so the bot only handles confirmed market sales.
 - Added a confirmed-sale delivery mode so market sale alerts can be sent to a Discord channel or directly to verified linked sellers without channel fallback.
 
-## [1.0.0-beta.113] - 2026-06-30
+
+## [0.29.0-beta.16] - 2026-06-30
 
 ### Fixed
 
 - Fixed the production background worker so a brief SQLite startup lock is retried instead of leaving Discord notifications and collectors stopped.
 - Fixed fatal worker startup crashes so systemd treats them as failures and restarts the worker instead of leaving it inactive.
 
-## [1.0.0-beta.112] - 2026-06-30
+
+## [0.29.0-beta.15] - 2026-06-30
 
 ### Changed
 
@@ -103,7 +122,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed Discord notification tests in the admin console so they use the same sender path as real notifications and show the actual sent, skipped, or failed result.
 
-## [1.0.0-beta.111] - 2026-06-30
+
+## [0.29.0-beta.14] - 2026-06-30
 
 ### Changed
 
@@ -114,33 +134,38 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed legacy YouTube announcement channel selections showing as a broken dropdown option.
 
-## [1.0.0-beta.110] - 2026-06-30
+
+## [0.29.0-beta.13] - 2026-06-30
 
 ### Fixed
 
 - Fixed YouTube Monitor channel selection so any synced Discord channel can be used for video announcements.
 - Fixed Discord app update announcements so worker-side scheduled checks recover missed release notifications after deploys.
 
-## [1.0.0-beta.109] - 2026-06-30
+
+## [0.29.0-beta.12] - 2026-06-30
 
 ### Added
 
 - Added a Discord bot YouTube Monitor for announcing new videos from configured YouTube channels without requiring a YouTube API key.
 
-## [1.0.0-beta.108] - 2026-06-30
+
+## [0.29.0-beta.11] - 2026-06-30
 
 ### Changed
 
 - Improved watchtower details so the popup opens in the visible browser area and member lists can be filtered by empire rank.
 
-## [1.0.0-beta.107] - 2026-06-30
+
+## [0.29.0-beta.10] - 2026-06-30
 
 ### Changed
 
 - Added weighted regional settlement scores to the Region rankings, prioritising tier, supplies, treasury, and tiles with hover details explaining the formula.
 - Improved watchtower details so the popup stays in the visible viewport and shows all empire members with their latest login status.
 
-## [1.0.0-beta.106] - 2026-06-30
+
+## [0.29.0-beta.9] - 2026-06-30
 
 ### Changed
 
@@ -148,7 +173,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved admin diagnostics and background collection settings so long logs and collector controls stay inside their cards.
 - Improved production contributor names so settlement-owner crowns stay aligned with the player name.
 
-## [1.0.0-beta.105] - 2026-06-30
+
+## [0.29.0-beta.8] - 2026-06-30
 
 ### Changed
 
@@ -156,48 +182,56 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved admin tab navigation spacing so the grouped controls stay compact.
 - Improved production contributor lists so all contributors wrap into compact rows instead of stretching cards vertically.
 
-## [1.0.0-beta.104] - 2026-06-30
+
+## [0.29.0-beta.7] - 2026-06-30
 
 ### Changed
 
 - Improved the admin console layout with grouped navigation, clearer tab descriptions, safer action tooltips, and empty states for admin lists, audit history, and backups.
 
-## [1.0.0-beta.103] - 2026-06-30
+
+## [0.29.0-beta.6] - 2026-06-30
 
 ### Fixed
 
 - Fixed dashboard refresh failures so recent collector data is shown as stale fallback data when BitJita cannot be reached after a server restart.
 
-## [1.0.0-beta.102] - 2026-06-30
+
+## [0.29.0-beta.5] - 2026-06-30
 
 ### Fixed
 
 - Fixed the dashboard market income chart so it loads the monitored-market sales history already shown on the Market analytics page.
-## [1.0.0-beta.101] - 2026-06-30
+
+## [0.29.0-beta.4] - 2026-06-30
 
 ### Changed
 
 - Updated the dashboard summary cards to show current treasury and confirmed monitored-market income history instead of construction and treasury trend cards.
-## [1.0.0-beta.100] - 2026-06-30
+
+## [0.29.0-beta.3] - 2026-06-30
 
 ### Changed
 
 - Moved market-listing sync and production contribution sync out of snapshot-history recording into separate worker collector phases with their own schedules and status tracking.
 
-## [1.0.0-beta.99] - 2026-06-30
+
+## [0.29.0-beta.2] - 2026-06-30
 
 ### Changed
 
 - Split snapshot recording into a short settlement snapshot write followed by separate market-listing and production sync phases, reducing how long worker transactions hold the SQLite writer lock.
 
-## [1.0.0-beta.98] - 2026-06-30
+
+## [0.29.0-beta.1] - 2026-06-30
 
 ### Changed
 
 - Added resumable worker budgets for storage activity and member market-trade imports so expensive collector work continues across runs instead of scanning every building or member in one pass.
 - Added worker budget environment controls for storage activity and market trade import batch sizes and runtimes.
 
-## [1.0.0-beta.97] - 2026-06-29
+
+## [0.28.0-beta.13] - 2026-06-29
 
 ### Added
 
@@ -209,7 +243,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Increased the default snapshot-history collector interval and added SQLite snapshot indexes to reduce repeated API and database load.
 - Added SQLite busy-timeout startup pragmas so concurrent web and worker database access waits briefly instead of failing immediately.
 
-## [1.0.0-beta.96] - 2026-06-29
+
+## [0.28.0-beta.12] - 2026-06-29
 
 ### Changed
 
@@ -218,35 +253,40 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved public-release CSS and UX safeguards for shared sort controls, app chrome controls, and Public Craft Finder actions.
 - Updated README, developer, notification, and release-readiness documentation with current verification evidence and remaining live-source blockers.
 
-## [1.0.0-beta.95] - 2026-06-29
+
+## [0.28.0-beta.11] - 2026-06-29
 
 ### Changed
 
 - Improved release-readiness structure by moving Discord OAuth flow decisions into a focused tested server helper.
 - Updated developer and release-readiness documentation with the latest OAuth helper boundary and verification evidence.
 
-## [1.0.0-beta.94] - 2026-06-29
+
+## [0.28.0-beta.10] - 2026-06-29
 
 ### Changed
 
 - Improved release-readiness structure by moving DB-backed session lookup, Discord OAuth config, and OAuth state secret handling into focused tested server helpers.
 - Documented the `/bot` notification exception as an accepted release decision and updated release-readiness verification evidence.
 
-## [1.0.0-beta.93] - 2026-06-29
+
+## [0.28.0-beta.9] - 2026-06-29
 
 ### Changed
 
 - Improved release-readiness structure by moving legacy password hashing and admin sign-in throttling into focused tested server helpers.
 - Updated developer and release-readiness documentation with the latest password-auth and login-attempt helper boundaries.
 
-## [1.0.0-beta.92] - 2026-06-29
+
+## [0.28.0-beta.8] - 2026-06-29
 
 ### Changed
 
 - Improved release-readiness structure by moving admin/app session policy and Discord OAuth state handling into focused tested server helpers.
 - Updated developer and release-readiness documentation with the latest auth helper boundaries and verification evidence.
 
-## [1.0.0-beta.91] - 2026-06-29
+
+## [0.28.0-beta.7] - 2026-06-29
 
 ### Changed
 
@@ -254,7 +294,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved release-readiness structure by moving admin permissions, public user payloads, admin mutation guards, and auth identity helpers out of the production server into focused tested modules.
 - Updated developer and release-readiness documentation with the latest server helper boundaries and verification evidence.
 
-## [1.0.0-beta.90] - 2026-06-29
+
+## [0.28.0-beta.6] - 2026-06-29
 
 ### Changed
 
@@ -262,7 +303,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Renamed reused command/filter styling primitives to neutral `command-filter-*` classes and added guard coverage to prevent page-specific names returning.
 - Updated release-readiness and developer documentation with the latest CSS ownership boundaries.
 
-## [1.0.0-beta.89] - 2026-06-29
+
+## [0.28.0-beta.5] - 2026-06-29
 
 ### Added
 
@@ -273,7 +315,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved browser notification reliability by keeping market activity, deal-alert, and production queue sources in a tested app-level source queue.
 - Updated release-readiness documentation with the current live-source notification blockers.
 
-## [1.0.0-beta.88] - 2026-06-29
+
+## [0.28.0-beta.4] - 2026-06-29
 
 ### Changed
 
@@ -281,7 +324,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added focused admin display helpers and boundary tests so release-critical shell responsibilities stay easier to review.
 - Expanded notification verification coverage for every routed page and supported browser notification type.
 
-## [1.0.0-beta.87] - 2026-06-29
+
+## [0.28.0-beta.3] - 2026-06-29
 
 ### Changed
 
@@ -289,7 +333,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Split Market price finder and buy-order finder tools into focused market-owned components.
 - Updated developer and release-readiness documentation with the latest page and market tool boundaries.
 
-## [1.0.0-beta.86] - 2026-06-29
+
+## [0.28.0-beta.2] - 2026-06-29
 
 ### Changed
 
@@ -297,7 +342,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Moved shared active-region loading and labels into a tested hook so page components no longer own duplicate region helper logic.
 - Updated developer and release-readiness documentation with the latest page boundaries.
 
-## [1.0.0-beta.85] - 2026-06-29
+
+## [0.28.0-beta.1] - 2026-06-29
 
 ### Changed
 
@@ -305,14 +351,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Reduced duplicated browser helper code in the main page bundle by reusing shared analytics and URL query helpers.
 - Updated developer and release-readiness documentation with the latest page-helper and stylesheet boundaries.
 
-## [1.0.0-beta.84] - 2026-06-28
+
+## [0.27.0-beta.9] - 2026-06-28
 
 ### Changed
 
 - Improved release-readiness structure by moving scheduled job, market activity, production activity, and recipe catalog helpers out of the production server into focused tested modules.
 - Updated developer and release-readiness documentation with the latest server helper boundaries.
 
-## [1.0.0-beta.83] - 2026-06-28
+
+## [0.27.0-beta.8] - 2026-06-28
 
 ### Added
 
@@ -323,7 +371,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved release-readiness structure by moving request-body parsing, rate limiting, visitor IP privacy helpers, and Empires page styles into focused modules with tests where applicable.
 - Updated developer and release-readiness documentation with the latest server, notification, and stylesheet boundaries.
 
-## [1.0.0-beta.82] - 2026-06-28
+
+## [0.27.0-beta.7] - 2026-06-28
 
 ### Changed
 
@@ -333,14 +382,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 ### Fixed
 
 - Confirmed admin settings responses keep submitted Discord bot tokens redacted while preserving configured-token status.
-## [1.0.0-beta.81] - 2026-06-28
+
+## [0.27.0-beta.6] - 2026-06-28
 
 ### Changed
 
 - Improved release-readiness structure by moving market listing, best-seller sorting, production craft, and activity-log helpers into focused page utility modules.
 - Updated developer and release-readiness documentation with the latest page-helper extraction boundaries.
 
-## [1.0.0-beta.80] - 2026-06-28
+
+## [0.27.0-beta.5] - 2026-06-28
 
 ### Added
 
@@ -355,7 +406,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed notification toasts appearing behind the floating help control and added browser sound helper coverage.
 
-## [1.0.0-beta.79] - 2026-06-28
+
+## [0.27.0-beta.4] - 2026-06-28
 
 ### Changed
 
@@ -365,7 +417,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 ### Fixed
 
 - Fixed corrupted or outdated browser notification settings from disabling important notification gates or selecting invalid sound/volume values.
-## [1.0.0-beta.78] - 2026-06-28
+
+## [0.27.0-beta.3] - 2026-06-28
 
 ### Changed
 
@@ -376,7 +429,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed duplicate persisted notifications replacing newer entries by ensuring the newest matching notice wins before the notification log is capped.
 
-## [1.0.0-beta.77] - 2026-06-28
+
+## [0.27.0-beta.2] - 2026-06-28
 
 ### Added
 
@@ -393,7 +447,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed admin-role access to user-management routes while keeping viewer-level users blocked.
 
-## [1.0.0-beta.76] - 2026-06-28
+
+## [0.27.0-beta.1] - 2026-06-28
 
 ### Changed
 
@@ -402,12 +457,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 ### Fixed
 
 - Reduced duplicate BitJita and local helper work during overlapping refreshes to avoid 502s on API-heavy pages while preserving last known good data.
-## [1.0.0-beta.75] - 2026-06-27
+
+## [0.26.0-beta.3] - 2026-06-27
 
 ### Fixed
 
 - Improved live stability during BitJita outages by serving recent cached data where possible, deduplicating heavy empire scans, and logging slow or failed requests with more detail.
-## [1.0.0-beta.74] - 2026-06-27
+
+## [0.26.0-beta.2] - 2026-06-27
 
 ### Added
 
@@ -417,12 +474,14 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed Empires watchtower scans timing out by returning partial or cached data when BitJita is slow.
 
-## [1.0.0-beta.73] - 2026-06-27
+
+## [0.26.0-beta.1] - 2026-06-27
 
 ### Added
 
 - Added an Empires page with regional empire overview and claimed watchtower scouting tools.
-## [1.0.0-beta.72] - 2026-06-26
+
+## [0.25.0-beta.2] - 2026-06-26
 
 ### Added
 
@@ -433,31 +492,36 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Enabled the Alert Pop notification sound by default for new browser settings.
 - Reworked the local smoke server health check so the launcher returns reliably during frontend testing.
 
-## [1.0.0-beta.71] - 2026-06-26
+
+## [0.25.0-beta.1] - 2026-06-26
 
 ### Changed
 
 - Redesigned the Market Analytics best sellers section as a visual leaderboard with ranking controls.
 - Hardened the local smoke server workflow so frontend testing can reuse the running server without unreliable restarts.
 
-## [1.0.0-beta.70] - 2026-06-23
+
+## [0.24.0-beta.4] - 2026-06-23
 
 ### Fixed
 
 - Fixed live server restarts caused by transient BitJita network timeouts in background tasks.
 - Improved BitJita timeout logging and preferred IPv4 upstream connections on the VPS.
 
-## [1.0.0-beta.69] - 2026-06-23
+
+## [0.24.0-beta.3] - 2026-06-23
 
 ### Changed
 
 - Improved page switching performance by aborting stale page refreshes and avoiding unnecessary production data requests on non-production pages.
-## [1.0.0-beta.68] - 2026-06-23
+
+## [0.24.0-beta.2] - 2026-06-23
 
 ### Changed
 
 - Added per-item deal watch thresholds so users can choose how far below average a watched market item must be before alerting.
-## [1.0.0-beta.67] - 2026-06-23
+
+## [0.24.0-beta.1] - 2026-06-23
 
 ### Added
 
@@ -467,82 +531,95 @@ Historical beta version headings have been normalised to follow SemVer more clos
 ### Changed
 
 - Added admin controls for deal watch limits, alert thresholds, minimum confirmed sale baselines, and Discord direct message alerts.
-## [1.0.0-beta.66] - 2026-06-21
+
+## [0.23.0-beta.1] - 2026-06-21
 
 ### Fixed
 
 - Fixed corrupted footer punctuation in the main app footer.
 
-## [1.0.0-beta.65] - 2026-06-20
+
+## [0.22.0-beta.1] - 2026-06-20
 
 ### Changed
 
 - Improved the admin background collection settings with clearer wording and a less crowded layout.
 
-## [1.0.0-beta.64] - 2026-06-19
+
+## [0.21.0-beta.7] - 2026-06-19
 
 ### Changed
 
 - Slowed the top refresh progress animation so refresh cycles feel less distracting.
 
-## [1.0.0-beta.63] - 2026-06-19
+
+## [0.21.0-beta.6] - 2026-06-19
 
 ### Fixed
 
 - Fixed the top refresh progress line causing a brief horizontal scrollbar during refresh cycles.
 
-## [1.0.0-beta.62] - 2026-06-19
+
+## [0.21.0-beta.5] - 2026-06-19
 
 ### Changed
 
 - Added a subtle top-edge refresh progress line while keeping the sidebar as the main refresh status indicator.
 
-## [1.0.0-beta.61] - 2026-06-19
+
+## [0.21.0-beta.4] - 2026-06-19
 
 ### Changed
 
 - Improved page switching performance by briefly reusing recently loaded page data while live refreshes continue normally.
 - Removed the floating page refresh notice so refresh state is shown only in the sidebar.
 
-## [1.0.0-beta.60] - 2026-06-19
+
+## [0.21.0-beta.3] - 2026-06-19
 
 ### Changed
 
 - Improved the profession focus card with tier-coloured level pills, rank markers, and a compact tier distribution view.
 
-## [1.0.0-beta.59] - 2026-06-19
+
+## [0.21.0-beta.2] - 2026-06-19
 
 ### Fixed
 
 - Added BitJita request timeouts so slow production refreshes fail gracefully instead of leaving the page stuck refreshing.
 
-## [1.0.0-beta.58] - 2026-06-19
+
+## [0.21.0-beta.1] - 2026-06-19
 
 ### Changed
 
 - Updated the professions page so adventure skills use the same sortable table layout as professions while remaining in a separate section.
 
-## [1.0.0-beta.57] - 2026-06-18
+
+## [0.20.0-beta.4] - 2026-06-18
 
 ### Removed
 
 - Removed the public `/wiki` knowledge base, related API endpoints, generated wiki data setup, route handling, page component, and styles after the feature caused app instability.
 
-## [1.0.0-beta.56] - 2026-06-18
+
+## [0.20.0-beta.3] - 2026-06-18
 
 ### Changed
 
 - Redesigned the public wiki into a player-facing game wiki with guide cards, searchable item, cargo, recipe, profession, and output-reference entries.
 - Improved wiki generation so it built friendly pages from the newest available local game data tables instead of exposing raw cached recipe JSON.
 
-## [1.0.0-beta.55] - 2026-06-18
+
+## [0.20.0-beta.2] - 2026-06-18
 
 ### Added
 
 - Added a public BitCraft server mechanics guide with source-backed notes on claim treasury, crafting XP, gathering, loot, research, market state, and unconfirmed mechanics.
 - Added a public `/wiki` knowledge base with admin-editable guide pages and generated recipe/output reference entries from local discovery data.
 
-## [1.0.0-beta.54] - 2026-06-18
+
+## [0.20.0-beta.1] - 2026-06-18
 
 ### Changed
 
@@ -553,53 +630,61 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the BitJita refresh issue banner so it renders as an opaque overlay above page content.
 
-## [1.0.0-beta.53] - 2026-06-17
+
+## [0.19.0-beta.1] - 2026-06-17
 
 ### Changed
 
 - Restored main app pages to refresh live BitJita data through the local proxy instead of using SQLite current-state tables for page display.
 - Clarified Admin collector wording so background collectors are described as history and notification support rather than the source of live page data.
 
-## [1.0.0-beta.52] - 2026-06-16
+
+## [0.18.0-beta.1] - 2026-06-16
 
 ### Fixed
 
 - Fixed in-app notifications so market listing and sale toasts are detected from a dedicated background feed instead of only firing after opening the Activity page.
 
-## [1.0.0-beta.51] - 2026-06-15
+
+## [0.17.0-beta.11] - 2026-06-15
 
 ### Fixed
 
 - Fixed inventory rows that only expose a BitJita tag, such as berries and meat, so the tag is shown as the item name instead of `Unknown item`.
 
-## [1.0.0-beta.50] - 2026-06-15
+
+## [0.17.0-beta.10] - 2026-06-15
 
 ### Fixed
 
 - Fixed inventory item names so BitJita display metadata on inventory slots is preserved in the local inventory table.
 
-## [1.0.0-beta.49] - 2026-06-15
+
+## [0.17.0-beta.9] - 2026-06-15
 
 ### Fixed
 
 - Fixed Regional Buy Order sale baselines so stale empty bucket rows are cleaned up instead of staying in the database.
 - Improved Regional Buy Order sale baselines to store compact price-stat metadata instead of raw empty bucket dumps.
 
-## [1.0.0-beta.48] - 2026-06-15
+
+## [0.17.0-beta.8] - 2026-06-15
 
 ### Fixed
 
 - Fixed Regional Buy Order opportunity baselines so cargo buy orders use the same BitJita price-history endpoint as Price Finder.
 - Improved Regional Buy Order opportunity baselines to use BitJita's 7-day average sale price when available.
 
-## [1.0.0-beta.47] - 2026-06-15
+
+## [0.17.0-beta.7] - 2026-06-15
 
 ### Fixed
 
 - Fixed Regional Buy Order sales baselines so stale buy orders from old region scans no longer create zero-value sale averages for unrelated regions.
 - Fixed Regional Buy Order sales baselines so empty BitJita sale-history responses are not saved as confirmed sale averages.
 
-## [1.0.0-beta.46] - 2026-06-15
+
+## [0.17.0-beta.6] - 2026-06-15
 
 ### Changed
 
@@ -610,28 +695,32 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed slow BitJita sale-history requests blocking the whole Regional Buy Order sale baseline job by timing out individual item lookups and continuing with the remaining items.
 - Fixed BitJita refresh issue banners so they overlay the page instead of shifting dashboard content down.
 
-## [1.0.0-beta.45] - 2026-06-15
+
+## [0.17.0-beta.5] - 2026-06-15
 
 ### Fixed
 
 - Fixed Regional Buy Order sale baselines so completed item baselines appear while the scheduled job is still running.
 - Fixed the page refresh indicator so it no longer shifts page content down during background updates.
 
-## [1.0.0-beta.44] - 2026-06-15
+
+## [0.17.0-beta.4] - 2026-06-15
 
 ### Changed
 
 - Reduced Regional Buy Order collector load by scanning only the monitored settlement region every 30 minutes.
 - Moved Regional Buy Order sales baseline refreshes into a separate daily scheduled job.
 
-## [1.0.0-beta.43] - 2026-06-15
+
+## [0.17.0-beta.3] - 2026-06-15
 
 ### Changed
 
 - Added clearer page refresh indicators so users can see when data is updating in the background.
 - Improved Admin refresh, collection, endpoint check, and scheduled-job buttons with visible busy states during slow actions.
 
-## [1.0.0-beta.42] - 2026-06-15
+
+## [0.17.0-beta.2] - 2026-06-15
 
 ### Changed
 
@@ -639,70 +728,81 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Reduced repeated regional buy-order sales baseline lookups by reusing cached 7-day sale averages for longer between collector runs.
 - Normalised compact money summary cards to show `K`, `M`, and `B` without an extra gold suffix.
 
-## [1.0.0-beta.41] - 2026-06-15
+
+## [0.17.0-beta.1] - 2026-06-15
 
 ### Changed
 
 - Improved the Admin loading screen animation and reduced visual clutter while administrator access is being verified.
 - Fixed sidebar Last Refresh spacing so the label and timestamp no longer run together.
 
-## [1.0.0-beta.40] - 2026-06-14
+
+## [0.16.0-beta.8] - 2026-06-14
 
 ### Changed
 
 - Changed the Map resource category filter to use BitJita resource tags directly instead of broad grouped categories.
 
-## [1.0.0-beta.39] - 2026-06-14
+
+## [0.16.0-beta.7] - 2026-06-14
 
 ### Fixed
 
 - Fixed the Region page missing live region details when BitJita returns a settlement region name without a numeric region id.
 - Fixed the Map resource category filter only showing exact-match categories such as Stone by grouping BitJita resource tags into the app's broader resource categories.
 
-## [1.0.0-beta.38] - 2026-06-14
+
+## [0.16.0-beta.6] - 2026-06-14
 
 ### Changed
 
 - Split major main-app pages and shared interface pieces into focused frontend modules to make future page work safer to maintain.
 - Improved page data resilience so local page views keep the latest successful data when one refresh domain temporarily fails.
 
-## [1.0.0-beta.37] - 2026-06-14
+
+## [0.16.0-beta.5] - 2026-06-14
 
 ### Fixed
 
 - Fixed duplicate market notifications and stale notification timestamps when listing events were reprocessed.
 
-## [1.0.0-beta.36] - 2026-06-14
+
+## [0.16.0-beta.4] - 2026-06-14
 
 ### Fixed
 
 - Fixed the Admin database browser hiding columns after the first ten fields.
 
-## [1.0.0-beta.35] - 2026-06-14
+
+## [0.16.0-beta.3] - 2026-06-14
 
 ### Added
 
 - Added search, row count controls, and pagination to Admin recent security events.
 
-## [1.0.0-beta.34] - 2026-06-14
+
+## [0.16.0-beta.2] - 2026-06-14
 
 ### Fixed
 
 - Fixed existing SQLite databases not receiving newer current-state table columns during startup migration.
 
-## [1.0.0-beta.33] - 2026-06-14
+
+## [0.16.0-beta.1] - 2026-06-14
 
 ### Fixed
 
 - Fixed the research current table staying empty by storing BitJita research responses that use the `technologies` field.
 
-## [1.0.0-beta.32] - 2026-06-13
+
+## [0.15.0-beta.22] - 2026-06-13
 
 ### Fixed
 
 - Fixed page data being cleared when a partial BitJita refresh failed, so pages keep showing the latest successful local data during API blips.
 
-## [1.0.0-beta.31] - 2026-06-13
+
+## [0.15.0-beta.21] - 2026-06-13
 
 ### Added
 
@@ -713,25 +813,29 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Changed the GeoIP refresh job to skip local downloads when ipapi.co provider mode is active.
 
-## [1.0.0-beta.30] - 2026-06-13
+
+## [0.15.0-beta.20] - 2026-06-13
 
 ### Fixed
 
 - Fixed oversized legacy GeoIP JSON fallback files being loaded into memory during normal app startup and visitor lookup.
 
-## [1.0.0-beta.29] - 2026-06-13
+
+## [0.15.0-beta.19] - 2026-06-13
 
 ### Fixed
 
 - Fixed MaxMind GeoLite2 City imports exhausting Node memory by storing imported IP ranges in SQLite instead of a large JSON lookup file.
 
-## [1.0.0-beta.28] - 2026-06-13
+
+## [0.15.0-beta.18] - 2026-06-13
 
 ### Changed
 
 - Improved MaxMind GeoLite2 City imports so GeoIP refreshes process only the required CSV files and show clearer progress while running.
 
-## [1.0.0-beta.27] - 2026-06-13
+
+## [0.15.0-beta.17] - 2026-06-13
 
 ### Changed
 
@@ -741,25 +845,29 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Added visible GeoIP refresh progress details while scheduled jobs are running.
 
-## [1.0.0-beta.26] - 2026-06-13
+
+## [0.15.0-beta.16] - 2026-06-13
 
 ### Fixed
 
 - Fixed scheduled jobs staying stuck as running after a server crash or timeout.
 
-## [1.0.0-beta.25] - 2026-06-13
+
+## [0.15.0-beta.15] - 2026-06-13
 
 ### Fixed
 
 - Fixed background polling and GeoIP download failures being able to take the local server offline.
 
-## [1.0.0-beta.24] - 2026-06-13
+
+## [0.15.0-beta.14] - 2026-06-13
 
 ### Changed
 
 - Changed the Admin session-loading animation to remain visible briefly before entering the console.
 
-## [1.0.0-beta.23] - 2026-06-13
+
+## [0.15.0-beta.13] - 2026-06-13
 
 ### Added
 
@@ -770,7 +878,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Improved Admin GeoIP configuration wording and masked saved MaxMind license keys in settings/database views.
 
-## [1.0.0-beta.22] - 2026-06-13
+
+## [0.15.0-beta.12] - 2026-06-13
 
 ### Added
 
@@ -781,7 +890,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Documented visitor security logging separately from optional analytics cookies.
 
-## [1.0.0-beta.21] - 2026-06-13
+
+## [0.15.0-beta.11] - 2026-06-13
 
 ### Changed
 
@@ -793,7 +903,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed member permission columns in the database browser showing zeroes when BitJita reports permissions using non-boolean field shapes.
 - Fixed construction current data so material requirements, added materials and storage coverage follow the same logic as the construction page.
 
-## [1.0.0-beta.20] - 2026-06-13
+
+## [0.15.0-beta.10] - 2026-06-13
 
 ### Changed
 
@@ -804,7 +915,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the Admin database browser showing stale rows when switching tables quickly.
 
-## [1.0.0-beta.19] - 2026-06-13
+
+## [0.15.0-beta.9] - 2026-06-13
 
 ### Changed
 
@@ -817,7 +929,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed sidebar last-refresh spacing so the label and timestamp no longer overlap.
 - Fixed Admin being interrupted by the full administrator-session loading screen during normal display refreshes.
 
-## [1.0.0-beta.18] - 2026-06-13
+
+## [0.15.0-beta.8] - 2026-06-13
 
 ### Added
 
@@ -836,7 +949,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Removed the legacy `current_claim_state` all-in-one cache table and its fallback usage.
 
-## [1.0.0-beta.17] - 2026-06-13
+
+## [0.15.0-beta.7] - 2026-06-13
 
 ### Added
 
@@ -846,7 +960,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed online members showing "Playing 0m" when BitJita reports them online without a usable session timestamp.
 
-## [1.0.0-beta.16] - 2026-06-13
+
+## [0.15.0-beta.6] - 2026-06-13
 
 ### Added
 
@@ -863,7 +978,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed server collection using short-lived production cache during manual polls, so changed craft data is not masked by cached production responses.
 
-## [1.0.0-beta.15] - 2026-06-13
+
+## [0.15.0-beta.5] - 2026-06-13
 
 ### Added
 
@@ -873,27 +989,31 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Changed offline Leaderboard current-session values to show a dash instead of "Unavailable".
 
-## [1.0.0-beta.14] - 2026-06-13
+
+## [0.15.0-beta.4] - 2026-06-13
 
 ### Fixed
 
 - Fixed the Leaderboard Online/Sessions tab showing members as offline because it was not loading player-detail status data.
 
-## [1.0.0-beta.13] - 2026-06-13
+
+## [0.15.0-beta.3] - 2026-06-13
 
 ### Added
 
 - Added Leaderboard tabs for Contribution, Professions, Activity, Market, and Online/Sessions settlement comparisons.
 - Added BitJita total played and total signed-in values to the Leaderboard Online/Sessions tab when player detail data provides them.
 
-## [1.0.0-beta.12] - 2026-06-13
+
+## [0.15.0-beta.2] - 2026-06-13
 
 ### Changed
 
 - Improved Craft Calculator recipe route selection with clearer route cards and route-type labels.
 - Changed Craft Calculator defaults to prefer normal processing recipes over unpack/package routes when multiple recipe routes are available.
 
-## [1.0.0-beta.11] - 2026-06-13
+
+## [0.15.0-beta.1] - 2026-06-13
 
 ### Changed
 
@@ -901,13 +1021,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Changed the Dashboard online member card fallback from "Session active" to a clearer playtime unavailable label.
 - Removed the Craft Calculator calculation notes panel to reduce clutter when multiple recipe options exist.
 
-## [1.0.0-beta.10] - 2026-06-12
+
+## [0.14.0-beta.10] - 2026-06-12
 
 ### Changed
 
 - Improved Map player tracking diagnostics and prevented temporary player-detail failures from emptying the member roster used by the map.
 
-## [1.0.0-beta.9] - 2026-06-12
+
+## [0.14.0-beta.9] - 2026-06-12
 
 ### Added
 
@@ -923,14 +1045,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the Admin database browser returning to the Status tab after refreshes by persisting the selected Admin tab.
 
-## [1.0.0-beta.8] - 2026-06-12
+
+## [0.14.0-beta.8] - 2026-06-12
 
 ### Added
 
 - Added direct recipe materials to Craft Calculator so users can compare immediate recipe inputs with fully expanded source materials.
 - Added a technical application overview covering current architecture, pages, data flow, integrations, security, and risk areas.
 
-## [1.0.0-beta.7] - 2026-06-12
+
+## [0.14.0-beta.7] - 2026-06-12
 
 ### Added
 
@@ -945,7 +1069,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Made Craft Calculator ingredient lookups more resilient to BitJita rate limits by caching recipe details, reducing lookup bursts, and treating failed child ingredients as source materials instead of failing the whole plan.
 
-## [1.0.0-beta.6] - 2026-06-12
+
+## [0.14.0-beta.6] - 2026-06-12
 
 ### Changed
 
@@ -955,7 +1080,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed Admin and Activity no-poll pages clearing the last good BitJita data snapshot during navigation.
 
-## [1.0.0-beta.5] - 2026-06-12
+
+## [0.14.0-beta.5] - 2026-06-12
 
 ### Changed
 
@@ -965,7 +1091,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Improved HTTP 429 refresh warnings so local rate limiting is easier to distinguish from upstream BitJita issues.
 
-## [1.0.0-beta.4] - 2026-06-12
+
+## [0.14.0-beta.4] - 2026-06-12
 
 ### Added
 
@@ -975,14 +1102,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Replaced the Admin sign-in and administrator management UI with Discord account approval instead of separate app passwords.
 
-## [1.0.0-beta.3] - 2026-06-12
+
+## [0.14.0-beta.3] - 2026-06-12
 
 ### Changed
 
 - Removed the visible "not syncing" suffix from active-region dropdown labels.
 - Updated Production's active/paused state to recognize craft progress that moves during refreshes, while keeping contribution recording limited to BitJita contribution data.
 
-## [1.0.0-beta.2] - 2026-06-12
+
+## [0.14.0-beta.2] - 2026-06-12
 
 ### Added
 
@@ -992,7 +1121,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Updated Map, Market tools and Public Craft Finder region selectors to use the shared active-region list instead of stale hardcoded region IDs.
 
-## [1.0.0-beta.1] - 2026-06-12
+
+## [0.14.0-beta.1] - 2026-06-12
 
 ### Changed
 
@@ -1006,7 +1136,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Removed inactive pin/watchlist controls from Production, Market pricing and Browser Settings until a visible pinned-items surface is rebuilt.
 
-## [0.9.27-beta.1] - 2026-06-11
+
+## [0.13.0-beta.3] - 2026-06-11
 
 ### Changed
 
@@ -1018,14 +1149,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added an in-app BitJita data warning banner when refreshes fail or production craft details only partially update.
 - Improved BitJita HTTP error messages so temporary API failures are shown as readable app alerts instead of raw endpoint errors.
 
-## [0.9.26-beta.1] - 2026-06-11
+
+## [0.13.0-beta.2] - 2026-06-11
 
 ### Fixed
 
 - Updated Leaderboard cards and filter controls to match the current dashboard-style card surfaces and metric styling.
 - Renamed the Leaderboard summary metric from Recorded Progress to Recorded Contribution.
 
-## [0.9.25-beta.1] - 2026-06-11
+
+## [0.13.0-beta.1] - 2026-06-11
 
 ### Added
 
@@ -1054,19 +1187,22 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Removed historical Replit export artifacts from the active workspace.
 
-## [0.9.24-beta.1] - 2026-06-10
+
+## [0.12.0-beta.1] - 2026-06-10
 
 ### Fixed
 
 - Fixed duplicate Discord craft-start notifications when BitJita changes a craft entity ID, Discord delivery is skipped or fails, or a craft briefly disappears from polling.
 
-## [0.9.23-beta.1] - 2026-06-09
+
+## [0.11.0-beta.2] - 2026-06-09
 
 ### Changed
 
 - Improved the main app footer spacing, support button styling, and sidebar collapse animation.
 
-## [0.9.22-beta.1] - 2026-06-09
+
+## [0.11.0-beta.1] - 2026-06-09
 
 ### Added
 
@@ -1079,13 +1215,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed the Buy Order Finder region filter so returned buy orders are locally filtered to the selected region even if the API returns a broader result set.
 - Fixed Craft Calculator source-material chains for items whose production recipe is exposed through BitJita output-helper items, such as wood logs from trunks.
 
-## [0.9.21-beta.1] - 2026-06-08
+
+## [0.10.0-beta.3] - 2026-06-08
 
 ### Fixed
 
 - Fixed the footer support button so it renders reliably without depending on the third-party Buy Me a Coffee embed script.
 
-## [0.9.20-beta.1] - 2026-06-08
+
+## [0.10.0-beta.2] - 2026-06-08
 
 ### Changed
 
@@ -1093,13 +1231,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added a Buy Me a Coffee support link to the main app footer.
 - Replaced the plain footer support link with the embedded Buy Me a Coffee button configuration.
 
-## [0.9.19-beta.1] - 2026-06-08
+
+## [0.10.0-beta.1] - 2026-06-08
 
 ### Changed
 
 - Updated Market live listings to label the per-item amount as Unit Price and show a separate Total Price column for the full listing value.
 
-## [0.9.18-beta.1] - 2026-06-07
+
+## [0.9.0-beta.6] - 2026-06-07
 
 ### Added
 
@@ -1109,14 +1249,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Updated the Violet browser theme description to avoid research-specific wording.
 
-## [0.9.17-beta.1] - 2026-06-07
+
+## [0.9.0-beta.5] - 2026-06-07
 
 ### Changed
 
 - Continued Phase 4 frontend modularization by moving shared formatting, item/equipment normalization, owner labels, browser persistence hooks, badges, item displays, metric components, API polling hooks, and app data normalization into focused modules.
 - Moved the Members, Professions, Construction, Research, Region, and Sync views into dedicated page modules and removed the dead legacy Overview implementation from the main app shell.
 
-## [0.9.16-beta.1] - 2026-06-07
+
+## [0.9.0-beta.4] - 2026-06-07
 
 ### Added
 
@@ -1126,7 +1268,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed Production current-crafter chips so member names and counts render as one clean pill.
 
-## [0.9.15-beta.1] - 2026-06-07
+
+## [0.9.0-beta.3] - 2026-06-07
 
 ### Changed
 
@@ -1150,7 +1293,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Capped pinned market watch price-history refreshes so watchlist items no longer request every tracked market price at once.
 - Moved settlement member passive-craft summaries behind one cached local endpoint so the Production page no longer makes a separate browser BitJita request for every member.
 
-## [0.9.9-beta.1] - 2026-06-07
+
+## [0.9.0-beta.2] - 2026-06-07
 
 ### Security
 
@@ -1161,7 +1305,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Added role selection and role editing to the Admin Console administrator management screen.
 
-## [0.9.8-beta.1] - 2026-06-07
+
+## [0.9.0-beta.1] - 2026-06-07
 
 ### Security
 
@@ -1174,7 +1319,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Improved oversized request handling so rejected bodies return `413` instead of a generic server error.
 
-## [0.9.7-beta.1] - 2026-06-06
+
+## [0.8.0-beta.8] - 2026-06-06
 
 ### Changed
 
@@ -1191,13 +1337,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Prevented crown styling from being applied to owners of other settlements in regional views.
 
-## [0.9.6-beta.1] - 2026-06-06
+
+## [0.8.0-beta.7] - 2026-06-06
 
 ### Fixed
 
 - Fixed Discord character-link selection so member names are shown and submitted instead of raw player IDs.
 
-## [0.9.5-beta.1] - 2026-06-06
+
+## [0.8.0-beta.6] - 2026-06-06
 
 ### Added
 
@@ -1210,7 +1358,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Kept Discord OAuth client secrets server-side through environment or app secret storage instead of exposing them to the browser.
 
-## [0.9.4-beta.1] - 2026-06-06
+
+## [0.8.0-beta.5] - 2026-06-06
 
 ### Added
 
@@ -1220,7 +1369,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Expanded Custom theme import, export, and saving so all preset-controlled theme settings are preserved, including gradient shape values.
 
-## [0.9.3-beta.1] - 2026-06-06
+
+## [0.8.0-beta.4] - 2026-06-06
 
 ### Added
 
@@ -1239,7 +1389,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed Dashboard and shared KPI cards so theme changes affect card gradients, card titles, metric values, icons, active states, and hover borders.
 - Fixed browser-local themes so shared main-app cards, filters, tables, controls, and page panels outside Dashboard also consume the selected theme colours.
 
-## [0.9.2-beta.1] - 2026-06-06
+
+## [0.8.0-beta.3] - 2026-06-06
 
 ### Added
 
@@ -1249,7 +1400,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Removed the Admin Theme tab so theme changes are user-specific rather than server-wide.
 
-## [0.9.1-beta.1] - 2026-06-06
+
+## [0.8.0-beta.2] - 2026-06-06
 
 ### Changed
 
@@ -1262,7 +1414,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the Dashboard treasury chart so it uses daily snapshots and no longer draws vertical spike charts from clustered refresh samples.
 
-## [0.9.0-beta.1] - 2026-06-06
+
+## [0.8.0-beta.1] - 2026-06-06
 
 ### Changed
 
@@ -1284,38 +1437,44 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed Market Price Finder layout stretching so switching tabs no longer enlarges the header, KPI cards, or tool panel.
 
-## [0.8.65-beta.1] - 2026-06-05
+
+## [0.7.0-beta.6] - 2026-06-05
 
 ### Changed
 
 - Refined the Production page command controls into a compact panel and updated active craft card headings to match the Dashboard heading style.
 
-## [0.8.64-beta.1] - 2026-06-05
+
+## [0.7.0-beta.5] - 2026-06-05
 
 ### Changed
 
 - Updated Dashboard, Professions, and Production card headings to use the same compact Dashboard heading style while retaining section icons.
 
-## [0.8.63-beta.1] - 2026-06-05
+
+## [0.7.0-beta.4] - 2026-06-05
 
 ### Fixed
 
 - Fixed top-right metadata spacing on the Production and Professions pages so tier badges no longer crowd their labels.
 - Cleaned up the Production passive craft table row background so it no longer shows an unintended gradient band.
 
-## [0.8.62-beta.1] - 2026-06-05
+
+## [0.7.0-beta.3] - 2026-06-05
 
 ### Changed
 
 - Restyled the Production page around the new Dashboard visual language with elevated KPI cards, cleaner production controls, richer craft cards, and a polished passive craft section.
 
-## [0.8.61-beta.1] - 2026-06-05
+
+## [0.7.0-beta.2] - 2026-06-05
 
 ### Changed
 
 - Restyled the Professions page to match the new Dashboard and Members visual language while preserving tier colours in the professions table.
 
-## [0.8.60-beta.1] - 2026-06-05
+
+## [0.7.0-beta.1] - 2026-06-05
 
 ### Fixed
 
@@ -1326,14 +1485,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Restyled the Members page around the new Dashboard visual language with elevated summary cards, cleaner roster rows, and a darker command-centre surface.
 
-## [0.8.59-beta.1] - 2026-06-04
+
+## [0.6.0-beta.4] - 2026-06-04
 
 ### Changed
 
 - Removed the old Overview page from main navigation so Dashboard is the single home page.
 - Redirected old Overview and Buildings page URLs to Dashboard to avoid stale or broken entry points.
 
-## [0.8.58-beta.1] - 2026-06-04
+
+## [0.6.0-beta.3] - 2026-06-04
 
 ### Added
 
@@ -1343,7 +1504,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Updated the main navigation and default page setting so new sessions open on Dashboard while the existing Overview page remains available.
 
-## [0.8.57-beta.1] - 2026-06-04
+
+## [0.6.0-beta.2] - 2026-06-04
 
 ### Changed
 
@@ -1352,7 +1514,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Renamed the unclear market presence KPI to Trade Listings and kept the metric limited to current settlement listing counts.
 - Added a real treasury trend chart powered by locally recorded settlement snapshots, with an honest empty state until enough snapshots exist.
 
-## [0.8.56-beta.1] - 2026-06-04
+
+## [0.6.0-beta.1] - 2026-06-04
 
 ### Changed
 
@@ -1363,7 +1526,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed Overview supply runway parsing so it accepts both documented and currently observed BitJita run-out field names.
 - Added regression coverage for BitJita construction requirements, project contributions, stored inventory quantities, timestamp parsing and wrapped/direct API arrays.
 
-## [0.8.55-beta.1] - 2026-06-03
+
+## [0.5.0-beta.11] - 2026-06-03
 
 ### Added
 
@@ -1376,7 +1540,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed Construction material labels so project contributions and storage quantities are shown separately.
 - Widened Overview hero metric sizing so the Online, Construction and Market labels no longer crowd or overlap.
 
-## [0.8.54-beta.1] - 2026-06-03
+
+## [0.5.0-beta.10] - 2026-06-03
 
 ### Changed
 
@@ -1391,7 +1556,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Tightened Overview hero metric sizing to prevent the top-right metric labels from overflowing.
 - Matched paired card heights on the Professions and Region pages for a cleaner layout.
 
-## [0.8.53-beta.1] - 2026-06-03
+
+## [0.5.0-beta.9] - 2026-06-03
 
 ### Removed
 
@@ -1402,7 +1568,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Redirected old Structures page links and saved browser/default-page settings back to Overview so existing users do not land on a blank removed page.
 - Replaced the Overview Structures shortcut with a Construction shortcut.
 
-## [0.8.52-beta.1] - 2026-06-03
+
+## [0.5.0-beta.8] - 2026-06-03
 
 ### Changed
 
@@ -1412,34 +1579,39 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Made Discord craft notification toggle buttons check the member's current server roles before adding or removing notification roles.
 
-## [0.8.51-beta.1] - 2026-06-03
+
+## [0.5.0-beta.7] - 2026-06-03
 
 ### Fixed
 
 - Standardised Discord bot dashboard tab alignment so capped-width sections start from the same left edge instead of some tabs appearing centred and others left-aligned.
 
-## [0.8.50-beta.1] - 2026-06-03
+
+## [0.5.0-beta.6] - 2026-06-03
 
 ### Fixed
 
 - Fixed Discord app-update notifications so they read the current Keep a Changelog version section and include actual release notes instead of a vague fallback message.
 - Reduced long app-update note lists before sending to Discord, with a pointer to the full changelog when extra notes are omitted.
 
-## [0.8.49-beta.1] - 2026-06-03
+
+## [0.5.0-beta.5] - 2026-06-03
 
 ### Added
 
 - Added Discord role-panel controls to hide the helper `Selection` / `Selections` embed section from self-assign role messages.
 - Added a Discord welcome-flow control to hide the `Next step` embed section from welcome messages.
 
-## [0.8.48-beta.1] - 2026-06-03
+
+## [0.5.0-beta.4] - 2026-06-03
 
 ### Fixed
 
 - Fixed Discord self-assign single-role panels so clicking an active option actually removes that role instead of only reporting it as removed.
 - Made Discord self-assign role buttons check the member's current server roles before adding or removing roles, reducing stale interaction state issues.
 
-## [0.8.47-beta.1] - 2026-06-03
+
+## [0.5.0-beta.3] - 2026-06-03
 
 ### Changed
 
@@ -1450,7 +1622,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Fixed the Discord notification settings footer so endpoint, slash command, token and delivery text no longer runs together.
 
-## [0.8.46-beta.1] - 2026-06-03
+
+## [0.5.0-beta.2] - 2026-06-03
 
 ### Changed
 
@@ -1463,7 +1636,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed Discord bot setup status fields visually running together.
 - Fixed broken emoji preset display in the Discord role-panel editor.
 
-## [0.8.45-beta.1] - 2026-06-03
+
+## [0.5.0-beta.1] - 2026-06-03
 
 ### Changed
 
@@ -1476,14 +1650,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed small-label readability, long-name wrapping and touch-target sizing across dense dashboard controls.
 - Added stronger keyboard focus states and clearer scroll cues for wide tables and map resource lists.
 
-## [0.8.44-beta.1] - 2026-06-02
+
+## [0.4.0-beta.30] - 2026-06-02
 
 ### Fixed
 
 - Fixed the Discord bot page rendering blank by removing hook-order-sensitive diagnostics calculations from the admin render path.
 - Hardened Discord diagnostics log handling when the status payload is missing or not yet loaded.
 
-## [0.8.43-beta.1] - 2026-06-02
+
+## [0.4.0-beta.29] - 2026-06-02
 
 ### Fixed
 
@@ -1494,7 +1670,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Limited low-supply Discord alerts to one successful post per 24 hours while supplies remain below the configured runway threshold.
 - Reworked the Discord diagnostics panel into readable cards with delivery counts and event-type filtering.
 
-## [0.8.42-beta.1] - 2026-06-02
+
+## [0.4.0-beta.28] - 2026-06-02
 
 ### Fixed
 
@@ -1502,7 +1679,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Scoped Discord bot action/report output to each dashboard tab so results no longer appear under unrelated sections.
 - Reworked the Custom Commands tab so commands are always listed there and existing commands can be selected for editing.
 
-## [0.8.41-beta.1] - 2026-06-02
+
+## [0.4.0-beta.27] - 2026-06-02
 
 ### Fixed
 
@@ -1513,7 +1691,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Updated Discord AutoMod rule creation to send mod-notes alerts and clarified that Discord exempts Administrator and Manage Server users.
 - Added a configurable Discord mod-log channel and routed moderation warning logs and AutoMod alerts through it.
 
-## [0.8.40-beta.1] - 2026-06-02
+
+## [0.4.0-beta.26] - 2026-06-02
 
 ### Added
 
@@ -1522,7 +1701,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added Discord-native safety tools for keyword auto-moderation rules, slowmode, channel lockdown and nickname format reports.
 - Added Discord-only community tools for polls, event RSVPs, clean embed posting and custom slash command responses.
 
-## [0.8.39-beta.1] - 2026-06-02
+
+## [0.4.0-beta.25] - 2026-06-02
 
 ### Added
 
@@ -1530,14 +1710,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added clearer Discord moderation result cards and audit-log reasons so actions are easier to verify.
 - Made Discord bot post/update controls more visually obvious across the bot dashboard.
 
-## [0.8.38-beta.1] - 2026-06-02
+
+## [0.4.0-beta.24] - 2026-06-02
 
 ### Added
 
 - Added a persisted collapsible sidebar mode that switches the main navigation to an icon-only rail for more page space.
 - Updated the sidebar brand to use the monitored settlement name and refreshed the Discord CTA icon/text.
 
-## [0.8.37-beta.1] - 2026-06-02
+
+## [0.4.0-beta.23] - 2026-06-02
 
 ### Changed
 
@@ -1545,7 +1727,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Colour-coded the Overview supply run-out date by runway health and tightened Overview production wording.
 - Matched the Overview attention card height to the adjacent settlement details card.
 
-## [0.8.36-beta.1] - 2026-06-02
+
+## [0.4.0-beta.22] - 2026-06-02
 
 ### Changed
 
@@ -1553,7 +1736,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Reworked the Discord bot Tools tab with clearer report cards, posting tools and readable report output.
 - Reworked the Discord audit log tool result into a readable activity list instead of raw JSON.
 
-## [0.8.35-beta.1] - 2026-06-02
+
+## [0.4.0-beta.21] - 2026-06-02
 
 ### Added
 
@@ -1569,32 +1753,37 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Fixed Discord role member counts so failed member-list syncs are shown as unavailable instead of misleadingly reporting zero members.
 - Cleaned up Discord notification setting fields so dropdowns and numeric inputs have consistent full-width sizing.
 
-## [0.8.34-beta.1] - 2026-06-02
+
+## [0.4.0-beta.20] - 2026-06-02
 
 ### Changed
 
 - General bug fixes.
 
-## [0.8.33-beta.1] - 2026-06-02
+
+## [0.4.0-beta.19] - 2026-06-02
 
 ### Changed
 
 - General bug fixes.
 
-## [0.8.32-beta.1] - 2026-06-02
+
+## [0.4.0-beta.18] - 2026-06-02
 
 ### Changed
 
 - Added huntable animals to the map resource finder and aligned map resource categories with the BC Codex category set.
 - Compactly redesigned the Discord colour-role editor and made colour selector buttons use consistent neutral Discord styling with emoji colour markers.
 
-## [0.8.31-beta.1] - 2026-06-02
+
+## [0.4.0-beta.17] - 2026-06-02
 
 ### Added
 
 - Added Discord colour-role management with a dedicated bot dashboard tab, editable bot-created colour roles, selector-channel configuration and a button message that enforces one colour role per user.
 
-## [0.8.30-beta.1] - 2026-06-02
+
+## [0.4.0-beta.16] - 2026-06-02
 
 ### Changed
 
@@ -1602,20 +1791,23 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Improved Discord role manageability labels so roles explain whether the bot can manage them, whether they are integration-managed, or whether the bot role needs moving higher in Discord.
 - Fixed Discord discovery so the app fetches the bot's guild member record by bot user ID, allowing role hierarchy checks to detect the bot's highest role correctly.
 
-## [0.8.29-beta.1] - 2026-06-02
+
+## [0.4.0-beta.15] - 2026-06-02
 
 ### Added
 
 - Added a BitJita-powered resource finder sidebar to the Map page, with resource search, tier/category filters, region selection and resource tracking through BitCraft Map `resourceId` URLs while retaining default online-player tracking.
 - Changed the Map page region selector back to a compact dropdown and expanded the map workspace so more of the viewport is used for the map and resource finder.
 
-## [0.8.28-beta.1] - 2026-06-02
+
+## [0.4.0-beta.14] - 2026-06-02
 
 ### Changed
 
 - Reworked the Discord bot dashboard for 1080p desktop displays with a horizontal category bar and cleaner notification rule groups, while keeping the compact narrow-screen layout readable.
 
-## [0.8.27-beta.1] - 2026-06-02
+
+## [0.4.0-beta.13] - 2026-06-02
 
 ### Added
 
@@ -1623,14 +1815,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Bot dashboard channel and craft-watch role settings now use discovered Discord dropdowns instead of manual ID entry.
 - Added a discovered role directory showing role colours, member counts and whether the bot can manage each role.
 
-## [0.8.26-beta.1] - 2026-06-02
+
+## [0.4.0-beta.12] - 2026-06-02
 
 ### Changed
 
 - Reworked the Discord Bot Control dashboard into sectioned categories for setup, notifications, channels, roles, tests and diagnostics.
 - Removed the duplicate save button from the bot setup card so bot settings rely on the floating unsaved-changes save bar.
 
-## [0.8.25-beta.1] - 2026-06-02
+
+## [0.4.0-beta.11] - 2026-06-02
 
 ### Added
 
@@ -1640,32 +1834,37 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Moved Discord bot settings out of the main Admin Console tab list and linked Admin to the dedicated bot dashboard.
 
-## [0.8.24-beta.1] - 2026-06-02
+
+## [0.4.0-beta.10] - 2026-06-02
 
 ### Changed
 
 - Discord craft notifications now include the craft tier and use the tier colour as the embed accent when available.
 
-## [0.8.23-beta.1] - 2026-06-02
+
+## [0.4.0-beta.9] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button replies now clarify that alerts always ping the configured role and the button only toggles whether the user has that role.
 
-## [0.8.22-beta.1] - 2026-06-02
+
+## [0.4.0-beta.8] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button replies now explain that clicking Watch again removes the notification role.
 
-## [0.8.21-beta.1] - 2026-06-02
+
+## [0.4.0-beta.7] - 2026-06-02
 
 ### Changed
 
 - Craft Watch Discord button failures now return a private diagnostic message instead of Discord's generic interaction failure.
 - Craft Watch role add/remove attempts are now recorded in the Discord diagnostics log.
 
-## [0.8.20-beta.1] - 2026-06-02
+
+## [0.4.0-beta.6] - 2026-06-02
 
 ### Changed
 
@@ -1673,64 +1872,74 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Craft notifications now ping the configured profession role when a matching alert fires.
 - Added configurable craft notification role IDs to the Discord admin settings.
 
-## [0.8.19-beta.1] - 2026-06-02
+
+## [0.4.0-beta.5] - 2026-06-02
 
 ### Changed
 
 - Simplified the Structures page into a basic overview of structures, categories and tiers, removing slot summaries and API detail controls.
 - Sidebar navigation items now use real page links so they can be opened in new tabs with middle-click or Ctrl-click.
 
-## [0.8.18-beta.1] - 2026-06-02
+
+## [0.4.0-beta.4] - 2026-06-02
 
 ### Changed
 
 - Discord craft-start notifications now use a configurable minimum time-present delay instead of a progress percentage threshold, defaulting to five minutes.
 
-## [0.8.17-beta.1] - 2026-06-02
+
+## [0.4.0-beta.3] - 2026-06-02
 
 ### Added
 
 - Added Discord craft-watch buttons to craft notifications so users can watch or mute profession alerts.
 - Added `/craftwatch list` and `/craftwatch clear` slash commands for personal craft watch management.
 
-## [0.8.16-beta.1] - 2026-06-02
+
+## [0.4.0-beta.2] - 2026-06-02
 
 ### Added
 
 - Added dedicated `/terms` and `/privacy` pages for Discord application submission, linked from the in-app Legal & Bot Terms and Privacy popups.
 
-## [0.8.15-beta.1] - 2026-06-02
+
+## [0.4.0-beta.1] - 2026-06-02
 
 ### Added
 
 - Added in-app Legal & Bot Terms covering the optional Discord bot, community-app status, data source disclaimer, and bot usage expectations.
 - Added Discord bot data processing notes to the Privacy & Analytics dialog and README.
 
-## [0.8.14-beta.1] - 2026-06-01
+
+## [0.3.0-beta.23] - 2026-06-01
 
 ### Fixed
 
 - The embedded map URL is now persisted per browser and only changed by explicit map actions, preventing normal app refreshes from reloading the map and wiping map-side filters.
 
-## [0.8.13-beta.1] - 2026-06-01
+
+## [0.3.0-beta.22] - 2026-06-01
 
 ### Fixed
 
 - Map focus from Public Craft Finder is now stored per browser and reflected in the page URL, so refreshing the Map page keeps the selected settlement/location.
 
-## [0.8.12-beta.1] - 2026-06-01
+
+## [0.3.0-beta.21] - 2026-06-01
 
 ### Changed
 
 - App update Discord notifications now include the current release notes from the changelog directly in the embed.
 
-## [0.8.11-beta.1] - 2026-06-01
+
+## [0.3.0-beta.20] - 2026-06-01
 
 ### Fixed
 
 - Discord craft notification filters now calculate production XP from the same BitJita fields as the Production page, including `totalActionsRequired` and `progress`.
 
-## [0.8.10-beta.1] - 2026-06-01
+
+## [0.3.0-beta.19] - 2026-06-01
 
 ### Fixed
 
@@ -1741,14 +1950,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Discord diagnostics now include production poll rows showing active crafts returned by BitJita, baseline state and known craft counts.
 - Scheduled supply reports no longer flood diagnostics with routine "not due yet" skips every polling cycle.
 
-## [0.8.9-beta.1] - 2026-06-01
+
+## [0.3.0-beta.18] - 2026-06-01
 
 ### Added
 
 - Added an Admin > Discord diagnostics console that records sent, skipped and failed Discord notification attempts with routing, thresholds, allowed crafters, payload context and Discord response details.
 - Discord test messages, app update checks and scheduled supply reports now write diagnostic records as well as live notifications.
 
-## [0.8.8-beta.1] - 2026-06-01
+
+## [0.3.0-beta.17] - 2026-06-01
 
 ### Fixed
 
@@ -1761,26 +1972,30 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Craft notification defaults are now 40,000 total XP and 1% start progress.
 
-## [0.8.7-beta.1] - 2026-06-01
+
+## [0.3.0-beta.16] - 2026-06-01
 
 ### Fixed
 
 - App update Discord notifications now use the configured Updates channel instead of always posting to the default notifications channel.
 
-## [0.8.6-beta.1] - 2026-06-01
+
+## [0.3.0-beta.15] - 2026-06-01
 
 ### Changed
 
 - Craft-start Discord notifications are now only marked as delivered after Discord accepts the message, so permission failures can be retried.
 - Admin now shows the latest Discord notification delivery status, including channel errors such as missing access.
 
-## [0.8.5-beta.1] - 2026-06-01
+
+## [0.3.0-beta.14] - 2026-06-01
 
 ### Added
 
 - Added a floating Admin save prompt that appears when settings have unsaved changes, with Save and Revert actions.
 
-## [0.8.4-beta.1] - 2026-06-01
+
+## [0.3.0-beta.13] - 2026-06-01
 
 ### Changed
 
@@ -1788,7 +2003,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Reworked Discord notification settings into grouped cards to reduce clutter.
 - Replaced checkbox styling across the app with theme-matched toggle switches.
 
-## [0.8.3-beta.1] - 2026-06-01
+
+## [0.3.0-beta.12] - 2026-06-01
 
 ### Added
 
@@ -1799,7 +2015,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 - Admin > Discord is grouped around bot credentials, channel configuration, notification routing, craft channels, and test previews.
 
-## [0.8.2-beta.1] - 2026-06-01
+
+## [0.3.0-beta.11] - 2026-06-01
 
 ### Added
 
@@ -1807,14 +2024,16 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added configurable Discord craft notification filters for minimum total XP, minimum start progress, and allowed crafter usernames.
 - Added configurable per-profession Discord channel routing for craft notifications, with Timbersteel's current craft channel IDs as defaults.
 
-## [0.8.1-beta.1] - 2026-06-01
+
+## [0.3.0-beta.10] - 2026-06-01
 
 ### Changed
 
 - Low-supplies Discord notifications now use configurable supply runway days, defaulting to alerts below seven days of supplies.
 - Supply-change activity metadata now includes calculated runway, daily upkeep, and run-out time for more accurate Discord alerts.
 
-## [0.8.0-beta.1] - 2026-06-01
+
+## [0.3.0-beta.9] - 2026-06-01
 
 ### Added
 
@@ -1823,38 +2042,44 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Discord notifications for new listings, confirmed sales, craft starts, craft completions, and optional low-supplies changes.
 - Server-side production job tracking so craft start/completion events can be recorded consistently.
 
-## [0.7.9-beta.1] - 2026-06-01
+
+## [0.3.0-beta.8] - 2026-06-01
 
 ### Changed
 
 - Member Toolbelt cards now use the shared colour-coded rarity badge.
 
-## [0.7.8-beta.1] - 2026-06-01
+
+## [0.3.0-beta.7] - 2026-06-01
 
 ### Changed
 
 - Price Finder suggestions now mirror BitJita's available-item market filtering by hiding output/input pseudo-items and items with no buy or sell orders.
 - Item rarity is now displayed as a consistent colour-coded badge across market, inventory, price finder and member equipment views.
 
-## [0.7.7-beta.1] - 2026-06-01
+
+## [0.3.0-beta.6] - 2026-06-01
 
 ### Changed
 
 - Gear preset slot labels now match in-game terminology: Heart, Jewellery, Head, Hands, Torso, Belt, Legs and Feet.
 
-## [0.7.6-beta.1] - 2026-06-01
+
+## [0.3.0-beta.5] - 2026-06-01
 
 ### Changed
 
 - Gear presets now render a curated set of visible in-game equipment slots, including empty placeholders, while still hiding unused/internal server slots.
 
-## [0.7.5-beta.1] - 2026-06-01
+
+## [0.3.0-beta.4] - 2026-06-01
 
 ### Changed
 
 - Gear preset cards now show only equipped items instead of rendering BitJita's empty placeholder slots as visible equipment slots.
 
-## [0.7.4-beta.1] - 2026-06-01
+
+## [0.3.0-beta.3] - 2026-06-01
 
 ### Changed
 
@@ -1862,7 +2087,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Pinned overview items, filters, density and notification preferences now persist in local browser storage without requiring analytics cookie consent.
 - Added a browser settings reset action for clearing local app preferences without touching admin settings or settlement data.
 
-## [0.7.3-beta.1] - 2026-06-01
+
+## [0.3.0-beta.2] - 2026-06-01
 
 ### Changed
 
@@ -1875,7 +2101,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Professions now prefer BitJita skill metadata when available instead of relying only on local static skill groupings.
 - Price Finder now shows a simple confidence label based on available completed-trade count.
 
-## [0.7.2-beta.1] - 2026-06-01
+
+## [0.3.0-beta.1] - 2026-06-01
 
 ### Added
 
@@ -1895,7 +2122,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Price Finder suggestions now hide BitJita output/input pseudo-items that are not valid market items.
 - Member table rows are vertically centered for cleaner roster readability.
 
-## [0.7.1-beta.1] - 2026-05-27
+
+## [0.2.0-beta.6] - 2026-05-27
 
 ### Added
 
@@ -1907,7 +2135,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Gear preset detection now compares actual equipped item slots instead of trusting BitJita's active flag, so members with differently flagged alternate presets still show Preset 2.
 - The member gear "Current" marker now follows BitJita's active preset flag when the saved alternate preset is the selected one.
 
-## [0.7.0-beta.1] - 2026-05-27
+
+## [0.2.0-beta.5] - 2026-05-27
 
 ### Changed
 
@@ -1915,7 +2144,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added a cookie notice requesting development-supporting analytics consent, with equally accessible decline and persistent preference controls.
 - Added an Admin Analytics dashboard for visitor, session, page-view, engagement-time and feature-usage aggregates.
 
-## [0.6.6-beta.1] - 2026-05-27
+
+## [0.2.0-beta.4] - 2026-05-27
 
 ### Added
 
@@ -1923,13 +2153,15 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Manual, sanitized section page views and anonymous high-level feature events for Market, Price Finder, Production filtering, member details, Public Craft Finder and Activity controls.
 - A Privacy & Analytics dialog accessible from the footer and help panel that discloses tracking state and excluded data.
 
-## [0.6.5-beta.1] - 2026-05-27
+
+## [0.2.0-beta.3] - 2026-05-27
 
 ### Changed
 
 - Renamed the Production passive-craft history panel to Member Passive Crafts and clarified that the API identifies the member, but not the settlement location where the craft occurred.
 
-## [0.6.4-beta.1] - 2026-05-27
+
+## [0.2.0-beta.2] - 2026-05-27
 
 ### Changed
 
@@ -1937,7 +2169,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Activity loads its locally stored feed every 10 seconds; its member selector roster updates separately without blocking timeline display.
 - Admin endpoint diagnostics now identify response times for each settlement storage container, with storage sync status visible in Collection Status.
 
-## [0.6.3-beta.1] - 2026-05-27
+
+## [0.2.0-beta.1] - 2026-05-27
 
 ### Changed
 
@@ -1945,20 +2178,23 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Storage deposit and withdrawal entries now show the settlement container nickname when one is configured, falling back to its structure name.
 - Added an Activity member selector for filtering attributed storage and market events by settlement member.
 
-## [0.6.2-beta.1] - 2026-05-26
+
+## [0.1.0-beta.8] - 2026-05-26
 
 ### Fixed
 
 - Activity storage movements are now loaded from the monitored settlement's known storage structures rather than each member's global storage history.
 - Storage activity excludes deployable containers such as carts, wagons, boats, ships and goats.
 
-## [0.6.1-beta.1] - 2026-05-26
+
+## [0.1.0-beta.7] - 2026-05-26
 
 ### Fixed
 
 - Price Finder recent trades now display buyers returned by BitJita's live price-history payload under `buyerUsername`, while retaining support for `purchaserUsername`.
 
-## [0.6.0-beta.1] - 2026-05-26
+
+## [0.1.0-beta.6] - 2026-05-26
 
 ### Added
 
@@ -1975,7 +2211,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Active production jobs now have animated effort progress cues and can be pinned to Overview.
 - Table controls and headers remain accessible while reviewing longer data sets.
 
-## [0.5.0-beta.1] - 2026-05-26
+
+## [0.1.0-beta.5] - 2026-05-26
 
 ### Added
 
@@ -1989,7 +2226,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Price Finder now provides a populated region dropdown rather than requiring users to enter region IDs.
 - The last visited page and Market tab are restored after refreshing the app.
 
-## [0.4.0-beta.1] - 2026-05-26
+
+## [0.1.0-beta.4] - 2026-05-26
 
 ### Added
 
@@ -2002,7 +2240,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - On first successful collection for a member, completed sell orders belonging to this market are backfilled; later verified tracked sales are retained in the same trade history.
 - Admin status now reports retained confirmed trades separately from listing lifecycle events.
 
-## [0.3.1-beta.1] - 2026-05-26
+
+## [0.1.0-beta.3] - 2026-05-26
 
 ### Fixed
 
@@ -2024,7 +2263,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added regression tests for market pagination, production snapshot protection, and administrator cross-origin request rejection.
 - Added baseline security response headers to the Caddy deployment example.
 
-## [0.3.0-beta.1] - 2026-05-26
+
+## [0.1.0-beta.2] - 2026-05-26
 
 ### Added
 
@@ -2040,7 +2280,8 @@ Historical beta version headings have been normalised to follow SemVer more clos
 - Added per-address and username login throttling after repeated failed sign-in attempts.
 - Branding uploads are limited to authenticated administrators, supported image types and a 1 MB size cap.
 
-## [0.2.0-beta.1] - 2026-05-26
+
+## [0.1.0-beta.1] - 2026-05-26
 
 ### Added
 

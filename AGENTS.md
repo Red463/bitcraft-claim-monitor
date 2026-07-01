@@ -371,10 +371,14 @@ For normal feature/fix work, mention a suggested changelog entry in the final re
 
 When preparing a release:
 
-* Use the beta train format from `VERSIONING.md`, for example `1.0.0-beta.41`.
-* During the current beta train, increment the beta number instead of creating patch-heavy versions like `1.0.41-beta.1`.
+* Use the pre-1.0 SemVer beta format from `VERSIONING.md`: `0.MINOR.PATCH-beta.N`.
+* For rapid iteration on the same feature or release line, increment only the beta counter, for example `0.25.0-beta.2` to `0.25.0-beta.3`.
+* When starting a new feature area, milestone, or meaningful batch of work, increment `MINOR`, reset `PATCH` to `0`, and reset beta to `1`, for example `0.25.0-beta.8` to `0.26.0-beta.1`.
+* When starting a fix-only line for an already released beta line, increment `PATCH` and reset beta to `1`, for example `0.25.0-beta.8` to `0.25.1-beta.1`.
+* Do not create an endless `1.0.0-beta.N` train and do not increment `PATCH` for every small same-line fix.
 * Move accumulated unreleased notes into a dated version section.
 * Keep the latest version at the top of `CHANGELOG.md`.
+* Update `apps/bitcraft-local/package.json` to match the latest changelog version.
 * Write changelog entries from the user's point of view.
 * Do not dump commit logs, hashes, branch names, or internal refactor details.
 * Omit empty changelog sections.
