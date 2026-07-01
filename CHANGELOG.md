@@ -8,6 +8,12 @@ Historical beta version headings have been normalised to follow SemVer more clos
 
 ## [Unreleased]
 
+## [1.0.0-beta.117] - 2026-07-01
+
+### Fixed
+
+- Fixed recent confirmed market sales so they still notify when a seller's trade-history backfill marker is missing or recovered.
+
 ## [1.0.0-beta.116] - 2026-07-01
 
 ### Fixed

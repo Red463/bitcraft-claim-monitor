@@ -1154,8 +1154,11 @@ test("server collection paginates listings and protects production mutations", a
 
   historicalTrades = [
     ...historicalTrades,
-    { id: "history-new-1", orderEntityId: "historic-order", itemId: 40, itemType: "0", itemName: "Sturdy Leather Belt", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 1, unitPrice: 1, totalPrice: 1, createdAt: "2099-05-21T12:00:00.000Z" },
+    { id: "history-new-1", orderEntityId: "historic-order", itemId: 40, itemType: "0", itemName: "Sturdy Leather Belt", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 1, unitPrice: 1, totalPrice: 1, createdAt: new Date(Date.now() - 60 * 1000).toISOString() },
   ];
+  const missingBackfillKeyDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  missingBackfillKeyDb.prepare("DELETE FROM app_settings WHERE key = ?").run(`market_trade_backfill:${claimId}:player-1`);
+  missingBackfillKeyDb.close();
   const historyOnlyPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

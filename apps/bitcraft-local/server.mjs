@@ -99,6 +99,7 @@ const marketTradeJobBudget = normalizeJobBudget({
   maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
   batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
 });
+const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
@@ -4772,6 +4773,14 @@ function tradeOccurredAt(trade, importedAt) {
   return Number.isNaN(parsed.getTime()) ? importedAt : parsed.toISOString();
 }
 
+function shouldNotifyImportedMarketTrade(importResult, trade, importedAt) {
+  if (importResult?.isBackfilled) return true;
+  const occurredMs = new Date(tradeOccurredAt(trade, importedAt)).getTime();
+  const importedMs = new Date(importedAt).getTime();
+  if (!Number.isFinite(occurredMs) || !Number.isFinite(importedMs)) return false;
+  return importedMs - occurredMs <= marketTradeNotificationRecoveryWindowMs;
+}
+
 function memberTradeImportKey(member) {
   return String(member.playerEntityId ?? member.entityId ?? "").trim();
 }
@@ -4810,7 +4819,7 @@ async function importMemberSellTrades(claimId, members, options = {}) {
         const listing = { owner: result.member.userName ?? result.member.username, ownerEntityId: result.member.playerEntityId ?? result.member.entityId };
         const changed = insertConfirmedMarketTrade(claimId, trade, listing, importedAt);
         inserted += changed;
-        if (changed > 0 && result.isBackfilled) {
+        if (changed > 0 && shouldNotifyImportedMarketTrade(result, trade, importedAt)) {
           const quantity = toNumber(trade.quantity);
           const unitPrice = toNumber(trade.unitPrice ?? trade.price);
           const occurredAt = tradeOccurredAt(trade, importedAt);
