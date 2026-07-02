@@ -3876,15 +3876,26 @@ async function syncMarketListingsForSnapshot(claimId, marketPayload, now) {
   }
 }
 
-async function syncProductionForSnapshot(claimId, craftsPayload, now) {
+async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now) {
   if (!craftsPayload) return { pendingNotifications: [], diagnostics: [] };
-  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, now);
   db.exec("BEGIN");
   try {
     const productionResult = recordProductionJobs(claimId, craftsPayload, now);
-    persistProductionContributions(productionContributionRecords);
     db.exec("COMMIT");
     return productionResult;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function syncProductionContributionsForSnapshot(claimId, craftsPayload, now) {
+  if (!craftsPayload) return;
+  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, now);
+  db.exec("BEGIN");
+  try {
+    persistProductionContributions(productionContributionRecords);
+    db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
@@ -6027,13 +6038,17 @@ async function runMarketListingsCollector(claimId, currentData, force = false) {
   }
 }
 
+async function runProductionActivityCollector(claimId, currentData) {
+  const productionResult = await syncProductionJobActivityForSnapshot(claimId, currentData.crafts, new Date().toISOString());
+  for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
+  await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
+}
+
 async function runProductionContributionCollector(claimId, currentData, force = false) {
   if (!sideEffectCollectorDue("productionContributions", force)) return;
   const startedAt = collectorAttempt("productionContributions");
   try {
-    const productionResult = await syncProductionForSnapshot(claimId, currentData.crafts, new Date().toISOString());
-    for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
-    await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
+    await syncProductionContributionsForSnapshot(claimId, currentData.crafts, new Date().toISOString());
     collectorSuccess("productionContributions", startedAt);
   } catch (error) {
     collectorFailure("productionContributions", startedAt, error);
@@ -6069,6 +6084,7 @@ async function collectServerSnapshot(force = false) {
     });
     collectorSuccess("snapshotHistory", snapshotStartedAt);
     await runMarketListingsCollector(claimId, currentData, force);
+    await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
     const storageStartedAt = collectorAttempt("storageActivity");
     pollStatus.storageLastAttemptAt = new Date().toISOString();

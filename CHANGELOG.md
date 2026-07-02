@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.13] - 2026-07-02
+
+### Fixed
+
+- Fixed live production start and completion notifications so in-app activity rows are recorded on the production refresh cadence instead of waiting for the slower contribution sync.
+
 ## [0.31.1-beta.12] - 2026-07-02
 
 ### Fixed

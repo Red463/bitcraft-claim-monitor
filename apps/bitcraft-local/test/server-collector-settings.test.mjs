@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -48,4 +49,21 @@ test("collector settings still clamp submitted intervals to the existing bounds"
   const normalized = normalizeCollectorSettings({ snapshotHistory: { intervalSeconds: 2 } });
 
   assert.equal(normalized.snapshotHistory.intervalSeconds, 15);
+});
+test("production activity rows are not gated by contribution sync cadence", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const activityStart = source.indexOf("async function runProductionActivityCollector");
+  const contributionStart = source.indexOf("async function runProductionContributionCollector");
+  const snapshotStart = source.indexOf("async function collectServerSnapshot");
+  const activityFunction = source.slice(activityStart, contributionStart);
+  const contributionFunction = source.slice(contributionStart, snapshotStart);
+
+  assert.ok(activityStart > -1);
+  assert.ok(contributionStart > activityStart);
+  assert.ok(snapshotStart > contributionStart);
+  assert.match(source, /await runProductionActivityCollector\(claimId, currentData\);\s*await runProductionContributionCollector\(claimId, currentData, force\);/);
+  assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
+  assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
+  assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
+  assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
