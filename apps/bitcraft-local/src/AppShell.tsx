@@ -2,6 +2,8 @@ import React from "react";
 import {
   ArrowDown,
   Bell,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileText,
   KeyRound,
@@ -109,6 +111,7 @@ function DashboardApp() {
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
   const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
+  const [floatingActionsCollapsed, setFloatingActionsCollapsed] = usePersistedState("layout.floatingActionsCollapsed", false);
   const [discordPromptDismissed, setDiscordPromptDismissed] = usePersistedState("auth.discordPromptDismissed", false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
@@ -525,9 +528,18 @@ function DashboardApp() {
           </div>
         </footer>
       </main>
-      <div className="floating-actions" aria-label="Application tools">
+      <div className={`floating-actions ${floatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools">
+        <button
+          className="floating-actions-toggle"
+          onClick={() => setFloatingActionsCollapsed((current) => !current)}
+          aria-expanded={!floatingActionsCollapsed}
+          aria-label={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
+          title={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
+        >
+          {floatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+        </button>
         {adminAuth.authenticated ? <a
-          className={active === "admin" ? "active" : ""}
+          className={`floating-action-item ${active === "admin" ? "active" : ""}`}
           href={panelHref("admin")}
           aria-label="Admin console"
           title="Admin console"
@@ -539,10 +551,10 @@ function DashboardApp() {
         >
           <KeyRound size={18} />
         </a> : null}
-        <button onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
-        <button onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
-        <button className="notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
-        <button className="floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
+        <button className="floating-action-item" onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
+        <button className="floating-action-item" onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
+        <button className="floating-action-item notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
+        <button className="floating-action-item floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
       </div>
       <ToastStack notices={toasts} onDismiss={dismissToast} />
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}

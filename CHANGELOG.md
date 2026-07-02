@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.8] - 2026-07-02
+
+### Added
+
+- Added a hideable floating tools rail so users can collapse the shortcuts off-screen with only an arrow handle visible.
+
 ## [0.31.1-beta.7] - 2026-07-02
 
 ### Added
