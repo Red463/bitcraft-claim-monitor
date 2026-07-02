@@ -107,3 +107,13 @@ test("App popup admin table fits its card without horizontal scrolling", () => {
   assert.match(adminCss, /\.popup-message-preview/);
 });
 
+
+test("App popup admin editor supports page targeting and expiry dates", () => {
+  const popupsSection = readFileSync(new URL("../src/components/admin/AdminPopupsSection.tsx", import.meta.url), "utf8");
+
+  assert.match(popupsSection, /Show on page/);
+  assert.match(popupsSection, /POPUP_PAGE_OPTIONS/);
+  assert.match(popupsSection, /Expiry date/);
+  assert.match(popupsSection, /type="date"/);
+  assert.match(popupsSection, /hasExpiry/);
+});

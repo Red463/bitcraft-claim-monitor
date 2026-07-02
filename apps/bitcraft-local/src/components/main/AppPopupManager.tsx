@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
+import type { ActivePanel } from "../../types/app";
 import {
   dismissalStateAfterAction,
   normalizePopupConfig,
@@ -38,7 +39,7 @@ function popupIcon(popup: AppPopup) {
   return <Info size={21} />;
 }
 
-export function AppPopupManager({ enabled = true }: { enabled?: boolean }) {
+export function AppPopupManager({ activePage = "dashboard", enabled = true }: { activePage?: ActivePanel; enabled?: boolean }) {
   const [popups, setPopups] = React.useState<AppPopup[]>([]);
   const [dismissals, setDismissals] = React.useState<Required<PopupDismissalState>>(() => ({
     persistentDismissals: readDismissals(typeof window === "undefined" ? undefined : window.localStorage, PERSISTENT_KEY),
@@ -60,7 +61,7 @@ export function AppPopupManager({ enabled = true }: { enabled?: boolean }) {
     };
   }, []);
 
-  const activePopup = enabled ? selectNextPopup(popups, dismissals) : null;
+  const activePopup = enabled ? selectNextPopup(popups, dismissals, { page: activePage }) : null;
 
   function dismiss(action: "ok" | "never") {
     if (!activePopup) return;

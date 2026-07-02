@@ -43,6 +43,8 @@ test("normalizePopupConfig trims, clamps, and keeps valid popup definitions", ()
       message: "Trading tools are being updated.",
       type: "warning",
       mode: "repeatUntilDismissed",
+      page: "any",
+      expiresAt: "",
       enabled: true,
       updatedAt: "2026-07-01T12:00:00.000Z",
     },
@@ -52,6 +54,8 @@ test("normalizePopupConfig trims, clamps, and keeps valid popup definitions", ()
       message: "Uses defaults",
       type: "info",
       mode: "oneTime",
+      page: "any",
+      expiresAt: "",
       enabled: false,
       updatedAt: "",
     },
@@ -98,4 +102,46 @@ test("dismissalStateAfterAction makes repeatable OK session-only and never persi
   const oneTimeOk = dismissalStateAfterAction(oneTime, "ok", {});
   assert.deepEqual(oneTimeOk.persistentDismissals, [popupDismissalKey(oneTime)]);
   assert.deepEqual(oneTimeOk.sessionDismissals, []);
+});
+test("normalizePopupConfig defaults popup targeting and preserves valid expiry dates", () => {
+  const config = normalizePopupConfig({
+    popups: [
+      { id: "old", title: "Old", message: "Any page", enabled: true, updatedAt: "v1" },
+      { id: "prod", title: "Production", message: "Production only", enabled: true, page: "production", expiresAt: "2026-07-15", updatedAt: "v1" },
+      { id: "bad", title: "Bad page", message: "Defaults", enabled: true, page: "unknown", expiresAt: "15/07/2026", updatedAt: "v1" },
+    ],
+  }, { today: "2026-07-14" });
+
+  assert.equal(config.popups[0].page, "any");
+  assert.equal(config.popups[0].expiresAt, "");
+  assert.equal(config.popups[1].page, "production");
+  assert.equal(config.popups[1].expiresAt, "2026-07-15");
+  assert.equal(config.popups[1].enabled, true);
+  assert.equal(config.popups[2].page, "any");
+  assert.equal(config.popups[2].expiresAt, "");
+});
+
+test("normalizePopupConfig disables expired popups without deleting them", () => {
+  const config = normalizePopupConfig({
+    popups: [
+      { id: "expired", title: "Expired", message: "Past", enabled: true, expiresAt: "2026-07-15", updatedAt: "v1" },
+      { id: "future", title: "Future", message: "Visible", enabled: true, expiresAt: "2026-07-16", updatedAt: "v1" },
+    ],
+  }, { today: "2026-07-15" });
+
+  assert.deepEqual(config.popups.map((popup) => [popup.id, popup.enabled]), [["expired", false], ["future", true]]);
+  assert.equal(config.popups[0].expiresAt, "2026-07-15");
+});
+
+test("selectNextPopup filters popups by active page", () => {
+  const config = normalizePopupConfig({
+    popups: [
+      { id: "market", title: "Market", message: "Market page", enabled: true, page: "market", updatedAt: "v1" },
+      { id: "production", title: "Production", message: "Production page", enabled: true, page: "production", updatedAt: "v1" },
+      { id: "any", title: "Any", message: "Any page", enabled: true, page: "any", updatedAt: "v1" },
+    ],
+  });
+
+  assert.equal(selectNextPopup(config.popups, {}, { page: "production" })?.id, "production");
+  assert.equal(selectNextPopup(config.popups, {}, { page: "inventory" })?.id, "any");
 });

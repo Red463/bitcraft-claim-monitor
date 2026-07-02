@@ -914,6 +914,9 @@
 .popup-admin-table-row.is-disabled { opacity: .68; }
 .popup-admin-table-row strong, .popup-admin-table-row small, .popup-admin-table-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .popup-message-preview { white-space: nowrap; }
+.popup-title-cell { min-width: 0; display: grid; gap: 2px; }
+.popup-title-cell strong, .popup-title-cell small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.popup-title-cell small { color: #8794a7; font-size: 11px; font-weight: 750; }
 .popup-row-actions { justify-content: flex-end; flex-wrap: nowrap; min-width: 0; }
 .popup-row-actions .toolbar-button { padding-inline: 9px; }
 .popup-type-badge { width: fit-content; border: 1px solid rgba(86,213,255,.28); border-radius: 999px; padding: 3px 8px; color: #9ee8ff; background: rgba(86,213,255,.08); font-size: 12px; font-weight: 850; }

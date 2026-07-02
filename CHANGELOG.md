@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.7] - 2026-07-02
+
+### Added
+
+- Added page targeting and optional expiry dates for admin-configured app popups.
+
 ## [0.31.1-beta.6] - 2026-07-02
 
 ### Fixed
