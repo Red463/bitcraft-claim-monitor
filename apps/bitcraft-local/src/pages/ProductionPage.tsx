@@ -96,7 +96,13 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   const [observedMovingCrafts, setObservedMovingCrafts] = React.useState<Set<string>>(() => new Set());
   const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
-  const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === String(selectedMember.userName ?? selectedMember.username)) ?? null : null;
+  const selectedMemberName = selectedMember ? String(selectedMember.userName ?? selectedMember.username ?? "") : "";
+  const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === selectedMemberName) ?? null : null;
+  const crafterMemberIdByName = data.members.reduce<Record<string, string>>((acc, member: AnyRecord) => {
+    const name = String(member.userName ?? member.username ?? "");
+    if (name && member.playerEntityId) acc[name] = String(member.playerEntityId);
+    return acc;
+  }, {});
   const craftProgressSignature = React.useMemo(() => data.crafts.map((job: AnyRecord) => [
     craftProgressKey(job),
     toNumber(job.progress),
@@ -141,6 +147,11 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
     return () => controller.abort();
   }, [selectedMember?.playerEntityId, refreshToken]);
+  const selectCrafterPill = (name: string) => {
+    if (!crafterMemberIdByName[name]) return;
+    onSelectMember(selectedMemberName === name ? "All" : crafterMemberIdByName[name]);
+    trackAnalyticsEvent("production_crafter_pill_filter_used", { scope: selectedMemberName === name ? "all_members" : "member" });
+  };
   function eligibility(job: AnyRecord) {
     if (!selectedMember) return null;
     const requirement = job.levelRequirements?.[0] ?? {};
@@ -165,7 +176,10 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}${ownedTool ? ` - ${ownedTool.name} (${formatNumber(ownedTool.toolPower)} power)` : ""}` };
   }
   const privateCrafts = data.crafts.filter((job) => job.isPublic === false);
-  const visibleCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);
+  const visibilityFilteredCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);
+  const visibleCrafts = selectedMemberName
+    ? visibilityFilteredCrafts.filter((job) => String(job.ownerUsername ?? "Unknown") === selectedMemberName)
+    : visibilityFilteredCrafts;
   const jobs = [...visibleCrafts].sort((a, b) => {
     const aMetrics = productionMetrics(a, itemLookup);
     const bMetrics = productionMetrics(b, itemLookup);
@@ -179,7 +193,12 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     const bActive = isCraftWorking(b, data.contributions[String(b.entityId)] ?? []) ? 1 : 0;
     return bActive - aActive || bMetrics.completion - aMetrics.completion;
   });
-  const crafterCounts = visibleCrafts.reduce<Record<string, number>>((acc, job) => {
+  const crafterCounts = visibilityFilteredCrafts.reduce<Record<string, number>>((acc, job) => {
+    const name = String(job.ownerUsername ?? "Unknown");
+    acc[name] = (acc[name] ?? 0) + 1;
+    return acc;
+  }, {});
+  const visibleCrafterCounts = visibleCrafts.reduce<Record<string, number>>((acc, job) => {
     const name = String(job.ownerUsername ?? "Unknown");
     acc[name] = (acc[name] ?? 0) + 1;
     return acc;
@@ -197,13 +216,13 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       <header className="members-topbar production-topbar">
         <div>
           <h2>Active Production</h2>
-          <p>{visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(crafterCounts).length} crafters`}</p>
+          <p>{visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Factory size={14} /> {formatNumber(visibleCrafts.length)} shown</span>
             {privateCrafts.length ? <span><Lock size={14} /> {formatNumber(privateCrafts.length)} private</span> : null}
-            <span>{formatNumber(Object.keys(crafterCounts).length)} crafters</span>
+            <span>{formatNumber(Object.keys(visibleCrafterCounts).length)} crafters</span>
           </div>
           <div className="dashboard-settlement-pill">
             {highestTier ? <TierBadge tier={highestTier} /> : <span className="status-pill">No tier</span>}
@@ -244,11 +263,19 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
             <span>Current crafters</span>
             <div className="crafter-pills">
               {Object.entries(crafterCounts).map(([name, count]) => (
-                <span key={name}>
+                <button
+                  type="button"
+                  key={name}
+                  className={`crafter-pill ${selectedMemberName === name ? "active" : ""}`}
+                  aria-pressed={selectedMemberName === name}
+                  onClick={() => selectCrafterPill(name)}
+                  title={selectedMemberName === name ? "Show all crafters" : `Show only ${name}`}
+                  disabled={!crafterMemberIdByName[name]}
+                >
                   <User size={12} />
                   <strong><TrackedOwnerName name={name} claim={data.claim} /></strong>
                   <small>{count}</small>
-                </span>
+                </button>
               ))}
             </div>
           </div>

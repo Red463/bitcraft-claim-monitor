@@ -27,3 +27,15 @@ test("Production contributors render as a wrapping grid", () => {
   assert.match(productionCss, /\.production-page \.contributors span strong \.tracked-owner-name svg \{/);
   assert.match(productionCss, /@media \(max-width: 1250px\)[\s\S]*\.production-page \.contributors \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
 });
+test("Production current crafter pills filter by that member", () => {
+  const productionPage = readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8");
+  const productionCss = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+
+  assert.match(productionPage, /<button[\s\S]*className=\{`crafter-pill/);
+  assert.match(productionPage, /aria-pressed=\{selectedMemberName === name\}/);
+  assert.match(productionPage, /onClick=\{\(\) => selectCrafterPill\(name\)\}/);
+  assert.match(productionPage, /const selectCrafterPill = \(name: string\) => \{/);
+  assert.match(productionPage, /onSelectMember\(selectedMemberName === name \? "All" : crafterMemberIdByName\[name\]/);
+  assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill/);
+  assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill\.active/);
+});

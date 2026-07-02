@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.20] - 2026-07-02
+
+### Added
+
+- Added clickable current-crafter pills on the Production page so users can filter active crafts by player and click again to return to all members.
+
 ## [0.31.1-beta.19] - 2026-07-02
 
 ### Added
