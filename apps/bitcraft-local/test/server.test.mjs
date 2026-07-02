@@ -150,6 +150,7 @@ test("server collection paginates listings and protects production mutations", a
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
   let craftBuildingName = "Public Station";
+  let craftProgressOverride = null;
   let failClaimRefresh = false;
   let failResearchRefresh = false;
   let failEmpireList = false;
@@ -339,9 +340,9 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === `/api/crafts`) return json(res, {
       craftResults: [
-        { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: craftOwnerUsername, isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
+        { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: craftOwnerUsername, isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: craftProgressOverride ?? 20 + craftEntityRevision },
       ],
-      items: [{ id: "craft-item-1", name: "Public Output", tier: 2 }],
+      items: [{ id: "craft-item-1", name: "Public Output", tier: 2, itemType: "0", rarityStr: "Common", iconAssetName: "public_output.png" }],
       cargos: [],
     });
     if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions" || url.pathname === "/api/crafts/public-craft-3/contributions") {
@@ -359,7 +360,7 @@ test("server collection paginates listings and protects production mutations", a
       playerCraftRequests += 1;
       return json(res, {
         craftResults: [
-          { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
+          { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: craftProgressOverride ?? 20 + craftEntityRevision },
           { entityId: "private-craft", claimEntityId: claimId, buildingName: "Private Scholar Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-2" }], totalActionsRequired: 200, progress: 10 },
           { entityId: "foreign-private-craft", claimEntityId: "other-claim", buildingName: "Other Claim Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-3" }], totalActionsRequired: 300, progress: 10 },
         ],
@@ -1239,6 +1240,20 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(ageGatedActivity.events.filter((event) => event.event_type === "production_started").length, 3);
   assert.equal(ageGatedActivity.events.some((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3"), true);
 
+  craftEntityRevision = 4;
+  craftOwnerUsername = "Tester";
+  craftBuildingName = "Collected Station";
+  craftProgressOverride = 100;
+  const completedOnArrivalPoll = await fetch(`${origin}/api/local/admin/poll`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(completedOnArrivalPoll.status, 200);
+  const completedOnArrivalActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=30`).then((response) => response.json());
+  assert.equal(completedOnArrivalActivity.events.filter((event) => event.event_type === "production_started").length, 3);
+  assert.equal(completedOnArrivalActivity.events.some((event) => event.event_type === "production_started" && event.summary.includes("Collected Station")), false);
+  craftProgressOverride = null;
   historicalTrades = [
     ...historicalTrades,
     { id: "history-new-1", orderEntityId: "historic-order", itemId: 40, itemType: "0", itemName: "Sturdy Leather Belt", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 1, unitPrice: 1, totalPrice: 1, createdAt: new Date(Date.now() - 60 * 1000).toISOString() },

@@ -54,6 +54,31 @@ test("toastItemFromActivity extracts market item display metadata defensively", 
   assert.equal(activityNoticeKey({ source_key: "   ", event_type: "market_sale", occurred_at: "2026-06-29T10:05:00.000Z", summary: "Sale" }), "activity:market_sale:2026-06-29T10:05:00.000Z:Sale");
 });
 
+test("toastItemFromActivity extracts production output icon metadata", () => {
+  assert.deepEqual(toastItemFromActivity({
+    id: 42,
+    event_type: "production_started",
+    metadata_json: JSON.stringify({
+      itemId: "2020003",
+      itemType: "0",
+      itemName: "Simple Plank",
+      tier: 2,
+      rarity: "Common",
+      iconAssetName: "simple_plank.png",
+    }),
+  }), {
+    id: "2020003",
+    itemId: "2020003",
+    itemType: "0",
+    name: "Simple Plank",
+    itemName: "Simple Plank",
+    tier: 2,
+    itemTier: 2,
+    rarity: "Common",
+    itemRarityStr: "Common",
+    iconAssetName: "simple_plank.png",
+  });
+});
 test("compactActivity combines adjacent treasury updates only", () => {
   const compacted = compactActivity([
     { id: 1, event_type: "treasury", occurred_at: "2026-06-28T10:00:00.000Z", metadata_json: JSON.stringify({ before: 100, after: 125 }) },

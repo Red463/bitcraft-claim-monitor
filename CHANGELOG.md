@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.17] - 2026-07-02
+
+### Fixed
+
+- Fixed production start notifications so crafts that are first seen already complete or ready to collect do not appear as newly started.
+- Fixed production notification item metadata so craft toasts can show the crafted item icon when BitJita provides one.
+
 ## [0.31.1-beta.16] - 2026-07-02
 
 ### Added

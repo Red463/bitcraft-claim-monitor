@@ -21,7 +21,7 @@ import { publicNotificationActivityEvent } from "./src/server/notificationActivi
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
-import { craftDisplayName, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
@@ -646,6 +646,16 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     }
     const firstSeen = current?.first_seen ?? occurredAt;
     const jobWithTiming = { ...job, firstSeen, lastSeen: occurredAt };
+    if (!current && isCompletedProductionJob(job)) {
+      diagnostics.push({
+        status: "skipped",
+        eventType: "production_started",
+        summary: `Craft already complete when first observed: ${job.label}`,
+        reason: "Newly observed craft is already complete or ready to collect; start notification suppressed",
+        metadata: discordDiagnosticContext("production_started", jobWithTiming),
+      });
+      continue;
+    }
     statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(job.raw));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
     if (startAlreadyNotified) {

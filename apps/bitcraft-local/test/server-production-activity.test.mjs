@@ -5,6 +5,7 @@ import {
   craftDisplayName,
   craftJobKey,
   craftOutputItem,
+  isCompletedProductionJob,
   normalizeProductionJob,
   normalizeProfessionKey,
   productionMetrics,
@@ -43,11 +44,11 @@ test("production activity helpers normalize production jobs with catalog item me
     remainingCraftWork: "6",
   };
   const craftsPayload = {
-    items: [{ id: "2020003", name: "Simple Plank", tier: "2" }],
+    items: [{ id: "2020003", name: "Simple Plank", tier: "2", itemType: "0", rarityStr: "Common", iconAssetName: "simple_plank.png" }],
     cargos: [],
   };
 
-  assert.deepEqual(craftOutputItem(job, craftsPayload), { id: "2020003", name: "Simple Plank", tier: "2" });
+  assert.deepEqual(craftOutputItem(job, craftsPayload), { id: "2020003", name: "Simple Plank", tier: "2", itemType: "0", rarityStr: "Common", iconAssetName: "simple_plank.png" });
   assert.equal(craftDisplayName(job, craftsPayload), "Simple Plank");
   assert.deepEqual(productionMetrics(job), {
     skillId: 3,
@@ -68,6 +69,16 @@ test("production activity helpers normalize production jobs with catalog item me
   assert.equal(normalized.raw, job);
 });
 
+test("production activity helpers identify jobs that are already complete", () => {
+  assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, progress: 100 }), true);
+  assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, remainingCraftWork: 0 }), true);
+  assert.equal(isCompletedProductionJob({ progressPct: 100 }), true);
+  assert.equal(isCompletedProductionJob({ totalEffort: 100, remainingEffort: 0, progressPct: 100 }), true);
+  assert.equal(isCompletedProductionJob({ status: "complete" }), true);
+  assert.equal(isCompletedProductionJob({ status: "ready_to_collect" }), true);
+  assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, progress: 99 }), false);
+  assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, remainingCraftWork: 1 }), false);
+});
 test("production activity helpers normalize profession keys defensively", () => {
   assert.equal(normalizeProfessionKey("Leather working!"), "leatherworking");
   assert.equal(normalizeProfessionKey(null), "");

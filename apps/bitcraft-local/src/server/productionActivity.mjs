@@ -45,10 +45,18 @@ export function craftDisplayName(job, craftsPayload = {}) {
 export function normalizeProductionJob(job, craftsPayload = {}) {
   const metrics = productionMetrics(job);
   const item = craftOutputItem(job, craftsPayload);
+  const output = job.craftedItem?.[0] ?? {};
+  const itemId = output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId ?? null;
+  const itemType = output.item_type ?? output.itemType ?? item?.itemType ?? job.outputItemType ?? job.itemType ?? null;
   return {
     key: craftJobKey(job),
     label: String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`),
+    itemId: itemId == null ? null : String(itemId),
+    itemType: itemType == null ? null : String(itemType),
+    itemName: item?.name ?? job.recipeName ?? job.name ?? null,
     tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
+    rarity: item?.rarityStr ?? item?.rarity ?? job.rarityStr ?? job.rarity ?? null,
+    iconAssetName: item?.iconAssetName ?? job.iconAssetName ?? null,
     buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
     crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
     ...metrics,
@@ -78,7 +86,7 @@ export function productionMetrics(job) {
   const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
   const totalEffort = toNumber(job.totalActionsRequired ?? job.totalCraftWork ?? job.requiredCraftWork ?? job.craftWorkRequired ?? job.effortRequired ?? job.totalEffort);
   const completedEffort = toNumber(job.progress ?? job.completedCraftWork ?? job.completedEffort ?? job.actionsCompleted);
-  const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? (totalEffort ? totalEffort - completedEffort : 0));
+  const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? job.remainingEffort ?? (totalEffort ? totalEffort - completedEffort : 0));
   const progressPct = totalEffort > 0 ? Math.max(0, Math.min(100, ((totalEffort - remainingEffort) / totalEffort) * 100)) : Math.max(0, Math.min(100, toNumber(job.progressPct ?? job.progressPercent ?? job.progress)));
   return {
     skillId,
@@ -91,6 +99,13 @@ export function productionMetrics(job) {
   };
 }
 
+export function isCompletedProductionJob(job) {
+  const metrics = productionMetrics(job);
+  const status = String(job.status ?? job.state ?? job.craftStatus ?? "").trim().toLowerCase();
+  if (/complete|completed|collect|ready/.test(status)) return true;
+  if (metrics.totalEffort > 0 && metrics.remainingEffort <= 0) return true;
+  return metrics.progressPct >= 100;
+}
 export function normalizeProfessionKey(value) {
   return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
 }
