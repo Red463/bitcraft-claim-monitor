@@ -3986,6 +3986,23 @@ function empireIdFromClaim(claim) {
   return String(claim?.empireEntityId ?? claim?.empireId ?? claim?.empire?.entityId ?? "").trim();
 }
 
+function normalizeEmpireClaim(claim) {
+  const claimId = String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
+  return {
+    claimId,
+    name: String(claim?.name ?? claim?.claimName ?? `Claim ${claimId}`),
+    ownerName: String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "Unknown"),
+    regionId: String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? ""),
+    locationX: nestedCoordinate(claim, "x"),
+    locationZ: nestedCoordinate(claim, "z"),
+    tier: claim?.tier ?? claim?.claimTier ?? null,
+    supplies: toNumber(claim?.supplies),
+    treasury: toNumber(claim?.treasury),
+    numTiles: toNumber(claim?.numTiles ?? claim?.tiles ?? claim?.territoryChunks),
+    updatedAt: claim?.updatedAt ?? claim?.lastUpdatedAt ?? claim?.timestamp ?? null,
+  };
+}
+
 function normalizeEmpireOverviewRow(empire, regionalClaims) {
   const entityId = String(empire?.entityId ?? empire?.id ?? "").trim();
   const claims = regionalClaims.filter((claim) => empireIdFromClaim(claim) === entityId);
@@ -4007,6 +4024,7 @@ function normalizeEmpireOverviewRow(empire, regionalClaims) {
     createdAt: empire?.createdAt ?? null,
     updatedAt: empire?.updatedAt ?? null,
     regionalClaimNames: claims.map((claim) => claim?.name).filter(Boolean).slice(0, 8),
+    claims: claims.map(normalizeEmpireClaim).filter((claim) => claim.claimId),
   };
 }
 
@@ -4131,6 +4149,24 @@ function normalizeEmpireTower(tower, empire, inactivity) {
     lastLeaderLogin: inactivity.lastLeaderLogin,
     inactivityReason: inactivity.inactivityReason,
   };
+}
+
+async function regionalEmpireClaimMembers(claimId) {
+  const key = `claim-members:${claimId}`;
+  return empireCacheLoad(key, async () => {
+    const [claimPayload, membersPayload] = await Promise.all([
+      fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+      fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
+    ]);
+    const claim = normalizeEmpireClaim(claimPayload?.claim ?? claimPayload ?? { entityId: claimId });
+    const members = unwrap(membersPayload, "members", []).map(normalizeEmpireMember).sort(compareEmpireMembers);
+    return {
+      claim,
+      members,
+      errors: Array.isArray(membersPayload?.errors) ? membersPayload.errors : [],
+      fetchedAt: new Date().toISOString(),
+    };
+  });
 }
 
 async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
@@ -8212,6 +8248,16 @@ const server = createServer(async (req, res) => {
           errors: [errorMessage(error)],
           summary: { empires: 0, regionalClaims: 0, totalMembers: 0, largestEmpireName: null },
         });
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/empires/claim-members") {
+      if (!rateLimit(req, res, "empire-claim-members", RATE_LIMITS.expensiveLocal)) return;
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      if (!claimId) return send(res, 400, { error: "Claim id is required" });
+      try {
+        return send(res, 200, await regionalEmpireClaimMembers(claimId));
+      } catch (error) {
+        return send(res, 502, { claim: { claimId, name: `Claim ${claimId}` }, members: [], errors: [errorMessage(error)], fetchedAt: new Date().toISOString() });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/watchtowers") {

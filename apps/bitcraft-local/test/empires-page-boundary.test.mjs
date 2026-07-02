@@ -45,3 +45,20 @@ test("watchtower table exposes empire and risk filters with open-map actions", (
   assert.match(css, /\.watchtower-risk-toggle/);
   assert.match(css, /\.inactivity-threshold-card/);
 });
+test("watchtower popup exposes aligned claims and lazy claim member drilldown", () => {
+  const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
+
+  assert.match(page, /Empire Members/);
+  assert.match(page, /Aligned Claims/);
+  assert.match(page, /towerDialogTab/);
+  assert.match(page, /tower\.claims/);
+  assert.match(page, /claimDistanceTiles/);
+  assert.match(page, /tiles away/);
+  assert.match(page, /selectedClaim/);
+  assert.match(page, /empires\/claim-members\?claimId=/);
+  assert.match(page, /ClaimMembersDialog/);
+  assert.match(css, /\.tower-dialog-tabs/);
+  assert.match(css, /\.tower-claims-list/);
+  assert.match(css, /\.claim-member-dialog/);
+});

@@ -251,6 +251,11 @@
 .tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
 .tower-dialog-summary span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .tower-access-note { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.tower-dialog-tabs { display: inline-flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 999px; background: rgba(4,8,14,.52); width: fit-content; max-width: 100%; }
+.tower-dialog-tabs button { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); padding: 5px 11px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.tower-dialog-tabs button small { color: inherit; font-size: 11px; opacity: .82; }
+.tower-dialog-tabs button:hover { color: #fff; background: rgba(148,163,184,.1); }
+.tower-dialog-tabs button.active { color: var(--active-color); background: rgba(240,198,79,.16); box-shadow: inset 0 0 0 1px rgba(240,198,79,.42); }
 .tower-rank-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
 .tower-rank-filter span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
 .tower-rank-filter button { border: 1px solid rgba(148,163,184,.24); border-radius: 999px; background: rgba(15,23,42,.72); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
@@ -264,8 +269,20 @@
 .tower-access-list article small { display: block; color: var(--muted); margin-top: 3px; }
 .tower-access-flags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tower-access-flags span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid rgba(240,198,79,.22); border-radius: 999px; color: var(--active-color); background: rgba(240,198,79,.08); font-size: 12px; font-weight: 700; }
+.tower-claims-list { display: grid; gap: 8px; max-height: min(430px, 48vh); overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+.tower-claims-list button { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 1.8fr); align-items: center; gap: 12px; min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(5,9,15,.62); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tower-claims-list button:hover { border-color: rgba(240,198,79,.5); background: rgba(240,198,79,.07); }
+.tower-claims-list strong { display: block; color: #fff; }
+.tower-claims-list small { display: block; color: var(--muted); margin-top: 3px; }
+.tower-claim-metrics { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 7px; min-width: 0; }
+.tower-claim-metrics > span:not(.status-pill):not(.tier-badge) { display: inline-flex; align-items: center; min-height: 25px; padding: 4px 8px; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; color: var(--muted); background: rgba(15,23,42,.5); font-size: 12px; font-weight: 800; }
+.claim-member-dialog { display: grid; gap: 14px; }
 .empty-state.compact { min-height: 72px; padding: 18px; }
 @media (max-width: 760px) {
   .tower-access-list article { grid-template-columns: 1fr; align-items: start; }
+  .tower-dialog-tabs { width: 100%; }
+  .tower-dialog-tabs button { justify-content: center; flex: 1; }
+  .tower-claims-list button { grid-template-columns: 1fr; align-items: start; }
+  .tower-claim-metrics { justify-content: flex-start; }
 }
 

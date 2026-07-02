@@ -186,18 +186,18 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/claims") {
       const regionId = url.searchParams.get("regionId");
-      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", treasury: 300, empireEntityId: "empire-1" }], count: 1 });
+      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", ownerName: "Modular", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, updatedAt: "2026-05-22T12:00:00.000Z", empireEntityId: "empire-1" }, { entityId: "neutral-claim", name: "Neutral Claim", regionId: "19", treasury: 10 }], count: 2 });
       if (regionId === "3") return json(res, { claims: [{ entityId: seasonalClaimId, name: "Seasonal Market", regionId: "3", regionName: "Region 3", treasury: 100 }], count: 1 });
       return json(res, { claims: [], count: 0 });
     }
     if (url.pathname === `/api/claims/${claimId}`) {
       claimDetailRequests += 1;
       if (failClaimRefresh) return json(res, { error: "rate limited" }, 429);
-      return json(res, { claim: { entityId: claimId, supplies: 500, treasury: 300, regionName: "Zephra" } });
+      return json(res, { claim: { entityId: claimId, name: "Timbersteel Trade", ownerName: "Modular", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, regionId: "19", regionName: "Zephra", empireEntityId: "empire-1" } });
     }
     if (url.pathname === `/api/claims/${claimId}/members`) {
       memberListRequests += 1;
-      return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester" }] });
+      return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester", rankTitle: "Officer", lastLoginTimestamp: "2026-05-21T12:00:00.000Z", signedIn: false }] });
     }
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
@@ -467,7 +467,19 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.empires[0].members.some((member) => member.username === "Citizen Two" && !member.hasStorage && !member.canAddHexite), true);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.hasStorage), true);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.some((member) => member.canAddHexite), true);
+  assert.equal(regionalWatchtowers.empires[0].claims.length, 1);
+  assert.equal(regionalWatchtowers.empires[0].claims[0].claimId, claimId);
+  assert.equal(regionalWatchtowers.empires[0].claims[0].name, "Timbersteel Trade");
+  assert.equal(regionalWatchtowers.empires[0].claims[0].ownerName, "Modular");
+  assert.equal(regionalWatchtowers.empires[0].claims.some((claim) => claim.name === "Neutral Claim"), false);
   assert.equal(regionalWatchtowers.unclaimedAvailable, false);
+  const missingClaimMembers = await fetch(`${origin}/api/local/empires/claim-members`).then((response) => ({ status: response.status }));
+  assert.equal(missingClaimMembers.status, 400);
+  const claimMembers = await fetch(`${origin}/api/local/empires/claim-members?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(claimMembers.claim.name, "Timbersteel Trade");
+  assert.equal(claimMembers.members[0].username, "Tester");
+  assert.equal(claimMembers.members[0].rankTitle, "Officer");
+  assert.equal(claimMembers.members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   assert.equal(recipeDetailOne.detail.item.name, "Simple Plank");
