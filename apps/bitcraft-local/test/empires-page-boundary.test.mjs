@@ -58,6 +58,11 @@ test("watchtower popup exposes aligned claims and lazy claim member drilldown", 
   assert.match(page, /selectedClaim/);
   assert.match(page, /empires\/claim-members\?claimId=/);
   assert.match(page, /ClaimMembersDialog/);
+  assert.match(page, /Empire rank:/);
+  assert.match(page, /Claim role:/);
+  assert.match(page, /claimRole/);
+  assert.match(page, /empireRankTitle/);
+  assert.match(page, /Claim roles/);
   assert.match(css, /\.tower-dialog-tabs/);
   assert.match(css, /\.tower-claims-list/);
   assert.match(css, /\.claim-member-dialog/);

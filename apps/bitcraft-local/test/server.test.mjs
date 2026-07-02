@@ -186,18 +186,18 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/claims") {
       const regionId = url.searchParams.get("regionId");
-      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", ownerName: "Modular", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, updatedAt: "2026-05-22T12:00:00.000Z", empireEntityId: "empire-1" }, { entityId: "neutral-claim", name: "Neutral Claim", regionId: "19", treasury: 10 }], count: 2 });
+      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", ownerName: "Tester", ownerEntityId: "player-1", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, updatedAt: "2026-05-22T12:00:00.000Z", empireEntityId: "empire-1" }, { entityId: "neutral-claim", name: "Neutral Claim", regionId: "19", treasury: 10 }], count: 2 });
       if (regionId === "3") return json(res, { claims: [{ entityId: seasonalClaimId, name: "Seasonal Market", regionId: "3", regionName: "Region 3", treasury: 100 }], count: 1 });
       return json(res, { claims: [], count: 0 });
     }
     if (url.pathname === `/api/claims/${claimId}`) {
       claimDetailRequests += 1;
       if (failClaimRefresh) return json(res, { error: "rate limited" }, 429);
-      return json(res, { claim: { entityId: claimId, name: "Timbersteel Trade", ownerName: "Modular", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, regionId: "19", regionName: "Zephra", empireEntityId: "empire-1" } });
+      return json(res, { claim: { entityId: claimId, name: "Timbersteel Trade", ownerName: "Tester", ownerEntityId: "player-1", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, regionId: "19", regionName: "Zephra", empireEntityId: "empire-1" } });
     }
     if (url.pathname === `/api/claims/${claimId}/members`) {
       memberListRequests += 1;
-      return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester", rankTitle: "Officer", lastLoginTimestamp: "2026-05-21T12:00:00.000Z", signedIn: false }] });
+      return json(res, { members: [{ playerEntityId: "player-1", userName: "Tester", lastLoginTimestamp: "2026-05-21T12:00:00.000Z", signedIn: false }, { playerEntityId: "citizen-1", userName: "Citizen One", coOwnerPermission: true, lastLoginTimestamp: "2026-05-20T12:00:00.000Z", signedIn: false }] });
     }
     if (url.pathname === `/api/claims/${claimId}/citizens`) return json(res, { citizens: [] });
     if (url.pathname === `/api/claims/${claimId}/buildings`) return json(res, { buildings: [] });
@@ -253,6 +253,7 @@ test("server collection paginates listings and protects production mutations", a
       empire: { entityId: "empire-1", name: "Test Empire", leaderEntityId: "leader-1" },
       members: [
         { entityId: "leader-1", playerName: "Leader One", rankTitle: "The Earth King", lastLoginTimestamp: "2026-05-01T12:00:00.000Z", buildPermission: true },
+        { entityId: "player-1", playerName: "Tester", rankTitle: "Emperor", lastLoginTimestamp: "2026-04-01T12:00:00.000Z" },
         { entityId: "citizen-1", playerName: "Citizen One", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
         { entityId: "citizen-2", playerName: "Citizen Two", rankTitle: "Citizen", lastLoginTimestamp: "2026-05-21T12:00:00.000Z" },
       ],
@@ -461,7 +462,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.towers[0].locationX, 111);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);
-  assert.equal(regionalWatchtowers.empires[0].members.length, 3);
+  assert.equal(regionalWatchtowers.empires[0].members.length, 4);
   assert.equal(regionalWatchtowers.empires[0].members[0].username, "Citizen Two");
   assert.equal(regionalWatchtowers.empires[0].members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
   assert.equal(regionalWatchtowers.empires[0].members.some((member) => member.username === "Citizen Two" && !member.hasStorage && !member.canAddHexite), true);
@@ -470,7 +471,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.empires[0].claims.length, 1);
   assert.equal(regionalWatchtowers.empires[0].claims[0].claimId, claimId);
   assert.equal(regionalWatchtowers.empires[0].claims[0].name, "Timbersteel Trade");
-  assert.equal(regionalWatchtowers.empires[0].claims[0].ownerName, "Modular");
+  assert.equal(regionalWatchtowers.empires[0].claims[0].ownerName, "Tester");
   assert.equal(regionalWatchtowers.empires[0].claims.some((claim) => claim.name === "Neutral Claim"), false);
   assert.equal(regionalWatchtowers.unclaimedAvailable, false);
   const missingClaimMembers = await fetch(`${origin}/api/local/empires/claim-members`).then((response) => ({ status: response.status }));
@@ -478,7 +479,11 @@ test("server collection paginates listings and protects production mutations", a
   const claimMembers = await fetch(`${origin}/api/local/empires/claim-members?claimId=${claimId}`).then((response) => response.json());
   assert.equal(claimMembers.claim.name, "Timbersteel Trade");
   assert.equal(claimMembers.members[0].username, "Tester");
-  assert.equal(claimMembers.members[0].rankTitle, "Officer");
+  assert.equal(claimMembers.members[0].rankTitle, null);
+  assert.equal(claimMembers.members[0].empireRankTitle, "Emperor");
+  assert.equal(claimMembers.members[0].claimRole, "Owner");
+  assert.equal(claimMembers.members[0].isClaimOwner, true);
+  assert.equal(claimMembers.members.some((member) => member.username === "Citizen One" && member.claimRole === "Co-owner"), true);
   assert.equal(claimMembers.members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());

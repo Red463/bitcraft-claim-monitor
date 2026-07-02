@@ -9,11 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.22] - 2026-07-02
+
+### Changed
+
+- Improved aligned-claim member drilldowns so settlement roles and empire ranks are shown separately, including owner and co-owner labels where available.
+
 ## [0.31.1-beta.21] - 2026-07-02
 
 ### Added
 
 - Added aligned-claim details to watchtower popups, including distance from the selected tower and lazy claim-member drilldowns with last login details.
+
 ## [0.31.1-beta.20] - 2026-07-02
 
 ### Added

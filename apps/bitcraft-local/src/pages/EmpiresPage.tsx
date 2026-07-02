@@ -97,20 +97,20 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
     return () => controller.abort();
   }, [claim.claimId]);
   const members: AnyRecord[] = Array.isArray(state.data?.members) ? state.data.members : [];
-  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.rankTitle ?? "Citizen")))).sort((a, b) => a.localeCompare(b)), [members]);
-  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.rankTitle ?? "Citizen"))) : members;
+  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.claimRole ?? "Member")))).sort((a, b) => a.localeCompare(b)), [members]);
+  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.claimRole ?? "Member"))) : members;
   const toggleRankFilter = (rank: string) => setRankFilters((current) => current.includes(rank) ? current.filter((value) => value !== rank) : [...current, rank]);
 
   return (
     <div className="claim-member-dialog">
       <button type="button" className="toolbar-button compact-map-action" onClick={onBack}>Back to aligned claims</button>
       <div className="tower-access-note">
-        Showing members BitJita reports for {state.data?.claim?.name ?? claim.name ?? "this claim"}, with rank and last login where available.
+        Showing members BitJita reports for {state.data?.claim?.name ?? claim.name ?? "this claim"}, with empire rank, claim role, and last login where available.
       </div>
       {rankOptions.length ? (
-        <div className="tower-rank-filter" aria-label="Filter claim members by rank">
-          <span>Ranks</span>
-          <button type="button" className={rankFilters.length === 0 ? "active" : ""} aria-label="Show all claim member ranks" onClick={() => setRankFilters([])}>All</button>
+        <div className="tower-rank-filter" aria-label="Filter claim members by claim role">
+          <span>Claim roles</span>
+          <button type="button" className={rankFilters.length === 0 ? "active" : ""} aria-label="Show all claim roles" onClick={() => setRankFilters([])}>All</button>
           {rankOptions.map((rank) => <button key={rank} type="button" className={rankFilters.includes(rank) ? "active" : ""} onClick={() => toggleRankFilter(rank)}>{rank}</button>)}
         </div>
       ) : null}
@@ -122,7 +122,8 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
             <article key={member.entityId || member.username}>
               <div>
                 <strong>{member.username ?? "Unknown"}</strong>
-                <small>{member.rankTitle ?? "Citizen"}</small>
+                <small>Empire rank: {member.empireRankTitle ?? "Unknown"}</small>
+                <small>Claim role: {member.claimRole ?? "Member"}</small>
               </div>
               <div className="tower-access-flags" />
               <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
@@ -140,8 +141,8 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
   const [towerDialogTab, setTowerDialogTab] = React.useState<"members" | "claims">("members");
   const [selectedClaim, setSelectedClaim] = React.useState<AnyRecord | null>(null);
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
-  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.rankTitle ?? "Citizen")))).sort((a, b) => a.localeCompare(b)), [members]);
-  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.rankTitle ?? "Citizen"))) : members;
+  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.claimRole ?? "Member")))).sort((a, b) => a.localeCompare(b)), [members]);
+  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.claimRole ?? "Member"))) : members;
   const visibleClaims = React.useMemo<Array<AnyRecord & { distanceTiles: number | null }>>(() => claims.map((claim): AnyRecord & { distanceTiles: number | null } => ({ ...claim, distanceTiles: claimDistanceTiles(tower, claim) })).sort((a, b) => {
     const aDistance = a.distanceTiles == null ? Number.POSITIVE_INFINITY : a.distanceTiles;
     const bDistance = b.distanceTiles == null ? Number.POSITIVE_INFINITY : b.distanceTiles;

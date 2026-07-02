@@ -3992,6 +3992,7 @@ function normalizeEmpireClaim(claim) {
     claimId,
     name: String(claim?.name ?? claim?.claimName ?? `Claim ${claimId}`),
     ownerName: String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "Unknown"),
+    ownerEntityId: String(claim?.ownerEntityId ?? claim?.ownerPlayerEntityId ?? claim?.ownerId ?? ""),
     regionId: String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? ""),
     locationX: nestedCoordinate(claim, "x"),
     locationZ: nestedCoordinate(claim, "z"),
@@ -4122,6 +4123,35 @@ function normalizeEmpireMember(member) {
   };
 }
 
+function memberLookupKeys(member) {
+  return [member?.entityId, member?.playerEntityId, member?.id, member?.username, member?.userName, member?.playerName]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function memberMatchesClaimOwner(member, claim) {
+  const ownerEntityId = String(claim?.ownerEntityId ?? "").trim().toLowerCase();
+  const ownerName = String(claim?.ownerName ?? "").trim().toLowerCase();
+  const keys = memberLookupKeys(member);
+  return Boolean((ownerEntityId && keys.includes(ownerEntityId)) || (ownerName && keys.includes(ownerName)));
+}
+
+function normalizeClaimMember(member, claim, empireMemberLookup) {
+  const base = normalizeEmpireMember({ ...member, rankTitle: member?.rankTitle ?? member?.rank ?? null });
+  const empireMember = memberLookupKeys({ ...member, ...base }).map((key) => empireMemberLookup.get(key)).find(Boolean) ?? null;
+  const isOwner = memberMatchesClaimOwner({ ...member, ...base }, claim);
+  const claimRole = isOwner ? "Owner" : base.permissions.coOwnerPermission ? "Co-owner" : "Member";
+  return {
+    ...base,
+    rankTitle: null,
+    claimMemberTitle: member?.rankTitle ?? member?.rank ?? null,
+    empireRankTitle: empireMember?.rankTitle ?? null,
+    claimRole,
+    isClaimOwner: isOwner,
+    isClaimCoOwner: base.permissions.coOwnerPermission,
+  };
+}
+
 function compareEmpireMembers(a, b) {
   if (Boolean(a.signedIn) !== Boolean(b.signedIn)) return a.signedIn ? -1 : 1;
   return lastLoginMs(b.lastLoginTimestamp) - lastLoginMs(a.lastLoginTimestamp) || String(a.username).localeCompare(String(b.username));
@@ -4158,12 +4188,24 @@ async function regionalEmpireClaimMembers(claimId) {
       fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
       fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
     ]);
-    const claim = normalizeEmpireClaim(claimPayload?.claim ?? claimPayload ?? { entityId: claimId });
-    const members = unwrap(membersPayload, "members", []).map(normalizeEmpireMember).sort(compareEmpireMembers);
+    const rawClaim = claimPayload?.claim ?? claimPayload ?? { entityId: claimId };
+    const claim = normalizeEmpireClaim(rawClaim);
+    const errors = Array.isArray(membersPayload?.errors) ? [...membersPayload.errors] : [];
+    const empireId = String(rawClaim?.empireEntityId ?? rawClaim?.empireId ?? "").trim();
+    const empireMembersPayload = empireId ? await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch((error) => {
+      errors.push(`Empire ranks unavailable: ${errorMessage(error)}`);
+      return null;
+    }) : null;
+    const empireMemberLookup = new Map();
+    for (const member of unwrap(empireMembersPayload, "members", [])) {
+      const normalized = normalizeEmpireMember(member);
+      for (const key of memberLookupKeys({ ...member, ...normalized })) empireMemberLookup.set(key, normalized);
+    }
+    const members = unwrap(membersPayload, "members", []).map((member) => normalizeClaimMember(member, claim, empireMemberLookup)).sort(compareEmpireMembers);
     return {
       claim,
       members,
-      errors: Array.isArray(membersPayload?.errors) ? membersPayload.errors : [],
+      errors,
       fetchedAt: new Date().toISOString(),
     };
   });
