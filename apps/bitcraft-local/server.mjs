@@ -6040,7 +6040,8 @@ async function runMarketListingsCollector(claimId, currentData, force = false) {
   if (!sideEffectCollectorDue("marketListings", force)) return;
   const startedAt = collectorAttempt("marketListings");
   try {
-    await syncMarketListingsForSnapshot(claimId, currentData.market ?? { listings: [] }, new Date().toISOString());
+    const marketPayload = await fetchAllClaimListings(claimId, { cache: false });
+    await syncMarketListingsForSnapshot(claimId, marketPayload, new Date().toISOString());
     collectorSuccess("marketListings", startedAt);
   } catch (error) {
     collectorFailure("marketListings", startedAt, error);

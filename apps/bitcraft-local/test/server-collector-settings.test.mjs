@@ -67,3 +67,16 @@ test("production activity rows are not gated by contribution sync cadence", () =
   assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
   assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
+
+test("market listing activity sync fetches live listings when the side-effect collector runs", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const marketStart = source.indexOf("async function runMarketListingsCollector");
+  const productionStart = source.indexOf("async function runProductionActivityCollector");
+  const marketFunction = source.slice(marketStart, productionStart);
+
+  assert.ok(marketStart > -1);
+  assert.ok(productionStart > marketStart);
+  assert.match(marketFunction, /fetchAllClaimListings\(claimId, \{ cache: false \}\)/);
+  assert.match(marketFunction, /syncMarketListingsForSnapshot\(claimId, marketPayload,/);
+  assert.doesNotMatch(marketFunction, /currentData\.market \?\? \{ listings: \[\] \}/);
+});

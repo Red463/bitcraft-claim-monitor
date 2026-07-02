@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.18] - 2026-07-02
+
+### Fixed
+
+- Fixed new market listing in-app notifications so live worker sync checks fresh BitJita listings and recent listing activity can toast after a browser refresh.
+
 ## [0.31.1-beta.17] - 2026-07-02
 
 ### Fixed

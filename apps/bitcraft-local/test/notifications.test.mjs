@@ -454,6 +454,41 @@ test("browserNotificationSourceDrafts surfaces fresh production activity on the 
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started"]);
   assert.equal(result.drafts[0].kind, "production");
 });
+
+test("browserNotificationSourceDrafts surfaces fresh market activity on the first fetch", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => event.source_key ?? `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const result = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 1,
+      events: [
+        { id: 3, event_type: "market_new_listing", summary: "New market listing: Fresh Plank", itemName: "Fresh Plank", occurred_at: new Date(Date.now() - 60_000).toISOString() },
+        { id: 2, event_type: "market_sale", summary: "Market sale: Recent sale", itemName: "Recent Sale", occurred_at: new Date(Date.now() - 90_000).toISOString() },
+        { id: 1, event_type: "market_new_listing", summary: "New market listing: Old Beam", itemName: "Old Beam", occurred_at: new Date(Date.now() - 60 * 60_000).toISOString() },
+      ],
+    },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.deepEqual(result.drafts.map((draft) => draft.sourceKey), ["activity:2", "activity:3"]);
+  assert.deepEqual(result.drafts.map((draft) => draft.title), ["Market sale", "New market listing"]);
+  assert.equal(result.drafts[1].kind, "market");
+});
 test("browserNotificationSourceDrafts queues production activity rows without current craft payload", () => {
   const helpers = {
     activity: {

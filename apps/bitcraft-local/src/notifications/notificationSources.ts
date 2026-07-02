@@ -61,8 +61,9 @@ export function marketActivityQueueToastDrafts(
   const knownIds = previous?.claimId === claimId ? previous.knownIds : null;
   const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => helpers.key(event), limit);
   const snapshot = { claimId, knownIds: selection.knownIds };
-  if (selection.seeded) return { snapshot, drafts: [], seeded: true };
-  const drafts = selection.unseen
+  const toastEvents = selection.seeded ? recentActivityEvents(notableEvents).slice(0, limit).reverse() : selection.unseen;
+  if (selection.seeded && toastEvents.length === 0) return { snapshot, drafts: [], seeded: true };
+  const drafts = toastEvents
     .map((event) => marketActivityToastDraft(event, settings, helpers))
     .filter((draft): draft is ToastNoticeDraft => draft != null);
   return { snapshot, drafts, seeded: false };
@@ -79,14 +80,14 @@ export type ProductionActivityToastSnapshot = {
 export function isProductionActivityToastEvent(event: AnyRecord): boolean {
   return productionActivityEventTypes.has(String(event.event_type ?? event.eventType ?? ""));
 }
-function productionActivityOccurredMs(event: AnyRecord): number {
+function activityOccurredMs(event: AnyRecord): number {
   const ms = new Date(String(event.occurred_at ?? event.occurredAt ?? "")).getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function recentProductionActivityEvents(events: AnyRecord[], maxAgeMs = 5 * 60 * 1000, nowMs = Date.now()): AnyRecord[] {
+function recentActivityEvents(events: AnyRecord[], maxAgeMs = 5 * 60 * 1000, nowMs = Date.now()): AnyRecord[] {
   return events.filter((event) => {
-    const occurredMs = productionActivityOccurredMs(event);
+    const occurredMs = activityOccurredMs(event);
     return occurredMs > 0 && nowMs - occurredMs >= 0 && nowMs - occurredMs <= maxAgeMs;
   });
 }
@@ -121,7 +122,7 @@ export function productionActivityQueueToastDrafts(
   const knownIds = previous?.claimId === claimId ? previous.knownIds : null;
   const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => helpers.key(event), limit);
   const snapshot = { claimId, knownIds: selection.knownIds };
-  const toastEvents = selection.seeded ? recentProductionActivityEvents(notableEvents).slice(0, limit).reverse() : selection.unseen;
+  const toastEvents = selection.seeded ? recentActivityEvents(notableEvents).slice(0, limit).reverse() : selection.unseen;
   if (selection.seeded && toastEvents.length === 0) return { snapshot, drafts: [], seeded: true };
   const drafts = toastEvents
     .map((event) => productionActivityToastDraft(event, settings, helpers))
