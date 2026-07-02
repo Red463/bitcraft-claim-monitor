@@ -265,14 +265,14 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     body: "Fine Plank - Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
-    sourceKey: "production-started:claim-1:craft-1",
+    sourceKey: "production_started:craft-1",
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers), {
     title: "Craft completed",
     body: "Fine Plank - Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
-    sourceKey: "production-completed:claim-1:craft-1",
+    sourceKey: "production_completed:craft-1",
   });
 });
 
@@ -314,8 +314,8 @@ test("productionCraftQueueToastDrafts falls back when craft ids are blank", () =
   ], helpers);
 
   assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), [
-    "production-started:claim-1:Workshop-recipe-2",
-    "production-completed:claim-1:Workshop-recipe-1",
+    "production_started:Workshop-recipe-2",
+    "production_completed:Workshop-recipe-1",
   ]);
 });
 test("productionCraftQueueToastDrafts emits capped started and completed drafts in queue order", () => {
@@ -340,10 +340,10 @@ test("productionCraftQueueToastDrafts emits capped started and completed drafts 
   ], helpers);
 
   assert.deepEqual(result.drafts.map((draft) => draft.sourceKey), [
-    "production-started:claim-1:new-1",
-    "production-started:claim-1:new-2",
-    "production-completed:claim-1:old-1",
-    "production-completed:claim-1:old-3",
+    "production_started:new-1",
+    "production_started:new-2",
+    "production_completed:old-1",
+    "production_completed:old-3",
   ]);
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started", "Craft started", "Craft completed", "Craft completed"]);
   assert.deepEqual([...result.snapshot.jobs.keys()], ["old-2", "new-1", "new-2", "new-3"]);
@@ -409,8 +409,8 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
     "activity:3",
     "activity:4",
     "deal-alert:5",
-    "production-started:claim-1:new-craft",
-    "production-completed:claim-1:old-craft",
+    "production_started:new-craft",
+    "production_completed:old-craft",
   ]);
   assert.deepEqual(next.drafts.map((draft) => draft.title), [
     "New market listing",
@@ -421,6 +421,56 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
   ]);
 });
 
+test("browserNotificationSourceDrafts queues production activity rows without current craft payload", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => event.source_key ?? `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const seeded = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 1,
+      events: [
+        { id: 1, event_type: "production_started", source_key: "production_started:old-craft", summary: "Craft started: Old Beam", itemName: "Old Beam" },
+      ],
+    },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.equal(seeded.drafts.length, 0);
+
+  const next = browserNotificationSourceDrafts(seeded.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 2,
+      events: [
+        { id: 2, event_type: "production_started", source_key: "production_started:new-craft", summary: "Craft started: New Beam", itemName: "New Beam" },
+        { id: 1, event_type: "production_started", source_key: "production_started:old-craft", summary: "Craft started: Old Beam", itemName: "Old Beam" },
+      ],
+    },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), ["production_started:new-craft"]);
+  assert.deepEqual(next.drafts.map((draft) => draft.title), ["Craft started"]);
+  assert.equal(next.drafts[0].kind, "production");
+});
 test("browserNotificationSourceDrafts scopes deal-alert dedupe to the signed-in user", () => {
   const helpers = {
     activity: {
@@ -612,5 +662,5 @@ test("browserNotificationSourceDrafts preserves production snapshot when the cur
 
   assert.deepEqual(noCraftPayloadPage.drafts, []);
   assert.deepEqual([...noCraftPayloadPage.snapshots.production.jobs.keys()], ["old-craft"]);
-  assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production-started:claim-1:new-craft"]);
+  assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production_started:new-craft"]);
 });

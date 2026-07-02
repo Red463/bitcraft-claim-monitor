@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.10] - 2026-07-02
+
+### Fixed
+
+- Fixed in-app production start and completion notifications so worker-recorded production activity rows trigger browser toasts on live deployments.
+
 ## [0.31.1-beta.9] - 2026-07-02
 
 ### Fixed

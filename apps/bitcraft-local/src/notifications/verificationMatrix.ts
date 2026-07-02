@@ -51,13 +51,13 @@ export const SUPPORTED_BROWSER_NOTIFICATION_TYPES: readonly BrowserNotificationT
   {
     id: "production-started",
     label: "Production started toast",
-    source: "AppShell production craft queue diff",
+    source: "/api/local/notification-activity event_type=production_started plus AppShell craft queue diff fallback",
     expectedDestination: "production",
   },
   {
     id: "production-completed",
     label: "Production completed toast",
-    source: "AppShell production craft queue diff",
+    source: "/api/local/notification-activity event_type=production_completed plus AppShell craft queue diff fallback",
     expectedDestination: "production",
   },
 ];
@@ -104,14 +104,14 @@ export const LIVE_SOURCE_NOTIFICATION_CHECKS: readonly LiveSourceNotificationChe
   },
   {
     typeId: "production-started",
-    source: "Global production craft queue diff in useBrowserNotificationSources",
+    source: "/api/local/notification-activity production rows, with global craft queue diff fallback in useBrowserNotificationSources",
     status: "required",
     browserSmokeEvidence: "Loopback smoke verified sample production-started toasts on every routed main-app page.",
     liveVerification: "Still required from an actual production queue diff that adds a craft, not only sample smoke drafts.",
   },
   {
     typeId: "production-completed",
-    source: "Global production craft queue diff in useBrowserNotificationSources",
+    source: "/api/local/notification-activity production rows, with global craft queue diff fallback in useBrowserNotificationSources",
     status: "required",
     browserSmokeEvidence: "Loopback smoke verified sample production-completed toasts on every routed main-app page.",
     liveVerification: "Still required from an actual production queue diff that removes/completes a craft, not only sample smoke drafts.",

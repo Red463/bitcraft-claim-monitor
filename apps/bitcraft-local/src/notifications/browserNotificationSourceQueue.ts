@@ -2,9 +2,11 @@ import type { AnyRecord } from "../main-app-data.ts";
 import {
   dealAlertQueueToastDrafts,
   marketActivityQueueToastDrafts,
+  productionActivityQueueToastDrafts,
   productionCraftQueueToastDrafts,
   type MarketActivityToastHelpers,
   type MarketActivityToastSnapshot,
+  type ProductionActivityToastSnapshot,
   type ProductionCraftQueueSnapshot,
   type ProductionCraftToastHelpers,
   type ToastNoticeDraft,
@@ -44,6 +46,7 @@ export type BrowserNotificationSourceHelpers = {
 
 export type BrowserNotificationSourceSnapshots = {
   activity: MarketActivityToastSnapshot | null;
+  productionActivity: ProductionActivityToastSnapshot | null;
   dealAlerts: { userKey: string; knownIds: Set<string> } | null;
   production: ProductionCraftQueueSnapshot | null;
 };
@@ -55,6 +58,7 @@ export type BrowserNotificationSourceDraftResult = {
 
 const emptySnapshots: BrowserNotificationSourceSnapshots = {
   activity: null,
+  productionActivity: null,
   dealAlerts: null,
   production: null,
 };
@@ -68,12 +72,18 @@ export function browserNotificationSourceDrafts(
   const drafts: ToastNoticeDraft[] = [];
 
   if (options.notificationActivity.refreshToken) {
-    const result = marketActivityQueueToastDrafts(snapshots.activity, options.claimId, options.notificationActivity.events, {
+    const marketResult = marketActivityQueueToastDrafts(snapshots.activity, options.claimId, options.notificationActivity.events, {
       marketListings: options.appToastSettings.marketListings && options.userToastSettings.marketListings,
       marketSales: options.appToastSettings.marketSales && options.userToastSettings.marketSales,
     }, helpers.activity);
-    snapshots.activity = result.snapshot;
-    drafts.push(...result.drafts);
+    snapshots.activity = marketResult.snapshot;
+    drafts.push(...marketResult.drafts);
+
+    const productionActivityResult = productionActivityQueueToastDrafts(snapshots.productionActivity, options.claimId, options.notificationActivity.events, {
+      production: options.appToastSettings.production && options.userToastSettings.production,
+    }, helpers.activity);
+    snapshots.productionActivity = productionActivityResult.snapshot;
+    drafts.push(...productionActivityResult.drafts);
   }
 
   if (options.dealAlerts.refreshToken) {

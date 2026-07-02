@@ -17,6 +17,7 @@ export type MarketActivityToastHelpers = {
 
 const marketSaleEventTypes = new Set(["market_sale", "market_sale_confirmed"]);
 const marketActivityEventTypes = new Set(["market_new_listing", ...marketSaleEventTypes]);
+const productionActivityEventTypes = new Set(["production_started", "production_completed"]);
 
 export function marketActivityToastDraft(
   event: AnyRecord,
@@ -66,6 +67,56 @@ export function marketActivityQueueToastDrafts(
     .filter((draft): draft is ToastNoticeDraft => draft != null);
   return { snapshot, drafts, seeded: false };
 }
+export type ProductionActivityToastSettings = {
+  production: boolean;
+};
+
+export type ProductionActivityToastSnapshot = {
+  claimId: string;
+  knownIds: Set<string>;
+};
+
+export function isProductionActivityToastEvent(event: AnyRecord): boolean {
+  return productionActivityEventTypes.has(String(event.event_type ?? event.eventType ?? ""));
+}
+
+export function productionActivityToastDraft(
+  event: AnyRecord,
+  settings: ProductionActivityToastSettings,
+  helpers: MarketActivityToastHelpers,
+): ToastNoticeDraft | null {
+  const eventType = String(event.event_type ?? event.eventType ?? "");
+  if (!isProductionActivityToastEvent(event)) return null;
+  if (!settings.production) return null;
+  return {
+    title: eventType === "production_started" ? "Craft started" : "Craft completed",
+    body: helpers.summary(event),
+    kind: "production",
+    occurredAt: event.occurred_at ?? event.occurredAt,
+    item: helpers.item(event),
+    sourceKey: helpers.key(event),
+  };
+}
+
+export function productionActivityQueueToastDrafts(
+  previous: ProductionActivityToastSnapshot | null,
+  claimId: string,
+  events: AnyRecord[],
+  settings: ProductionActivityToastSettings,
+  helpers: MarketActivityToastHelpers,
+  limit = 3,
+): { snapshot: ProductionActivityToastSnapshot; drafts: ToastNoticeDraft[]; seeded: boolean } {
+  const notableEvents = events.filter(isProductionActivityToastEvent);
+  const knownIds = previous?.claimId === claimId ? previous.knownIds : null;
+  const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => helpers.key(event), limit);
+  const snapshot = { claimId, knownIds: selection.knownIds };
+  if (selection.seeded) return { snapshot, drafts: [], seeded: true };
+  const drafts = selection.unseen
+    .map((event) => productionActivityToastDraft(event, settings, helpers))
+    .filter((draft): draft is ToastNoticeDraft => draft != null);
+  return { snapshot, drafts, seeded: false };
+}
+
 export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
   const discount = Math.round(toNumber(alert.discountPercent));
   const price = `${formatNumber(alert.unitPrice)}g`;
@@ -135,7 +186,7 @@ export function productionCraftToastDraft(
     body: `${helpers.displayName(job)} - ${job.buildingName ?? "Settlement production"}`,
     kind: "production",
     item: helpers.item(job),
-    sourceKey: `production-${status}:${claimId}:${jobId}`,
+    sourceKey: `production_${status === "started" ? "started" : "completed"}:${jobId}`,
   };
 }
 

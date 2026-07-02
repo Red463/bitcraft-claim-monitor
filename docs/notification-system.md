@@ -9,7 +9,7 @@ The browser UI currently creates these toast/drawer notifications:
 - Market listings from `/api/local/notification-activity` events with `event_type = market_new_listing`.
 - Market sales from `/api/local/notification-activity` events with `event_type = market_sale` or `market_sale_confirmed`.
 - Market deal alerts from `/api/local/market/deal-alerts` for the signed-in user.
-- Production started and completed notifications from the global craft queue diff in `src/notifications/useBrowserNotificationSources.ts`.
+- Production started and completed notifications from `/api/local/notification-activity` events with `event_type = production_started` or `production_completed`, with the global craft queue diff in `src/notifications/useBrowserNotificationSources.ts` retained as a fallback.
 
 Discord-only/admin diagnostics, low-supply alerts, app-update messages, supply reports, and character-link requests are server-side delivery paths. They are not currently surfaced as browser toast/drawer notifications unless a dedicated in-app source is added.
 
@@ -22,7 +22,7 @@ Notification behavior is intentionally split into rendering, pure notification l
 - `src/notifications/notificationSources.ts` turns market activity, deal alerts, and production craft events into toast drafts.
 - `src/notifications/verificationMatrix.ts` is the tested release-verification checklist for supported browser notification types, every routed main-app page, the intentional `/bot` exception, page-independent sample drafts, page-scoped sample drafts for every page/type combination, and the live-source checklist that separates smoke evidence from source verification requirements with dated `liveEvidence` records for verified live sources.
 - `src/notifications/browserSmoke.ts` provides loopback-only browser verification helpers, and `src/notifications/useBrowserNotificationSmoke.ts` wires the smoke event bridge plus `smokeNotification` query trigger into the mounted app so built local smoke checks can prove toast/drawer behavior for every supported type without depending on live BitJita timing or a signed-in account.
-- `src/notifications/browserNotificationSourceQueue.ts` owns the pure source-queue adapter for market activity rows, signed-in deal-alert rows, and production queue diffs; `src/notifications/useBrowserNotificationSources.ts` keeps that adapter mounted globally from AppShell.
+- `src/notifications/browserNotificationSourceQueue.ts` owns the pure source-queue adapter for market activity rows, production activity rows, signed-in deal-alert rows, and production queue diffs; `src/notifications/useBrowserNotificationSources.ts` keeps that adapter mounted globally from AppShell.
 - `src/notifications/useToastNotifications.ts` owns toast state, notification log state, source-key dedupe, auto-dismiss timers, read-state marking, and browser sound playback; `src/AppShell.tsx` owns route navigation from drawer items and calls notification-owned hooks.
 - `src/api/localHistory.ts` keeps market activity and deal-alert polling page-independent.
 - `src/notifications/userToastSettings.ts` owns browser toast defaults and persisted settings normalization before notification gating, account save, and account load.
@@ -32,7 +32,7 @@ This keeps notification trigger logic central to the mounted app shell rather th
 
 ## Replay And Deduplication
 
-On first load, activity and deal-alert sources seed their known source keys and do not replay old rows as fresh toasts. Blank activity `source_key` values fall back to the derived activity key instead of creating empty notification source keys. Production craft rows also use the first non-empty craft identity field before falling back to building/recipe identity, avoiding empty production notification keys. Deal-alert rows without a stable non-empty ID are ignored so malformed live rows cannot create `deal-alert:undefined` notifications. Later refreshes select only unseen rows, cap the batch, and display them in chronological display order.
+On first load, activity and deal-alert sources seed their known source keys and do not replay old rows as fresh toasts. Blank activity `source_key` values fall back to the derived activity key instead of creating empty notification source keys. Production activity rows use server source keys, and production craft-diff fallback rows use the same `production_started:<job>` / `production_completed:<job>` key shape. Craft fallback rows use the first non-empty craft identity field before falling back to building/recipe identity, avoiding empty production notification keys. Deal-alert rows without a stable non-empty ID are ignored so malformed live rows cannot create `deal-alert:undefined` notifications. Later refreshes select only unseen rows, cap the batch, and display them in chronological display order.
 
 Toast deduplication prefers `sourceKey` when present. Legacy notices without `sourceKey` dedupe by `kind`, `title`, and `body`.
 
@@ -43,7 +43,7 @@ Browser toast settings are controlled by app/admin settings and user settings:
 - Market listing toasts require both app-level and user-level listing notifications to be enabled.
 - Market sale toasts require both app-level and user-level sale notifications to be enabled.
 - Market deal-alert toasts use the broader market toast gate: at least one app-level market category and one user-level market category must be enabled. Disabled deal-alert rows still advance the known-ID baseline so they do not replay later.
-- Production toasts require both app-level and user-level production notifications to be enabled.
+- Production toasts from activity rows or craft-diff fallback require both app-level and user-level production notifications to be enabled.
 - Sounds are browser-only and are skipped when disabled or blocked by the browser. Persisted browser toast settings are normalized to boolean notification gates, known tone IDs, and a 0-1 volume range before preview, playback, account save, or account load.
 
 Deal-alert toasts are tied to the signed-in user's deal-alert feed and follow the browser market-toast gate rather than a separate persisted toggle.
@@ -71,7 +71,7 @@ Automated coverage exists for:
 - The tested release matrix in `src/notifications/verificationMatrix.ts` covers all routed `ActivePanel` pages, the five supported browser notification types, the current `/bot` exception, sample draft-to-toast/log creation for every supported type, unique page-scoped source keys for all 85 routed page/type combinations, one live-source checklist row per supported type, and dated evidence metadata for live-source checks marked verified.
 - The loopback-only smoke helpers in `src/notifications/browserSmoke.ts` are covered for host gating, supported-type parsing, unique source keys, and dispatch into normal toast notices; AppShell boundary tests keep smoke wiring delegated through `src/notifications/useBrowserNotificationSmoke.ts`, live source effects delegated through `src/notifications/useBrowserNotificationSources.ts`, and toast stack/log/timer state delegated through `src/notifications/useToastNotifications.ts`.
 
-Required release verification still includes live-source checks for production queue diffs and signed-in deal-alert feeds. `LIVE_SOURCE_NOTIFICATION_CHECKS` records those remaining source requirements beside the already-verified market activity source rows, verified rows carry dated `liveEvidence` references, `liveSourceNotificationChecksForStatus("required")` and `requiredLiveSourceNotificationTypeIds()` are the tested source of truth for the current blocker list, and `liveSourceNotificationVerificationComplete()` is the tested completion gate. Use [`notification-live-source-verification.md`](./notification-live-source-verification.md) for the manual/live verification procedure. The local smoke bridge proves the global toast/drawer UI path for every supported type on every routed main-app page; it does not by itself prove that live BitJita production changes or a real signed-in user deal-alert feed produced the source rows.
+Required release verification still includes live-source checks for production activity rows/craft queue diffs and signed-in deal-alert feeds. `LIVE_SOURCE_NOTIFICATION_CHECKS` records those remaining source requirements beside the already-verified market activity source rows, verified rows carry dated `liveEvidence` references, `liveSourceNotificationChecksForStatus("required")` and `requiredLiveSourceNotificationTypeIds()` are the tested source of truth for the current blocker list, and `liveSourceNotificationVerificationComplete()` is the tested completion gate. Use [`notification-live-source-verification.md`](./notification-live-source-verification.md) for the manual/live verification procedure. The local smoke bridge proves the global toast/drawer UI path for every supported type on every routed main-app page; it does not by itself prove that live BitJita production changes or a real signed-in user deal-alert feed produced the source rows.
 
 ## Browser Verification Matrix Progress
 
@@ -103,6 +103,6 @@ A later built-app smoke pass used the loopback-only `smokeNotification` query tr
 
 Still required before release completion:
 
-- Verify live-source production started/completed notifications from actual production queue diffs, not only sample smoke drafts.
+- Verify live-source production started/completed notifications from actual production activity rows or craft queue diffs, not only sample smoke drafts.
 - Verify live-source market deal alert notifications with a signed-in Discord-linked user, not only sample smoke drafts.
 - Browser sound Preview has been smoke-verified on representative Dashboard, Production, and Market pages with the real Preferences controls visible and no captured console errors; automated coverage also verifies disabled sound does not create browser audio and enabled sound schedules the selected generated tone at the configured volume.
