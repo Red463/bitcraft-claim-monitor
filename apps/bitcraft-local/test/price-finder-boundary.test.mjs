@@ -13,3 +13,10 @@ test("PriceFinder lives in a market-owned component module", () => {
   assert.match(priceFinder, /from "\.\.\/\.\.\/navigation"/);
   assert.match(priceFinder, /from "\.\.\/\.\.\/utils\/analytics"/);
 });
+test("PriceFinder keeps item-specific watch action but not the full watchlist manager", () => {
+  const priceFinder = readFileSync(new URL("../src/pages/market/PriceFinder.tsx", import.meta.url), "utf8");
+
+  assert.match(priceFinder, /Watch for deals/);
+  assert.doesNotMatch(priceFinder, /<section className="deal-watchlist-section">/);
+  assert.doesNotMatch(priceFinder, /No watched items yet\. Search an item/);
+});

@@ -76,6 +76,7 @@ import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTo
 import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "./market/listingUtils";
 import { PriceFinder } from "./market/PriceFinder";
 import { BuyOrderFinder } from "./market/BuyOrderFinder";
+import { DealWatchlist } from "./market/DealWatchlist";
 
 /*
  * Main application pages that still share a large amount of display logic.
@@ -160,7 +161,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
 }
 export function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
   const [q, setQ] = React.useState("");
-  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders">("market.view", "live");
+  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist">("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = usePersistedState("market.tier", "All");
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
@@ -170,10 +171,11 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
     if (requested === "buy-orders" || requested === "buyOrders") setView("buyOrders");
+    if (requested === "deal-watchlist" || requested === "dealWatchlist") setView("dealWatchlist");
   }, [setView]);
-  const selectView = (next: "live" | "analytics" | "pricing" | "buyOrders") => {
+  const selectView = (next: "live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist") => {
     setView(next);
-    updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next });
+    updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next === "dealWatchlist" ? "deal-watchlist" : next });
     trackAnalyticsEvent("market_tab_viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {
@@ -267,7 +269,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
       <header className="members-topbar market-topbar">
         <div>
           <h2>Market</h2>
-          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : view === "buyOrders" ? "Find active buy orders across regional markets" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
+          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : view === "buyOrders" ? "Find active buy orders across regional markets" : view === "dealWatchlist" ? "Manage watched market deals and alert thresholds" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -289,28 +291,31 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
       <section className="command-filter-panel market-command-panel">
         <div className="command-filter-header">
           <span className="command-filter-title"><CircleDollarSign size={15} /> Market tools</span>
-          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : "Browse settlement market data by view and member."}</span>
+          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : view === "dealWatchlist" ? "Manage deal alerts without running a price lookup first." : "Browse settlement market data by view and member."}</span>
         </div>
         <div className="market-tool-row">
           <div className="tabs primary-tabs market-tabs">
             <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
             <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
             <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
+            <button className={view === "dealWatchlist" ? "active" : ""} onClick={() => selectView("dealWatchlist")}><Bell size={15} /> Deal Watchlist</button>
             <button className={view === "buyOrders" ? "active" : ""} onClick={() => selectView("buyOrders")}><ShoppingBag size={15} /> Buy Order Finder</button>
           </div>
-          <label className={`market-member-field ${view === "pricing" || view === "buyOrders" ? "is-placeholder" : ""}`}>
+          <label className={`market-member-field ${view === "pricing" || view === "buyOrders" || view === "dealWatchlist" ? "is-placeholder" : ""}`}>
             <span>Member</span>
-            {view !== "pricing" && view !== "buyOrders" ? (
+            {view !== "pricing" && view !== "buyOrders" && view !== "dealWatchlist" ? (
               <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
                 <option>All</option>
                 {memberOptions.map((name) => <option key={name}>{name}</option>)}
               </select>
-            ) : <span className="market-member-placeholder">{view === "buyOrders" ? "All market buyers" : "All settlement history"}</span>}
+            ) : <span className="market-member-placeholder">{view === "buyOrders" ? "All market buyers" : view === "dealWatchlist" ? "Your watched deals" : "All settlement history"}</span>}
           </label>
         </div>
       </section>
       {view === "pricing" ? (
         <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
+      ) : view === "dealWatchlist" ? (
+        <DealWatchlist monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : view === "buyOrders" ? (
         <BuyOrderFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : view === "analytics" ? (

@@ -705,6 +705,27 @@
   font-size: var(--font-micro);
 }
 
+.deal-watchlist-page {
+  display: grid;
+  gap: 14px;
+}
+
+.deal-watch-add-card {
+  border: 1px solid rgba(154, 168, 190, .2);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(17, 24, 36, .95), rgba(7, 10, 15, .95));
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.deal-watch-add-controls {
+  align-items: end;
+}
+
+.deal-watch-add-threshold .unit-input {
+  min-width: 170px;
+}
 .deal-watchlist-section {
   border: 1px solid rgba(154, 168, 190, .2);
   border-radius: 10px;

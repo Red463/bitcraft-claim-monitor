@@ -1,12 +1,12 @@
 import React from "react";
-import { Activity, Bell, CheckCircle2, CircleDollarSign, Search, ShoppingBag, ShoppingCart, TrendingUp, X } from "lucide-react";
+import { Activity, Bell, CheckCircle2, CircleDollarSign, Search, ShoppingBag, ShoppingCart, TrendingUp } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { DataTable } from "../../components/main/DataTable";
-import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
+import { ItemIcon } from "../../components/main/ItemDisplay";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
-import { dateLabel, formatNumber, timeAgo } from "../../utils/format";
+import { dateLabel, formatNumber } from "../../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../../hooks/useActiveRegions";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { isMarketableItem } from "../../utils/items";
@@ -149,45 +149,6 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     }
   }
 
-  async function updateDealWatch(watch: AnyRecord, patch: AnyRecord) {
-    const id = String(watch.id ?? "");
-    if (!id) return;
-    setWatchBusy(id);
-    try {
-      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
-      refreshDealWatches();
-    } catch (error) {
-      setWatchState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
-    } finally {
-      setWatchBusy("");
-    }
-  }
-
-  async function deleteDealWatch(watch: AnyRecord) {
-    const id = String(watch.id ?? "");
-    if (!id) return;
-    setWatchBusy(id);
-    try {
-      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
-      refreshDealWatches();
-    } catch (error) {
-      setWatchState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
-    } finally {
-      setWatchBusy("");
-    }
-  }
-
-  function saveDealWatchThreshold(watch: AnyRecord, value: string) {
-    const thresholdPercent = Math.min(Math.max(Number(value) || toNumber(watch.thresholdPercent) || 30, 1), 95);
-    if (Math.abs(thresholdPercent - toNumber(watch.thresholdPercent)) < 0.01) return;
-    updateDealWatch(watch, { thresholdPercent });
-  }
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
     setQuery(String(item.name));
@@ -283,33 +244,6 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
             <MiniStat icon={<CheckCircle2 />} label="Price Confidence" value={confidence} />
           </div>
           <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
-          <section className="deal-watchlist-section">
-            <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
-            {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
-            {!authState.user ? (
-              <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><a className="toolbar-button" href={signInHref}>Sign in with Discord</a></div>
-            ) : dealWatches.length ? (
-              <div className="deal-watch-list">
-                {dealWatches.map((watch) => (
-                  <article className="deal-watch-row" key={String(watch.id)}>
-                    <ItemLabel item={{ ...watch, name: watch.itemName, tier: watch.tier, rarity: watch.rarity, iconAssetName: watch.iconAssetName }} name={String(watch.itemName ?? "Unknown item")} />
-                    <div className="deal-watch-meta">
-                      <span>R{watch.regionId}</span>
-                      <label className="deal-watch-threshold"><span>Alert at</span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>% below average</em></label>
-                      <span>Last checked {watch.lastCheckedAt ? timeAgo(watch.lastCheckedAt) : "not yet"}</span>
-                      <span>Last alert {watch.lastAlertAt ? timeAgo(watch.lastAlertAt) : "none"}</span>
-                    </div>
-                    <div className="deal-watch-actions">
-                      <button className="toolbar-button" type="button" disabled={watchBusy === String(watch.id)} onClick={() => updateDealWatch(watch, { enabled: !watch.enabled })}>{watch.enabled ? "Disable" : "Enable"}</button>
-                      <button className="toolbar-button danger" type="button" disabled={watchBusy === String(watch.id)} onClick={() => deleteDealWatch(watch)}><X size={14} /> Remove</button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="deal-watch-empty"><span>No watched items yet. Search an item and choose a single region, then click Watch for deals.</span></div>
-            )}
-          </section>
           <section>
             <h3><ShoppingBag size={17} /> Recent Trades <small>{formatNumber(stats.totalTrades)} total trades</small></h3>
             <DataTable rows={recentTrades.slice(0, 15)} columns={[

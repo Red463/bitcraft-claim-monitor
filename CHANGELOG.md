@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.15] - 2026-07-02
+
+### Added
+
+- Added a dedicated Deal Watchlist market tab so users can add, edit, enable, disable, and remove deal watches without first running a Price Finder search.
+
+### Changed
+
+- Kept Price Finder focused on item pricing while retaining the selected-item Watch for deals action.
+
 ## [0.31.1-beta.14] - 2026-07-02
 
 ### Added

@@ -11,8 +11,20 @@ test("Market page replaces the legacy MainPages bundle", () => {
   assert.match(marketPage, /export function Market\b/);
   assert.match(marketPage, /from "\.\/market\/PriceFinder"/);
   assert.match(marketPage, /from "\.\/market\/BuyOrderFinder"/);
+  assert.match(marketPage, /from "\.\/market\/DealWatchlist"/);
   assert.match(appShell, /from "\.\/pages\/MarketPage"/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
+});
+test("Market page exposes a dedicated deal watchlist tool tab", () => {
+  const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+  const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
+
+  assert.match(marketPage, /"dealWatchlist"/);
+  assert.match(marketPage, /deal-watchlist/);
+  assert.match(marketPage, /Deal Watchlist/);
+  assert.match(marketPage, /<DealWatchlist monitoredRegionId=\{String\(data\.claim\?\.regionId \?\? "19"\)\} \/>/);
+  assert.match(commandPalette, /deal-watchlist/);
+  assert.match(commandPalette, /Deal Watchlist/);
 });
 test("Market mini-stat values leave room for descenders", () => {
   const marketCss = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
