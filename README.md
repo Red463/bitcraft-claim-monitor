@@ -419,17 +419,8 @@ For a normal update after changes have been pushed to GitHub:
 
 ```bash
 cd /opt/bitcraft-claim-monitor
-sudo -u bitcraft git pull --ff-only
-sudo -u bitcraft corepack pnpm install --frozen-lockfile
-sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
-cp deploy/bitcraft-claim-monitor.service /etc/systemd/system/
-cp deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now bitcraft-claim-monitor-worker
-systemctl restart bitcraft-claim-monitor bitcraft-claim-monitor-worker
-systemctl status bitcraft-claim-monitor --no-pager -l
-systemctl status bitcraft-claim-monitor-worker --no-pager -l
-curl http://127.0.0.1:18430/api/local/health
+install -m 755 deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-monitor
+update-bitcraft-monitor
 ```
 
 The database directory is outside the Git checkout, so ordinary code updates do not erase accumulated market or activity history.

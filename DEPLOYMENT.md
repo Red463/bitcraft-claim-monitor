@@ -105,11 +105,12 @@ EOF
 chmod 600 /etc/bitcraft-claim-monitor.env
 ```
 
-Install the checked-in systemd services. The web service handles requests; the worker service handles polling, history imports, scheduled jobs, and Discord background work:
+Install the checked-in systemd services and update helper. The web service handles requests; the worker service handles polling, history imports, scheduled jobs, and Discord background work:
 
 ```bash
 cp /opt/bitcraft-claim-monitor/deploy/bitcraft-claim-monitor.service /etc/systemd/system/
 cp /opt/bitcraft-claim-monitor/deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
+install -m 755 /opt/bitcraft-claim-monitor/deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-monitor
 systemctl daemon-reload
 systemctl enable --now bitcraft-claim-monitor bitcraft-claim-monitor-worker
 systemctl status bitcraft-claim-monitor --no-pager -l
@@ -142,17 +143,11 @@ After new changes have been pushed to GitHub, run:
 
 ```bash
 cd /opt/bitcraft-claim-monitor
-sudo -u bitcraft git pull --ff-only
-sudo -u bitcraft corepack pnpm install --frozen-lockfile
-sudo -u bitcraft corepack pnpm --filter @workspace/bitcraft-local run build
-cp deploy/bitcraft-claim-monitor.service /etc/systemd/system/
-cp deploy/bitcraft-claim-monitor-worker.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now bitcraft-claim-monitor-worker
-systemctl restart bitcraft-claim-monitor bitcraft-claim-monitor-worker
-systemctl status bitcraft-claim-monitor --no-pager -l
-systemctl status bitcraft-claim-monitor-worker --no-pager -l
+install -m 755 deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-monitor
+update-bitcraft-monitor
 ```
+
+The helper repairs build-output ownership, syncs `main` to `origin/main`, prints the previous and current Git revisions, shows a diff summary when code changed, rebuilds the app, installs service files, waits for both systemd services to become active, and waits for `/api/local/health` to return before printing the health JSON.
 
 Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace history, admin configuration, uploaded branding or admin-created backups.
 

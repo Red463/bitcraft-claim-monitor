@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="${APP_DIR:-/opt/bitcraft-claim-monitor}"
+RUN_USER="${RUN_USER:-bitcraft}"
+WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor}"
+WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-worker}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18430/api/local/health}"
+PUBLIC_URL="${PUBLIC_URL:-https://app.timbersteeltrade.com}"
+
+log() {
+  printf "\n== %s ==\n" "$1"
+}
+
+run_as_app_user() {
+  sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && $*"
+}
+
+wait_for_service() {
+  local service="$1"
+  local label="$2"
+
+  printf "Waiting for %s to become active" "$label"
+  for _ in {1..30}; do
+    if systemctl is-active --quiet "$service"; then
+      printf " ok\n"
+      return 0
+    fi
+    printf "."
+    sleep 1
+  done
+
+  printf " failed\n"
+  systemctl status "$service" --no-pager -l || true
+  return 1
+}
+
+wait_for_health() {
+  local response
+
+  printf "Waiting for web health at %s" "$HEALTH_URL"
+  for _ in {1..30}; do
+    if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null)"; then
+      printf " ok\n"
+      printf "%s\n" "$response"
+      return 0
+    fi
+    printf "."
+    sleep 1
+  done
+
+  printf " failed\n"
+  curl -v --max-time 5 "$HEALTH_URL" || true
+  return 1
+}
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "Run this script as root so it can update systemd services."
+  exit 1
+fi
+
+cd "$APP_DIR"
+
+previous_revision="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || printf "unknown")"
+log "Stopping services"
+systemctl stop "$WEB_SERVICE" "$WORKER_SERVICE" || true
+
+log "Repairing build output ownership"
+if [[ -d "$APP_DIR/apps/bitcraft-local/dist" ]]; then
+  chown -R "$RUN_USER:$RUN_USER" "$APP_DIR/apps/bitcraft-local/dist"
+  chmod -R u+rwX "$APP_DIR/apps/bitcraft-local/dist"
+fi
+
+log "Pulling latest code"
+printf "Previous revision: %s\n" "$previous_revision"
+run_as_app_user "git fetch --prune origin main"
+run_as_app_user "git checkout -B main origin/main"
+current_revision="$(git -C "$APP_DIR" rev-parse --short HEAD)"
+printf "Current revision:  %s\n" "$current_revision"
+
+if [[ "$previous_revision" != "unknown" && "$previous_revision" != "$current_revision" ]]; then
+  git -C "$APP_DIR" diff --stat "$previous_revision..$current_revision"
+else
+  echo "No code changes detected."
+fi
+
+log "Installing dependencies"
+run_as_app_user "corepack pnpm install --frozen-lockfile"
+
+log "Building app"
+run_as_app_user "corepack pnpm --filter @workspace/bitcraft-local run build"
+
+log "Installing service files"
+cp "$APP_DIR/deploy/$WEB_SERVICE.service" /etc/systemd/system/
+cp "$APP_DIR/deploy/$WORKER_SERVICE.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" >/dev/null
+
+log "Starting services"
+systemctl start "$WEB_SERVICE"
+wait_for_service "$WEB_SERVICE" "web service"
+systemctl start "$WORKER_SERVICE"
+wait_for_service "$WORKER_SERVICE" "worker service"
+
+log "Health check"
+wait_for_health
+
+log "Public HTTP check"
+curl -fsSI --max-time 10 "$PUBLIC_URL" | sed -n '1,8p' || true
+
+log "Repo state"
+git -C "$APP_DIR" status -sb
+git -C "$APP_DIR" rev-parse --short HEAD
+node -p "require('$APP_DIR/apps/bitcraft-local/package.json').version"

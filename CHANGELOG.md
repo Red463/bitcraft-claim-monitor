@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.16] - 2026-07-02
+
+### Added
+
+- Added a tracked VPS update helper that repairs build output ownership, reports Git revision changes, waits for services, and prints health-check output during deployments.
+
+### Changed
+
+- Updated deployment documentation to install and use the tracked update helper for normal VPS updates.
+
 ## [0.31.1-beta.15] - 2026-07-02
 
 ### Added
