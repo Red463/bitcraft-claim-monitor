@@ -186,7 +186,7 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/claims") {
       const regionId = url.searchParams.get("regionId");
-      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", ownerName: "Tester", ownerEntityId: "player-1", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, updatedAt: "2026-05-22T12:00:00.000Z", empireEntityId: "empire-1" }, { entityId: "neutral-claim", name: "Neutral Claim", regionId: "19", treasury: 10 }], count: 2 });
+      if (regionId === "19") return json(res, { claims: [{ entityId: claimId, name: "Timbersteel Trade", regionId: "19", tier: 5, supplies: 500, treasury: 300, numTiles: 42, locationX: 100, locationZ: 210, updatedAt: "2026-05-22T12:00:00.000Z", empireEntityId: "empire-1" }, { entityId: "neutral-claim", name: "Neutral Claim", regionId: "19", treasury: 10 }], count: 2 });
       if (regionId === "3") return json(res, { claims: [{ entityId: seasonalClaimId, name: "Seasonal Market", regionId: "3", regionName: "Region 3", treasury: 100 }], count: 1 });
       return json(res, { claims: [], count: 0 });
     }

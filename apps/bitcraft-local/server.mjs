@@ -4004,6 +4004,45 @@ function normalizeEmpireClaim(claim) {
   };
 }
 
+function knownClaimOwnerName(claim) {
+  const ownerName = String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "").trim();
+  return ownerName && ownerName.toLowerCase() !== "unknown" ? ownerName : "";
+}
+
+function claimEntityId(claim) {
+  return String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
+}
+
+function mergeDefinedClaimFields(base, detail) {
+  return Object.fromEntries(Object.entries({ ...base, ...detail }).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function memberDisplayName(member) {
+  return String(member?.username ?? member?.userName ?? member?.playerName ?? member?.name ?? "").trim();
+}
+
+async function enrichRegionalClaimOwners(claims) {
+  return mapWithConcurrency(claims, 4, async (claim) => {
+    if (!empireIdFromClaim(claim) || knownClaimOwnerName(claim)) return claim;
+    const id = claimEntityId(claim);
+    if (!id) return claim;
+    try {
+      const detailPayload = await fetchCachedClaimDetail(id);
+      const detail = detailPayload?.claim ?? detailPayload ?? {};
+      const enriched = mergeDefinedClaimFields(claim, detail);
+      if (knownClaimOwnerName(enriched)) return enriched;
+      const ownerEntityId = String(enriched?.ownerEntityId ?? enriched?.ownerPlayerEntityId ?? enriched?.ownerId ?? "").trim().toLowerCase();
+      if (!ownerEntityId) return enriched;
+      const membersPayload = await fetchBitjita(`/claims/${encodeURIComponent(id)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch(() => ({ members: [] }));
+      const ownerMember = unwrap(membersPayload, "members", []).find((member) => memberLookupKeys(member).includes(ownerEntityId));
+      const ownerName = memberDisplayName(ownerMember);
+      return ownerName ? { ...enriched, ownerName } : enriched;
+    } catch {
+      return claim;
+    }
+  });
+}
+
 function normalizeEmpireOverviewRow(empire, regionalClaims) {
   const entityId = String(empire?.entityId ?? empire?.id ?? "").trim();
   const claims = regionalClaims.filter((claim) => empireIdFromClaim(claim) === entityId);
@@ -4036,7 +4075,7 @@ async function regionalEmpireOverview(regionId) {
       fetchRegionClaimList(regionId),
       fetchBitjita("/empires"),
     ]);
-    const claims = unwrap(claimPayload, "claims", []);
+    const claims = await enrichRegionalClaimOwners(unwrap(claimPayload, "claims", []));
     const regionalEmpireIds = new Set(claims.map(empireIdFromClaim).filter(Boolean));
     const allEmpires = Array.isArray(empirePayload) ? empirePayload : unwrap(empirePayload, "empires", []);
     const empires = allEmpires
