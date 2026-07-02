@@ -74,6 +74,9 @@ const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 
+function hasProductionPayload(raw: AnyRecord | null): boolean {
+  return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
+}
 
 /**
  * Main public application route.
@@ -359,7 +362,7 @@ function DashboardApp() {
     dealAlerts: dealAlertSource,
     productionCrafts: data.crafts,
     productionCraftCatalog: data.raw?.crafts ?? state.data?.crafts,
-    hasProductionData: Boolean(state.data),
+    hasProductionData: hasProductionPayload(state.data),
     pushToast,
   });
   React.useEffect(() => {

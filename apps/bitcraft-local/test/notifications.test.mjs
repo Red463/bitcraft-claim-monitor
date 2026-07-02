@@ -563,3 +563,54 @@ test("selectUnseenNotificationItems seeds known ids then returns newest unseen i
   assert.deepEqual(next.unseen.map((item) => item.id), ["new-2", "new-3"]);
   assert.deepEqual([...next.knownIds], ["old-1", "old-2", "new-3", "new-2", "new-1"]);
 });
+
+test("browserNotificationSourceDrafts preserves production snapshot when the current page has no craft payload", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const seeded = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [{ entityId: "old-craft", name: "Old Beam", buildingName: "Workshop" }],
+    hasProductionData: true,
+  }, helpers);
+
+  const noCraftPayloadPage = browserNotificationSourceDrafts(seeded.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  const refreshedProductionPage = browserNotificationSourceDrafts(noCraftPayloadPage.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 0, events: [] },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [
+      { entityId: "old-craft", name: "Old Beam", buildingName: "Workshop" },
+      { entityId: "new-craft", name: "New Beam", buildingName: "Workshop" },
+    ],
+    hasProductionData: true,
+  }, helpers);
+
+  assert.deepEqual(noCraftPayloadPage.drafts, []);
+  assert.deepEqual([...noCraftPayloadPage.snapshots.production.jobs.keys()], ["old-craft"]);
+  assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production-started:claim-1:new-craft"]);
+});

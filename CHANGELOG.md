@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.6] - 2026-07-02
+
+### Fixed
+
+- Fixed craft notifications so browsing pages without production craft data no longer clears the craft notification snapshot.
+
 ## [0.31.1-beta.5] - 2026-07-01
 
 ### Changed

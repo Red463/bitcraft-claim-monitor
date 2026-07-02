@@ -30,3 +30,9 @@ test("AppShell delegates toast state, timers, and persisted log to the notificat
   assert.match(appShell, /useToastNotifications\(\{ soundSettings: normalizedUserToastSettings \}\)/);
   assert.doesNotMatch(appShell, /appendNotificationLog|appendToastStack|createToastNotice|markNotificationsRead|toastTimersRef|notificationSourceKeysRef/);
 });
+test("AppShell only marks production notifications ready when the payload includes crafts", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(appShell, /hasProductionData:\s*Boolean\(state\.data\)/);
+  assert.match(appShell, /hasProductionData:\s*hasProductionPayload\(state\.data\)/);
+});
