@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.11] - 2026-07-02
+
+### Fixed
+
+- Fixed production in-app notifications so Discord-only minimum age filters no longer suppress app toasts.
+
 ## [0.31.1-beta.10] - 2026-07-02
 
 ### Fixed

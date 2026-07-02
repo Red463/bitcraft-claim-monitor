@@ -659,13 +659,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     }
     if (!startAlreadyNotified && hasProductionBaseline) {
       const summary = `Craft started: ${job.label}`;
+      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
       const skipReason = productionNotificationSkipReason("production_started", jobWithTiming);
       if (skipReason) {
         diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", jobWithTiming) });
-        continue;
+      } else {
+        pendingNotifications.push({ jobKey: job.key, sourceKey: `production_started:${job.key}`, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
       }
-      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
-      pendingNotifications.push({ jobKey: job.key, sourceKey: `production_started:${job.key}`, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
       statements.markProductionStartNotified.run(job.key);
     }
   }
@@ -693,13 +693,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       ...job,
     };
     const summary = `Craft completed: ${current.label}`;
+    statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
     const skipReason = productionNotificationSkipReason("production_completed", metadata);
     if (skipReason) {
       diagnostics.push({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
-      continue;
+    } else {
+      pendingNotifications.push({ jobKey: key, sourceKey: `production_completed:${key}`, eventType: "production_completed", summary, occurredAt, metadata });
     }
-    statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
-    pendingNotifications.push({ jobKey: key, sourceKey: `production_completed:${key}`, eventType: "production_completed", summary, occurredAt, metadata });
   }
   return { pendingNotifications, diagnostics };
 }

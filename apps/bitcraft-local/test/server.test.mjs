@@ -149,6 +149,7 @@ test("server collection paginates listings and protects production mutations", a
   let ipapiRequests = 0;
   let craftEntityRevision = 0;
   let craftOwnerUsername = "Tester";
+  let craftBuildingName = "Public Station";
   let failClaimRefresh = false;
   let failResearchRefresh = false;
   let failEmpireList = false;
@@ -338,12 +339,12 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === `/api/crafts`) return json(res, {
       craftResults: [
-        { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: "Public Station", ownerUsername: craftOwnerUsername, isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
+        { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: craftOwnerUsername, isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
       ],
       items: [{ id: "craft-item-1", name: "Public Output", tier: 2 }],
       cargos: [],
     });
-    if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions") {
+    if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions" || url.pathname === "/api/crafts/public-craft-3/contributions") {
       craftContributionRequests += 1;
       return json(res, { contributions: [{
         contributorEntityId: "player-1",
@@ -358,7 +359,7 @@ test("server collection paginates listings and protects production mutations", a
       playerCraftRequests += 1;
       return json(res, {
         craftResults: [
-          { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: "Public Station", ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
+          { entityId: `public-craft-${craftEntityRevision}`, claimEntityId: claimId, buildingName: craftBuildingName, ownerUsername: "Tester", isPublic: true, craftedItem: [{ item_id: "craft-item-1" }], totalActionsRequired: 100, progress: 20 + craftEntityRevision },
           { entityId: "private-craft", claimEntityId: claimId, buildingName: "Private Scholar Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-2" }], totalActionsRequired: 200, progress: 10 },
           { entityId: "foreign-private-craft", claimEntityId: "other-claim", buildingName: "Other Claim Station", ownerUsername: "Tester", isPublic: false, craftedItem: [{ item_id: "craft-item-3" }], totalActionsRequired: 300, progress: 10 },
         ],
@@ -1193,6 +1194,7 @@ test("server collection paginates listings and protects production mutations", a
   const thirdActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 2);
   assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started" && event.summary.includes("Public Output")).length, 1);
+
   const contributionLeaderboard = await fetch(`${origin}/api/local/leaderboard?claimId=${claimId}`).then((response) => response.json());
   assert.equal(contributionLeaderboard.summary.contributorCount, 1);
   assert.equal(contributionLeaderboard.summary.recordedCrafts, 3);
@@ -1210,6 +1212,32 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.storageEvents === 1), true);
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.totalEvents > 0), true);
   assert.equal(contributionLeaderboard.activity.summary.ignoredRows > 0, true);
+  const discordProductionAgeGateSettings = await fetch(`${origin}/api/local/admin/settings`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({
+      ...updatedConfig,
+      discord: {
+        ...updatedConfig.discord,
+        productionMinXp: 0,
+        productionMinAgeMinutes: 60,
+      },
+    }),
+  });
+  assert.equal(discordProductionAgeGateSettings.status, 200);
+  currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
+  craftEntityRevision = 3;
+  craftOwnerUsername = "Tester";
+  craftBuildingName = "Age Gate Station";
+  const ageGatedPoll = await fetch(`${origin}/api/local/admin/poll`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(ageGatedPoll.status, 200);
+  const ageGatedActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
+  assert.equal(ageGatedActivity.events.filter((event) => event.event_type === "production_started").length, 3);
+  assert.equal(ageGatedActivity.events.some((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3"), true);
 
   historicalTrades = [
     ...historicalTrades,
