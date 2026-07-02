@@ -117,3 +117,14 @@ test("App popup admin editor supports page targeting and expiry dates", () => {
   assert.match(popupsSection, /type="date"/);
   assert.match(popupsSection, /hasExpiry/);
 });
+test("Admin configuration exposes global in-app notification defaults", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /In-app notification defaults/);
+  assert.match(adminPanel, /updateToastSetting/);
+  assert.match(adminPanel, /New market listings/);
+  assert.match(adminPanel, /Confirmed market sales/);
+  assert.match(adminPanel, /Production starts and completions/);
+  assert.match(adminPanel, /"production"/);
+  assert.match(adminPanel, /draft\.toastSettings\[key\]/);
+});

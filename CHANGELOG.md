@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.14] - 2026-07-02
+
+### Added
+
+- Added admin controls for global in-app notification defaults.
+
+### Changed
+
+- User notification settings now show when a notification type is disabled by admin while preserving the user's saved preference.
+
 ## [0.31.1-beta.13] - 2026-07-02
 
 ### Fixed

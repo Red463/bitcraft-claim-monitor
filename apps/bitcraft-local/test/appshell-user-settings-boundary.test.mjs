@@ -46,4 +46,13 @@ test("approved Discord character links require unlink before relink", () => {
   assert.match(dialog, /Unlink character/);
   assert.match(dialog, /onLinkCharacter\(null\)/);
 });
+test("User settings show notification types disabled by admin without overwriting user preference", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
 
+  assert.match(appShell, /appToastSettings=\{appSettings\.toastSettings\}/);
+  assert.match(dialog, /appToastSettings/);
+  assert.match(dialog, /Disabled by admin/);
+  assert.match(dialog, /disabled=\{!appToastSettings\[key\]\}/);
+  assert.match(dialog, /checked=\{toastSettings\[key\]\}/);
+});

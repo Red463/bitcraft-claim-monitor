@@ -34,7 +34,7 @@ import {
   type ThemeRangeKey,
   type ThemeSettings,
 } from "../../theme";
-import type { UserAuthState, UserToastSettings } from "../../types/settings";
+import type { AppSettings, UserAuthState, UserToastSettings } from "../../types/settings";
 import { memberDisplayName } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
 
@@ -49,6 +49,7 @@ export type UserSettingsDialogProps = {
   density: "comfortable" | "compact";
   onDensityChange: (density: "comfortable" | "compact") => void;
   toastSettings: UserToastSettings;
+  appToastSettings: AppSettings["toastSettings"];
   onToastSettingsChange: (settings: UserToastSettings) => void;
   theme: ThemeSettings;
   onThemeChange: (theme: ThemeSettings) => void;
@@ -68,6 +69,7 @@ export function UserSettingsDialog({
   density,
   onDensityChange,
   toastSettings,
+  appToastSettings,
   onToastSettingsChange,
   theme,
   onThemeChange,
@@ -412,9 +414,15 @@ export function UserSettingsDialog({
           </section> : null}
           {settingsSection === "preferences" ? <section>
             <h3>Notifications</h3>
-            {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => (
-              <label className="toggle-row" key={key}><input type="checkbox" checked={toastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} /><span>{label}</span></label>
-            ))}
+            {([["marketListings", "New market listings"], ["marketSales", "Confirmed market sales"], ["production", "Production starts and completions"]] as const).map(([key, label]) => {
+              const disabledByAdmin = !appToastSettings[key];
+              return (
+                <label className={`toggle-row ${disabledByAdmin ? "is-disabled-by-admin" : ""}`} key={key}>
+                  <input type="checkbox" checked={toastSettings[key]} disabled={!appToastSettings[key]} onChange={(event) => onToastSettingsChange({ ...toastSettings, [key]: event.target.checked })} />
+                  <span>{label}{disabledByAdmin ? <small>Disabled by admin</small> : null}</span>
+                </label>
+              );
+            })}
           </section> : null}
           {settingsSection === "preferences" && auth.user ? <section>
             <h3>Discord Direct Messages</h3>

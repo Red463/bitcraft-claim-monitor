@@ -443,6 +443,13 @@ export function AdminPanel({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function updateToastSetting(key: keyof AppSettings["toastSettings"], value: boolean) {
+    setDraft((current) => ({
+      ...current,
+      toastSettings: { ...current.toastSettings, [key]: value },
+    }));
+  }
+
   function updateCollectorSetting(key: string, patch: Partial<AppSettings["collectorSettings"][string]>) {
     setDraft((current) => ({
       ...current,
@@ -1500,6 +1507,22 @@ export function AdminPanel({
                 <div className="unit-input"><input type="number" min={1} max={90} value={draft.visitorSecurity.geoipCacheDays} onChange={(event) => updateVisitorSecuritySetting({ geoipCacheDays: Number(event.target.value) })} /><em>days</em></div>
                 <small>How long third-party IP location lookups are cached locally.</small>
               </label>
+            </div>
+            <div className="form-card nested-card">
+              <h3><Bell size={17} /> In-app notification defaults</h3>
+              <p className="legend">Global switches for browser toast notifications. Users keep their own preferences, but disabled types are blocked until re-enabled here.</p>
+              <div className="notification-default-list">
+                {([
+                  ["marketListings", "New market listings", "Show toasts for newly tracked market listings."],
+                  ["marketSales", "Confirmed market sales", "Show toasts for confirmed market sale activity."],
+                  ["production", "Production starts and completions", "Show toasts for craft start and completion activity."],
+                ] as const).map(([key, label, detail]) => (
+                  <label className="toggle-line" key={key}>
+                    <input type="checkbox" checked={draft.toastSettings[key] !== false} onChange={(event) => updateToastSetting(key, event.target.checked)} />
+                    <span><strong>{label}</strong><small>{detail}</small></span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="form-card nested-card">
               <h3><MapPin size={17} /> GeoIP Location Source</h3>
