@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.12] - 2026-07-02
+
+### Fixed
+
+- Fixed fresh production notifications so recently recorded worker events can toast on the first browser notification refresh.
+
 ## [0.31.1-beta.11] - 2026-07-02
 
 ### Fixed

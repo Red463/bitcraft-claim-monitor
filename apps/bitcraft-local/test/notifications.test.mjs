@@ -421,6 +421,39 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
   ]);
 });
 
+test("browserNotificationSourceDrafts surfaces fresh production activity on the first fetch", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => event.source_key ?? `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const result = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: {
+      refreshToken: 1,
+      events: [
+        { id: 2, event_type: "production_started", summary: "Craft started: Fresh Starbulb Products", itemName: "Fresh Starbulb Products", occurred_at: new Date(Date.now() - 60_000).toISOString() },
+        { id: 1, event_type: "production_started", summary: "Craft started: Old Beam", itemName: "Old Beam", occurred_at: new Date(Date.now() - 60 * 60_000).toISOString() },
+      ],
+    },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: false,
+  }, helpers);
+
+  assert.deepEqual(result.drafts.map((draft) => draft.sourceKey), ["activity:2"]);
+  assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started"]);
+  assert.equal(result.drafts[0].kind, "production");
+});
 test("browserNotificationSourceDrafts queues production activity rows without current craft payload", () => {
   const helpers = {
     activity: {
