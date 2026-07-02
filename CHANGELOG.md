@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.19] - 2026-07-02
+
+### Added
+
+- Added Discord profession emoji support for craft notifications, including synced emoji discovery, automatic profession matching, and admin overrides.
+
+### Changed
+
+- Improved the VPS update helper so normal updates print compact progress, service readiness, health checks, and a final summary while writing full details to a timestamped log.
+
 ## [0.31.1-beta.18] - 2026-07-02
 
 ### Fixed

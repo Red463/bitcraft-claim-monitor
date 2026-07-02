@@ -10,3 +10,9 @@ test("Discord notification test endpoint returns and displays real sender result
   assert.match(server, /return send\(res, 200, \{ ok: true, result \}\)/);
   assert.match(admin, /setDiscordToolResults\(\(current\) => \(\{ \.\.\.current, tests: \{ \.\.\.result, __type: "botAction" \} \}\)\)/);
 });
+
+test("Discord discovery includes guild emoji metadata for profession matching", () => {
+  assert.match(server, /\/guilds\/\$\{encodeURIComponent\(guildId\)\}\/emojis/);
+  assert.match(server, /emojis: normalizedEmojis/);
+  assert.match(admin, /discoveredEmojis/);
+});

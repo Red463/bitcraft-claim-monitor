@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+const embeds = readFileSync(new URL("../src/server/discordEmbeds.mjs", import.meta.url), "utf8");
 
 test("youtube_video Discord events route to announcements with video embeds", () => {
   assert.match(server, /eventType === "youtube_video"/);
@@ -12,8 +13,8 @@ test("youtube_video Discord events route to announcements with video embeds", ()
   assert.match(server, /youtubeChannelSelection/);
   assert.match(server, /metadata\.discordChannelId/);
   assert.match(server, /discordChannelId: channel\.discord_channel_id/);
-  assert.match(server, /New YouTube Video/);
-  assert.match(server, /thumbnailUrl/);
+  assert.match(embeds, /New YouTube Video/);
+  assert.match(embeds, /thumbnailUrl/);
   assert.match(server, /recordDiscordDeliverySafe\(\{ status: "skipped"/);
 });
 

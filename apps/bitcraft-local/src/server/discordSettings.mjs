@@ -35,6 +35,8 @@ export const defaultCraftRoles = {
   hunting: "1511297640866906153",
 };
 
+export const defaultCraftEmojis = {};
+
 export const defaultDiscordChannels = {
   notifications: "",
   announcements: "",
@@ -79,8 +81,8 @@ export const defaultRolePanels = [
     mode: "single",
     showHelperText: true,
     options: [
-      { key: "citizen", label: "Citizen", roleId: "", emoji: "1️⃣" },
-      { key: "visitor", label: "Visitor", roleId: "", emoji: "2️⃣" },
+      { key: "citizen", label: "Citizen", roleId: "", emoji: "1Ã¯Â¸ÂÃ¢Æ’Â£" },
+      { key: "visitor", label: "Visitor", roleId: "", emoji: "2Ã¯Â¸ÂÃ¢Æ’Â£" },
     ],
   },
   {
@@ -143,6 +145,7 @@ export const defaultDiscordSettings = {
   notificationChannels: defaultNotificationChannels,
   craftChannels: defaultCraftChannels,
   craftRoles: defaultCraftRoles,
+  craftEmojis: defaultCraftEmojis,
   colourRolesChannelId: "",
   colourRolesMessageId: "",
   colourRoles: defaultColourRoles,
@@ -224,6 +227,12 @@ export function normalizeYouTubeMonitorSettings(value = {}) {
   };
 }
 
+function normalizeCraftEmojis(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([key, emoji]) => [String(key ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""), String(emoji ?? "").trim()])
+    .filter(([key, emoji]) => key && /^<a?:[A-Za-z0-9_]{2,32}:\d{17,22}>$/.test(emoji)));
+}
 function normalizeChannelMap(value = {}) {
   return Object.fromEntries(Object.entries({ ...defaultDiscordChannels, ...(value ?? {}) }).map(([key, channelId]) => [key, String(channelId ?? "").trim()]));
 }
@@ -253,6 +262,7 @@ export function normalizeDiscordSettings(value = {}) {
     notificationChannels: { ...defaultNotificationChannels, ...(value.notificationChannels ?? {}) },
     craftChannels: { ...defaultCraftChannels, ...(value.channels ?? {}), ...(value.craftChannels ?? {}) },
     craftRoles: { ...defaultCraftRoles, ...(value.craftRoles ?? {}) },
+    craftEmojis: normalizeCraftEmojis(value.craftEmojis ?? {}),
     colourRolesChannelId: String(value.colourRolesChannelId ?? "").trim(),
     colourRolesMessageId: String(value.colourRolesMessageId ?? "").trim(),
     colourRoles: colourRoleSource.map((item, index) => {

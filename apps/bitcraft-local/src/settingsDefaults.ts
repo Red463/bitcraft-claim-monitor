@@ -53,6 +53,8 @@ export const DEFAULT_CRAFT_ROLES: Record<string, string> = {
   hunting: "1511297640866906153",
 };
 
+export const DEFAULT_CRAFT_EMOJIS: Record<string, string> = {};
+
 export const DEFAULT_NOTIFICATION_CHANNELS: Record<string, string> = {
   // "profession" is a routing sentinel handled by the server: craft
   // notifications are posted to the configured channel for that profession.
@@ -190,6 +192,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     notificationChannels: DEFAULT_NOTIFICATION_CHANNELS,
     craftChannels: DEFAULT_CRAFT_CHANNELS,
     craftRoles: DEFAULT_CRAFT_ROLES,
+    craftEmojis: DEFAULT_CRAFT_EMOJIS,
     colourRolesChannelId: "",
     colourRolesMessageId: "",
     colourRoles: DEFAULT_COLOUR_ROLES,

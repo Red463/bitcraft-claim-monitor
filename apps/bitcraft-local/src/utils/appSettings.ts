@@ -2,6 +2,7 @@ import {
   DEFAULT_COLLECTOR_SETTINGS,
   DEFAULT_COLOUR_ROLES,
   DEFAULT_CRAFT_CHANNELS,
+  DEFAULT_CRAFT_EMOJIS,
   DEFAULT_CRAFT_ROLES,
   DEFAULT_DISCORD_CHANNELS,
   DEFAULT_DISCORD_PRESENCE,
@@ -99,6 +100,12 @@ export function normalizeDiscordPresence(value: AnyRecord = {}): DiscordPresence
   };
 }
 
+function normalizeCraftEmojiMap(value: AnyRecord | undefined): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([key, emoji]) => [String(key ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""), String(emoji ?? "").trim()])
+    .filter(([key, emoji]) => key && /^<a?:[A-Za-z0-9_]{2,32}:\d{17,22}>$/.test(emoji)));
+}
 export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | null | undefined): AppSettings {
   // Keep this tolerant of missing/narrow legacy shapes: self-hosted installs can
   // jump across many beta versions, and invalid settings should fall back to a
@@ -159,6 +166,7 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
       youtube: { enabled: (config as AnyRecord)?.discord?.youtube?.enabled !== false, pollIntervalMinutes: Math.min(Math.max(toNumber((config as AnyRecord)?.discord?.youtube?.pollIntervalMinutes) || DEFAULT_SETTINGS.discord.youtube.pollIntervalMinutes, 1), 1440) },
       craftChannels: { ...DEFAULT_CRAFT_CHANNELS, ...((config as AnyRecord)?.discord?.channels ?? {}), ...((config as AnyRecord)?.discord?.craftChannels ?? {}) },
       craftRoles: { ...DEFAULT_CRAFT_ROLES, ...((config as AnyRecord)?.discord?.craftRoles ?? {}) },
+      craftEmojis: { ...DEFAULT_CRAFT_EMOJIS, ...normalizeCraftEmojiMap((config as AnyRecord)?.discord?.craftEmojis) },
       colourRolesChannelId: String((config as AnyRecord)?.discord?.colourRolesChannelId ?? ""),
       colourRolesMessageId: String((config as AnyRecord)?.discord?.colourRolesMessageId ?? ""),
       colourRoles: (savedColourRoles ?? DEFAULT_COLOUR_ROLES).map((entry: AnyRecord, index: number) => normalizeColourRoleDefinition(entry, DEFAULT_COLOUR_ROLES[index])),

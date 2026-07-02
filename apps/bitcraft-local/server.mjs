@@ -25,6 +25,7 @@ import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, nor
 import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
+import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
@@ -2283,7 +2284,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
     return { ok: true, skipped: true, reason, channelKey: "dm" };
   }
   const payload = {
-    embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
+    embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata, settings)],
     allowed_mentions: { parse: [] },
   };
   const responses = [];
@@ -2324,7 +2325,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
       content: role?.mention,
-      embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata)],
+      embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata, settings)],
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
     }, settings, channelId);
@@ -2389,61 +2390,8 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
     discordNotificationOutboxRunning = false;
   }
 }
-function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}) {
-  const tierColors = {
-    1: 0x838e9e,
-    2: 0xbe6327,
-    3: 0x00f630,
-    4: 0x2d6bff,
-    5: 0xa349af,
-    6: 0xd12234,
-    7: 0xc09015,
-    8: 0x5ae2e2,
-    9: 0x1f1f1f,
-    10: 0xdeffff,
-  };
-  const isProduction = eventType === "production_started" || eventType === "production_completed";
-  const tier = isProduction ? toNumber(metadata.tier ?? metadata.itemTier) : 0;
-  const color = eventType.includes("sale") ? 0x4ee28a : eventType.includes("listing") ? 0xf0c64f : isProduction && tierColors[tier] ? tierColors[tier] : isProduction ? 0x65b7fa : eventType === "app_update" ? 0xa349af : eventType === "youtube_video" ? 0xff0033 : 0xef6461;
-  const fields = [];
-  if (metadata.itemName) fields.push({ name: "Item", value: String(metadata.itemName), inline: true });
-  if (metadata.owner) fields.push({ name: "Member", value: String(metadata.owner), inline: true });
-  if (toNumber(metadata.quantity)) fields.push({ name: "Quantity", value: toNumber(metadata.quantity).toLocaleString(), inline: true });
-  if (toNumber(metadata.price)) fields.push({ name: "Unit price", value: formatGold(metadata.price), inline: true });
-  if (toNumber(metadata.totalValue ?? metadata.totalPrice)) fields.push({ name: "Total", value: formatGold(metadata.totalValue ?? metadata.totalPrice), inline: true });
-  if (metadata.buildingName) fields.push({ name: "Structure", value: String(metadata.buildingName), inline: true });
-  if (metadata.crafterName) fields.push({ name: "Crafter", value: String(metadata.crafterName), inline: true });
-  if (metadata.skillName) fields.push({ name: "Profession", value: String(metadata.skillName), inline: true });
-  if (isProduction && tier) fields.push({ name: "Tier", value: `T${tier}`, inline: true });
-  if (toNumber(metadata.totalXp)) fields.push({ name: "Total XP", value: toNumber(metadata.totalXp).toLocaleString(), inline: true });
-  if (toNumber(metadata.progressPct)) fields.push({ name: "Progress", value: `${toNumber(metadata.progressPct).toFixed(1)}%`, inline: true });
-  if (metadata.runway) fields.push({ name: "Runway", value: String(metadata.runway), inline: true });
-  if (metadata.upkeep) fields.push({ name: "Upkeep", value: String(metadata.upkeep), inline: true });
-  if (metadata.runsOutAt) fields.push({ name: "Runs out", value: new Date(metadata.runsOutAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: false });
-  if (metadata.version) fields.push({ name: "Version", value: String(metadata.version), inline: true });
-  if (metadata.changeNotes) fields.push({ name: "Changes", value: String(metadata.changeNotes).slice(0, 1024), inline: false });
-  if (metadata.changelogUrl) fields.push({ name: "Changelog", value: `[View changes](${metadata.changelogUrl})`, inline: false });
-  if (metadata.channelTitle) fields.push({ name: "Channel", value: String(metadata.channelTitle), inline: true });
-  if (metadata.publishedAt) fields.push({ name: "Published", value: new Date(metadata.publishedAt).toLocaleString("en-GB", { timeZone: "Europe/London" }), inline: true });
-  const title = eventType === "market_new_listing" ? "Market Listing"
-    : eventType.includes("sale") ? "Market Sale"
-    : eventType === "production_started" ? "Craft Started"
-    : eventType === "production_completed" ? "Craft Completed"
-    : eventType === "supplies" ? "Supply Watch"
-    : eventType === "app_update" ? "App Update"
-    : eventType === "youtube_video" ? "New YouTube Video"
-    : "Settlement Update";
-  return {
-    author: { name: "Timbersteel Trade" },
-    title,
-    url: metadata.url ?? metadata.changelogUrl,
-    description: `**${summary}**`,
-    color,
-    fields: fields.slice(0, 8),
-    timestamp: occurredAt,
-    footer: { text: "BitCraft settlement monitor" },
-    ...(metadata.thumbnailUrl ? { thumbnail: { url: String(metadata.thumbnailUrl) } } : {}),
-  };
+function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+  return buildDiscordEmbedForActivity(eventType, summary, occurredAt, metadata, settings);
 }
 
 function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
@@ -2511,16 +2459,16 @@ async function resolvedColourRoles(settings = getDiscordSettingsRaw()) {
 function discordColourButtonEmoji(role) {
   const label = String(role?.label ?? "").toLowerCase();
   const color = toNumber(role?.color);
-  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return "🟢";
-  if (label.includes("blue") || color === 0x5fa8ff || color === 0x244cff) return "🔵";
-  if (label.includes("purple") || color === 0x9b4acb) return "🟣";
-  if (label.includes("pink") || color === 0xff4f88) return "🌸";
-  if (label.includes("red") || color === 0xff2028) return "🔴";
-  if (label.includes("yellow") || color === 0xf4c430) return "🟡";
-  if (label.includes("orange") || color === 0xff9f1c) return "🟠";
-  if (label.includes("black") || color === 0x111111) return "⚫";
-  if (label.includes("white") || color === 0xf4f4f4) return "⚪";
-  return "🎨";
+  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¢";
+  if (label.includes("blue") || color === 0x5fa8ff || color === 0x244cff) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Âµ";
+  if (label.includes("purple") || color === 0x9b4acb) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â£";
+  if (label.includes("pink") || color === 0xff4f88) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â¸";
+  if (label.includes("red") || color === 0xff2028) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â´";
+  if (label.includes("yellow") || color === 0xf4c430) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¡";
+  if (label.includes("orange") || color === 0xff9f1c) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â ";
+  if (label.includes("black") || color === 0x111111) return "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â«";
+  if (label.includes("white") || color === 0xf4f4f4) return "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Âª";
+  return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨";
 }
 async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   const channelId = String(settings.colourRolesChannelId || settings.channels?.notifications || settings.channelId || "").trim();
@@ -2749,10 +2697,11 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
   const guildId = String(settings.guildId);
   const botUser = await discordApiRequest("/users/@me", {}, settings);
   const botUserId = String(botUser?.id ?? "");
-  const [guild, channels, roles, botMember] = await Promise.all([
+  const [guild, channels, roles, emojis, botMember] = await Promise.all([
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}`, {}, settings),
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/channels`, {}, settings),
     discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/roles`, {}, settings),
+    discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/emojis`, {}, settings).catch(() => []),
     botUserId ? discordApiRequest(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`, {}, settings).catch(() => null) : null,
   ]);
   const sortedChannels = (Array.isArray(channels) ? channels : [])
@@ -2820,11 +2769,29 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
         manageabilityReason: botCanManage ? "Bot can manage" : managed ? "Managed by integration" : botHighestRolePosition ? "Move bot role above this role" : "Bot role not found",
       };
     });
+  const normalizedEmojis = (Array.isArray(emojis) ? emojis : [])
+    .map((emoji) => {
+      const id = String(emoji.id ?? "");
+      const name = String(emoji.name ?? "").trim();
+      if (!id || !name) return null;
+      const animated = Boolean(emoji.animated);
+      return {
+        id,
+        name,
+        animated,
+        available: emoji.available !== false,
+        mention: `<${animated ? "a" : ""}:${name}:${id}>`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
   return {
     guild: { id: guildId, name: String(guild?.name ?? guildId) },
     bot: { id: botUserId, username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
     channels: sortedChannels,
     roles: normalizedRoles,
+    emojis: normalizedEmojis,
     members: members.slice(0, 1000),
     memberCount: memberCountAvailable ? members.length : null,
     memberCountAvailable,
@@ -7725,7 +7692,7 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/discord/discovery") {
         const discovery = await discordGuildDiscovery();
-        audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, members: discovery.memberCount });
+        audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, emojis: discovery.emojis.length, members: discovery.memberCount });
         return send(res, 200, discovery);
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {

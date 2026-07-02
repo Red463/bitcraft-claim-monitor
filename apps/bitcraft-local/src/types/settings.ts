@@ -51,6 +51,7 @@ export type DiscordSettings = {
   notificationChannels: Record<string, string>;
   craftChannels: Record<string, string>;
   craftRoles: Record<string, string>;
+  craftEmojis: Record<string, string>;
   colourRolesChannelId: string;
   colourRolesMessageId: string;
   colourRoles: ColourRoleDefinition[];

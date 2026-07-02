@@ -7,23 +7,100 @@ WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor}"
 WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-worker}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18430/api/local/health}"
 PUBLIC_URL="${PUBLIC_URL:-https://app.timbersteeltrade.com}"
+LOG_FILE="${LOG_FILE:-/tmp/bitcraft-claim-monitor-update-$(date +%Y%m%d-%H%M%S).log}"
+VERBOSE=0
+SKIP_PUBLIC_CHECK=0
+HEALTH_SUMMARY="not checked"
+PUBLIC_SUMMARY="skipped"
+
+usage() {
+  cat <<USAGE
+Usage: update-bitcraft-monitor [--verbose] [--no-public-check]
+
+  --verbose          Show full install/build command output while also logging it.
+  --no-public-check  Skip the public HTTPS check after local health passes.
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --verbose) VERBOSE=1 ;;
+    --no-public-check) SKIP_PUBLIC_CHECK=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $arg"; usage; exit 2 ;;
+  esac
+done
 
 log() {
   printf "\n== %s ==\n" "$1"
 }
 
-run_as_app_user() {
-  sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && $*"
+log_detail() {
+  printf "%s\n" "$*" >>"$LOG_FILE"
+}
+
+print_log_tail() {
+  if [[ -f "$LOG_FILE" ]]; then
+    printf "\nLast log lines from %s:\n" "$LOG_FILE"
+    tail -n 80 "$LOG_FILE" || true
+  fi
+}
+
+run_logged() {
+  local label="$1"
+  shift
+
+  log "$label"
+  log_detail "== $label =="
+  log_detail "+ $*"
+  set +e
+  if [[ "$VERBOSE" == "1" ]]; then
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+  else
+    "$@" >>"$LOG_FILE" 2>&1
+  fi
+  local status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf "%s ok\n" "$label"
+    return 0
+  fi
+
+  printf "%s failed (exit %s)\n" "$label" "$status"
+  print_log_tail
+  return "$status"
+}
+
+service_summary() {
+  local service="$1"
+  local label="$2"
+  local state pid active_since
+
+  state="$(systemctl show "$service" --property=ActiveState --value 2>/dev/null || printf "unknown")"
+  pid="$(systemctl show "$service" --property=MainPID --value 2>/dev/null || printf "0")"
+  active_since="$(systemctl show "$service" --property=ActiveEnterTimestamp --value 2>/dev/null || printf "")"
+  printf "%s: %s pid=%s" "$label" "$state" "$pid"
+  if [[ -n "$active_since" ]]; then
+    printf " since=%s" "$active_since"
+  fi
+  printf "\n"
+}
+
+service_journal_tail() {
+  local service="$1"
+  printf "\nRecent journal for %s:\n" "$service"
+  journalctl -u "$service" -n 80 --no-pager -l || true
 }
 
 wait_for_service() {
   local service="$1"
   local label="$2"
 
-  printf "Waiting for %s to become active" "$label"
+  printf "Waiting for %s" "$label"
   for _ in {1..30}; do
     if systemctl is-active --quiet "$service"; then
       printf " ok\n"
+      service_summary "$service" "$label"
       return 0
     fi
     printf "."
@@ -31,8 +108,23 @@ wait_for_service() {
   done
 
   printf " failed\n"
-  systemctl status "$service" --no-pager -l || true
+  service_summary "$service" "$label" || true
+  service_journal_tail "$service"
   return 1
+}
+
+health_summary() {
+  node -e '
+const payload = process.argv[1] || "{}";
+try {
+  const data = JSON.parse(payload);
+  const polling = data.polling || {};
+  const version = data.version || data.appVersion || data.release?.version || "unknown";
+  console.log(`Health: ok=${data.ok === true}, polling enabled=${polling.enabled === true}, version=${version}`);
+} catch {
+  console.log("Health: response was not JSON");
+}
+' "$1"
 }
 
 wait_for_health() {
@@ -40,9 +132,11 @@ wait_for_health() {
 
   printf "Waiting for web health at %s" "$HEALTH_URL"
   for _ in {1..30}; do
-    if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null)"; then
+    if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>>"$LOG_FILE")"; then
       printf " ok\n"
-      printf "%s\n" "$response"
+      HEALTH_SUMMARY="$(health_summary "$response")"
+      printf "%s\n" "$HEALTH_SUMMARY"
+      log_detail "Health response: $response"
       return 0
     fi
     printf "."
@@ -50,8 +144,27 @@ wait_for_health() {
   done
 
   printf " failed\n"
-  curl -v --max-time 5 "$HEALTH_URL" || true
+  curl -v --max-time 5 "$HEALTH_URL" >>"$LOG_FILE" 2>&1 || true
+  print_log_tail
   return 1
+}
+
+public_http_check() {
+  local status final_url
+  if [[ "$SKIP_PUBLIC_CHECK" == "1" ]]; then
+    PUBLIC_SUMMARY="Public: skipped (--no-public-check)"
+    printf "%s\n" "$PUBLIC_SUMMARY"
+    return 0
+  fi
+
+  status="$(curl -fsSIL --max-time 10 -o /dev/null -w "%{http_code}" "$PUBLIC_URL" 2>>"$LOG_FILE" || true)"
+  final_url="$(curl -fsSIL --max-time 10 -o /dev/null -w "%{url_effective}" "$PUBLIC_URL" 2>>"$LOG_FILE" || printf "%s" "$PUBLIC_URL")"
+  if [[ "$status" =~ ^[23] ]]; then
+    PUBLIC_SUMMARY="Public: ok status=$status url=$final_url"
+  else
+    PUBLIC_SUMMARY="Public: check failed status=${status:-none} url=$final_url"
+  fi
+  printf "%s\n" "$PUBLIC_SUMMARY"
 }
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -59,22 +172,28 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   exit 1
 fi
 
+: >"$LOG_FILE"
+printf "Full log: $LOG_FILE\n"
 cd "$APP_DIR"
 
 previous_revision="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || printf "unknown")"
 log "Stopping services"
-systemctl stop "$WEB_SERVICE" "$WORKER_SERVICE" || true
+systemctl stop "$WEB_SERVICE" "$WORKER_SERVICE" >>"$LOG_FILE" 2>&1 || true
+printf "Services stopped ok\n"
 
 log "Repairing build output ownership"
 if [[ -d "$APP_DIR/apps/bitcraft-local/dist" ]]; then
   chown -R "$RUN_USER:$RUN_USER" "$APP_DIR/apps/bitcraft-local/dist"
   chmod -R u+rwX "$APP_DIR/apps/bitcraft-local/dist"
+  printf "Build output ownership ok\n"
+else
+  printf "Build output ownership skipped; dist not present\n"
 fi
 
 log "Pulling latest code"
 printf "Previous revision: %s\n" "$previous_revision"
-run_as_app_user "git fetch --prune origin main"
-run_as_app_user "git checkout -B main origin/main"
+run_logged "Fetching latest code" sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && git fetch --prune origin main"
+run_logged "Checking out origin/main" sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && git checkout -B main origin/main"
 current_revision="$(git -C "$APP_DIR" rev-parse --short HEAD)"
 printf "Current revision:  %s\n" "$current_revision"
 
@@ -84,17 +203,19 @@ else
   echo "No code changes detected."
 fi
 
-log "Installing dependencies"
-run_as_app_user "corepack pnpm install --frozen-lockfile"
+run_logged "Installing dependencies" sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && corepack pnpm install --frozen-lockfile"
 
-log "Building app"
-run_as_app_user "corepack pnpm --filter @workspace/bitcraft-local run build"
+BUILD_STARTED=$(date +%s)
+run_logged "Building app" sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && corepack pnpm --filter @workspace/bitcraft-local run build"
+BUILD_SECONDS=$(( $(date +%s) - BUILD_STARTED ))
+printf "Build completed in %ss\n" "$BUILD_SECONDS"
 
 log "Installing service files"
 cp "$APP_DIR/deploy/$WEB_SERVICE.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/$WORKER_SERVICE.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" >/dev/null
+systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" >>"$LOG_FILE" 2>&1
+printf "Service files installed ok\n"
 
 log "Starting services"
 systemctl start "$WEB_SERVICE"
@@ -106,9 +227,16 @@ log "Health check"
 wait_for_health
 
 log "Public HTTP check"
-curl -fsSI --max-time 10 "$PUBLIC_URL" | sed -n '1,8p' || true
+public_http_check
 
-log "Repo state"
-git -C "$APP_DIR" status -sb
-git -C "$APP_DIR" rev-parse --short HEAD
-node -p "require('$APP_DIR/apps/bitcraft-local/package.json').version"
+app_version="$(node -p "require('$APP_DIR/apps/bitcraft-local/package.json').version")"
+repo_state="$(git -C "$APP_DIR" status -sb)"
+
+log "Summary"
+printf "Updated from %s to %s\n" "$previous_revision" "$current_revision"
+printf "Version: %s\n" "$app_version"
+printf "%s\n" "$HEALTH_SUMMARY"
+printf "%s\n" "$PUBLIC_SUMMARY"
+printf "Repo: %s\n" "$repo_state"
+printf "Log: %s\n" "$LOG_FILE"
+printf "Next: open $PUBLIC_URL\n"

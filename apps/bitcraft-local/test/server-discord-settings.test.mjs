@@ -106,3 +106,24 @@ test("discord settings keep market sale delivery mode explicit and disable listi
   assert.equal(normalizeDiscordSettings({ marketSalesDelivery: "invalid" }).marketSalesDelivery, "channel");
   assert.equal(normalizeDiscordSettings({ notify: { marketListings: true } }).notify.marketListings, false);
 });
+
+test("discord settings normalize craft profession emoji overrides", () => {
+  const settings = normalizeDiscordSettings({
+    craftChannels: { carpentry: "custom-channel" },
+    craftRoles: { carpentry: "custom-role" },
+    craftEmojis: {
+      carpentry: " <:carpentry:123456789012345678> ",
+      smithing: "<a:smithing:223456789012345678>",
+      mining: ":mining:",
+      farming: "<:bad name:323456789012345678>",
+      foraging: "",
+    },
+  });
+
+  assert.equal(settings.craftChannels.carpentry, "custom-channel");
+  assert.equal(settings.craftRoles.carpentry, "custom-role");
+  assert.deepEqual(settings.craftEmojis, {
+    carpentry: "<:carpentry:123456789012345678>",
+    smithing: "<a:smithing:223456789012345678>",
+  });
+});

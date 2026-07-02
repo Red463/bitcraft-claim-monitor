@@ -18,3 +18,7 @@ test("Discord notification tests use the same sender gate as real notifications"
   assert.match(server, /sendDiscordActivity\(sample\.eventType/);
   assert.doesNotMatch(server, /sendDiscordMessage\(\{\s*embeds: \[discordEmbedForActivity\(sample\.eventType/);
 });
+
+test("Discord craft notifications pass settings into embed rendering for profession emojis", () => {
+  assert.match(server, /discordEmbedForActivity\(eventType, summary, occurredAt, metadata, settings\)/);
+});

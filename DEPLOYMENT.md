@@ -147,7 +147,7 @@ install -m 755 deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-mon
 update-bitcraft-monitor
 ```
 
-The helper repairs build-output ownership, syncs `main` to `origin/main`, prints the previous and current Git revisions, shows a diff summary when code changed, rebuilds the app, installs service files, waits for both systemd services to become active, and waits for `/api/local/health` to return before printing the health JSON.
+The helper repairs build-output ownership, syncs `main` to `origin/main`, rebuilds the app, installs service files, waits for both systemd services to become active, and waits for `/api/local/health`. Successful runs now print a compact success summary with revisions, version, service readiness, local health, and public URL status; full command output is written to `/tmp/bitcraft-claim-monitor-update-*.log`. Use `update-bitcraft-monitor --verbose` to stream the detailed install/build output while logging it, or `update-bitcraft-monitor --no-public-check` when public DNS or Caddy is intentionally unavailable.
 
 Persistent application data is stored at `/var/lib/bitcraft-claim-monitor`, so updating application code does not replace history, admin configuration, uploaded branding or admin-created backups.
 

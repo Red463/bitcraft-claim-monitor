@@ -128,6 +128,18 @@ type AdminTabGroup = {
   tabs: AdminTabMeta[];
 };
 
+function normalizeDiscordEmojiName(value: string) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function autoMatchCraftEmojis(craftRoleKeys: readonly string[], discoveredEmojis: AnyRecord[] = []): Record<string, string> {
+  return Object.fromEntries(craftRoleKeys.map((key) => {
+    const match = discoveredEmojis.find((emoji) => normalizeDiscordEmojiName(String(emoji.name ?? "")) === key && String(emoji.mention ?? "").trim());
+    return match ? [key, String(match.mention).trim()] : null;
+  }).filter(Boolean) as [string, string][]);
+}
+
+
 const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   {
     label: "Operations",
@@ -363,7 +375,18 @@ export function AdminPanel({
   }
 
   async function refreshDiscordDiscovery() {
-    setDiscordDiscovery(await api("/admin/discord/discovery"));
+    const discovery = await api("/admin/discord/discovery");
+    setDiscordDiscovery(discovery);
+    const matchedCraftEmojis = autoMatchCraftEmojis(Object.keys(DEFAULT_CRAFT_ROLES), discovery.emojis ?? []);
+    if (Object.keys(matchedCraftEmojis).length) {
+      setDraft((current) => ({
+        ...current,
+        discord: {
+          ...current.discord,
+          craftEmojis: { ...matchedCraftEmojis, ...(current.discord.craftEmojis ?? {}) },
+        },
+      }));
+    }
   }
 
   async function refreshCustomCommands() {
@@ -513,6 +536,10 @@ export function AdminPanel({
 
   function updateDiscordRole(key: string, value: string) {
     setDraft((current) => ({ ...current, discord: { ...current.discord, craftRoles: { ...current.discord.craftRoles, [key]: value } } }));
+  }
+
+  function updateDiscordCraftEmoji(key: string, value: string) {
+    setDraft((current) => ({ ...current, discord: { ...current.discord, craftEmojis: { ...(current.discord.craftEmojis ?? {}), [key]: value } } }));
   }
   function updateDiscordColourRole(key: string, patch: Partial<ColourRoleDefinition>) {
     setDraft((current) => ({
@@ -794,6 +821,7 @@ export function AdminPanel({
   );
   const discoveredChannels: AnyRecord[] = discordDiscovery?.channels ?? [];
   const discoveredRoles: AnyRecord[] = discordDiscovery?.roles ?? [];
+  const discoveredEmojis: AnyRecord[] = discordDiscovery?.emojis ?? [];
   const discoveredMembers: AnyRecord[] = discordDiscovery?.members ?? [];
   const roleById = (id: string) => discoveredRoles.find((role) => String(role.id) === String(id));
   const roleMemberCountText = (role: AnyRecord | undefined | null) => role?.memberCountAvailable === false ? "Member count unavailable" : `${formatNumber(role?.memberCount)} members`;
@@ -832,6 +860,13 @@ export function AdminPanel({
       <option value="">Select a role</option>
       {value && !discoveredRoles.some((role) => String(role.id) === String(value)) ? <option value={value}>Unknown role ({value})</option> : null}
       {discoveredRoles.map((role) => <option key={role.id} value={role.id}>{role.name}{role.botCanManage ? "" : ` - ${role.manageabilityReason ?? "not manageable"}`}</option>)}
+    </select>
+  );
+  const emojiSelect = (value: string, onChange: (value: string) => void) => (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">No emoji</option>
+      {value && !discoveredEmojis.some((emoji) => String(emoji.mention) === String(value)) ? <option value={value}>Unknown emoji ({value})</option> : null}
+      {discoveredEmojis.map((emoji) => <option key={emoji.id} value={emoji.mention}>{emoji.mention} {emoji.name}</option>)}
     </select>
   );
   const discordDelivery = status?.discord?.lastDelivery ?? {};
@@ -1274,8 +1309,8 @@ export function AdminPanel({
                 <div className="endpoint-summary-grid">
                   <Info label="Checks run" value={formatNumber(endpointChecks.length)} />
                   <Info label="Failures" value={formatNumber(endpointFailures.length)} />
-                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} · ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
-                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} · ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} Â· ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} Â· ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
                 </div>
                 <DataTable
                   rows={endpointChecks}
@@ -1338,7 +1373,7 @@ export function AdminPanel({
               <Stat icon={<Activity />} label="Requests" value={formatNumber(visitorSecurityData?.totals?.requests)} />
               <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(visitorSecurityData?.totals?.uniqueVisitors)} />
               <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(visitorSecurityData?.totals?.errors)} />
-              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} · ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
+              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} Â· ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
               <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
             </div>
           </section>
@@ -1737,10 +1772,14 @@ export function AdminPanel({
               botOnly={botOnly}
               craftRoleKeys={Object.keys(DEFAULT_CRAFT_ROLES)}
               craftRoles={draft.discord.craftRoles}
+              craftEmojis={draft.discord.craftEmojis}
               discoveredRoles={discoveredRoles}
+              discoveredEmojis={discoveredEmojis}
+              emojiSelect={emojiSelect}
               memberCountWarning={memberCountWarning}
               roleIdSelect={roleIdSelect}
               roleStatusText={roleStatusText}
+              updateDiscordCraftEmoji={updateDiscordCraftEmoji}
               updateDiscordRole={updateDiscordRole}
             />
           ) : null}
