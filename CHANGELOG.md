@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.31.1-beta.9] - 2026-07-02
+
+### Fixed
+
+- Fixed production craft notifications so worker-recorded craft start and completion events appear in the app notification feed.
+
 ## [0.31.1-beta.8] - 2026-07-02
 
 ### Added

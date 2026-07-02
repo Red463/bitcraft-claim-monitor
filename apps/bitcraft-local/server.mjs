@@ -6325,7 +6325,7 @@ function activityHistory(claimId, limit = 500) {
 
 function notificationActivity(claimId, limit = 120) {
   const eventLimit = Math.min(Math.max(Number(limit) || 120, 1), 500);
-  const notableTypes = ["market_new_listing", "market_sale", "market_sale_confirmed"];
+  const notableTypes = ["market_new_listing", "market_sale", "market_sale_confirmed", "production_started", "production_completed"];
   const placeholders = notableTypes.map(() => "?").join(", ");
   const events = db.prepare(`
     SELECT *

@@ -1089,7 +1089,8 @@ test("server collection paginates listings and protects production mutations", a
   notificationSecretDb.close();
   const notificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(notificationActivity.events.length >= 2, true);
-  assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed"].includes(event.event_type)), true);
+  assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed", "production_started", "production_completed"].includes(event.event_type)), true);
+  assert.equal(notificationActivity.events.some((event) => event.event_type === "production_started"), true);
   assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
   assert.equal(notificationActivity.events.some((event) => event.event_type === "storage"), false);
   const secretNotification = notificationActivity.events.find((event) => event.source_key === "release-secret-sentinel");
