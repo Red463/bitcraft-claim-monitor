@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+
+## [0.31.1-beta.23] - 2026-07-02
+
+### Fixed
+
+- Fixed watchtower empire member rank filters so they use empire ranks instead of settlement claim roles.
+
 ## [0.31.1-beta.22] - 2026-07-02
 
 ### Changed

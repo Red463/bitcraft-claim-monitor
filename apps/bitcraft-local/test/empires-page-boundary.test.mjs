@@ -13,6 +13,7 @@ test("watchtower dialog stays viewport bounded and renders all empire members", 
   assert.match(page, /visibleMembers/);
   assert.match(page, /tower-rank-filter/);
   assert.match(page, /aria-label="Show all ranks"/);
+  assert.match(page, /rankTitle \?\? "Citizen"/);
   assert.match(page, /const members:[\s\S]*tower\.members/);
   assert.match(page, /setSelectedTower\(\{ \.\.\.row, members:/);
   assert.doesNotMatch(page, /No storage or hexite-capable members were returned/);

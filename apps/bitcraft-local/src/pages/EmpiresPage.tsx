@@ -141,8 +141,8 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
   const [towerDialogTab, setTowerDialogTab] = React.useState<"members" | "claims">("members");
   const [selectedClaim, setSelectedClaim] = React.useState<AnyRecord | null>(null);
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
-  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.claimRole ?? "Member")))).sort((a, b) => a.localeCompare(b)), [members]);
-  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.claimRole ?? "Member"))) : members;
+  const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.rankTitle ?? "Citizen")))).sort((a, b) => a.localeCompare(b)), [members]);
+  const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.rankTitle ?? "Citizen"))) : members;
   const visibleClaims = React.useMemo<Array<AnyRecord & { distanceTiles: number | null }>>(() => claims.map((claim): AnyRecord & { distanceTiles: number | null } => ({ ...claim, distanceTiles: claimDistanceTiles(tower, claim) })).sort((a, b) => {
     const aDistance = a.distanceTiles == null ? Number.POSITIVE_INFINITY : a.distanceTiles;
     const bDistance = b.distanceTiles == null ? Number.POSITIVE_INFINITY : b.distanceTiles;
