@@ -2,7 +2,7 @@ import type { NotificationSoundId, NotificationSoundType, UserToastSettings } fr
 import { normalizeNotificationSoundSettings, resolveNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings.ts";
 
 export type { NotificationSoundSettings };
-export type NotificationSoundOption = { id: NotificationSoundId; label: string; description: string };
+export type NotificationSoundOption = { id: NotificationSoundId; label: string; description: string; src?: string };
 
 export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
   { id: "soft-chime", label: "Soft chime", description: "Warm two-note chime" },
@@ -20,11 +20,37 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
   { id: "crystal-tap", label: "Crystal tap", description: "Light glassy tap" },
   { id: "low-thud", label: "Low thud", description: "Subtle low notification" },
   { id: "arcade-beep", label: "Arcade beep", description: "Retro square beep" },
+  { id: "reverse-chime", label: "Reverse chime", description: "Soft reversed notification swell", src: "/sounds/notifications/reverse-chime.mp3" },
+  { id: "ui-pop", label: "UI pop", description: "Clean app pop", src: "/sounds/notifications/ui-pop.mp3" },
+  { id: "ui-pack-pop", label: "UI pack pop", description: "Rounded UI pop", src: "/sounds/notifications/ui-pack-pop.mp3" },
+  { id: "coin-clink-4", label: "Coin clink 4", description: "Light coin clink", src: "/sounds/notifications/coin-clink-4.mp3" },
+  { id: "coin-clink-8", label: "Coin clink 8", description: "Bright coin clink", src: "/sounds/notifications/coin-clink-8.mp3" },
+  { id: "coin-clink-9", label: "Coin clink 9", description: "Crisp coin clink", src: "/sounds/notifications/coin-clink-9.wav" },
+  { id: "ui-blip", label: "UI blip", description: "Short interface blip", src: "/sounds/notifications/ui-blip.mp3" },
+  { id: "new-notification-1", label: "New notification", description: "Polished notification tone", src: "/sounds/notifications/new-notification-1.mp3" },
+  { id: "notification-bell", label: "Notification bell", description: "Classic notification bell", src: "/sounds/notifications/notification-bell.mp3" },
+  { id: "confirm-tap", label: "Confirm tap", description: "Subtle confirmation tap", src: "/sounds/notifications/confirm-tap.mp3" },
+  { id: "happy-pop", label: "Happy pop", description: "Positive pop", src: "/sounds/notifications/happy-pop.mp3" },
+  { id: "drop-coin", label: "Drop coin", description: "Single dropped coin", src: "/sounds/notifications/drop-coin.mp3" },
+  { id: "simple-ping", label: "Simple ping", description: "Menu beep ping", src: "/sounds/notifications/simple-ping.mp3" },
+  { id: "cash-register", label: "Cash register", description: "Till ring for confirmed sales", src: "/sounds/notifications/cash-register.mp3" },
+  { id: "plopp", label: "Plopp", description: "Soft plop pop", src: "/sounds/notifications/plopp.mp3" },
+  { id: "interface-click", label: "Interface click", description: "App interface click", src: "/sounds/notifications/interface-click.mp3" },
+  { id: "bubble-pop-soft", label: "Bubble pop soft", description: "Soft bubble pop", src: "/sounds/notifications/bubble-pop-soft.mp3" },
+  { id: "bubble-pop", label: "Bubble pop", description: "Bubble pop", src: "/sounds/notifications/bubble-pop.mp3" },
+  { id: "notification-010", label: "Notification 010", description: "Notification tone 010", src: "/sounds/notifications/notification-010.mp3" },
+  { id: "notification-035", label: "Notification 035", description: "Notification tone 035", src: "/sounds/notifications/notification-035.mp3" },
+  { id: "notification-040", label: "Notification 040", description: "Notification tone 040", src: "/sounds/notifications/notification-040.mp3" },
+  { id: "notification-047", label: "Notification 047", description: "Notification tone 047", src: "/sounds/notifications/notification-047.mp3" },
+  { id: "notification-062", label: "Notification 062", description: "Notification tone 062", src: "/sounds/notifications/notification-062.mp3" },
+  { id: "notification-beep", label: "Notification beep", description: "Compact notification beep", src: "/sounds/notifications/notification-beep.mp3" },
 ];
 
 type ToneStep = { frequency: number; start: number; duration: number; type?: OscillatorType; gain?: number };
 
-const SOUND_PATTERNS: Record<NotificationSoundId, ToneStep[]> = {
+const DEFAULT_GENERATED_SOUND_ID: NotificationSoundId = "alert-pop";
+
+const SOUND_PATTERNS: Partial<Record<NotificationSoundId, ToneStep[]>> = {
   "soft-chime": [
     { frequency: 660, start: 0, duration: 0.16, type: "sine", gain: 0.7 },
     { frequency: 880, start: 0.13, duration: 0.22, type: "sine", gain: 0.55 },
@@ -102,14 +128,38 @@ function getAudioContext(): AudioContext | null {
 export function playNotificationSound(settings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume" | "soundByType">, soundType?: NotificationSoundType) {
   const normalized = resolveNotificationSoundSettings(settings, soundType);
   if (!normalized.soundEnabled) return;
-  void playGeneratedSound(normalized.soundId, normalized.soundVolume);
+  void playResolvedSound(normalized.soundId, normalized.soundVolume);
 }
 
 export function previewNotificationSound(settings: Pick<UserToastSettings, "soundId" | "soundVolume">) {
   const normalized = normalizeNotificationSoundSettings({ soundEnabled: true, ...settings });
-  void playGeneratedSound(normalized.soundId, normalized.soundVolume);
+  void playResolvedSound(normalized.soundId, normalized.soundVolume);
 }
 
+function notificationSoundSource(soundId: NotificationSoundId): string | null {
+  return NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === soundId)?.src ?? null;
+}
+
+async function playResolvedSound(soundId: NotificationSoundId, volume: number) {
+  const src = notificationSoundSource(soundId);
+  if (src) {
+    await playAudioFile(src, volume);
+    return;
+  }
+  await playGeneratedSound(soundId, volume);
+}
+
+async function playAudioFile(src: string, volume: number) {
+  try {
+    if (typeof window === "undefined" || !window.Audio) return;
+    const audio = new window.Audio(src);
+    audio.volume = volume;
+    audio.currentTime = 0;
+    await audio.play();
+  } catch {
+    // Browsers can block audio until user interaction; notifications should still work silently.
+  }
+}
 async function playGeneratedSound(soundId: NotificationSoundId, volume: number) {
   try {
     const context = getAudioContext();
@@ -120,7 +170,7 @@ async function playGeneratedSound(soundId: NotificationSoundId, volume: number) 
     master.gain.setValueAtTime(volume, now);
     master.connect(context.destination);
 
-    for (const step of SOUND_PATTERNS[soundId]) {
+    for (const step of SOUND_PATTERNS[soundId] ?? SOUND_PATTERNS[DEFAULT_GENERATED_SOUND_ID] ?? []) {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       const start = now + step.start;

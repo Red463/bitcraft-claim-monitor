@@ -11,6 +11,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.30] - 2026-07-03
+
+### Added
+
+- Added imported MP3 and WAV notification sound options, including coin clinks, UI pops, notification bells, and cash-register style alerts.
+
+### Changed
+
+- Updated browser notification sound playback so settings can use either generated tones or bundled audio files.
+
 ## [0.31.1-beta.29] - 2026-07-03
 
 ### Added

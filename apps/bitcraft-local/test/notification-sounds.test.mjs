@@ -2,7 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { normalizeNotificationSoundSettings, normalizeUserToastSettings, resolveNotificationSoundSettings } from "../src/notifications/userToastSettings.ts";
-import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../src/utils/notificationSounds.ts";
+import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound, previewNotificationSound } from "../src/utils/notificationSounds.ts";
+
+class FakeAudioElement {
+  static instances = [];
+
+  constructor(src) {
+    this.src = src;
+    this.volume = 1;
+    this.currentTime = 0;
+    this.playCalls = 0;
+    FakeAudioElement.instances.push(this);
+  }
+
+  play() {
+    this.playCalls += 1;
+    return Promise.resolve();
+  }
+}
 
 class FakeAudioParam {
   constructor() {
@@ -124,6 +141,37 @@ test("playNotificationSound resolves per-type sound choices", () => {
   assert.equal(context.oscillators.length - previousOscillators >= 3, true);
   assert.deepEqual(context.gains[previousGains].gain.calls[0], ["set", 0.25, 10]);
   assert.equal(context.oscillators[previousOscillators].type, "triangle");
+});
+
+test("file-backed notification sounds are listed and play through browser Audio", () => {
+  FakeAudioElement.instances = [];
+  globalThis.window = { Audio: FakeAudioElement };
+
+  const sound = NOTIFICATION_SOUND_OPTIONS.find((option) => option.id === "cash-register");
+  assert.deepEqual(sound, {
+    id: "cash-register",
+    label: "Cash register",
+    description: "Till ring for confirmed sales",
+    src: "/sounds/notifications/cash-register.mp3",
+  });
+
+  playNotificationSound({ soundEnabled: true, soundId: "cash-register", soundVolume: 0.35, soundByType: {} });
+
+  assert.equal(FakeAudioElement.instances.length, 1);
+  assert.equal(FakeAudioElement.instances[0].src, "/sounds/notifications/cash-register.mp3");
+  assert.equal(FakeAudioElement.instances[0].volume, 0.35);
+  assert.equal(FakeAudioElement.instances[0].playCalls, 1);
+});
+
+test("previewNotificationSound plays file-backed sound options", () => {
+  FakeAudioElement.instances = [];
+  globalThis.window = { Audio: FakeAudioElement };
+
+  previewNotificationSound({ soundId: "coin-clink-9", soundVolume: 0.42 });
+
+  assert.equal(FakeAudioElement.instances.length, 1);
+  assert.equal(FakeAudioElement.instances[0].src, "/sounds/notifications/coin-clink-9.wav");
+  assert.equal(FakeAudioElement.instances[0].volume, 0.42);
 });
 
 test("every listed notification sound option is accepted by settings normalization", () => {
