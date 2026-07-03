@@ -121,10 +121,20 @@ function formatProductionToastTime(value: unknown): string {
   }).format(date);
 }
 
+function productionToastCrafterName(details: AnyRecord): string | null {
+  const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
+  return firstNonEmptyString(details.crafterName, details.crafterUsername, details.ownerUsername, details.playerUsername, details.userName, raw.crafterName, raw.crafterUsername, raw.ownerUsername, raw.playerUsername, raw.userName);
+}
+
+function productionToastMeta(details: AnyRecord): { metaLabel?: string } {
+  const crafterName = productionToastCrafterName(details);
+  return crafterName ? { metaLabel: crafterName } : {};
+}
+
 function productionToastBody(_status: ProductionCraftToastStatus, details: AnyRecord, _occurredAt: unknown, fallbackName?: unknown): string {
   const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
   const itemName = firstNonEmptyString(details.itemName, details.label, details.name, raw.itemName, raw.name, fallbackName, "Craft");
-  const crafterName = firstNonEmptyString(details.crafterName, details.crafterUsername, details.ownerUsername, details.playerUsername, details.userName, raw.crafterName, raw.crafterUsername, raw.ownerUsername, raw.playerUsername, raw.userName);
+  const crafterName = productionToastCrafterName(details);
   const buildingName = firstNonEmptyString(details.buildingName, details.structureName, raw.buildingName, raw.structureName, "Settlement production");
   return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName}`;
 }
@@ -139,9 +149,11 @@ export function productionActivityToastDraft(
   if (!settings.production) return null;
   const occurredAt = firstNonEmptyString(event.occurred_at, event.occurredAt) ?? new Date().toISOString();
   const status = eventType === "production_started" ? "started" : "completed";
+  const metadata = parseActivityMetadata(event);
   return {
     title: status === "started" ? "Craft started" : "Craft completed",
-    body: productionToastBody(status, parseActivityMetadata(event), occurredAt, stripCraftSummaryPrefix(helpers.summary(event))),
+    body: productionToastBody(status, metadata, occurredAt, stripCraftSummaryPrefix(helpers.summary(event))),
+    ...productionToastMeta(metadata),
     kind: "production",
     occurredAt,
     item: helpers.item(event),
@@ -240,6 +252,7 @@ export function productionCraftToastDraft(
     kind: "production",
     item: helpers.item(job) ?? (job.toastItem && typeof job.toastItem === "object" ? job.toastItem as AnyRecord : null),
     occurredAt,
+    ...productionToastMeta(job),
     sourceKey: `production_${status === "started" ? "started" : "completed"}:${jobId}`,
   };
 }

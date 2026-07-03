@@ -12,7 +12,7 @@ import {
   type ToastNotice,
 } from "./toastNotices";
 
-export type PushToastOptions = { occurredAt?: string; sourceKey?: string };
+export type PushToastOptions = { occurredAt?: string; sourceKey?: string; metaLabel?: string };
 
 export type PushToast = (
   title: string,
@@ -55,6 +55,7 @@ export function useToastNotifications({ soundSettings }: { soundSettings: Pick<U
       occurredAt: options.occurredAt ?? new Date().toISOString(),
       item,
       sourceKey: options.sourceKey,
+      metaLabel: options.metaLabel,
     });
     playNotificationSound(soundSettings);
     setToasts((current) => appendToastStack(current, notice));

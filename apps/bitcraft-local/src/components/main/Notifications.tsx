@@ -31,13 +31,14 @@ export function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onD
     <section className="toast-stack" aria-live="polite" aria-label="Notifications">
       {notices.map((notice) => {
         const eventTime = notice.kind === "production" ? toastClockTime(notice.occurredAt) : "";
+        const eventMeta = notice.kind === "production" ? [notice.metaLabel, eventTime].filter(Boolean).join(" - ") : "";
         return (
           <article className={`toast ${notice.kind}`} key={notice.id}>
             <ToastVisual notice={notice} />
             <div>
               <strong>{notice.title}</strong>
               <p>{notice.body}</p>
-              {eventTime ? <time className="toast-event-time" dateTime={notice.occurredAt}>{eventTime}</time> : null}
+              {eventMeta ? <time className="toast-event-time" dateTime={notice.occurredAt}>{eventMeta}</time> : null}
             </div>
             <button onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification"><X size={14} /></button>
           </article>

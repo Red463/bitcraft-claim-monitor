@@ -13,6 +13,7 @@ export type ToastNotice = {
   destination?: ActivePanel;
   item?: AnyRecord | null;
   sourceKey?: string;
+  metaLabel?: string;
 };
 
 export type CreateToastNoticeInput = {
@@ -23,6 +24,7 @@ export type CreateToastNoticeInput = {
   occurredAt?: string;
   item?: AnyRecord | null;
   sourceKey?: string;
+  metaLabel?: string;
 };
 
 export function destinationForToastKind(kind: ToastKind): ActivePanel {
@@ -40,6 +42,7 @@ export function createToastNotice(input: CreateToastNoticeInput): ToastNotice {
     destination: destinationForToastKind(input.kind),
     item: input.item ?? null,
     sourceKey: input.sourceKey,
+    ...(input.metaLabel ? { metaLabel: input.metaLabel } : {}),
   };
 }
 

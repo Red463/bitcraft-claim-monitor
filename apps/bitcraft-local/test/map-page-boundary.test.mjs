@@ -12,3 +12,13 @@ test("Map page lives outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, new RegExp("export function MapPanel\\b"));
   assert.equal(appShell.includes('import { MapPanel } from "./pages/MapPage";'), true);
 });
+
+test("Map page exposes compact player tracking controls", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /usePersistedState<string\[\] \| null>\("map\.players", null\)/);
+  assert.match(mapPage, /MapPlayerTrackingControls/);
+  assert.match(mapPage, /Manage players/);
+  assert.match(mapPage, /Track online/);
+  assert.doesNotMatch(mapPage, /roster\.map\(\(player\) => \{/);
+});

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { currentAppAnnouncementKey, currentAppBuildId, currentAppReleaseKey, releaseVersionAlreadyAnnounced } from "../src/server/appRelease.mjs";
@@ -52,4 +53,11 @@ test("app update announcements dedupe by app version instead of rebuild id", () 
   assert.equal(currentAppAnnouncementKey({ appVersion: "1.0.0-beta.114", buildId: "abcdef123456" }), "1.0.0-beta.114");
   assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "1.0.0-beta.114+oldbuild", appVersion: "1.0.0-beta.114" }), true);
   assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "1.0.0-beta.113+oldbuild", appVersion: "1.0.0-beta.114" }), false);
+});
+test("health route exposes public version and build id", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(server, /url\.pathname === "\/api\/local\/health"/);
+  assert.match(server, /version:\s*appVersion/);
+  assert.match(server, /buildId:\s*currentAppBuildId\(\)/);
 });

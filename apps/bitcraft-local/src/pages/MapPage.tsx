@@ -13,9 +13,103 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { updateQueryState } from "../navigation";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
+import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 
 const LOCAL_API = "/api/local";
 
+function MapPlayerTrackingControls({
+  roster,
+  selectedIds,
+  current,
+  onAutoOnline,
+  onTrackOnline,
+  onTrackAll,
+  onTrackNone,
+  onTogglePlayer,
+  onClearFilters,
+}: {
+  roster: AnyRecord[];
+  selectedIds: string[] | null;
+  current: Set<string>;
+  onAutoOnline: () => void;
+  onTrackOnline: () => void;
+  onTrackAll: () => void;
+  onTrackNone: () => void;
+  onTogglePlayer: (id: string, tracked: boolean) => void;
+  onClearFilters: () => void;
+}) {
+  const [managerOpen, setManagerOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [filter, setFilter] = React.useState<MapPlayerFilter>("all");
+  const rows = React.useMemo(() => sortedMapPlayerRows(roster, current), [roster, current]);
+  const visibleRows = React.useMemo(() => filterMapPlayerRows(rows, filter, search), [rows, filter, search]);
+  const summary = mapPlayerTrackingSummary(selectedIds, roster);
+  const trackedCount = current.size;
+  const onlineCount = roster.filter((player) => player.signedIn === true).length;
+  const filterTabs: Array<{ key: MapPlayerFilter; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "online", label: "Online" },
+    { key: "tracked", label: "Tracked" },
+    { key: "untracked", label: "Untracked" },
+  ];
+
+  return (
+    <section className="map-player-tracking" aria-label="Player tracking">
+      <div className="map-player-tracking-summary">
+        <Users size={16} />
+        <div>
+          <strong>Player Tracking</strong>
+          <span>{summary}</span>
+        </div>
+      </div>
+      <div className="map-player-tracking-actions">
+        <button className={selectedIds === null ? "active" : ""} onClick={onAutoOnline}>Auto online</button>
+        <button className={trackedCount === roster.length && roster.length > 0 ? "active" : ""} onClick={onTrackAll}>All</button>
+        <button className={trackedCount === 0 ? "active" : ""} onClick={onTrackNone}>None</button>
+        <button onClick={() => setManagerOpen(true)}>Manage</button>
+        <button onClick={onClearFilters}>Clear filters</button>
+      </div>
+      {managerOpen ? (
+        <div className="map-player-dialog-overlay" onClick={() => setManagerOpen(false)}>
+          <section className="map-player-dialog" role="dialog" aria-modal="true" aria-label="Manage players" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h3>Manage players</h3>
+                <p>{trackedCount} tracked, {onlineCount} online, {roster.length} total</p>
+              </div>
+              <button className="icon-button" onClick={() => setManagerOpen(false)} aria-label="Close player manager"><X size={15} /></button>
+            </header>
+            <div className="map-player-bulk-actions">
+              <button onClick={onTrackOnline}>Track online</button>
+              <button onClick={onTrackAll}>Track all</button>
+              <button onClick={onTrackNone}>Track none</button>
+              <button onClick={onAutoOnline}>Reset to auto</button>
+            </div>
+            <div className="map-player-manager-controls">
+              <div className="map-player-tabs" role="tablist" aria-label="Player filters">
+                {filterTabs.map((tab) => <button key={tab.key} className={filter === tab.key ? "active" : ""} onClick={() => setFilter(tab.key)}>{tab.label}</button>)}
+              </div>
+              <SearchBox value={search} onChange={setSearch} placeholder="Find members" />
+            </div>
+            <div className="map-player-list">
+              {visibleRows.map((row) => (
+                <label key={row.id} className={row.tracked ? "active" : ""}>
+                  <input type="checkbox" checked={row.tracked} onChange={(event) => onTogglePlayer(row.id, event.target.checked)} />
+                  <span className={`online-dot ${row.signedIn ? "is-online" : ""}`} />
+                  <span>
+                    <strong>{row.name}</strong>
+                    <small>{row.signedIn ? `Online${formatCurrentSession(row.sessionSeconds) ? ` - ${formatCurrentSession(row.sessionSeconds)}` : ""}` : "Offline"}</small>
+                  </span>
+                </label>
+              ))}
+              {!visibleRows.length ? <p className="legend">No members match these filters.</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
@@ -79,11 +173,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
       });
     return () => controller.abort();
   }, []);
-  const defaultSelection = React.useMemo(() => {
-    const online = roster.filter((player) => player.signedIn).map((player) => String(player.entityId)).filter(Boolean);
-    return new Set(online.length ? online : roster.map((player) => String(player.entityId)).filter(Boolean));
-  }, [roster]);
-  const current = React.useMemo(() => selectedIds === null ? defaultSelection : new Set(selectedIds), [defaultSelection, selectedIds]);
+  const current = React.useMemo(() => currentMapPlayerSelection(selectedIds, roster), [selectedIds, roster]);
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",
     locationX: toNumber(data.claim.locationX),
@@ -144,13 +234,24 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   function setResourceRegion(value: string) {
     setResourceRegions(value === "All" ? [] : [value]);
   }
-  function toggle(id: string) {
+  function setManualPlayers(ids: string[]) {
+    setSelectedIds([...new Set(ids.filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+  }
+  function trackOnlinePlayers() {
+    setManualPlayers(defaultMapPlayerSelection(roster));
+  }
+  function trackAllPlayers() {
+    setManualPlayers(roster.map(mapPlayerTrackingId));
+  }
+  function trackNoPlayers() {
+    setSelectedIds([]);
+  }
+  function togglePlayerTracking(id: string, tracked: boolean) {
     setSelectedIds((prev) => {
-      const next = new Set(prev === null ? [...defaultSelection] : prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      const nextIds = [...next].sort();
-      return nextIds;
+      const next = new Set(prev === null ? defaultMapPlayerSelection(roster) : prev.filter(Boolean));
+      if (tracked) next.add(id);
+      else next.delete(id);
+      return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
   }
   function toggleResource(token: string) {
@@ -161,10 +262,6 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
       else next.add(normalizedToken);
       return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
-  }
-  function toggleAll() {
-    const nextIds = current.size === roster.length ? [] : roster.map((player) => String(player.entityId)).filter(Boolean).sort();
-    setSelectedIds(nextIds);
   }
   function resetMapFilters() {
     setSelectedIds(null);
@@ -199,14 +296,17 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
           <button className="mini-action" onClick={onClearFocus}>Clear</button>
         </div>
       ) : null}
-      <div className="player-pills">
-        <button className={current.size === roster.length ? "active" : ""} onClick={toggleAll}>All</button>
-        <button onClick={resetMapFilters}>Clear filters</button>
-        {roster.map((player) => {
-          const id = String(player.entityId);
-          return <button key={id} className={current.has(id) ? "active" : ""} onClick={() => toggle(id)} title={player.signedIn ? `Online${formatCurrentSession(player.sessionSeconds) ? ` - ${formatCurrentSession(player.sessionSeconds)}` : ""}` : "Offline"}><span className={`online-dot ${player.signedIn ? "is-online" : ""}`} />{player.username}{current.has(id) ? <MapPin size={12} /> : null}</button>;
-        })}
-      </div>
+      <MapPlayerTrackingControls
+        roster={roster}
+        selectedIds={selectedIds}
+        current={current}
+        onAutoOnline={() => setSelectedIds(null)}
+        onTrackOnline={trackOnlinePlayers}
+        onTrackAll={trackAllPlayers}
+        onTrackNone={trackNoPlayers}
+        onTogglePlayer={togglePlayerTracking}
+        onClearFilters={resetMapFilters}
+      />
       <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
         <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
           <div className="map-resource-heading">

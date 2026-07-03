@@ -11,6 +11,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.27] - 2026-07-03
+
+### Added
+
+- Added a scalable Player Tracking manager on the Map page so large settlements can search, filter, and bulk-manage tracked players without crowding the header.
+- Added the running app version and commit ID to the footer for quick live-version checks.
+
+### Changed
+
+- Changed map player tracking defaults to follow online members only, with quick actions for auto, all, none, and manual management.
+- Improved production toast metadata so the crafter name appears beside the muted event time.
+
 ## [0.31.1-beta.26] - 2026-07-03
 
 ### Changed

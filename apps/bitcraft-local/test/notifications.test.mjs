@@ -66,6 +66,7 @@ test("createToastNotice assigns stable notification fields and destinations", ()
     occurredAt: "2026-06-28T10:00:00.000Z",
     item: { itemName: "Leather", tier: 2 },
     sourceKey: "deal-alert:1",
+    metaLabel: "Market",
   });
   const productionNotice = createToastNotice({
     id: "notice-2",
@@ -84,6 +85,7 @@ test("createToastNotice assigns stable notification fields and destinations", ()
     destination: "market",
     item: { itemName: "Leather", tier: 2 },
     sourceKey: "deal-alert:1",
+    metaLabel: "Market",
   });
   assert.equal(productionNotice.destination, "production");
   assert.equal(productionNotice.read, false);
@@ -273,6 +275,7 @@ test("productionActivityToastDraft formats production activity with crafter, bui
     body: "Fine Cloth by Mosswick at Tailoring Station",
     kind: "production",
     occurredAt: "2026-07-03T10:42:00.000Z",
+    metaLabel: "Mosswick",
     item: { itemName: "Fine Cloth", iconAssetName: "fine_cloth.png" },
     sourceKey: "production_completed:craft-1",
   });
@@ -290,6 +293,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T09:58:00.000Z",
+    metaLabel: "Modular",
     sourceKey: "production_started:craft-1",
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
@@ -298,6 +302,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T10:42:00.000Z",
+    metaLabel: "Modular",
     sourceKey: "production_completed:craft-1",
   });
 });
@@ -308,10 +313,9 @@ test("productionCraftToastDraft omits missing crafter and falls back to settleme
     item: () => null,
   };
 
-  assert.equal(
-    productionCraftToastDraft("started", "claim-1", "craft-1", { entityId: "craft-1" }, helpers, "2026-07-03T09:58:00.000Z").body,
-    "Simple Plank at Settlement production",
-  );
+  const draft = productionCraftToastDraft("started", "claim-1", "craft-1", { entityId: "craft-1" }, helpers, "2026-07-03T09:58:00.000Z");
+  assert.equal(draft.body, "Simple Plank at Settlement production");
+  assert.equal(Object.prototype.hasOwnProperty.call(draft, "metaLabel"), false);
 });
 
 test("productionCraftQueueToastDrafts seeds baselines, handles claim changes, and respects disabled settings", () => {

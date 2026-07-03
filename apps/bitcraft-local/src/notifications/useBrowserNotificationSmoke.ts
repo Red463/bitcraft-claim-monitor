@@ -13,6 +13,7 @@ function pushSmokeNotice(pushToast: PushToast, notice: ToastNotice) {
   pushToast(notice.title, notice.body, notice.kind, notice.item, {
     occurredAt: notice.occurredAt,
     sourceKey: notice.sourceKey,
+    metaLabel: notice.metaLabel,
   });
 }
 

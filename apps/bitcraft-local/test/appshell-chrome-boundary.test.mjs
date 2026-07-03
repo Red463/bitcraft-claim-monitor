@@ -22,3 +22,11 @@ test("floating action rail CSS slides collapsed rail offscreen with reduced moti
   assert.match(css, /\.floating-actions\s+\.floating-actions-toggle\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
 });
+test("footer shows the app version and build id", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /fetch\(`\$\{LOCAL_API\}\/health`\)/);
+  assert.match(appShell, /setAppBuildId/);
+  assert.match(appShell, /footer-build/);
+  assert.match(appShell, /APP_VERSION/);
+});

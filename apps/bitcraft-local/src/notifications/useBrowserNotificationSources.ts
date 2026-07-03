@@ -46,7 +46,7 @@ export function useBrowserNotificationSources(options: BrowserNotificationSource
     });
     sourceSnapshotsRef.current = result.snapshots;
     for (const draft of result.drafts) {
-      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey });
+      pushToast(draft.title, draft.body, draft.kind, draft.item, { occurredAt: draft.occurredAt, sourceKey: draft.sourceKey, metaLabel: draft.metaLabel });
     }
   }, [
     appToastSettings,

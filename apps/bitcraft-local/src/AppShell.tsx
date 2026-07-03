@@ -92,6 +92,7 @@ function DashboardApp() {
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
+  const [appBuildId, setAppBuildId] = React.useState("");
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
@@ -108,6 +109,10 @@ function DashboardApp() {
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
   const normalizedUserToastSettings = React.useMemo(() => normalizeUserToastSettings(userToastSettings), [userToastSettings]);
   const { toasts, notificationLog, dismissToast, pushToast, markNotificationLogRead } = useToastNotifications({ soundSettings: normalizedUserToastSettings });
+  const appBuildLabel = React.useMemo(() => {
+    const shortBuildId = appBuildId.trim().slice(0, 7);
+    return shortBuildId ? `v${APP_VERSION} - ${shortBuildId}` : `v${APP_VERSION}`;
+  }, [appBuildId]);
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
   const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
@@ -274,6 +279,18 @@ function DashboardApp() {
     }
     window.addEventListener("keydown", openCommands);
     return () => window.removeEventListener("keydown", openCommands);
+  }, []);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`${LOCAL_API}/health`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (!cancelled && typeof payload?.buildId === "string") setAppBuildId(payload.buildId);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
   React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
@@ -517,6 +534,9 @@ function DashboardApp() {
           <div className="footer-links">
             <span className="footer-copy">
               &copy; {new Date().getFullYear()} Timbersteel Claim Monitor - unofficial fan-made tool.
+            </span>
+            <span className="footer-build" title={appBuildId ? `Version ${APP_VERSION}, commit ${appBuildId}` : `Version ${APP_VERSION}`}>
+              {appBuildLabel}
             </span>
             <a href="https://bitjita.com/docs/api" target="_blank" rel="noreferrer">Data: BitJita API</a>
             <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>

@@ -7555,7 +7555,12 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, { ok: true, polling: collectorStatusPayload() });
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
+      ok: true,
+      version: appVersion,
+      buildId: currentAppBuildId(),
+      polling: collectorStatusPayload(),
+    });
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
       return proxyBitjita(req, url, res);
