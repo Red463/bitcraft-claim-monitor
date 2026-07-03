@@ -11,6 +11,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.33] - 2026-07-03
+
+### Fixed
+
+- Fixed the dashboard Recent Activity card so it previews the same recent events as the Activity page while still hiding craft start and completion noise.
+
 ## [0.31.1-beta.32] - 2026-07-03
 
 ### Changed

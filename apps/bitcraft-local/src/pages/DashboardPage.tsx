@@ -79,8 +79,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
-  const dashboardSummaryActivity = Array.isArray(dashboardSummary?.recentActivity) ? dashboardSummary.recentActivity : null;
-  const recentActivity = dashboardRecentActivityItems(dashboardSummaryActivity ?? activity, 5);
+  const recentActivity = dashboardRecentActivityItems(activity, 5);
   const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
   const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
     const member = memberByPlayerId.get(String(player.entityId));

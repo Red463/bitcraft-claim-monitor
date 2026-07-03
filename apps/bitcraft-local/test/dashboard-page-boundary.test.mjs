@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -11,4 +11,11 @@ test("Dashboard page lives outside the legacy MainPages bundle", () => {
   assert.equal(existsSync(dashboardPageUrl), true);
   assert.doesNotMatch(mainPages, /export function Dashboard\b/);
   assert.match(appShell, /import \{ Dashboard \} from "\.\/pages\/DashboardPage";/);
+});
+
+test("Dashboard recent activity previews the activity page feed", () => {
+  const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+
+  assert.match(dashboard, /dashboardRecentActivityItems\(activity,\s*5\)/);
+  assert.doesNotMatch(dashboard, /dashboardSummary\?\.recentActivity/);
 });
