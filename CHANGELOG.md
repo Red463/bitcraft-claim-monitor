@@ -11,6 +11,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.32] - 2026-07-03
+
+### Changed
+
+- Updated the dashboard Recent Activity card so craft start and completion updates no longer crowd out broader settlement activity.
+
 ## [0.31.1-beta.31] - 2026-07-03
 
 ### Added

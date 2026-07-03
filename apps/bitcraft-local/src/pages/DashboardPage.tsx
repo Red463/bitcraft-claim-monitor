@@ -17,12 +17,12 @@ import {
   formatDaysAndHours,
   formatNumber,
   timeAgo,
-  timestampMs,
 } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, activitySummary, signedDelta } from "./activity/activityUtils";
 import { activityStyle } from "./activity/activityDisplay";
+import { dashboardRecentActivityItems } from "./dashboard/dashboardRecentActivity";
 import { buildMarketIncomeSummary } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
@@ -80,10 +80,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
   const dashboardSummaryActivity = Array.isArray(dashboardSummary?.recentActivity) ? dashboardSummary.recentActivity : null;
-  const dashboardActivity = [...(dashboardSummaryActivity ?? activity)]
-    .filter((event) => !["treasury", "supplies"].includes(String(event.event_type ?? "")))
-    .sort((a, b) => timestampMs(b.occurred_at) - timestampMs(a.occurred_at));
-  const recentActivity = dashboardActivity.slice(0, 5);
+  const recentActivity = dashboardRecentActivityItems(dashboardSummaryActivity ?? activity, 5);
   const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
   const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
     const member = memberByPlayerId.get(String(player.entityId));
@@ -180,7 +177,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
                   <time>{timeAgo(event.occurred_at)}</time>
                 </button>
               );
-            }) : <div className="dashboard-empty">{activity.length ? "No non-treasury or non-supply activity has been recorded yet." : "No local activity history has been recorded yet."}</div>}
+            }) : <div className="dashboard-empty">{activity.length ? "No dashboard activity outside production, treasury, or supply updates has been recorded yet." : "No local activity history has been recorded yet."}</div>}
           </div>
         </article>
 
