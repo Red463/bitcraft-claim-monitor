@@ -1,16 +1,33 @@
 import React from "react";
 import type { AnyRecord } from "../main-app-data";
-import { usePersistedState } from "../hooks/usePersistedState";
+import { persistedStorageKey, usePersistedState } from "../hooks/usePersistedState";
 import type { UserToastSettings } from "../types/settings";
 import { playNotificationSound } from "../utils/notificationSounds";
 import {
   appendNotificationLog,
   appendToastStack,
+  claimNotificationSourceKey,
   createToastNotice,
   markNotificationsRead,
   type ToastKind,
   type ToastNotice,
 } from "./toastNotices";
+
+const notificationLogStorageKey = persistedStorageKey("notifications.log");
+
+function notificationSourceKeys(notices: ToastNotice[]): Set<string> {
+  return new Set(notices.map((notice) => notice.sourceKey).filter(Boolean) as string[]);
+}
+
+function parseStoredNotificationLog(value: string | null): ToastNotice[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as ToastNotice[] : null;
+  } catch {
+    return null;
+  }
+}
 
 export type PushToastOptions = { occurredAt?: string; sourceKey?: string; metaLabel?: string };
 
@@ -26,7 +43,7 @@ export function useToastNotifications({ soundSettings }: { soundSettings: Pick<U
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
-  const notificationSourceKeysRef = React.useRef<Set<string>>(new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]));
+  const notificationSourceKeysRef = React.useRef<Set<string>>(notificationSourceKeys(notificationLog));
 
   const dismissToast = React.useCallback((id: string) => {
     const timer = toastTimersRef.current.get(id);
@@ -40,11 +57,25 @@ export function useToastNotifications({ soundSettings }: { soundSettings: Pick<U
   }, [setNotificationLog]);
 
   React.useEffect(() => {
-    notificationSourceKeysRef.current = new Set(notificationLog.map((notice) => notice.sourceKey).filter(Boolean) as string[]);
+    notificationSourceKeysRef.current = notificationSourceKeys(notificationLog);
   }, [notificationLog]);
 
+  React.useEffect(() => {
+    function syncNotificationLog(event: StorageEvent) {
+      if (event.key !== notificationLogStorageKey) return;
+      const nextLog = parseStoredNotificationLog(event.newValue);
+      if (!nextLog) return;
+      notificationSourceKeysRef.current = notificationSourceKeys(nextLog);
+      setNotificationLog(nextLog);
+    }
+    window.addEventListener("storage", syncNotificationLog);
+    return () => window.removeEventListener("storage", syncNotificationLog);
+  }, [setNotificationLog]);
+
   const pushToast = React.useCallback<PushToast>((title, body, kind, item = null, options = {}) => {
+    if (options.sourceKey && document.visibilityState === "hidden") return;
     if (options.sourceKey && notificationSourceKeysRef.current.has(options.sourceKey)) return;
+    if (options.sourceKey && !claimNotificationSourceKey(options.sourceKey)) return;
     if (options.sourceKey) notificationSourceKeysRef.current.add(options.sourceKey);
     const id = `${Date.now()}-${Math.random()}`;
     const notice = createToastNotice({

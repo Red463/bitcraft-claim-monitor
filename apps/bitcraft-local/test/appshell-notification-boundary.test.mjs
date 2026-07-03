@@ -36,3 +36,24 @@ test("AppShell only marks production notifications ready when the payload includ
   assert.doesNotMatch(appShell, /hasProductionData:\s*Boolean\(state\.data\)/);
   assert.match(appShell, /hasProductionData:\s*hasProductionPayload\(state\.data\)/);
 });
+test("notification drawer uses the shared toast meta formatter", () => {
+  const notifications = readFileSync(new URL("../src/components/main/Notifications.tsx", import.meta.url), "utf8");
+
+  assert.match(notifications, /formatToastMetaLine/);
+  assert.match(notifications, /className="toast-event-time"/);
+  assert.match(notifications, /timeAgo\(notice\.occurredAt\)/);
+});
+
+test("toast notifications sync log state and source keys across tabs", () => {
+  const hook = readFileSync(new URL("../src/notifications/useToastNotifications.ts", import.meta.url), "utf8");
+
+  assert.match(hook, /notificationLogStorageKey/);
+  assert.match(hook, /addEventListener\("storage"/);
+  assert.match(hook, /claimNotificationSourceKey/);
+});
+
+test("browser notification sources skip queue processing while the document is hidden", () => {
+  const hook = readFileSync(new URL("../src/notifications/useBrowserNotificationSources.ts", import.meta.url), "utf8");
+
+  assert.match(hook, /document\.visibilityState\s*===\s*"hidden"/);
+});

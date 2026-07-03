@@ -1,17 +1,10 @@
 import { Bell, Factory, ShoppingCart, X } from "lucide-react";
 
 import { toNumber, type AnyRecord } from "../../main-app-data";
-import { dedupeNotifications, type ToastNotice } from "../../notifications/toastNotices";
+import { dedupeNotifications, formatToastMetaLine, type ToastNotice } from "../../notifications/toastNotices";
 import { timeAgo } from "../../utils/format";
 import { bitjitaIconUrl } from "../../utils/items";
 import { ItemIcon } from "./ItemDisplay";
-
-function toastClockTime(value?: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(date);
-}
 
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
@@ -30,8 +23,7 @@ export function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onD
   return (
     <section className="toast-stack" aria-live="polite" aria-label="Notifications">
       {notices.map((notice) => {
-        const eventTime = notice.kind === "production" ? toastClockTime(notice.occurredAt) : "";
-        const eventMeta = notice.kind === "production" ? [notice.metaLabel, eventTime].filter(Boolean).join(" - ") : "";
+        const eventMeta = formatToastMetaLine(notice);
         return (
           <article className={`toast ${notice.kind}`} key={notice.id}>
             <ToastVisual notice={notice} />
@@ -54,14 +46,17 @@ export function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices
     <div className="drawer-overlay" onClick={onClose}>
       <aside className="notice-drawer" role="dialog" aria-modal="true" aria-label="Recent notifications" onClick={(event) => event.stopPropagation()}>
         <header><h2><Bell size={18} /> Notifications</h2><button onClick={onClose} aria-label="Close notifications"><X size={16} /></button></header>
-        {displayNotices.length ? <div className="notice-list">{displayNotices.map((notice) => (
-          <button key={notice.id} className={notice.read ? "" : "unread"} onClick={() => onOpenNotice(notice)}>
-            <ToastVisual notice={notice} />
-            <strong>{notice.title}</strong>
-            <small>{notice.body}</small>
-            <time>{notice.occurredAt ? timeAgo(notice.occurredAt) : ""}</time>
-          </button>
-        ))}</div> : <p className="legend">Notifications for sales, listings and production will appear here.</p>}
+        {displayNotices.length ? <div className="notice-list">{displayNotices.map((notice) => {
+          const eventMeta = formatToastMetaLine(notice);
+          return (
+            <button key={notice.id} className={notice.read ? "" : "unread"} onClick={() => onOpenNotice(notice)}>
+              <ToastVisual notice={notice} />
+              <strong>{notice.title}</strong>
+              <small>{notice.body}</small>
+              {eventMeta ? <time className="toast-event-time" dateTime={notice.occurredAt}>{eventMeta}</time> : <time>{notice.occurredAt ? timeAgo(notice.occurredAt) : ""}</time>}
+            </button>
+          );
+        })}</div> : <p className="legend">Notifications for sales, listings and production will appear here.</p>}
       </aside>
     </div>
   );

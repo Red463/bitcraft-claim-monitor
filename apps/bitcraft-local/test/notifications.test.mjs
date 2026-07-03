@@ -12,7 +12,26 @@ import {
   selectUnseenNotificationItems,
 } from "../src/notifications/notificationSources.ts";
 import { browserNotificationSourceDrafts } from "../src/notifications/browserNotificationSourceQueue.ts";
-import { appendNotificationLog, appendToastStack, createToastNotice, dedupeNotifications, markNotificationsRead, notificationDedupeKey } from "../src/notifications/toastNotices.ts";
+import {
+  appendNotificationLog,
+  appendToastStack,
+  claimNotificationSourceKey,
+  createToastNotice,
+  dedupeNotifications,
+  formatToastMetaLine,
+  markNotificationsRead,
+  notificationDedupeKey,
+} from "../src/notifications/toastNotices.ts";
+
+function memoryStorage(initial = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    getItem: (key) => store.has(key) ? store.get(key) : null,
+    setItem: (key, value) => store.set(key, String(value)),
+    removeItem: (key) => store.delete(key),
+    dump: () => Object.fromEntries(store),
+  };
+}
 
 test("dedupeNotifications keeps the newest notice for source and legacy duplicates", () => {
   const notices = [
@@ -92,6 +111,59 @@ test("createToastNotice assigns stable notification fields and destinations", ()
   assert.equal(productionNotice.item, null);
 });
 
+test("formatToastMetaLine formats production crafter and local time", () => {
+  const productionNotice = createToastNotice({
+    id: "notice-1",
+    title: "Craft completed",
+    body: "Fine Plank by Modular at Carpentry Station",
+    kind: "production",
+    occurredAt: "2026-07-03T14:14:00",
+    metaLabel: "Modular",
+  });
+  const productionWithoutCrafter = createToastNotice({
+    id: "notice-2",
+    title: "Craft completed",
+    body: "Fine Plank at Settlement production",
+    kind: "production",
+    occurredAt: "2026-07-03T14:14:00",
+  });
+  const marketNotice = createToastNotice({
+    id: "notice-3",
+    title: "Market sale",
+    body: "Fine Plank sold",
+    kind: "market",
+    occurredAt: "2026-07-03T14:14:00",
+    metaLabel: "Market",
+  });
+
+  assert.equal(formatToastMetaLine(productionNotice, { now: "2026-07-03T14:20:00.000Z" }), "Modular - 14:14");
+  assert.equal(formatToastMetaLine(productionWithoutCrafter, { now: "2026-07-03T14:20:00.000Z" }), "14:14");
+  assert.equal(formatToastMetaLine(marketNotice, { now: "2026-07-03T14:20:00.000Z" }), "");
+});
+
+test("claimNotificationSourceKey suppresses duplicate source keys across tabs and prunes old claims", () => {
+  const storage = memoryStorage({
+    "claim-monitor.notifications.claims": JSON.stringify({
+      "activity:old": "2026-07-03T08:00:00.000Z",
+    }),
+  });
+
+  assert.equal(claimNotificationSourceKey("activity:new", {
+    storage,
+    nowMs: Date.parse("2026-07-03T10:00:00.000Z"),
+    ttlMs: 60 * 60 * 1000,
+  }), true);
+  assert.equal(claimNotificationSourceKey("activity:new", {
+    storage,
+    nowMs: Date.parse("2026-07-03T10:01:00.000Z"),
+    ttlMs: 60 * 60 * 1000,
+  }), false);
+
+  const claims = JSON.parse(storage.getItem("claim-monitor.notifications.claims"));
+  assert.equal(Object.prototype.hasOwnProperty.call(claims, "activity:new"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(claims, "activity:old"), false);
+  assert.equal(claimNotificationSourceKey("", { storage }), true);
+});
 test("marketActivityToastDraft respects listing and sale settings", () => {
   const listing = {
     id: 42,

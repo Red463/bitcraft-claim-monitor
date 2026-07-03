@@ -70,6 +70,7 @@
 .notice-list strong { color: var(--text); font-size: 13px; font-weight: 500; }
 .notice-list small { grid-column: 2; color: var(--muted); }
 .notice-list time { grid-column: 3; grid-row: 2; color: var(--muted); font-size: var(--font-micro); }
+.notice-list .toast-event-time { grid-column: 2 / 4; grid-row: 3; margin-top: 0; color: #7f8b9d; font-size: 10.5px; }
 
 @media (max-width: 760px) {
   .notification-sound-grid { grid-template-columns: 1fr; }

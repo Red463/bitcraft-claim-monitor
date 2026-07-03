@@ -11,6 +11,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.28] - 2026-07-03
+
+### Changed
+
+- Improved production notifications in the drawer so they use the same crafter and event-time styling as toast popups.
+- Reduced duplicate toast popups and sounds across multiple open app tabs by letting only the active visible tab deliver each source-keyed notification.
+
 ## [0.31.1-beta.27] - 2026-07-03
 
 ### Added

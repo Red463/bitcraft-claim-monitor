@@ -2,6 +2,10 @@ import React from "react";
 
 const STORAGE_PREFIX = "claim-monitor.";
 
+export function persistedStorageKey(key: string): string {
+  return `${STORAGE_PREFIX}${key}`;
+}
+
 /**
  * Persists browser-only preferences such as collapsed navigation and selected
  * filters. This intentionally uses localStorage rather than analytics cookies so
@@ -10,7 +14,7 @@ const STORAGE_PREFIX = "claim-monitor.";
 export function usePersistedState<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = React.useState<T>(() => {
     try {
-      const saved = window.localStorage.getItem(`${STORAGE_PREFIX}${key}`);
+      const saved = window.localStorage.getItem(persistedStorageKey(key));
       return saved == null ? initialValue : JSON.parse(saved) as T;
     } catch {
       return initialValue;
@@ -18,7 +22,7 @@ export function usePersistedState<T>(key: string, initialValue: T): [T, React.Di
   });
   React.useEffect(() => {
     try {
-      window.localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(value));
+      window.localStorage.setItem(persistedStorageKey(key), JSON.stringify(value));
     } catch {
       // Storage can be blocked without affecting the dashboard.
     }
@@ -28,7 +32,7 @@ export function usePersistedState<T>(key: string, initialValue: T): [T, React.Di
 
 export function hasPersistedState(key: string): boolean {
   try {
-    return window.localStorage.getItem(`${STORAGE_PREFIX}${key}`) != null;
+    return window.localStorage.getItem(persistedStorageKey(key)) != null;
   } catch {
     return false;
   }

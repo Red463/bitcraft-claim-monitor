@@ -23,8 +23,18 @@ export function useBrowserNotificationSources(options: BrowserNotificationSource
     userToastSettings,
   } = options;
   const sourceSnapshotsRef = React.useRef<BrowserNotificationSourceSnapshots | null>(null);
+  const [visibilityToken, setVisibilityToken] = React.useState(0);
 
   React.useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "hidden") setVisibilityToken((value) => value + 1);
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (document.visibilityState === "hidden") return;
     const result = browserNotificationSourceDrafts(sourceSnapshotsRef.current, {
       appToastSettings,
       claimId,
@@ -58,5 +68,6 @@ export function useBrowserNotificationSources(options: BrowserNotificationSource
     productionCrafts,
     pushToast,
     userToastSettings,
+    visibilityToken,
   ]);
 }
