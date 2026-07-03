@@ -1,5 +1,5 @@
-import type { NotificationSoundId, UserToastSettings } from "../types/settings";
-import { normalizeNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings.ts";
+import type { NotificationSoundId, NotificationSoundType, UserToastSettings } from "../types/settings";
+import { normalizeNotificationSoundSettings, resolveNotificationSoundSettings, type NotificationSoundSettings } from "../notifications/userToastSettings.ts";
 
 export type { NotificationSoundSettings };
 export type NotificationSoundOption = { id: NotificationSoundId; label: string; description: string };
@@ -12,6 +12,7 @@ export const NOTIFICATION_SOUND_OPTIONS: NotificationSoundOption[] = [
   { id: "bright-ping", label: "Bright ping", description: "High clean ping" },
   { id: "double-ping", label: "Double ping", description: "Two quick bright pings" },
   { id: "coin-ding", label: "Coin ding", description: "Market-style coin sound" },
+  { id: "coin-jingle", label: "Coin jingle", description: "Fuller coin drop and jingle" },
   { id: "success-chime", label: "Success chime", description: "Positive rising chime" },
   { id: "warning-blip", label: "Warning blip", description: "Short attention blip" },
   { id: "soft-bell", label: "Soft bell", description: "Gentle rounded bell" },
@@ -49,6 +50,12 @@ const SOUND_PATTERNS: Record<NotificationSoundId, ToneStep[]> = {
   "coin-ding": [
     { frequency: 1318.51, start: 0, duration: 0.08, type: "triangle", gain: 0.58 },
     { frequency: 1760, start: 0.055, duration: 0.16, type: "sine", gain: 0.42 },
+  ],
+  "coin-jingle": [
+    { frequency: 1567.98, start: 0, duration: 0.07, type: "triangle", gain: 0.46 },
+    { frequency: 2093, start: 0.045, duration: 0.08, type: "sine", gain: 0.38 },
+    { frequency: 1760, start: 0.105, duration: 0.1, type: "triangle", gain: 0.32 },
+    { frequency: 2349.32, start: 0.16, duration: 0.09, type: "sine", gain: 0.24 },
   ],
   "success-chime": [
     { frequency: 523.25, start: 0, duration: 0.13, type: "sine", gain: 0.55 },
@@ -92,8 +99,8 @@ function getAudioContext(): AudioContext | null {
   return audioContext;
 }
 
-export function playNotificationSound(settings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume">) {
-  const normalized = normalizeNotificationSoundSettings(settings);
+export function playNotificationSound(settings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume" | "soundByType">, soundType?: NotificationSoundType) {
+  const normalized = resolveNotificationSoundSettings(settings, soundType);
   if (!normalized.soundEnabled) return;
   void playGeneratedSound(normalized.soundId, normalized.soundVolume);
 }

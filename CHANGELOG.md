@@ -11,6 +11,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.29] - 2026-07-03
+
+### Added
+
+- Added per-notification browser sound choices for market listings, market sales, deal alerts, craft starts, and craft completions.
+- Added a fuller Coin jingle sound option for market-style alerts.
+
+### Changed
+
+- Improved notification sound settings so the global sound remains the default while individual notification types can override it.
+
 ## [0.31.1-beta.28] - 2026-07-03
 
 ### Changed

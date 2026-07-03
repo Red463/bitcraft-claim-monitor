@@ -34,7 +34,7 @@ import {
   type ThemeRangeKey,
   type ThemeSettings,
 } from "../../theme";
-import type { AppSettings, UserAuthState, UserToastSettings } from "../../types/settings";
+import type { AppSettings, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
 import { memberDisplayName } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
 
@@ -45,6 +45,13 @@ import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../util
  * density, toast preferences, page defaults, linked account controls, and custom
  * themes should not be written into global admin configuration.
  */
+const SOUND_TYPE_OPTIONS: Array<{ key: NotificationSoundType; label: string }> = [
+  { key: "marketListings", label: "New market listings" },
+  { key: "marketSales", label: "Confirmed market sales" },
+  { key: "dealAlerts", label: "Deal watcher alerts" },
+  { key: "productionStarted", label: "Craft started" },
+  { key: "productionCompleted", label: "Craft completed" },
+];
 export type UserSettingsDialogProps = {
   density: "comfortable" | "compact";
   onDensityChange: (density: "comfortable" | "compact") => void;
@@ -173,6 +180,13 @@ export function UserSettingsDialog({
   const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
   const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
   const handleSoundVolumeChange = (event: React.FormEvent<HTMLInputElement>) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.currentTarget.value) / 100 });
+  const defaultSoundLabel = NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === toastSettings.soundId)?.label ?? "Default";
+  const updateSoundTypeSetting = (key: NotificationSoundType, value: string) => {
+    const soundByType = { ...(toastSettings.soundByType ?? {}) };
+    if (value) soundByType[key] = value as NotificationSoundId;
+    else delete soundByType[key];
+    onToastSettingsChange({ ...toastSettings, soundByType });
+  };
   const accountName = auth.user?.globalName || auth.user?.username || "Discord user";
   const discordMarketSaleDm = auth.user?.settings?.discordMarketSaleDm !== false;
   const characterLinkApproved = auth.user?.characterStatus === "approved" && Boolean(auth.user?.characterPlayerId);
@@ -433,14 +447,14 @@ export function UserSettingsDialog({
             <div className="settings-section-heading">
               <div>
                 <h3>Notification Sound</h3>
-                <p className="legend">Optional browser-only sound for new toast notifications. Preview unlocks browser audio if needed.</p>
+                <p className="legend">Browser-only sounds for toast notifications. The default sound is used whenever a type does not have its own choice.</p>
               </div>
-              <button className="toolbar-button" onClick={() => previewNotificationSound({ soundId: toastSettings.soundId, soundVolume: toastSettings.soundVolume })}><Bell size={14} /> Preview</button>
+              <button className="toolbar-button" onClick={() => previewNotificationSound({ soundId: toastSettings.soundId, soundVolume: toastSettings.soundVolume })}><Bell size={14} /> Preview default</button>
             </div>
             <label className="toggle-row"><input type="checkbox" checked={toastSettings.soundEnabled} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundEnabled: event.target.checked })} /><span>Play a sound for new notifications</span></label>
             <div className="notification-sound-grid">
               <label className="field">
-                <span>Sound</span>
+                <span>Default sound</span>
                 <select value={toastSettings.soundId} onChange={(event) => onToastSettingsChange({ ...toastSettings, soundId: event.target.value as UserToastSettings["soundId"] })}>
                   {NOTIFICATION_SOUND_OPTIONS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
                 </select>
@@ -453,7 +467,26 @@ export function UserSettingsDialog({
                 </div>
               </label>
             </div>
-            <p className="legend">{NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === toastSettings.soundId)?.description ?? "Generated notification sound."}</p>
+            <div className="notification-sound-type-list">
+              {SOUND_TYPE_OPTIONS.map(({ key, label }) => {
+                const overrideSoundId = toastSettings.soundByType?.[key] ?? "";
+                const soundId = overrideSoundId || toastSettings.soundId;
+                const soundDescription = NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === soundId)?.description ?? "Generated notification sound.";
+                return (
+                  <div className="notification-sound-type-row" key={key}>
+                    <div>
+                      <strong>{label}</strong>
+                      <span>{overrideSoundId ? soundDescription : `Uses default: ${defaultSoundLabel}`}</span>
+                    </div>
+                    <select aria-label={`${label} sound`} value={overrideSoundId} onChange={(event) => updateSoundTypeSetting(key, event.target.value)}>
+                      <option value="">Use default ({defaultSoundLabel})</option>
+                      {NOTIFICATION_SOUND_OPTIONS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
+                    </select>
+                    <button className="toolbar-button icon-only" title={`Preview ${label} sound`} aria-label={`Preview ${label} sound`} onClick={() => previewNotificationSound({ soundId: soundId, soundVolume: toastSettings.soundVolume })}><Bell size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
           </section> : null}
           {settingsSection === "data" ? <section>
             <h3>Reset</h3>

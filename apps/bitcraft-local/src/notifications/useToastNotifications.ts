@@ -1,7 +1,7 @@
 import React from "react";
 import type { AnyRecord } from "../main-app-data";
 import { persistedStorageKey, usePersistedState } from "../hooks/usePersistedState";
-import type { UserToastSettings } from "../types/settings";
+import type { NotificationSoundType, UserToastSettings } from "../types/settings";
 import { playNotificationSound } from "../utils/notificationSounds";
 import {
   appendNotificationLog,
@@ -29,7 +29,7 @@ function parseStoredNotificationLog(value: string | null): ToastNotice[] | null 
   }
 }
 
-export type PushToastOptions = { occurredAt?: string; sourceKey?: string; metaLabel?: string };
+export type PushToastOptions = { occurredAt?: string; sourceKey?: string; metaLabel?: string; soundType?: NotificationSoundType };
 
 export type PushToast = (
   title: string,
@@ -39,7 +39,7 @@ export type PushToast = (
   options?: PushToastOptions,
 ) => void;
 
-export function useToastNotifications({ soundSettings }: { soundSettings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume"> }) {
+export function useToastNotifications({ soundSettings }: { soundSettings: Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume" | "soundByType"> }) {
   const [toasts, setToasts] = React.useState<ToastNotice[]>([]);
   const [notificationLog, setNotificationLog] = usePersistedState<ToastNotice[]>("notifications.log", []);
   const toastTimersRef = React.useRef<Map<string, number>>(new Map());
@@ -87,8 +87,9 @@ export function useToastNotifications({ soundSettings }: { soundSettings: Pick<U
       item,
       sourceKey: options.sourceKey,
       metaLabel: options.metaLabel,
+      soundType: options.soundType,
     });
-    playNotificationSound(soundSettings);
+    playNotificationSound(soundSettings, options.soundType);
     setToasts((current) => appendToastStack(current, notice));
     setNotificationLog((current) => appendNotificationLog(current, notice));
     const timer = window.setTimeout(() => {

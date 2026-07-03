@@ -30,13 +30,16 @@ export function marketActivityToastDraft(
   if (!isListing && !isSale) return null;
   if (isListing && !settings.marketListings) return null;
   if (isSale && !settings.marketSales) return null;
+  const item = helpers.item(event);
   return {
     title: isListing ? "New market listing" : "Market sale",
     body: helpers.summary(event),
     kind: "market",
     occurredAt: event.occurred_at ?? event.occurredAt,
-    item: helpers.item(event),
+    item,
     sourceKey: helpers.key(event),
+    soundType: isListing ? "marketListings" : "marketSales",
+    ...marketToastMeta(event, item),
   };
 }
 
@@ -102,6 +105,36 @@ function parseActivityMetadata(event: AnyRecord): AnyRecord {
   }
 }
 
+function usefulMarketLabel(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (value == null) continue;
+    const normalized = String(value).trim();
+    if (!normalized) continue;
+    if (/^unknown(?:\s+(?:seller|buyer|item|settlement))?$/i.test(normalized)) continue;
+    return normalized;
+  }
+  return null;
+}
+
+function marketToastMeta(event: AnyRecord, item: AnyRecord | null): { metaLabel?: string } {
+  const metadata = parseActivityMetadata(event);
+  const raw = metadata.raw && typeof metadata.raw === "object" ? metadata.raw as AnyRecord : {};
+  const sellerName = usefulMarketLabel(
+    metadata.sellerName,
+    metadata.sellerUsername,
+    metadata.ownerUsername,
+    metadata.ownerName,
+    metadata.owner,
+    raw.sellerName,
+    raw.sellerUsername,
+    raw.ownerUsername,
+    raw.ownerName,
+    raw.owner,
+  );
+  const itemName = usefulMarketLabel(metadata.itemName, metadata.item_name, raw.itemName, raw.name, event.itemName, item?.itemName, item?.name);
+  const label = sellerName ?? itemName;
+  return label ? { metaLabel: label } : {};
+}
 function stripCraftSummaryPrefix(summary: unknown): string | null {
   const value = firstNonEmptyString(summary);
   if (!value) return null;
@@ -158,6 +191,7 @@ export function productionActivityToastDraft(
     occurredAt,
     item: helpers.item(event),
     sourceKey: helpers.key(event),
+    soundType: status === "started" ? "productionStarted" : "productionCompleted",
   };
 }
 
@@ -186,6 +220,7 @@ export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
   const price = `${formatNumber(alert.unitPrice)}g`;
   const baseline = `${formatNumber(Math.round(toNumber(alert.baselineAverage)))}g ${alert.baselineWindowDays}-day average`;
   const itemName = String(alert.itemName ?? "Unknown item");
+  const metaLabel = usefulMarketLabel(alert.sellerName, alert.sellerUsername, alert.ownerUsername, alert.ownerName, alert.owner, itemName);
   return {
     title: "Market deal found",
     body: `${itemName}: ${price} at ${alert.marketClaimName ?? "a regional market"} (${discount}% below ${baseline})`,
@@ -199,6 +234,8 @@ export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
     },
     occurredAt: alert.createdAt,
     sourceKey: `deal-alert:${alert.id}`,
+    soundType: "dealAlerts",
+    ...(metaLabel ? { metaLabel } : {}),
   };
 }
 function dealAlertId(alert: AnyRecord): string | null {
@@ -254,6 +291,7 @@ export function productionCraftToastDraft(
     occurredAt,
     ...productionToastMeta(job),
     sourceKey: `production_${status === "started" ? "started" : "completed"}:${jobId}`,
+    soundType: status === "started" ? "productionStarted" : "productionCompleted",
   };
 }
 

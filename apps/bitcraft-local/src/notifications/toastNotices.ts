@@ -1,5 +1,6 @@
 import type { AnyRecord } from "../main-app-data";
 import type { ActivePanel } from "../types/app";
+import type { NotificationSoundType } from "../types/settings";
 
 export type ToastKind = "market" | "production";
 
@@ -16,6 +17,7 @@ export type ToastNotice = {
   item?: AnyRecord | null;
   sourceKey?: string;
   metaLabel?: string;
+  soundType?: NotificationSoundType;
 };
 
 export type CreateToastNoticeInput = {
@@ -27,6 +29,7 @@ export type CreateToastNoticeInput = {
   item?: AnyRecord | null;
   sourceKey?: string;
   metaLabel?: string;
+  soundType?: NotificationSoundType;
 };
 
 
@@ -53,7 +56,6 @@ function claimTimeMs(value: unknown): number {
 }
 
 export function formatToastMetaLine(notice: Pick<ToastNotice, "kind" | "occurredAt" | "metaLabel">, _options: { now?: string } = {}): string {
-  if (notice.kind !== "production") return "";
   return [notice.metaLabel, toastClockTime(notice.occurredAt)].filter(Boolean).join(" - ");
 }
 
@@ -105,6 +107,7 @@ export function createToastNotice(input: CreateToastNoticeInput): ToastNotice {
     item: input.item ?? null,
     sourceKey: input.sourceKey,
     ...(input.metaLabel ? { metaLabel: input.metaLabel } : {}),
+    ...(input.soundType ? { soundType: input.soundType } : {}),
   };
 }
 

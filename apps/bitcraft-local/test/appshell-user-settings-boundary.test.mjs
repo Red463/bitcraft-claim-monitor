@@ -56,3 +56,14 @@ test("User settings show notification types disabled by admin without overwritin
   assert.match(dialog, /disabled=\{!appToastSettings\[key\]\}/);
   assert.match(dialog, /checked=\{toastSettings\[key\]\}/);
 });
+
+test("User settings exposes per-notification sound selectors", () => {
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(dialog, /SOUND_TYPE_OPTIONS/);
+  assert.match(dialog, /productionStarted/);
+  assert.match(dialog, /productionCompleted/);
+  assert.match(dialog, /dealAlerts/);
+  assert.match(dialog, /soundByType/);
+  assert.match(dialog, /previewNotificationSound\(\{ soundId: soundId, soundVolume: toastSettings\.soundVolume \}\)/);
+});

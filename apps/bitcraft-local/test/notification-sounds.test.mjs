@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeNotificationSoundSettings, normalizeUserToastSettings } from "../src/notifications/userToastSettings.ts";
+import { normalizeNotificationSoundSettings, normalizeUserToastSettings, resolveNotificationSoundSettings } from "../src/notifications/userToastSettings.ts";
 import { NOTIFICATION_SOUND_OPTIONS, playNotificationSound } from "../src/utils/notificationSounds.ts";
 
 class FakeAudioParam {
@@ -111,20 +111,39 @@ test("playNotificationSound schedules the selected generated tone at the configu
   assert.deepEqual(context.oscillators[0].stopCalls, [10.2]);
 });
 
+test("playNotificationSound resolves per-type sound choices", () => {
+  globalThis.window = { AudioContext: FakeAudioContext };
+  const existingContext = FakeAudioContext.instances.at(-1);
+  const previousOscillators = existingContext?.oscillators.length ?? 0;
+  const previousGains = existingContext?.gains.length ?? 0;
+
+  playNotificationSound({ soundEnabled: true, soundId: "clear-ping", soundVolume: 0.25, soundByType: { marketSales: "coin-jingle" } }, "marketSales");
+
+  const context = FakeAudioContext.instances.at(-1);
+  assert.ok(context);
+  assert.equal(context.oscillators.length - previousOscillators >= 3, true);
+  assert.deepEqual(context.gains[previousGains].gain.calls[0], ["set", 0.25, 10]);
+  assert.equal(context.oscillators[previousOscillators].type, "triangle");
+});
+
 test("every listed notification sound option is accepted by settings normalization", () => {
   for (const sound of NOTIFICATION_SOUND_OPTIONS) {
     assert.equal(normalizeNotificationSoundSettings({ soundId: sound.id, soundVolume: 0.5 }).soundId, sound.id);
   }
-});test("normalizeNotificationSoundSettings falls back for missing or corrupted saved sound settings", () => {
+});
+
+test("normalizeNotificationSoundSettings falls back for missing or corrupted saved sound settings", () => {
   assert.deepEqual(normalizeNotificationSoundSettings(null), {
     soundEnabled: true,
     soundId: "alert-pop",
     soundVolume: 0.55,
+    soundByType: {},
   });
   assert.deepEqual(normalizeNotificationSoundSettings({ soundEnabled: "no", soundId: "unknown-tone", soundVolume: Number.NaN }), {
     soundEnabled: true,
     soundId: "alert-pop",
     soundVolume: 0.55,
+    soundByType: {},
   });
 });
 
@@ -133,13 +152,29 @@ test("normalizeNotificationSoundSettings preserves explicit disabled state and c
     soundEnabled: false,
     soundId: "deep-bell",
     soundVolume: 1,
+    soundByType: {},
   });
   assert.deepEqual(normalizeNotificationSoundSettings({ soundEnabled: true, soundId: "soft-chime", soundVolume: -0.2 }), {
     soundEnabled: true,
     soundId: "soft-chime",
     soundVolume: 0,
+    soundByType: {},
   });
 });
+test("normalizeNotificationSoundSettings preserves per-type sound choices and resolves fallbacks", () => {
+  const normalized = normalizeNotificationSoundSettings({
+    soundEnabled: true,
+    soundId: "clear-ping",
+    soundVolume: 0.4,
+    soundByType: { marketSales: "coin-jingle", productionStarted: "deep-bell", productionCompleted: "bad-tone" },
+  });
+
+  assert.deepEqual(normalized.soundByType, { marketSales: "coin-jingle", productionStarted: "deep-bell" });
+  assert.equal(resolveNotificationSoundSettings(normalized, "marketSales").soundId, "coin-jingle");
+  assert.equal(resolveNotificationSoundSettings(normalized, "productionStarted").soundId, "deep-bell");
+  assert.equal(resolveNotificationSoundSettings(normalized, "productionCompleted").soundId, "clear-ping");
+});
+
 test("normalizeUserToastSettings restores malformed browser toast settings safely", () => {
   assert.deepEqual(normalizeUserToastSettings({
     marketListings: false,
@@ -155,6 +190,7 @@ test("normalizeUserToastSettings restores malformed browser toast settings safel
     soundEnabled: false,
     soundId: "alert-pop",
     soundVolume: 1,
+    soundByType: {},
   });
   assert.deepEqual(normalizeUserToastSettings("bad saved value"), {
     marketListings: true,
@@ -163,5 +199,6 @@ test("normalizeUserToastSettings restores malformed browser toast settings safel
     soundEnabled: true,
     soundId: "alert-pop",
     soundVolume: 0.55,
+    soundByType: {},
   });
 });

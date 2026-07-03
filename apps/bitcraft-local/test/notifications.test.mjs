@@ -85,7 +85,8 @@ test("createToastNotice assigns stable notification fields and destinations", ()
     occurredAt: "2026-06-28T10:00:00.000Z",
     item: { itemName: "Leather", tier: 2 },
     sourceKey: "deal-alert:1",
-    metaLabel: "Market",
+    metaLabel: "Mosswick",
+    soundType: "dealAlerts",
   });
   const productionNotice = createToastNotice({
     id: "notice-2",
@@ -104,14 +105,15 @@ test("createToastNotice assigns stable notification fields and destinations", ()
     destination: "market",
     item: { itemName: "Leather", tier: 2 },
     sourceKey: "deal-alert:1",
-    metaLabel: "Market",
+    metaLabel: "Mosswick",
+    soundType: "dealAlerts",
   });
   assert.equal(productionNotice.destination, "production");
   assert.equal(productionNotice.read, false);
   assert.equal(productionNotice.item, null);
 });
 
-test("formatToastMetaLine formats production crafter and local time", () => {
+test("formatToastMetaLine formats notification labels and local time", () => {
   const productionNotice = createToastNotice({
     id: "notice-1",
     title: "Craft completed",
@@ -133,12 +135,12 @@ test("formatToastMetaLine formats production crafter and local time", () => {
     body: "Fine Plank sold",
     kind: "market",
     occurredAt: "2026-07-03T14:14:00",
-    metaLabel: "Market",
+    metaLabel: "Mosswick",
   });
 
   assert.equal(formatToastMetaLine(productionNotice, { now: "2026-07-03T14:20:00.000Z" }), "Modular - 14:14");
   assert.equal(formatToastMetaLine(productionWithoutCrafter, { now: "2026-07-03T14:20:00.000Z" }), "14:14");
-  assert.equal(formatToastMetaLine(marketNotice, { now: "2026-07-03T14:20:00.000Z" }), "");
+  assert.equal(formatToastMetaLine(marketNotice, { now: "2026-07-03T14:20:00.000Z" }), "Mosswick - 14:14");
 });
 
 test("claimNotificationSourceKey suppresses duplicate source keys across tabs and prunes old claims", () => {
@@ -170,14 +172,14 @@ test("marketActivityToastDraft respects listing and sale settings", () => {
     event_type: "market_new_listing",
     occurred_at: "2026-06-28T10:00:00.000Z",
     summary: "New market listing: Oak Plank",
-    metadata_json: JSON.stringify({ itemName: "Oak Plank", itemId: 12, itemType: 0, tier: 2 }),
+    metadata_json: JSON.stringify({ itemName: "Oak Plank", itemId: 12, itemType: 0, tier: 2, owner: "Modular" }),
   };
   const sale = {
     id: 43,
     event_type: "market_sale_confirmed",
     occurredAt: "2026-06-28T10:05:00.000Z",
     summary: "Market sale confirmed: Oak Plank",
-    metadataJson: JSON.stringify({ itemName: "Oak Plank", itemId: 12, itemType: 0, tier: 2 }),
+    metadataJson: JSON.stringify({ itemName: "Oak Plank", itemId: 12, itemType: 0, tier: 2, owner: "Mosswick" }),
   };
   const settings = { marketListings: true, marketSales: true };
   const helpers = {
@@ -193,6 +195,8 @@ test("marketActivityToastDraft respects listing and sale settings", () => {
     occurredAt: "2026-06-28T10:00:00.000Z",
     item: { itemName: "Oak Plank" },
     sourceKey: "activity:42",
+    metaLabel: "Modular",
+    soundType: "marketListings",
   });
   assert.deepEqual(marketActivityToastDraft(sale, settings, helpers), {
     title: "Market sale",
@@ -201,6 +205,8 @@ test("marketActivityToastDraft respects listing and sale settings", () => {
     occurredAt: "2026-06-28T10:05:00.000Z",
     item: { itemName: "Oak Plank" },
     sourceKey: "activity:43",
+    metaLabel: "Mosswick",
+    soundType: "marketSales",
   });
   assert.equal(marketActivityToastDraft(listing, { marketListings: false, marketSales: true }, helpers), null);
   assert.equal(marketActivityToastDraft(sale, { marketListings: true, marketSales: false }, helpers), null);
@@ -317,8 +323,21 @@ test("dealAlertToastDraft builds market deal notices with source keys and item m
     rarity: "Common",
     iconAssetName: "leather.png",
     createdAt: "2026-06-28T11:00:00.000Z",
+    sellerName: "MarketSeller",
   });
 
+  const fallbackDraft = dealAlertToastDraft({
+    id: 8,
+    itemName: "Iron Ore",
+    unitPrice: 3,
+    marketClaimName: "Timbersteel Trade",
+    discountPercent: 30,
+    baselineAverage: 5,
+    baselineWindowDays: 7,
+    createdAt: "2026-06-28T11:05:00.000Z",
+  });
+
+  assert.equal(fallbackDraft.metaLabel, "Iron Ore");
   assert.deepEqual(draft, {
     title: "Market deal found",
     body: "Leather: 6g at Timbersteel Trade (40% below 10g 7-day average)",
@@ -326,6 +345,8 @@ test("dealAlertToastDraft builds market deal notices with source keys and item m
     item: { name: "Leather", itemName: "Leather", tier: 2, rarity: "Common", iconAssetName: "leather.png" },
     occurredAt: "2026-06-28T11:00:00.000Z",
     sourceKey: "deal-alert:7",
+    metaLabel: "MarketSeller",
+    soundType: "dealAlerts",
   });
 });
 test("productionActivityToastDraft formats production activity with crafter, building, and event time", () => {
@@ -350,6 +371,7 @@ test("productionActivityToastDraft formats production activity with crafter, bui
     metaLabel: "Mosswick",
     item: { itemName: "Fine Cloth", iconAssetName: "fine_cloth.png" },
     sourceKey: "production_completed:craft-1",
+    soundType: "productionCompleted",
   });
 });
 test("productionCraftToastDraft builds started and completed notices", () => {
@@ -367,6 +389,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     occurredAt: "2026-07-03T09:58:00.000Z",
     metaLabel: "Modular",
     sourceKey: "production_started:craft-1",
+    soundType: "productionStarted",
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
     title: "Craft completed",
@@ -376,6 +399,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     occurredAt: "2026-07-03T10:42:00.000Z",
     metaLabel: "Modular",
     sourceKey: "production_completed:craft-1",
+    soundType: "productionCompleted",
   });
 });
 
