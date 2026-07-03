@@ -96,7 +96,7 @@ export function Members({
   const activeGearSlots = gearPresets.find((preset) => preset.active)?.slots ?? currentEquipmentSlots;
 
   return (
-    <div className="panel members-page">
+    <div className="panel members-page" data-tour="members-page">
       <header className="members-topbar">
         <div>
           <h2>Settlement Roster</h2>

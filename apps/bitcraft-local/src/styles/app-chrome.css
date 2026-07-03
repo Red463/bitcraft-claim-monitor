@@ -81,6 +81,27 @@ body:has(.admin-loading-panel) .floating-actions {
     transition: none;
   }
 }
+.release-update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: calc(var(--z-toast) + 2);
+  width: min(520px, calc(100vw - 34px));
+  transform: translateX(-50%);
+  border: 1px solid rgba(240,198,79,.42);
+  border-radius: 10px;
+  background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 26%, transparent), transparent 42%), linear-gradient(180deg, rgba(17,25,35,.96), rgba(8,13,20,.98));
+  box-shadow: 0 20px 48px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.045);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.release-update-banner div { display: grid; gap: 2px; min-width: 0; }
+.release-update-banner strong { color: var(--gold); font-size: 14px; }
+.release-update-banner span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.release-update-banner .toolbar-button { flex: 0 0 auto; }
 .help-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: radial-gradient(circle at top right, rgba(15,60,180,.16), transparent 38%), rgba(2,5,10,.78); display: grid; place-items: center; padding: 20px; animation: overlay-enter .18s ease-out; backdrop-filter: blur(8px); }
 .help-dialog { width: min(480px, 100%); border: 1px solid var(--border); border-radius: 10px; background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 24%, transparent), transparent 35%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); box-shadow: 0 24px 70px rgba(0,0,0,.62), inset 0 1px 0 rgba(255,255,255,.035); padding: 20px; display: grid; gap: 16px; animation: dialog-enter .2s ease-out; }
 @keyframes overlay-enter { from { opacity: 0; } to { opacity: 1; } }

@@ -236,7 +236,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
         <MiniStat icon={<TrendingUp />} label="Total XP" value={formatNumber(totalProductionXp)} />
         <MiniStat icon={<Star />} label="XP Remaining" value={formatNumber(remainingProductionXp)} />
       </div>
-      <div className="command-filter-panel">
+      <div className="command-filter-panel" data-tour="production-controls">
         <div className="command-filter-main">
           <span className="command-filter-title"><Wrench size={15} /> Production controls</span>
           <label className="inline-field"><span>Member</span>

@@ -11,6 +11,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.31] - 2026-07-03
+
+### Added
+
+- Added a first-time app tour with a welcome prompt, page highlights, navigation through key tools, and a Help menu replay action.
+- Added live update detection so open browsers can see when a new VPS deployment is available and hidden tabs refresh automatically.
+
+### Fixed
+
+- Fixed the first-time tour so cookie consent remains on top and the welcome prompt does not reappear while the tour is running.
+- Fixed the user settings preferences panel so notification sound options are no longer clipped at the bottom.
 ## [0.31.1-beta.30] - 2026-07-03
 
 ### Added

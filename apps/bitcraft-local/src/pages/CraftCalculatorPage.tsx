@@ -276,7 +276,7 @@ export function CraftCalculatorPage() {
   const stepCount = state.plan?.steps.length ?? 0;
 
   return (
-    <div className="panel craftcalc-page">
+    <div className="panel craftcalc-page" data-tour="craftcalc-page">
       <header className="members-topbar craftcalc-topbar">
         <div>
           <h2>Craft Calculator</h2>

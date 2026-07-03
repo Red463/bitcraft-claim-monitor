@@ -81,7 +81,7 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
       return bStatus.remaining - aStatus.remaining || aStatus.pct - bStatus.pct;
     });
   return (
-    <div className="panel construction-page">
+    <div className="panel construction-page" data-tour="construction-page">
       <header className="members-topbar construction-topbar">
         <div>
           <h2>Construction Projects</h2>

@@ -44,7 +44,7 @@
   --z-toast: 22;
   --z-sticky: 25;
   --z-overlay: 30;
-  --z-cookie: 35;
+  --z-cookie: 60;
   font-family: Outfit, system-ui, sans-serif;
   background: var(--bg);
 }

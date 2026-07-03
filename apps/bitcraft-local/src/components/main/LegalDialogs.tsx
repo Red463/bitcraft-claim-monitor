@@ -6,7 +6,7 @@ import packageJson from "../../../package.json";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const APP_VERSION = packageJson.version;
 type AnalyticsConsent = "accepted" | "declined" | null;
-export function HelpCenter({ version, onClose, onPrivacy, onTerms }: { version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void }) {
+export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }: { version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -42,6 +42,11 @@ export function HelpCenter({ version, onClose, onPrivacy, onTerms }: { version: 
             <span>Found an issue or have an idea? Let us know on GitHub Issues.</span>
             <ExternalLink size={14} />
           </a>
+          <button className="help-link-button" onClick={() => { onClose(); onStartTour(); }}>
+            <strong>Start app tour</strong>
+            <span>Replay the guided overview of the main dashboard tools</span>
+            <CircleHelp size={14} />
+          </button>
           <button className="help-link-button" onClick={() => { onClose(); onPrivacy(); }}>
             <strong>Privacy & Analytics</strong>
             <span>See what anonymous usage data may be measured</span>
@@ -220,5 +225,3 @@ export function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSetti
     </div>
   );
 }
-
-

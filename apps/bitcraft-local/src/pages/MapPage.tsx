@@ -54,7 +54,7 @@ function MapPlayerTrackingControls({
   ];
 
   return (
-    <section className="map-player-tracking" aria-label="Player tracking">
+    <section className="map-player-tracking" aria-label="Player tracking" data-tour="map-player-tracking">
       <div className="map-player-tracking-summary">
         <Users size={16} />
         <div>

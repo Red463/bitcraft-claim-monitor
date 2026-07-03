@@ -25,6 +25,7 @@ import { AppPopupManager } from "./components/main/AppPopupManager";
 import { UserSettingsDialog } from "./components/main/UserSettingsDialog";
 import { BuyMeCoffeeButton, DiscordIcon } from "./components/main/SupportLinks";
 import { CookieBanner, DedicatedLegalPage, DiscordSignInPrompt, HelpCenter, PrivacyDialog, TermsDialog } from "./components/main/LegalDialogs";
+import { FirstRunTourManager } from "./components/main/FirstRunTourManager";
 import { useBrowserNotificationSmoke } from "./notifications/useBrowserNotificationSmoke";
 import { useBrowserNotificationSources } from "./notifications/useBrowserNotificationSources";
 import { useToastNotifications } from "./notifications/useToastNotifications";
@@ -34,6 +35,7 @@ import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
+import { normalizeReleaseBuildId, releaseUpdateDecision } from "./utils/releaseUpdate";
 import { normalizeAppSettings } from "./utils/appSettings";
 import { applyMemberTrackingFilter } from "./utils/memberTracking";
 import { getTrackedOwnerName } from "./utils/ownership";
@@ -93,6 +95,9 @@ function DashboardApp() {
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [appBuildId, setAppBuildId] = React.useState("");
+  const appBuildIdRef = React.useRef("");
+  const releaseUpdateBuildIdRef = React.useRef("");
+  const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
@@ -119,6 +124,8 @@ function DashboardApp() {
   const [floatingActionsCollapsed, setFloatingActionsCollapsed] = usePersistedState("layout.floatingActionsCollapsed", false);
   const [discordPromptDismissed, setDiscordPromptDismissed] = usePersistedState("auth.discordPromptDismissed", false);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [tourVisible, setTourVisible] = React.useState(false);
+  const [tourReplayToken, setTourReplayToken] = React.useState(0);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
   const [termsOpen, setTermsOpen] = React.useState(false);
@@ -282,14 +289,36 @@ function DashboardApp() {
   }, []);
   React.useEffect(() => {
     let cancelled = false;
-    fetch(`${LOCAL_API}/health`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload) => {
-        if (!cancelled && typeof payload?.buildId === "string") setAppBuildId(payload.buildId);
-      })
-      .catch(() => undefined);
+    function rememberBuildId(buildId: string) {
+      appBuildIdRef.current = buildId;
+      if (!cancelled) setAppBuildId(buildId);
+    }
+    function showReleaseUpdate(buildId: string) {
+      releaseUpdateBuildIdRef.current = buildId;
+      if (!cancelled) setReleaseUpdateBuildId(buildId);
+    }
+    async function checkReleaseBuild() {
+      try {
+        const response = await fetch(`${LOCAL_API}/health`, { cache: "no-store" });
+        const nextBuildId = normalizeReleaseBuildId(response.ok ? await response.json() : null);
+        const decision = releaseUpdateDecision({ currentBuildId: appBuildIdRef.current, nextBuildId, documentHidden: document.hidden });
+        if (decision === "remember") rememberBuildId(nextBuildId);
+        if (decision === "prompt") showReleaseUpdate(nextBuildId);
+        if (decision === "reload") window.location.reload();
+      } catch {
+        // A failed release check should not interrupt the dashboard.
+      }
+    }
+    function handleReleaseVisibility() {
+      if (document.hidden && releaseUpdateBuildIdRef.current) window.location.reload();
+    }
+    void checkReleaseBuild();
+    const timer = window.setInterval(checkReleaseBuild, 60_000);
+    document.addEventListener("visibilitychange", handleReleaseVisibility);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleReleaseVisibility);
     };
   }, []);
   React.useEffect(() => {
@@ -478,7 +507,7 @@ function DashboardApp() {
             <MessageCircle size={16} /><span>Sign in with Discord</span>
           </a>
         ) : null}
-        <nav aria-label="Main navigation">
+        <nav aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
             const hasActivePage = group.items.some(([id]) => active === id);
             const isOpen = sidebarGroups[group.id] ?? true;
@@ -548,7 +577,8 @@ function DashboardApp() {
           </div>
         </footer>
       </main>
-      <div className={`floating-actions ${floatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools">
+      {releaseUpdateBuildId ? <div className="release-update-banner" role="status" aria-live="polite"><div><strong>Update available</strong><span>A newer version is ready. Refresh to use the latest app.</span></div><button className="toolbar-button primary" onClick={() => window.location.reload()}><RefreshCw size={14} /> Refresh now</button></div> : null}
+      <div className={`floating-actions ${floatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
         <button
           className="floating-actions-toggle"
           onClick={() => setFloatingActionsCollapsed((current) => !current)}
@@ -576,16 +606,17 @@ function DashboardApp() {
         <button className="floating-action-item notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-action-item floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
       </div>
-      <ToastStack notices={toasts} onDismiss={dismissToast} />
+      {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={NAV} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
-      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} /> : null}
+      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
       {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
-      <AppPopupManager activePage={active} enabled={active !== "admin" && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen} />
+      <FirstRunTourManager activePage={active} enabled={active !== "admin" && consent != null && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen && !(!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user)} replayToken={tourReplayToken} onNavigate={(panel) => navigate(panel)} onOpenUserSettings={() => setUserSettingsOpen(true)} onCloseUserSettings={() => setUserSettingsOpen(false)} onVisibilityChange={setTourVisible} />
+      <AppPopupManager activePage={active} enabled={active !== "admin" && !tourVisible && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen} />
     </div>
   );
 }
@@ -629,4 +660,3 @@ export default function App() {
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }
-

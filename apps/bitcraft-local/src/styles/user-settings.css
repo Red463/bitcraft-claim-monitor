@@ -4,7 +4,7 @@
 .settings-section-tabs button { flex: 1 1 0; min-width: 128px; min-height: 38px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 0 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; text-align: center; }
 .settings-section-tabs button:hover { color: var(--text); border-color: var(--hover-border); }
 .settings-section-tabs button.active { color: var(--active-color); border-color: var(--active-border); background: linear-gradient(180deg, color-mix(in srgb, var(--active-bg) 50%, transparent), color-mix(in srgb, var(--active-bg) 18%, transparent)); }
-.settings-grid { display: grid; gap: 13px; min-width: 0; max-height: calc(100vh - 170px); overflow: auto; padding-right: 2px; align-content: start; }
+.settings-grid { display: grid; gap: 13px; min-width: 0; max-height: calc(100vh - 170px); overflow: auto; padding: 0 10px 24px 0; scrollbar-gutter: stable; align-content: start; }
 .settings-grid section { border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 13px; display: grid; gap: 10px; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); }
 .settings-grid h3 { color: var(--active-color); font-size: 16px; }
 .settings-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; }

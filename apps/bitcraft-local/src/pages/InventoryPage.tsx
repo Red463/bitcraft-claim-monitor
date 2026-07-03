@@ -120,7 +120,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
   const occupiedContainers = containers.filter((container) => container.items.length > 0).length;
   const uniqueVisibleItems = unique(rows.map((row: AnyRecord) => String(row.name))).length;
   return (
-    <div className="panel inventory-page">
+    <div className="panel inventory-page" data-tour="inventory-page">
       <header className="members-topbar inventory-topbar">
         <div>
           <h2>Inventory & Storage</h2>

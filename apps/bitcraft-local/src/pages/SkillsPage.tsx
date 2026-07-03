@@ -104,7 +104,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
-    <div className="panel skills-page">
+    <div className="panel skills-page" data-tour="skills-page">
       <header className="skills-topbar">
         <div>
           <h2>Member Professions</h2>

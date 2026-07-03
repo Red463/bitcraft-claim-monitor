@@ -193,7 +193,7 @@ export function Leaderboard({
     <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
   ];
   return (
-    <div className="panel leaderboard-page">
+    <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">
         <div>
           <h2>Leaderboard</h2>

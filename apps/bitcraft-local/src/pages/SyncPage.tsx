@@ -5,7 +5,7 @@ import { ExternalLink } from "lucide-react";
 // code asks the user to configure one instead of rendering this iframe.
 export function SyncPanel({ syncUrl }: { syncUrl: string }) {
   return (
-    <div className="panel sync-panel">
+    <div className="panel sync-panel" data-tour="sync-page">
       <header className="members-topbar sync-topbar">
         <div>
           <h2>Sync</h2>

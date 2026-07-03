@@ -24,6 +24,7 @@ import "./styles/app-chrome.css";
 import "./styles/user-settings.css";
 import "./styles/notifications.css";
 import "./styles/app-popups.css";
+import "./styles/first-run-tour.css";
 import App from "./AppShell";
 
 // Keep this file as the React bootstrapping boundary only. App-level routing,

@@ -288,7 +288,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
         <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
         <MiniStat icon={<TrendingUp />} label="Sales Revenue" value={formatCompactNumber(confirmedRevenue)} />
       </div>
-      <section className="command-filter-panel market-command-panel">
+      <section className="command-filter-panel market-command-panel" data-tour="market-tools">
         <div className="command-filter-header">
           <span className="command-filter-title"><CircleDollarSign size={15} /> Market tools</span>
           <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : view === "dealWatchlist" ? "Manage deal alerts without running a price lookup first." : "Browse settlement market data by view and member."}</span>

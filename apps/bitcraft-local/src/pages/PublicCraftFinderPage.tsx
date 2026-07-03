@@ -116,7 +116,7 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     ["Owner", "owner", (job) => <TrackedOwnerName name={job.ownerUsername ?? "-"} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
   ];
   return (
-    <section className="public-craft-finder">
+    <section className="public-craft-finder" data-tour="publiccrafts-page">
       <header className="members-topbar public-craft-topbar">
         <div>
           <h2>Public Craft Finder</h2>

@@ -44,7 +44,7 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
   return (
-    <div className="panel research-panel">
+    <div className="panel research-panel" data-tour="research-page">
       <header className="members-topbar research-topbar">
         <div>
           <h2>Research & Technology</h2>

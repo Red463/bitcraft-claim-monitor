@@ -315,7 +315,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
 
   return (
     <div className="panel empires-page">
-      <header className="page-title-row">
+      <header className="page-title-row" data-tour="empires-page">
         <div>
           <h2>Empires</h2>
           <p>Regional empire overview and claimed watchtower scouting.</p>
@@ -366,7 +366,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
           </section>
           {watchtowers.error ? <div className="error-card"><AlertTriangle /> {watchtowers.error}</div> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
-          <section className="dashboard-card table-panel">
+          <section className="dashboard-card table-panel" data-tour="watchtower-card">
             <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
             <div className="watchtower-filter-bar">
               <div className="watchtower-empire-filter" aria-label="Filter watchtowers by empire">

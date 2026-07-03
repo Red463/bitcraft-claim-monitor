@@ -208,7 +208,7 @@ export function UserSettingsDialog({
   }
   return (
     <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+      <section className="help-dialog settings-dialog" data-tour="user-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
             <Settings size={19} />

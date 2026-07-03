@@ -92,7 +92,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   ];
   const regionStatusLabel = liveStatus ? liveStatus.syncing ? "Syncing" : liveStatus.active ? "Active" : "Offline" : "-";
   return (
-    <div className="panel region-panel">
+    <div className="panel region-panel" data-tour="region-page">
       <header className="members-topbar region-topbar">
         <div>
           <h2>{data.claim.regionName ?? "Region"}</h2>
