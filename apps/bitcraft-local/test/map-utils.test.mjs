@@ -26,6 +26,9 @@ test("bitcraftMapUrl sorts query ids and preserves waypoint data", () => {
   assert.equal(parsed.regionId, "3,19");
   assert.equal(parsed.enemyId, "1,8");
   assert.equal(parsed.hasWaypoint, true);
+
+  const waypoint = JSON.parse(decodeURIComponent(new URL(url).hash.slice(1)));
+  assert.equal(waypoint.features[0].properties.turnLayerOn.includes("towersLayer"), true);
 });
 
 test("map resource helpers handle resource and enemy catalog rows", () => {

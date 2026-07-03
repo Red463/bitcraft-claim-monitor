@@ -35,6 +35,7 @@
 .toast-item-icon .item-thumb img { padding: 2px; background: transparent; }
 .toast strong { display: block; color: #fff; font-size: 13px; font-weight: 800; margin-bottom: 4px; }
 .toast p { margin: 0; color: #aab5c4; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.toast-event-time { display: block; margin-top: 2px; color: #7f8b9d; font-size: 10.5px; line-height: 1.25; }
 .toast button { width: 27px; height: 27px; border: 1px solid transparent; border-radius: 7px; color: #8793a4; background: transparent; display: grid; place-items: center; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 

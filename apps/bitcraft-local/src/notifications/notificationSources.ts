@@ -121,13 +121,12 @@ function formatProductionToastTime(value: unknown): string {
   }).format(date);
 }
 
-function productionToastBody(status: ProductionCraftToastStatus, details: AnyRecord, occurredAt: unknown, fallbackName?: unknown): string {
-  const action = status === "started" ? "Started" : "Completed";
+function productionToastBody(_status: ProductionCraftToastStatus, details: AnyRecord, _occurredAt: unknown, fallbackName?: unknown): string {
   const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
   const itemName = firstNonEmptyString(details.itemName, details.label, details.name, raw.itemName, raw.name, fallbackName, "Craft");
   const crafterName = firstNonEmptyString(details.crafterName, details.crafterUsername, details.ownerUsername, details.playerUsername, details.userName, raw.crafterName, raw.crafterUsername, raw.ownerUsername, raw.playerUsername, raw.userName);
   const buildingName = firstNonEmptyString(details.buildingName, details.structureName, raw.buildingName, raw.structureName, "Settlement production");
-  return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName} - ${action} ${formatProductionToastTime(occurredAt)}`;
+  return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName}`;
 }
 
 export function productionActivityToastDraft(

@@ -11,6 +11,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.26] - 2026-07-03
+
+### Changed
+
+- Changed generated BitCraft Map links so the watchtower layer is requested by default when users open the app map.
+- Improved production toast layout so the event time is shown as a smaller muted time-only line instead of repeating the started or completed status.
+
 ## [0.31.1-beta.25] - 2026-07-03
 
 ### Fixed

@@ -2,7 +2,7 @@ import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 
 export type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 
-export const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
+export const MAP_DEFAULT_LAYERS = ["roadsLayer", "towersLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 
 export function bitcraftMapUrl(
   playerIds: string[],

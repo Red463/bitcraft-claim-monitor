@@ -270,7 +270,7 @@ test("productionActivityToastDraft formats production activity with crafter, bui
 
   assert.deepEqual(productionActivityToastDraft(event, { production: true }, helpers), {
     title: "Craft completed",
-    body: "Fine Cloth by Mosswick at Tailoring Station - Completed 03/07/2026, 11:42",
+    body: "Fine Cloth by Mosswick at Tailoring Station",
     kind: "production",
     occurredAt: "2026-07-03T10:42:00.000Z",
     item: { itemName: "Fine Cloth", iconAssetName: "fine_cloth.png" },
@@ -286,7 +286,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
 
   assert.deepEqual(productionCraftToastDraft("started", "claim-1", "craft-1", job, helpers, "2026-07-03T09:58:00.000Z"), {
     title: "Craft started",
-    body: "Fine Plank by Modular at Carpentry Station - Started 03/07/2026, 10:58",
+    body: "Fine Plank by Modular at Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T09:58:00.000Z",
@@ -294,7 +294,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
     title: "Craft completed",
-    body: "Fine Plank by Modular at Carpentry Station - Completed 03/07/2026, 11:42",
+    body: "Fine Plank by Modular at Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T10:42:00.000Z",
@@ -310,7 +310,7 @@ test("productionCraftToastDraft omits missing crafter and falls back to settleme
 
   assert.equal(
     productionCraftToastDraft("started", "claim-1", "craft-1", { entityId: "craft-1" }, helpers, "2026-07-03T09:58:00.000Z").body,
-    "Simple Plank at Settlement production - Started 03/07/2026, 10:58",
+    "Simple Plank at Settlement production",
   );
 });
 

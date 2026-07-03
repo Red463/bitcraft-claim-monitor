@@ -6,6 +6,13 @@ import { timeAgo } from "../../utils/format";
 import { bitjitaIconUrl } from "../../utils/items";
 import { ItemIcon } from "./ItemDisplay";
 
+function toastClockTime(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
   const tier = toNumber(item?.tier ?? item?.itemTier);
@@ -22,16 +29,20 @@ function ToastVisual({ notice }: { notice: ToastNotice }) {
 export function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onDismiss: (id: string) => void }) {
   return (
     <section className="toast-stack" aria-live="polite" aria-label="Notifications">
-      {notices.map((notice) => (
-        <article className={`toast ${notice.kind}`} key={notice.id}>
-          <ToastVisual notice={notice} />
-          <div>
-            <strong>{notice.title}</strong>
-            <p>{notice.body}</p>
-          </div>
-          <button onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification"><X size={14} /></button>
-        </article>
-      ))}
+      {notices.map((notice) => {
+        const eventTime = notice.kind === "production" ? toastClockTime(notice.occurredAt) : "";
+        return (
+          <article className={`toast ${notice.kind}`} key={notice.id}>
+            <ToastVisual notice={notice} />
+            <div>
+              <strong>{notice.title}</strong>
+              <p>{notice.body}</p>
+              {eventTime ? <time className="toast-event-time" dateTime={notice.occurredAt}>{eventTime}</time> : null}
+            </div>
+            <button onClick={() => onDismiss(notice.id)} aria-label="Dismiss notification"><X size={14} /></button>
+          </article>
+        );
+      })}
     </section>
   );
 }
