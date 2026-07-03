@@ -69,6 +69,33 @@ test("production activity helpers normalize production jobs with catalog item me
   assert.equal(normalized.raw, job);
 });
 
+test("production activity helpers preserve stored normalized item metadata without a fresh catalog", () => {
+  const stored = {
+    key: "craft|claim-1|station-1|simple plank|2020003|0|public",
+    label: "Simple Plank",
+    itemId: "2020003",
+    itemType: "0",
+    itemName: "Simple Plank",
+    tier: 2,
+    rarity: "Common",
+    iconAssetName: "simple_plank.png",
+    buildingName: "Public Workshop",
+    crafterName: "Tester",
+    raw: { entityId: "craft-1" },
+  };
+
+  const normalized = normalizeProductionJob(stored);
+
+  assert.equal(normalized.label, "Simple Plank");
+  assert.equal(normalized.itemId, "2020003");
+  assert.equal(normalized.itemType, "0");
+  assert.equal(normalized.itemName, "Simple Plank");
+  assert.equal(normalized.tier, 2);
+  assert.equal(normalized.rarity, "Common");
+  assert.equal(normalized.iconAssetName, "simple_plank.png");
+  assert.equal(normalized.buildingName, "Public Workshop");
+  assert.equal(normalized.crafterName, "Tester");
+});
 test("production activity helpers identify jobs that are already complete", () => {
   assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, progress: 100 }), true);
   assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, remainingCraftWork: 0 }), true);

@@ -11,6 +11,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.25] - 2026-07-03
+
+### Fixed
+
+- Improved production in-app notifications so craft start and completion toasts show the crafter, station, event time, and keep crafted item images when available.
+
 ## [0.31.1-beta.24] - 2026-07-02
 
 ### Fixed

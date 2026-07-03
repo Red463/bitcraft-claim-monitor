@@ -657,7 +657,7 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       });
       continue;
     }
-    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(job.raw));
+    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(jobWithTiming));
     const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
     if (startAlreadyNotified) {
       diagnostics.push({

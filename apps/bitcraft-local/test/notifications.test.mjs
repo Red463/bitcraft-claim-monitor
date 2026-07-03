@@ -6,6 +6,7 @@ import {
   dealAlertQueueToastDrafts,
   marketActivityToastDraft,
   marketActivityQueueToastDrafts,
+  productionActivityToastDraft,
   productionCraftToastDraft,
   productionCraftQueueToastDrafts,
   selectUnseenNotificationItems,
@@ -253,27 +254,64 @@ test("dealAlertToastDraft builds market deal notices with source keys and item m
     sourceKey: "deal-alert:7",
   });
 });
+test("productionActivityToastDraft formats production activity with crafter, building, and event time", () => {
+  const helpers = {
+    summary: (event) => event.summary,
+    item: (event) => ({ itemName: JSON.parse(event.metadata_json).itemName, iconAssetName: JSON.parse(event.metadata_json).iconAssetName }),
+    key: (event) => event.source_key,
+  };
+  const event = {
+    event_type: "production_completed",
+    source_key: "production_completed:craft-1",
+    summary: "Craft completed: Fine Cloth",
+    occurred_at: "2026-07-03T10:42:00.000Z",
+    metadata_json: JSON.stringify({ itemName: "Fine Cloth", iconAssetName: "fine_cloth.png", crafterName: "Mosswick", buildingName: "Tailoring Station" }),
+  };
+
+  assert.deepEqual(productionActivityToastDraft(event, { production: true }, helpers), {
+    title: "Craft completed",
+    body: "Fine Cloth by Mosswick at Tailoring Station - Completed 03/07/2026, 11:42",
+    kind: "production",
+    occurredAt: "2026-07-03T10:42:00.000Z",
+    item: { itemName: "Fine Cloth", iconAssetName: "fine_cloth.png" },
+    sourceKey: "production_completed:craft-1",
+  });
+});
 test("productionCraftToastDraft builds started and completed notices", () => {
-  const job = { entityId: "craft-1", buildingName: "Carpentry Station", recipeId: "recipe-1" };
+  const job = { entityId: "craft-1", buildingName: "Carpentry Station", crafterName: "Modular", recipeId: "recipe-1" };
   const helpers = {
     displayName: () => "Fine Plank",
     item: () => ({ itemName: "Fine Plank", tier: 4 }),
   };
 
-  assert.deepEqual(productionCraftToastDraft("started", "claim-1", "craft-1", job, helpers), {
+  assert.deepEqual(productionCraftToastDraft("started", "claim-1", "craft-1", job, helpers, "2026-07-03T09:58:00.000Z"), {
     title: "Craft started",
-    body: "Fine Plank - Carpentry Station",
+    body: "Fine Plank by Modular at Carpentry Station - Started 03/07/2026, 10:58",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
+    occurredAt: "2026-07-03T09:58:00.000Z",
     sourceKey: "production_started:craft-1",
   });
-  assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers), {
+  assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
     title: "Craft completed",
-    body: "Fine Plank - Carpentry Station",
+    body: "Fine Plank by Modular at Carpentry Station - Completed 03/07/2026, 11:42",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
+    occurredAt: "2026-07-03T10:42:00.000Z",
     sourceKey: "production_completed:craft-1",
   });
+});
+
+test("productionCraftToastDraft omits missing crafter and falls back to settlement production", () => {
+  const helpers = {
+    displayName: () => "Simple Plank",
+    item: () => null,
+  };
+
+  assert.equal(
+    productionCraftToastDraft("started", "claim-1", "craft-1", { entityId: "craft-1" }, helpers, "2026-07-03T09:58:00.000Z").body,
+    "Simple Plank at Settlement production - Started 03/07/2026, 10:58",
+  );
 });
 
 test("productionCraftQueueToastDrafts seeds baselines, handles claim changes, and respects disabled settings", () => {
@@ -347,6 +385,21 @@ test("productionCraftQueueToastDrafts emits capped started and completed drafts 
   ]);
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started", "Craft started", "Craft completed", "Craft completed"]);
   assert.deepEqual([...result.snapshot.jobs.keys()], ["old-2", "new-1", "new-2", "new-3"]);
+});
+test("productionCraftQueueToastDrafts keeps resolved item metadata for completed fallback toasts", () => {
+  const catalog = new Set(["Fine Cloth"]);
+  const helpers = {
+    displayName: (job) => job.name,
+    item: (job) => catalog.has(job.name) ? ({ itemName: job.name, iconAssetName: `${job.name}.png` }) : null,
+  };
+  const initial = productionCraftQueueToastDrafts(null, "claim-1", [
+    { entityId: "old-1", name: "Fine Cloth", buildingName: "Tailoring Station" },
+  ], helpers);
+  catalog.clear();
+
+  const completed = productionCraftQueueToastDrafts(initial.snapshot, "claim-1", [], helpers);
+
+  assert.deepEqual(completed.drafts[0].item, { itemName: "Fine Cloth", iconAssetName: "Fine Cloth.png" });
 });
 test("browserNotificationSourceDrafts queues live source rows without page-mounted state", () => {
   const helpers = {

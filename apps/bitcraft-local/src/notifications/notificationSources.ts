@@ -92,6 +92,44 @@ function recentActivityEvents(events: AnyRecord[], maxAgeMs = 5 * 60 * 1000, now
   });
 }
 
+function parseActivityMetadata(event: AnyRecord): AnyRecord {
+  const metadata = event.metadata_json ?? event.metadataJson;
+  if (metadata && typeof metadata === "object") return metadata as AnyRecord;
+  try {
+    return JSON.parse(String(metadata ?? "{}"));
+  } catch {
+    return {};
+  }
+}
+
+function stripCraftSummaryPrefix(summary: unknown): string | null {
+  const value = firstNonEmptyString(summary);
+  if (!value) return null;
+  return value.replace(/^Craft (?:started|completed):\s*/i, "").trim() || value;
+}
+
+function formatProductionToastTime(value: unknown): string {
+  const date = new Date(String(value ?? ""));
+  if (!Number.isFinite(date.getTime())) return "now";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function productionToastBody(status: ProductionCraftToastStatus, details: AnyRecord, occurredAt: unknown, fallbackName?: unknown): string {
+  const action = status === "started" ? "Started" : "Completed";
+  const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
+  const itemName = firstNonEmptyString(details.itemName, details.label, details.name, raw.itemName, raw.name, fallbackName, "Craft");
+  const crafterName = firstNonEmptyString(details.crafterName, details.crafterUsername, details.ownerUsername, details.playerUsername, details.userName, raw.crafterName, raw.crafterUsername, raw.ownerUsername, raw.playerUsername, raw.userName);
+  const buildingName = firstNonEmptyString(details.buildingName, details.structureName, raw.buildingName, raw.structureName, "Settlement production");
+  return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName} - ${action} ${formatProductionToastTime(occurredAt)}`;
+}
+
 export function productionActivityToastDraft(
   event: AnyRecord,
   settings: ProductionActivityToastSettings,
@@ -100,11 +138,13 @@ export function productionActivityToastDraft(
   const eventType = String(event.event_type ?? event.eventType ?? "");
   if (!isProductionActivityToastEvent(event)) return null;
   if (!settings.production) return null;
+  const occurredAt = firstNonEmptyString(event.occurred_at, event.occurredAt) ?? new Date().toISOString();
+  const status = eventType === "production_started" ? "started" : "completed";
   return {
-    title: eventType === "production_started" ? "Craft started" : "Craft completed",
-    body: helpers.summary(event),
+    title: status === "started" ? "Craft started" : "Craft completed",
+    body: productionToastBody(status, parseActivityMetadata(event), occurredAt, stripCraftSummaryPrefix(helpers.summary(event))),
     kind: "production",
-    occurredAt: event.occurred_at ?? event.occurredAt,
+    occurredAt,
     item: helpers.item(event),
     sourceKey: helpers.key(event),
   };
@@ -192,13 +232,15 @@ export function productionCraftToastDraft(
   jobId: string,
   job: AnyRecord,
   helpers: ProductionCraftToastHelpers,
+  occurredAt: string = new Date().toISOString(),
 ): ToastNoticeDraft {
   const title = status === "started" ? "Craft started" : "Craft completed";
   return {
     title,
-    body: `${helpers.displayName(job)} - ${job.buildingName ?? "Settlement production"}`,
+    body: productionToastBody(status, job, occurredAt, helpers.displayName(job)),
     kind: "production",
-    item: helpers.item(job),
+    item: helpers.item(job) ?? (job.toastItem && typeof job.toastItem === "object" ? job.toastItem as AnyRecord : null),
+    occurredAt,
     sourceKey: `production_${status === "started" ? "started" : "completed"}:${jobId}`,
   };
 }
@@ -239,7 +281,7 @@ export function productionCraftQueueToastDrafts(
   helpers: ProductionCraftToastHelpers,
   options: ProductionCraftQueueToastOptions = {},
 ): { snapshot: ProductionCraftQueueSnapshot; drafts: ToastNoticeDraft[]; seeded: boolean } {
-  const currentJobs = new Map<string, AnyRecord>(jobs.map((job) => [productionCraftJobKey(job), job]));
+  const currentJobs = new Map<string, AnyRecord>(jobs.map((job) => [productionCraftJobKey(job), { ...job, toastItem: helpers.item(job) }]));
   const snapshot = { claimId, jobs: currentJobs };
   if (!previous || previous.claimId !== claimId) return { snapshot, drafts: [], seeded: true };
   if (options.enabled === false) return { snapshot, drafts: [], seeded: false };

@@ -17,6 +17,8 @@ function firstNonEmptyString(...values) {
 }
 
 export function craftJobKey(job) {
+  const storedKey = firstNonEmptyString(job.key);
+  if (storedKey) return storedKey;
   const output = job.craftedItem?.[0] ?? {};
   const claim = stableCraftPart(job.claimEntityId ?? job.claimId, "claim");
   const structure = stableCraftPart(
@@ -48,19 +50,20 @@ export function normalizeProductionJob(job, craftsPayload = {}) {
   const output = job.craftedItem?.[0] ?? {};
   const itemId = output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId ?? null;
   const itemType = output.item_type ?? output.itemType ?? item?.itemType ?? job.outputItemType ?? job.itemType ?? null;
+  const label = String(item?.name ?? job.itemName ?? job.label ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`);
   return {
     key: craftJobKey(job),
-    label: String(item?.name ?? job.recipeName ?? job.name ?? `${job.buildingName ?? "Settlement"} craft`),
+    label,
     itemId: itemId == null ? null : String(itemId),
     itemType: itemType == null ? null : String(itemType),
-    itemName: item?.name ?? job.recipeName ?? job.name ?? null,
+    itemName: item?.name ?? job.itemName ?? job.label ?? job.recipeName ?? job.name ?? null,
     tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
     rarity: item?.rarityStr ?? item?.rarity ?? job.rarityStr ?? job.rarity ?? null,
     iconAssetName: item?.iconAssetName ?? job.iconAssetName ?? null,
     buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
-    crafterName: job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
+    crafterName: job.crafterName ?? job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
     ...metrics,
-    raw: job,
+    raw: job.raw ?? job,
   };
 }
 
