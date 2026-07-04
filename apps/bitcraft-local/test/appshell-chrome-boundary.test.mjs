@@ -31,3 +31,18 @@ test("footer shows the app version and build id", () => {
   assert.match(appShell, /footer-build/);
   assert.match(appShell, /APP_VERSION/);
 });
+test("sidebar exposes a persistent app account sign-in affordance", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(appShell, /sidebar-account-card/);
+  assert.match(appShell, /Not signed in/);
+  assert.match(appShell, /Sign in to save settings and verify your character/);
+  assert.match(appShell, /Sign in with Discord/);
+  assert.match(appShell, /Join Discord Server/);
+  assert.match(appShell, /setUserSettingsOpen\(true\)/);
+  assert.match(css, /\.sidebar-account-card/);
+  assert.match(css, /\.sidebar-account-avatar/);
+  assert.match(css, /\.sidebar-account-action/);
+});
+

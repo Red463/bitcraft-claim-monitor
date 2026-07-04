@@ -77,7 +77,7 @@ nav { position: relative; z-index: 1; min-height: 0; flex: 1 1 auto; padding: 12
 nav::-webkit-scrollbar { width: 7px; }
 nav::-webkit-scrollbar-thumb { background: rgba(154,168,190,.22); border-radius: 999px; }
 nav a, nav button { position: relative; border: 1px solid transparent; color: #b2bccb; background: transparent; border-radius: 8px; min-height: 39px; padding: 0 12px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease; }
-nav .nav-label, .discord-cta span, .sidebar-auth-cta span { white-space: nowrap; overflow: hidden; transition: opacity .16s ease, max-width .24s cubic-bezier(.2,.8,.2,1), transform .2s ease; max-width: 150px; }
+nav .nav-label, .discord-cta span, .sidebar-auth-cta span, .sidebar-account-copy { white-space: nowrap; overflow: hidden; transition: opacity .16s ease, max-width .24s cubic-bezier(.2,.8,.2,1), transform .2s ease; max-width: 150px; }
 nav a svg, nav button svg { color: #9aa6b6; transition: color .16s ease; }
 nav a:hover, nav button:hover { color: #f7f8fb; background: linear-gradient(180deg, rgba(17,25,35,.72), rgba(8,13,20,.86)); border-color: rgba(154,168,190,.2); transform: translateX(1px); }
 nav a:hover svg, nav button:hover svg { color: #d5dce7; }
@@ -154,9 +154,23 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .toolbar-button.is-loading svg {
   animation: busy-spin .85s linear infinite;
 }
-.discord-cta { position: relative; z-index: 1; margin: 10px 10px 0; min-height: 43px; border: 1px solid rgba(129,140,248,.78); border-radius: 9px; background: radial-gradient(circle at 16% 18%, rgba(255,255,255,.2), transparent 28%), linear-gradient(135deg, #6574ff, #4b57d7 72%); color: #fff; padding: 0 11px; display: flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 800; box-shadow: 0 12px 26px rgba(88,101,242,.24), inset 0 1px 0 rgba(255,255,255,.2); transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, width .24s ease, min-height .24s ease, margin .24s ease, padding .24s ease; }
+.sidebar-account-card { position: relative; z-index: 1; margin: 10px 10px 0; border: 1px solid rgba(108,123,145,.28); border-radius: 10px; background: linear-gradient(180deg, rgba(12,18,27,.94), rgba(6,10,16,.96)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 10px 24px rgba(0,0,0,.2); padding: 9px; display: grid; gap: 8px; transition: width .24s ease, min-height .24s ease, margin .24s ease, padding .24s ease, border-color .16s ease, background .16s ease; }
+.sidebar-account-card.signed-in { padding: 6px; }
+.sidebar-account-main { min-width: 0; width: 100%; border: 0; background: transparent; color: inherit; padding: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 8px; text-align: left; text-decoration: none; }
+button.sidebar-account-main { cursor: pointer; border-radius: 8px; padding: 3px; }
+button.sidebar-account-main:hover { background: color-mix(in srgb, var(--active-bg) 26%, transparent); }
+.sidebar-account-avatar { width: 34px; height: 34px; border: 1px solid rgba(240,198,79,.34); border-radius: 9px; background: radial-gradient(circle at 35% 18%, color-mix(in srgb, var(--active-bg) 55%, transparent), rgba(9,13,20,.96)); color: var(--active-color); display: grid; place-items: center; font-weight: 900; overflow: hidden; }
+.sidebar-account-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.sidebar-account-copy { min-width: 0; display: grid; gap: 1px; }
+.sidebar-account-copy strong, .sidebar-account-copy small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-account-copy strong { color: var(--text); font-size: 13px; font-weight: 850; }
+.sidebar-account-copy small { color: var(--muted); font-size: 11px; line-height: 1.25; }
+.sidebar-account-action { min-height: 32px; border: 1px solid rgba(240,198,79,.38); border-radius: 8px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-bg) 54%, transparent), rgba(8,12,18,.94)); color: var(--active-color); display: inline-flex; align-items: center; justify-content: center; gap: 7px; text-decoration: none; font-size: 12px; font-weight: 850; transition: transform .15s ease, border-color .15s ease, background .15s ease, color .15s ease; }
+.sidebar-account-action:hover { color: #fff; border-color: var(--active-border); background: linear-gradient(180deg, color-mix(in srgb, var(--active-bg) 68%, transparent), rgba(9,13,20,.98)); transform: translateY(-1px); }
+.sidebar-account-disabled { min-height: 30px; border: 1px solid rgba(108,123,145,.24); border-radius: 8px; color: var(--muted); display: grid; place-items: center; font-size: 11px; font-weight: 750; }
+.discord-cta { position: relative; z-index: 1; margin: 8px 10px 0; min-height: 38px; border: 1px solid rgba(129,140,248,.42); border-radius: 9px; background: linear-gradient(180deg, rgba(88,101,242,.22), rgba(13,18,30,.86)); color: #dce4ff; padding: 0 11px; display: flex; align-items: center; gap: 9px; text-decoration: none; font-size: 13px; font-weight: 800; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, width .24s ease, min-height .24s ease, margin .24s ease, padding .24s ease; }
 .discord-cta span { flex: 1; }
-.discord-cta:hover { color: #fff; transform: translateY(-1px); filter: saturate(1.08); box-shadow: 0 14px 30px rgba(88,101,242,.3), inset 0 1px 0 rgba(255,255,255,.22); }
+.discord-cta:hover { color: #fff; transform: translateY(-1px); filter: saturate(1.08); box-shadow: 0 12px 24px rgba(88,101,242,.18), inset 0 1px 0 rgba(255,255,255,.16); }
 .discord-cta svg:last-child { opacity: .78; }
 .discord-logo-icon { width: 18px; height: 18px; flex: 0 0 auto; }
 .sidebar-auth-cta { position: relative; z-index: 1; margin: 8px 10px 0; min-height: 38px; border: 1px solid rgba(240,198,79,.34); border-radius: 8px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-bg) 48%, transparent), rgba(8,12,18,.9)); color: var(--active-color); padding: 0 11px; display: flex; align-items: center; gap: 9px; text-decoration: none; font-size: 13px; font-weight: 800; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 10px 20px rgba(0,0,0,.2); transition: transform .15s ease, border-color .15s ease, background .15s ease, width .24s ease, min-height .24s ease, margin .24s ease, padding .24s ease; }
@@ -208,10 +222,11 @@ nav a.active svg, nav button.active svg { color: var(--active-color); }
 .sidebar-collapsed .brand > img { width: 28px; height: 28px; }
 .sidebar-collapsed .brand > svg { width: 27px; height: 27px; }
 .sidebar-collapsed .sidebar-toggle { margin: 0 auto; width: 30px; height: 30px; border-radius: 7px; }
-.sidebar-collapsed .discord-cta, .sidebar-collapsed .sidebar-auth-cta { width: 42px; height: 42px; min-height: 42px; margin-left: auto; margin-right: auto; padding: 0; justify-content: center; gap: 0; overflow: hidden; }
-.sidebar-collapsed .discord-cta svg:first-child, .sidebar-collapsed .sidebar-auth-cta svg { margin: 0 auto; }
-.sidebar-collapsed .discord-cta span, .sidebar-collapsed .sidebar-auth-cta span, .sidebar-collapsed nav .nav-label, .sidebar-collapsed .refresh-copy { opacity: 0; width: 0; min-width: 0; max-width: 0; transform: translateX(-4px); pointer-events: none; }
+.sidebar-collapsed .discord-cta, .sidebar-collapsed .sidebar-auth-cta, .sidebar-collapsed .sidebar-account-card { width: 42px; min-height: 42px; margin-left: auto; margin-right: auto; padding: 0; justify-content: center; gap: 0; overflow: hidden; }
+.sidebar-collapsed .discord-cta svg:first-child, .sidebar-collapsed .sidebar-auth-cta svg, .sidebar-collapsed .sidebar-account-avatar { margin: 0 auto; }
+.sidebar-collapsed .discord-cta span, .sidebar-collapsed .sidebar-auth-cta span, .sidebar-collapsed .sidebar-account-copy, .sidebar-collapsed .sidebar-account-action, .sidebar-collapsed .sidebar-account-disabled, .sidebar-collapsed nav .nav-label, .sidebar-collapsed .refresh-copy { opacity: 0; width: 0; min-width: 0; max-width: 0; max-height: 0; transform: translateX(-4px); pointer-events: none; }
 .sidebar-collapsed .discord-cta svg:last-child { display: none; }
+.sidebar-collapsed .sidebar-account-main { display: grid; grid-template-columns: 1fr; width: 42px; height: 42px; padding: 0; place-items: center; }
 .sidebar-collapsed nav { padding: 12px 8px; gap: 9px; justify-items: center; overflow-x: visible; }
 .sidebar-collapsed .sidebar-section { width: 100%; gap: 5px; justify-items: center; }
 .sidebar-collapsed .sidebar-section-title { display: none; }
@@ -1447,7 +1462,10 @@ body .market-page tbody tr:hover td {
   .nav-tools-menu { left: 0; top: calc(100% + 7px); }
   .sidebar-collapsed nav .nav-label { display: inline; opacity: 1; max-width: 150px; transform: none; pointer-events: auto; }
   .sidebar-collapsed .discord-cta, .sidebar-collapsed .sidebar-auth-cta { width: auto; min-height: 40px; margin-left: 10px; margin-right: 10px; padding: 0 10px; justify-content: flex-start; }
-  .sidebar-collapsed .discord-cta span, .sidebar-collapsed .sidebar-auth-cta span, .sidebar-collapsed .discord-cta svg:last-child { display: inline-flex; opacity: 1; max-width: 150px; transform: none; pointer-events: auto; }
+  .sidebar-collapsed .sidebar-account-card { width: auto; margin-left: 10px; margin-right: 10px; padding: 9px; }
+  .sidebar-collapsed .sidebar-account-main { width: 100%; height: auto; grid-template-columns: 34px minmax(0, 1fr); place-items: initial; }
+  .sidebar-collapsed .discord-cta span, .sidebar-collapsed .sidebar-auth-cta span, .sidebar-collapsed .sidebar-account-action, .sidebar-collapsed .sidebar-account-disabled, .sidebar-collapsed .discord-cta svg:last-child { display: inline-flex; opacity: 1; width: auto; max-width: 150px; max-height: none; transform: none; pointer-events: auto; }
+  .sidebar-collapsed .sidebar-account-copy { display: grid; opacity: 1; width: auto; max-width: 150px; max-height: none; transform: none; pointer-events: auto; }
   .discord-cta { margin-top: 8px; }
   .refresh-status { display: none; }
   .refresh { margin-top: 0; }
@@ -1494,3 +1512,4 @@ body .market-page tbody tr:hover td {
 .restricted-access-panel { min-height: 45vh; display: grid; place-items: center; }
 .restricted-access-state { max-width: 520px; text-align: center; }
 .restricted-access-state small { color: var(--muted); }
+

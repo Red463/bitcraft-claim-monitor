@@ -1,6 +1,6 @@
 {
   "name": "@workspace/bitcraft-local",
-  "version": "0.31.1-beta.36",
+  "version": "0.31.1-beta.37",
   "private": true,
   "type": "module",
   "engines": {
@@ -31,4 +31,5 @@
     "@types/node": "catalog:"
   }
 }
+
 

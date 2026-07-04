@@ -99,6 +99,17 @@ function RestrictedAccessState({ title, decision, discordLoginEnabled, onDiscord
   );
 }
 
+function accountCharacterStatusLabel(user: UserAuthState["user"]): string {
+  if (!user) return "Not signed in";
+  if (user.characterStatus === "approved" && user.characterPlayerId) return "Character verified";
+  if (user.characterStatus === "pending") return "Pending approval";
+  if (user.characterStatus === "rejected") return "Link rejected";
+  return "Not linked";
+}
+
+function accountDisplayName(user: UserAuthState["user"]): string {
+  return user?.globalName || user?.username || "Discord user";
+}
 /**
  * Main public application route.
  *
@@ -528,6 +539,9 @@ function DashboardApp() {
     warnings: apiWarnings,
   }), [active, apiWarnings, claimId, data.citizens.length, data.construction, data.crafts.length, data.inventories, data.market.length, data.members.length, data.region.length, lastUpdated, state.loading]);
 
+  const sidebarAccountName = accountDisplayName(userAuth.user);
+  const sidebarAccountStatus = accountCharacterStatusLabel(userAuth.user);
+  const sidebarAccountInitial = sidebarAccountName.slice(0, 1).toUpperCase();
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="app-sidebar">
@@ -538,12 +552,23 @@ function DashboardApp() {
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
-        <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Our Discord</span><ExternalLink size={13} /></a>
-        {userAuth.discordLoginEnabled && !userAuth.user ? (
-          <a className="sidebar-auth-cta" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}>
-            <MessageCircle size={16} /><span>Sign in with Discord</span>
-          </a>
-        ) : null}
+        <section className={`sidebar-account-card ${userAuth.user ? "signed-in" : "signed-out"}`} aria-label="Account">
+          {userAuth.user ? (
+            <button type="button" className="sidebar-account-main" onClick={() => setUserSettingsOpen(true)} title="Open account settings">
+              <span className="sidebar-account-avatar">{userAuth.user.avatarUrl ? <img src={userAuth.user.avatarUrl} alt="" /> : sidebarAccountInitial}</span>
+              <span className="sidebar-account-copy"><strong>{sidebarAccountName}</strong><small>{sidebarAccountStatus}</small></span>
+            </button>
+          ) : (
+            <>
+              <div className="sidebar-account-main">
+                <span className="sidebar-account-avatar"><MessageCircle size={16} /></span>
+                <span className="sidebar-account-copy"><strong>Not signed in</strong><small>Sign in to save settings and verify your character.</small></span>
+              </div>
+              {userAuth.discordLoginEnabled ? <a className="sidebar-account-action" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}><MessageCircle size={14} /> Sign in with Discord</a> : <span className="sidebar-account-disabled">Discord login unavailable</span>}
+            </>
+          )}
+        </section>
+        <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Discord Server</span><ExternalLink size={13} /></a>
         <nav aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
             const visibleItems = group.items.filter(([id]) => isPageAllowed(id));
@@ -699,3 +724,4 @@ export default function App() {
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }
+

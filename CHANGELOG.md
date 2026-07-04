@@ -10,6 +10,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.31.1-beta.37] - 2026-07-04
+
+### Added
+
+- Added a persistent sidebar account card so users can clearly see Discord sign-in and character verification status.
+
 
 ## [0.31.1-beta.36] - 2026-07-04
 
@@ -2601,4 +2607,5 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
+
 
