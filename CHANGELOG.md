@@ -10,6 +10,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.31.1-beta.39] - 2026-07-04
+
+### Fixed
+
+- Fixed duplicate craft notifications after returning to an inactive browser tab by aligning fallback and activity-feed craft notification keys.
+
 ## [0.31.1-beta.38] - 2026-07-04
 
 ### Changed

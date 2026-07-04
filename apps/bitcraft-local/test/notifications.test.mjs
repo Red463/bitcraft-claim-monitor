@@ -407,7 +407,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T09:58:00.000Z",
     metaLabel: "Modular",
-    sourceKey: "production_started:craft-1",
+    sourceKey: "production_started:craft|claim|carpentry station|recipe-1|output|item|public",
     soundType: "productionStarted",
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
@@ -417,7 +417,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T10:42:00.000Z",
     metaLabel: "Modular",
-    sourceKey: "production_completed:craft-1",
+    sourceKey: "production_completed:craft|claim|carpentry station|recipe-1|output|item|public",
     soundType: "productionCompleted",
   });
 });
@@ -464,15 +464,15 @@ test("productionCraftQueueToastDrafts falls back when craft ids are blank", () =
     { entityId: "", id: " ", craftId: "", buildingName: "Workshop", recipeId: "recipe-1", itemId: "item-1", name: "Old Beam" },
   ], helpers);
 
-  assert.deepEqual([...initial.snapshot.jobs.keys()], ["Workshop-recipe-1"]);
+  assert.deepEqual([...initial.snapshot.jobs.keys()], ["craft|claim|workshop|recipe-1|item-1|item|public"]);
 
   const next = productionCraftQueueToastDrafts(initial.snapshot, "claim-1", [
     { entityId: "", id: " ", craftId: "", buildingName: "Workshop", recipeId: "recipe-2", itemId: "item-2", name: "New Beam" },
   ], helpers);
 
   assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), [
-    "production_started:Workshop-recipe-2",
-    "production_completed:Workshop-recipe-1",
+    "production_started:craft|claim|workshop|recipe-2|item-2|item|public",
+    "production_completed:craft|claim|workshop|recipe-1|item-1|item|public",
   ]);
 });
 test("productionCraftQueueToastDrafts emits capped started and completed drafts in queue order", () => {
@@ -480,14 +480,11 @@ test("productionCraftQueueToastDrafts emits capped started and completed drafts 
     displayName: (job) => job.name,
     item: (job) => ({ itemName: job.name }),
   };
-  const previous = {
-    claimId: "claim-1",
-    jobs: new Map([
-      ["old-1", { entityId: "old-1", name: "Old One", buildingName: "Kiln" }],
-      ["old-2", { entityId: "old-2", name: "Old Two", buildingName: "Forge" }],
-      ["old-3", { entityId: "old-3", name: "Old Three", buildingName: "Workbench" }],
-    ]),
-  };
+  const previous = productionCraftQueueToastDrafts(null, "claim-1", [
+    { entityId: "old-1", name: "Old One", buildingName: "Kiln" },
+    { entityId: "old-2", name: "Old Two", buildingName: "Forge" },
+    { entityId: "old-3", name: "Old Three", buildingName: "Workbench" },
+  ], helpers).snapshot;
 
   const result = productionCraftQueueToastDrafts(previous, "claim-1", [
     { entityId: "old-2", name: "Old Two", buildingName: "Forge" },
@@ -497,13 +494,13 @@ test("productionCraftQueueToastDrafts emits capped started and completed drafts 
   ], helpers);
 
   assert.deepEqual(result.drafts.map((draft) => draft.sourceKey), [
-    "production_started:new-1",
-    "production_started:new-2",
-    "production_completed:old-1",
-    "production_completed:old-3",
+    "production_started:craft|claim|loom|new one|output|item|public",
+    "production_started:craft|claim|tannery|new two|output|item|public",
+    "production_completed:craft|claim|kiln|old one|output|item|public",
+    "production_completed:craft|claim|workbench|old three|output|item|public",
   ]);
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Craft started", "Craft started", "Craft completed", "Craft completed"]);
-  assert.deepEqual([...result.snapshot.jobs.keys()], ["old-2", "new-1", "new-2", "new-3"]);
+  assert.deepEqual([...result.snapshot.jobs.keys()], ["craft|claim|forge|old two|output|item|public", "craft|claim|loom|new one|output|item|public", "craft|claim|tannery|new two|output|item|public", "craft|claim|mill|new three|output|item|public"]);
 });
 test("productionCraftQueueToastDrafts keeps resolved item metadata for completed fallback toasts", () => {
   const catalog = new Set(["Fine Cloth"]);
@@ -581,7 +578,7 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
     "activity:3",
     "activity:4",
     "deal-alert:5",
-    "production_started:new-craft",
+    "production_started:craft|claim|workshop|new beam|output|item|public",
   ]);
   assert.deepEqual(next.drafts.map((draft) => draft.title), [
     "New market listing",
@@ -696,6 +693,44 @@ test("browserNotificationSourceDrafts surfaces fresh market activity on the firs
   assert.deepEqual(result.drafts.map((draft) => draft.title), ["Market sale", "New market listing"]);
   assert.equal(result.drafts[1].kind, "market");
 });
+test("production fallback and activity drafts share source keys for the same craft", () => {
+  const rawCraft = {
+    entityId: "1369094286799999999",
+    claimEntityId: "1369094286777412590",
+    buildingEntityId: "1369094286799419104",
+    recipeId: "410008",
+    craftedItem: [{ item_id: "4220021", item_type: "item" }],
+    buildingName: "Cooking Station",
+    crafterName: "Modular",
+    isPublic: true,
+  };
+  const activityEvent = {
+    id: 7,
+    event_type: "production_started",
+    summary: "Craft started: Fine Ocean Fish",
+    occurred_at: "2026-07-04T19:44:00.000Z",
+    metadata_json: JSON.stringify({
+      key: "craft|1369094286777412590|1369094286799419104|410008|4220021|item|public",
+      label: "Fine Ocean Fish",
+      buildingName: "Cooking Station",
+      crafterName: "Modular",
+      raw: rawCraft,
+    }),
+  };
+  const helpers = {
+    summary: (event) => event.summary,
+    item: () => ({ itemName: "Fine Ocean Fish" }),
+    key: (event) => event.source_key ?? `activity:${event.id}`,
+  };
+
+  const fallback = productionCraftToastDraft("started", "1369094286777412590", rawCraft.entityId, rawCraft, {
+    displayName: () => "Fine Ocean Fish",
+    item: () => ({ itemName: "Fine Ocean Fish" }),
+  }, activityEvent.occurred_at);
+  const activity = productionActivityToastDraft(activityEvent, { production: true }, helpers);
+
+  assert.equal(fallback.sourceKey, activity.sourceKey);
+});
 test("browserNotificationSourceDrafts queues production activity rows without current craft payload", () => {
   const helpers = {
     activity: {
@@ -733,7 +768,7 @@ test("browserNotificationSourceDrafts queues production activity rows without cu
     notificationActivity: {
       refreshToken: 2,
       events: [
-        { id: 2, event_type: "production_started", source_key: "production_started:new-craft", summary: "Craft started: New Beam", itemName: "New Beam" },
+        { id: 2, event_type: "production_started", source_key: "production_started:craft|claim|workshop|new beam|output|item|public", summary: "Craft started: New Beam", itemName: "New Beam" },
         { id: 1, event_type: "production_started", source_key: "production_started:old-craft", summary: "Craft started: Old Beam", itemName: "Old Beam" },
       ],
     },
@@ -742,7 +777,7 @@ test("browserNotificationSourceDrafts queues production activity rows without cu
     hasProductionData: false,
   }, helpers);
 
-  assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), ["production_started:new-craft"]);
+  assert.deepEqual(next.drafts.map((draft) => draft.sourceKey), ["production_started:craft|claim|workshop|new beam|output|item|public"]);
   assert.deepEqual(next.drafts.map((draft) => draft.title), ["Craft started"]);
   assert.equal(next.drafts[0].kind, "production");
 });
@@ -936,7 +971,7 @@ test("browserNotificationSourceDrafts preserves production snapshot when the cur
   }, helpers);
 
   assert.deepEqual(noCraftPayloadPage.drafts, []);
-  assert.deepEqual([...noCraftPayloadPage.snapshots.production.jobs.keys()], ["old-craft"]);
-  assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production_started:new-craft"]);
+  assert.deepEqual([...noCraftPayloadPage.snapshots.production.jobs.keys()], ["craft|claim|workshop|old beam|output|item|public"]);
+  assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production_started:craft|claim|workshop|new beam|output|item|public"]);
 });
 

@@ -299,7 +299,7 @@ export function productionCraftToastDraft(
     item: helpers.item(job) ?? (job.toastItem && typeof job.toastItem === "object" ? job.toastItem as AnyRecord : null),
     occurredAt,
     ...productionToastMeta(job),
-    sourceKey: `production_${status === "started" ? "started" : "completed"}:${jobId}`,
+    sourceKey: `production_${status === "started" ? "started" : "completed"}:${productionCraftJobKey(job)}`,
     soundType: status === "started" ? "productionStarted" : "productionCompleted",
   };
 }
@@ -324,13 +324,26 @@ function firstNonEmptyString(...values: unknown[]): string | null {
   return null;
 }
 
+function stableCraftPart(value: unknown, fallback = ""): string {
+  return String(value ?? fallback).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export function productionCraftJobKey(job: AnyRecord): string {
-  return firstNonEmptyString(
-    job.entityId,
-    job.id,
-    job.craftId,
-    `${job.buildingName ?? "Settlement production"}-${job.recipeId ?? job.itemId ?? job.name ?? "craft"}`,
-  ) as string;
+  const storedKey = firstNonEmptyString(job.key);
+  if (storedKey) return storedKey;
+  const output = Array.isArray(job.craftedItem) ? job.craftedItem[0] ?? {} : {};
+  const raw = job.raw && typeof job.raw === "object" ? job.raw as AnyRecord : {};
+  const rawOutput = Array.isArray(raw.craftedItem) ? raw.craftedItem[0] ?? {} : {};
+  const claim = stableCraftPart(job.claimEntityId ?? job.claimId ?? raw.claimEntityId ?? raw.claimId, "claim");
+  const structure = stableCraftPart(
+    job.buildingEntityId ?? job.structureEntityId ?? job.stationEntityId ?? job.craftingStationEntityId ?? job.buildingId ?? raw.buildingEntityId ?? raw.structureEntityId ?? raw.stationEntityId ?? raw.craftingStationEntityId ?? raw.buildingId ?? job.buildingName ?? job.structureName ?? raw.buildingName ?? raw.structureName,
+  );
+  const recipe = stableCraftPart(job.recipeId ?? job.recipeEntityId ?? job.recipe_entity_id ?? job.craftingRecipeId ?? raw.recipeId ?? raw.recipeEntityId ?? raw.recipe_entity_id ?? raw.craftingRecipeId ?? job.recipeName ?? job.name ?? raw.recipeName ?? raw.name);
+  const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId ?? rawOutput.item_id ?? rawOutput.itemId ?? rawOutput.id ?? raw.outputItemId ?? raw.itemId);
+  const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType ?? rawOutput.item_type ?? rawOutput.itemType ?? raw.outputItemType ?? raw.itemType);
+  const visibility = job.isPublic === false || raw.isPublic === false ? "private" : "public";
+  if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
+  return firstNonEmptyString(job.entityId, job.id, job.craftId, raw.entityId, raw.id, raw.craftId) ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|");
 }
 
 export function productionCraftQueueToastDrafts(
@@ -373,3 +386,4 @@ export function selectUnseenNotificationItems<T>(
   for (const id of ids) nextKnownIds.add(id);
   return { knownIds: nextKnownIds, unseen, seeded: false };
 }
+
