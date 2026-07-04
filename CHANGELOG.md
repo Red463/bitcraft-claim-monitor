@@ -11,6 +11,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.34] - 2026-07-04
+
+### Fixed
+
+- Fixed the dashboard Recent Activity card so treasury and supply updates remain visible while craft start and completion updates stay hidden.
+- Fixed profession heatmap headers so long profession names such as Leatherworking stay on one line.
+
 ## [0.31.1-beta.33] - 2026-07-03
 
 ### Fixed

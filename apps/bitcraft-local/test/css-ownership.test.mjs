@@ -342,7 +342,18 @@ test("skills page styles live in the skills stylesheet", () => {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(skillsCss.includes(selector), true, `${selector} should live in skills.css`);
   }
-});test("members page styles live in the members stylesheet", () => {
+});
+test("skills profession heatmap headers stay on one line", () => {
+  const skillsCss = readFileSync(new URL("../src/styles/skills.css", import.meta.url), "utf8");
+
+  assert.match(skillsCss, /\.skill-table \{[^}]*min-width:\s*1580px;[^}]*table-layout:\s*fixed;/s);
+  assert.match(skillsCss, /\.skill-table \.profession-header \{[^}]*width:\s*100px;[^}]*white-space:\s*nowrap;/s);
+  assert.match(skillsCss, /\.skill-table \.profession-header span \{[^}]*white-space:\s*nowrap;[^}]*overflow-wrap:\s*normal;/s);
+  assert.match(skillsCss, /\.skill-cell \{[^}]*width:\s*100px;/s);
+  assert.doesNotMatch(skillsCss, /\.skill-table \.profession-header span \{[^}]*overflow-wrap:\s*anywhere;/s);
+});
+
+test("members page styles live in the members stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const mainTsx = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
   const membersCssUrl = new URL("../src/styles/members.css", import.meta.url);

@@ -38,3 +38,18 @@ test("dashboard recent activity applies the display limit after filtering", asyn
     "+1 member",
   ]);
 });
+
+test("dashboard recent activity keeps treasury and supply rows visible", async () => {
+  const { dashboardRecentActivityItems } = await loadHelper();
+  const rows = [
+    { id: 1, event_type: "production_started", summary: "Craft started: Basic Ink", occurred_at: "2026-07-03T10:05:00.000Z" },
+    { id: 2, event_type: "treasury", summary: "Treasury changed", occurred_at: "2026-07-03T10:04:00.000Z" },
+    { id: 3, event_type: "supplies", summary: "Supplies changed", occurred_at: "2026-07-03T10:03:00.000Z" },
+    { id: 4, event_type: "production_completed", summary: "Craft completed: Basic Pigment", occurred_at: "2026-07-03T10:02:00.000Z" },
+  ];
+
+  assert.deepEqual(dashboardRecentActivityItems(rows).map((row) => row.summary), [
+    "Treasury changed",
+    "Supplies changed",
+  ]);
+});
