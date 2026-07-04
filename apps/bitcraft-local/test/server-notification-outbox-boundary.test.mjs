@@ -8,8 +8,8 @@ test("event-driven Discord notifications are enqueued and delivered by the worke
   assert.match(server, /enqueueDiscordActivity/);
   assert.match(server, /processDiscordNotificationOutbox/);
   assert.match(server, /setInterval\(processDiscordNotificationOutbox/);
-  assert.match(server, /sourceKey: `production_started:/);
-  assert.match(server, /sourceKey: `production_completed:/);
+  assert.match(server, /const sourceKey = `production_started:/);
+  assert.match(server, /const sourceKey = `production_completed:/);
   assert.match(server, /sourceKey: `youtube_video:/);
   assert.match(server, /sourceKey: `app_update:/);
 });

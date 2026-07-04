@@ -374,6 +374,25 @@ test("productionActivityToastDraft formats production activity with crafter, bui
     soundType: "productionCompleted",
   });
 });
+test("productionActivityToastDraft uses the craft metadata key for source dedupe", () => {
+  const helpers = {
+    summary: (event) => event.summary,
+    item: () => null,
+    key: (event) => event.source_key ?? `activity:${event.id}`,
+  };
+  const event = {
+    id: 42,
+    event_type: "production_started",
+    source_key: "",
+    summary: "Craft started: Simple Plank",
+    occurred_at: "2026-07-04T08:43:00.000Z",
+    metadata_json: JSON.stringify({ key: "craft-1", label: "Simple Plank", crafterName: "Mosswick", buildingName: "Exquisite Carpentry Station" }),
+  };
+
+  const draft = productionActivityToastDraft(event, { production: true }, helpers);
+
+  assert.equal(draft.sourceKey, "production_started:craft-1");
+});
 test("productionCraftToastDraft builds started and completed notices", () => {
   const job = { entityId: "craft-1", buildingName: "Carpentry Station", crafterName: "Modular", recipeId: "recipe-1" };
   const helpers = {

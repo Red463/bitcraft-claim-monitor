@@ -33,3 +33,12 @@ test("Market mini-stat values leave room for descenders", () => {
   assert.match(valueRule, /line-height:\s*1\.18\b/);
   assert.match(valueRule, /padding-bottom:\s*1px\b/);
 });
+
+test("Market tool tabs accept app access-control decisions", () => {
+  const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+
+  assert.match(marketPage, /type EffectiveAccess/);
+  assert.match(marketPage, /targetIdForTab\("market"/);
+  assert.match(marketPage, /marketViews/);
+  assert.match(marketPage, /effectiveTargetAllowed/);
+});

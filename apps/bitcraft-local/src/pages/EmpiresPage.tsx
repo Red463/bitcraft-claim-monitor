@@ -7,6 +7,7 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
+import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -218,9 +219,17 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
     document.body,
   );
 }
-export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
+export function Empires({ monitoredRegionId, access }: { monitoredRegionId: string; access?: EffectiveAccess | null }) {
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
+  const empireTabs = React.useMemo(() => [
+    { id: "overview" as const, label: "Overview", icon: <Landmark size={15} /> },
+    { id: "watchtowers" as const, label: "Watchtowers", icon: <RadioTower size={15} /> },
+  ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("empires", entry.id))), [access]);
+  React.useEffect(() => {
+    if (!empireTabs.length) return;
+    if (!empireTabs.some((entry) => entry.id === tab)) setTab(empireTabs[0].id);
+  }, [empireTabs, setTab, tab]);
   const [regionId, setRegionId] = usePersistedState("empires.region", initialRegion);
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
@@ -331,8 +340,7 @@ export function Empires({ monitoredRegionId }: { monitoredRegionId: string }) {
       </header>
 
       <div className="leaderboard-tabs empires-tabs" role="tablist" aria-label="Empire views">
-        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><Landmark size={15} /> Overview</button>
-        <button className={tab === "watchtowers" ? "active" : ""} onClick={() => setTab("watchtowers")}><RadioTower size={15} /> Watchtowers</button>
+        {empireTabs.map((entry) => <button key={entry.id} className={tab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
       </div>
 
       {tab === "overview" ? (

@@ -69,6 +69,7 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { updateQueryState } from "../navigation";
+import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
@@ -159,7 +160,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
     </div>
   );
 }
-export function Market({ data, history, claimId }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string }) {
+export function Market({ data, history, claimId, access }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null }) {
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist">("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
@@ -167,6 +168,17 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
   const [memberFilter, setMemberFilter] = usePersistedState("market.member", "All");
   const [memberHistory, setMemberHistory] = React.useState<AnyRecord | null>(null);
+  const marketViews = React.useMemo(() => [
+    { id: "live" as const, label: "Live Listings", icon: <ShoppingCart size={15} /> },
+    { id: "analytics" as const, label: "Analytics", icon: <TrendingUp size={15} /> },
+    { id: "pricing" as const, label: "Price Finder", icon: <CircleDollarSign size={15} /> },
+    { id: "dealWatchlist" as const, label: "Deal Watchlist", icon: <Bell size={15} /> },
+    { id: "buyOrders" as const, label: "Buy Order Finder", icon: <ShoppingBag size={15} /> },
+  ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("market", entry.id))), [access]);
+  React.useEffect(() => {
+    if (!marketViews.length) return;
+    if (!marketViews.some((entry) => entry.id === view)) setView(marketViews[0].id);
+  }, [marketViews, setView, view]);
   React.useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
@@ -295,11 +307,7 @@ export function Market({ data, history, claimId }: { data: ReturnType<typeof nor
         </div>
         <div className="market-tool-row">
           <div className="tabs primary-tabs market-tabs">
-            <button className={view === "live" ? "active" : ""} onClick={() => selectView("live")}><ShoppingCart size={15} /> Live Listings</button>
-            <button className={view === "analytics" ? "active" : ""} onClick={() => selectView("analytics")}><TrendingUp size={15} /> Analytics</button>
-            <button className={view === "pricing" ? "active" : ""} onClick={() => selectView("pricing")}><CircleDollarSign size={15} /> Price Finder</button>
-            <button className={view === "dealWatchlist" ? "active" : ""} onClick={() => selectView("dealWatchlist")}><Bell size={15} /> Deal Watchlist</button>
-            <button className={view === "buyOrders" ? "active" : ""} onClick={() => selectView("buyOrders")}><ShoppingBag size={15} /> Buy Order Finder</button>
+            {marketViews.map((entry) => <button key={entry.id} className={view === entry.id ? "active" : ""} onClick={() => selectView(entry.id)}>{entry.icon} {entry.label}</button>)}
           </div>
           <label className={`market-member-field ${view === "pricing" || view === "buyOrders" || view === "dealWatchlist" ? "is-placeholder" : ""}`}>
             <span>Member</span>

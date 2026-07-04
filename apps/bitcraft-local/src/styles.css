@@ -1490,3 +1490,7 @@ body .market-page tbody tr:hover td {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
+
+.restricted-access-panel { min-height: 45vh; display: grid; place-items: center; }
+.restricted-access-state { max-width: 520px; text-align: center; }
+.restricted-access-state small { color: var(--muted); }

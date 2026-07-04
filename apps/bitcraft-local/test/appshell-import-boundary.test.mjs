@@ -11,3 +11,13 @@ test("AppShell imports only top-level shell dependencies after admin/settings ex
   assert.equal(appShell.includes('import { AdminPanel } from "./components/admin/AdminPanel";'), true);
   assert.equal(appShell.includes('import { UserSettingsDialog } from "./components/main/UserSettingsDialog";'), true);
 });
+
+test("AppShell wires public access-control decisions into navigation and blocked states", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /\/access-control\/effective/);
+  assert.match(appShell, /effectiveTargetAllowed/);
+  assert.match(appShell, /targetIdForPage/);
+  assert.match(appShell, /RestrictedAccessState/);
+  assert.match(appShell, /visibleItems = group\.items\.filter/);
+});

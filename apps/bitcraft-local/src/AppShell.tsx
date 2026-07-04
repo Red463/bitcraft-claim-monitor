@@ -61,6 +61,7 @@ import { Production } from "./pages/ProductionPage";
 import { Market } from "./pages/MarketPage";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
+import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
 
 /*
  * Top-level browser application shell.
@@ -82,6 +83,22 @@ function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
 }
 
+function RestrictedAccessState({ title, decision, discordLoginEnabled, onDiscordLogin }: { title: string; decision: { mode?: string; reason?: string } | undefined; discordLoginEnabled: boolean; onDiscordLogin: () => void }) {
+  const modeInfo = ACCESS_RULE_MODES.find((entry) => entry.mode === decision?.mode);
+  const needsDiscord = decision?.mode === "discord" || decision?.mode === "verified" || decision?.mode === "specificUsers";
+  return (
+    <div className="panel restricted-access-panel">
+      <section className="empty-state restricted-access-state">
+        <Shield size={34} />
+        <strong>{title} is restricted</strong>
+        <span>{decision?.reason || modeInfo?.label || "You do not have access to this area."}</span>
+        {decision?.mode === "verified" ? <small>Link your BitCraft character in User Settings, then wait for an admin to approve it.</small> : null}
+        {needsDiscord && discordLoginEnabled ? <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={15} /> Sign in with Discord</button> : null}
+      </section>
+    </div>
+  );
+}
+
 /**
  * Main public application route.
  *
@@ -99,6 +116,7 @@ function DashboardApp() {
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
+  const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
@@ -157,6 +175,14 @@ function DashboardApp() {
     if (!response.ok) return;
     setUserAuth(await response.json());
   }, []);
+  const refreshEffectiveAccess = React.useCallback(async () => {
+    try {
+      const response = await fetch(`${LOCAL_API}/access-control/effective`);
+      if (response.ok) setEffectiveAccess(await response.json());
+    } catch {
+      setEffectiveAccess(null);
+    }
+  }, []);
   const refreshAdminAuth = React.useCallback(async () => {
     try {
       const response = await fetch(`${LOCAL_API}/admin/me`);
@@ -169,6 +195,9 @@ function DashboardApp() {
       setAdminAuth({ authenticated: false });
     }
   }, []);
+  React.useEffect(() => {
+    refreshEffectiveAccess().catch(() => undefined);
+  }, [refreshEffectiveAccess, userAuth.user?.discordId, userAuth.user?.characterStatus]);
   const discordLogin = React.useCallback(() => {
     setDiscordPromptDismissed(true);
     window.location.href = discordAuthHref;
@@ -228,6 +257,9 @@ function DashboardApp() {
     if (!response.ok) throw new Error(body.error ?? "Unable to save Discord notification preference");
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, [userAuth.user?.settings]);
+  const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
+  const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
+  const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -442,7 +474,7 @@ function DashboardApp() {
 
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} marketHistory={localHistory.market} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
-    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} data={data} />,
+    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} data={data} access={effectiveAccess} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
@@ -451,15 +483,20 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} />,
     empire: <Region data={data} />,
-    empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} />,
+    empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
-    activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} />,
+    activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} access={effectiveAccess} />,
     admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
   };
-  const activePanel = panels[active] ?? panels.dashboard;
+  const activePageTargetId = targetIdForPage(active);
+  const activePageDecision = accessDecisionFor(activePageTargetId);
+  const activePageLabel = accessTargetMeta.get(activePageTargetId)?.label ?? NAV.find(([id]) => id === active)?.[1] ?? "This page";
+  const activePanel = isPageAllowed(active)
+    ? panels[active] ?? panels.dashboard
+    : <RestrictedAccessState title={activePageLabel} decision={activePageDecision} discordLoginEnabled={userAuth.discordLoginEnabled} onDiscordLogin={discordLogin} />;
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
     const staleWarning = state.stale
@@ -509,7 +546,9 @@ function DashboardApp() {
         ) : null}
         <nav aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
-            const hasActivePage = group.items.some(([id]) => active === id);
+            const visibleItems = group.items.filter(([id]) => isPageAllowed(id));
+            if (!visibleItems.length) return null;
+            const hasActivePage = visibleItems.some(([id]) => active === id);
             const isOpen = sidebarGroups[group.id] ?? true;
             const showItems = isOpen || hasActivePage;
             return (
@@ -524,7 +563,7 @@ function DashboardApp() {
                   <ArrowDown size={12} aria-hidden="true" />
                 </button>
                 <div className="sidebar-section-items">
-                  {group.items.map(([id, label, Icon]) => (
+                  {visibleItems.map(([id, label, Icon]) => (
                     <a
                       key={id}
                       className={active === id ? "active" : ""}

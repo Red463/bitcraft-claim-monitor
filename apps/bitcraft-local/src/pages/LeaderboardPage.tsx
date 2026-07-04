@@ -11,6 +11,7 @@ import { memberTrackingKeys } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_NAMES } from "../utils/professions";
 import type { LoadState } from "../types/app";
+import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -29,11 +30,13 @@ export function Leaderboard({
   refreshToken,
   excludedMemberIds = [],
   data,
+  access,
 }: {
   claimId: string;
   refreshToken: number;
   excludedMemberIds?: string[];
   data: ReturnType<typeof normalizeData>;
+  access?: EffectiveAccess | null;
 }) {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   const [activeTab, setActiveTab] = usePersistedState<LeaderboardTab>("leaderboard.tab", "contribution");
@@ -41,6 +44,11 @@ export function Leaderboard({
   const [professionSort, setProfessionSort] = React.useState("totalLevel");
   const [activitySort, setActivitySort] = React.useState("totalEvents");
   const [marketSort, setMarketSort] = React.useState("confirmedSaleValue");
+  const visibleTabs = React.useMemo(() => LEADERBOARD_TABS.filter((tab) => effectiveTargetAllowed(access, targetIdForTab("leaderboard", tab.id))), [access]);
+  React.useEffect(() => {
+    if (!visibleTabs.length) return;
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) setActiveTab(visibleTabs[0].id);
+  }, [activeTab, setActiveTab, visibleTabs]);
   React.useEffect(() => {
     const controller = new AbortController();
     setState((current) => ({ ...current, loading: true, error: null }));
@@ -165,7 +173,7 @@ export function Leaderboard({
   }, [data.members, playerById, playerByName]);
   const mostPlayedRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.timePlayedSeconds) > toNumber(best?.timePlayedSeconds) ? row : best, null);
   const longestSessionRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.sessionSeconds) > toNumber(best?.sessionSeconds) ? row : best, null);
-  const activeTabMeta = LEADERBOARD_TABS.find((tab) => tab.id === activeTab) ?? LEADERBOARD_TABS[0];
+  const activeTabMeta = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0] ?? LEADERBOARD_TABS[0];
   const tabSummary = activeTab === "professions" ? [
     <MiniStat key="members" icon={<Users />} label="Members Compared" value={formatNumber(sortedProfessionRows.length)} />,
     <MiniStat key="total" icon={<GraduationCap />} label="Total Profession Levels" value={formatNumber(sortedProfessionRows.reduce((total, row) => total + toNumber(row.totalLevel), 0))} />,
@@ -208,7 +216,7 @@ export function Leaderboard({
         </div>
       </header>
       <nav className="leaderboard-tabs" aria-label="Leaderboard categories">
-        {LEADERBOARD_TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button key={tab.id} className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>
             {tab.icon}
             <span>{tab.label}</span>

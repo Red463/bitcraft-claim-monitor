@@ -952,3 +952,17 @@
 @media (max-width: 1040px) { .admin-tab-groups { align-items: flex-start; } .admin-nav-divider { display: none; } .admin-tabs { flex-basis: 100%; } .admin-tab-overview { flex-basis: 100%; min-width: 0; margin-left: 0; border-left: 0; border-top: 1px solid rgba(108,123,145,.18); padding: 8px 0 0; } .diagnostics-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .audit-toolbar { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .diagnostics-health-grid, .audit-summary-strip { grid-template-columns: 1fr; } }
 
+
+.access-control-card { align-content: start; }
+.access-control-list { display: grid; gap: 10px; max-height: 620px; overflow: auto; padding-right: 4px; }
+.access-control-group { border: 1px solid rgba(147,160,186,.18); border-radius: 8px; background: rgba(255,255,255,.025); padding: 10px; display: grid; gap: 9px; }
+.access-control-row, .access-control-tab-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 280px); gap: 10px; align-items: end; }
+.access-control-row > strong { color: var(--text); }
+.access-control-tabs { display: grid; gap: 8px; padding-left: 12px; border-left: 1px solid rgba(240,198,79,.22); }
+.access-control-tab-row { grid-template-columns: minmax(140px, 1fr) minmax(220px, 280px); }
+.access-control-tab-row > span { color: var(--muted); font-size: 13px; padding-bottom: 8px; }
+.access-user-select { grid-column: 1 / -1; }
+.access-user-select select { min-height: 90px; }
+@media (max-width: 760px) {
+  .access-control-row, .access-control-tab-row { grid-template-columns: 1fr; }
+}

@@ -31,6 +31,7 @@ import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVi
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
+import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -670,12 +671,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
     }
     if (!startAlreadyNotified && hasProductionBaseline) {
       const summary = `Craft started: ${job.label}`;
-      statements.insertActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming));
+      const sourceKey = `production_started:${job.key}`;
+      statements.insertSourcedActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming), sourceKey);
       const skipReason = productionNotificationSkipReason("production_started", jobWithTiming);
       if (skipReason) {
         diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", jobWithTiming) });
       } else {
-        pendingNotifications.push({ jobKey: job.key, sourceKey: `production_started:${job.key}`, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
+        pendingNotifications.push({ jobKey: job.key, sourceKey, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
       }
       statements.markProductionStartNotified.run(job.key);
     }
@@ -704,12 +706,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       ...job,
     };
     const summary = `Craft completed: ${current.label}`;
-    statements.insertActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata));
+    const sourceKey = `production_completed:${key}`;
+    statements.insertSourcedActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata), sourceKey);
     const skipReason = productionNotificationSkipReason("production_completed", metadata);
     if (skipReason) {
       diagnostics.push({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
     } else {
-      pendingNotifications.push({ jobKey: key, sourceKey: `production_completed:${key}`, eventType: "production_completed", summary, occurredAt, metadata });
+      pendingNotifications.push({ jobKey: key, sourceKey, eventType: "production_completed", summary, occurredAt, metadata });
     }
   }
   return { pendingNotifications, diagnostics };
@@ -1717,6 +1720,23 @@ function authStatus(req) {
   const user = getAppUser(req);
   const config = discordOAuthConfig(req);
   return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
+}
+
+function accessControlConfig() {
+  return normalizeAccessControlConfig(safeJson(statements.getSetting.get("access_control_json")?.value, {}));
+}
+
+function accessControlSubject(req) {
+  return { user: publicAppUser(getAppUser(req)) };
+}
+
+function adminAccessControlResponse() {
+  return {
+    config: accessControlConfig(),
+    modes: ACCESS_RULE_MODES,
+    targets: ACCESS_CONTROL_TARGETS,
+    accounts: statements.listUserAccounts.all().map(publicAppUser),
+  };
 }
 
 function createAdminSessionForDiscordProfile(profile, loginAt) {
@@ -7590,6 +7610,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
+    if (req.method === "GET" && url.pathname === "/api/local/access-control/effective") return send(res, 200, publicEffectiveAccess(accessControlConfig(), accessControlSubject(req)));
     if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
       return handleDiscordOAuthStart(req, res, url);
@@ -8092,6 +8113,17 @@ const server = createServer(async (req, res) => {
           GROUP BY admin_users.id ORDER BY admin_users.username
         `).all(new Date().toISOString());
         return send(res, 200, { users: users.map((entry) => ({ ...entry, role: normalizeAdminRole(entry.role), roleLabel: ADMIN_ROLE_LABELS[normalizeAdminRole(entry.role)], avatarUrl: discordAvatarUrl(entry) })), roles: ADMIN_ROLE_LABELS });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/access-control") {
+        return send(res, 200, adminAccessControlResponse());
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/access-control") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const config = normalizeAccessControlConfig(body);
+        const updatedAt = new Date().toISOString();
+        statements.upsertSetting.run("access_control_json", JSON.stringify(config), updatedAt);
+        audit(user, "access_control.update", { rules: Object.keys(config.rules).length });
+        return send(res, 200, adminAccessControlResponse());
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });

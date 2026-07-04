@@ -172,6 +172,15 @@ function productionToastBody(_status: ProductionCraftToastStatus, details: AnyRe
   return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName}`;
 }
 
+function productionActivitySourceKey(event: AnyRecord, metadata: AnyRecord, helpers: MarketActivityToastHelpers): string {
+  const eventType = String(event.event_type ?? event.eventType ?? "");
+  const raw = metadata.raw && typeof metadata.raw === "object" ? metadata.raw as AnyRecord : {};
+  const explicitMetadataKey = firstNonEmptyString(metadata.sourceKey, metadata.source_key);
+  if (explicitMetadataKey?.startsWith(`${eventType}:`)) return explicitMetadataKey;
+  const craftKey = firstNonEmptyString(metadata.key, metadata.jobKey, metadata.craftKey, raw.key, raw.entityId, raw.id, raw.craftId);
+  if (craftKey) return `${eventType}:${craftKey}`;
+  return firstNonEmptyString(helpers.key(event), `${eventType}:${event.id ?? event.occurred_at ?? event.summary ?? "unknown"}`) as string;
+}
 export function productionActivityToastDraft(
   event: AnyRecord,
   settings: ProductionActivityToastSettings,
@@ -190,7 +199,7 @@ export function productionActivityToastDraft(
     kind: "production",
     occurredAt,
     item: helpers.item(event),
-    sourceKey: helpers.key(event),
+    sourceKey: productionActivitySourceKey(event, metadata, helpers),
     soundType: status === "started" ? "productionStarted" : "productionCompleted",
   };
 }
@@ -205,7 +214,7 @@ export function productionActivityQueueToastDrafts(
 ): { snapshot: ProductionActivityToastSnapshot; drafts: ToastNoticeDraft[]; seeded: boolean } {
   const notableEvents = events.filter(isProductionActivityToastEvent);
   const knownIds = previous?.claimId === claimId ? previous.knownIds : null;
-  const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => helpers.key(event), limit);
+  const selection = selectUnseenNotificationItems(knownIds, notableEvents, (event) => productionActivitySourceKey(event, parseActivityMetadata(event), helpers), limit);
   const snapshot = { claimId, knownIds: selection.knownIds };
   const toastEvents = selection.seeded ? recentActivityEvents(notableEvents).slice(0, limit).reverse() : selection.unseen;
   if (selection.seeded && toastEvents.length === 0) return { snapshot, drafts: [], seeded: true };

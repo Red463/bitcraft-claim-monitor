@@ -958,6 +958,23 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
   assert.equal(linkedAccounts.accounts.some((account) => account.discordId === "deal-discord-user"), true);
+  const saveAccessControl = await fetch(`${origin}/api/local/admin/access-control`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ rules: {
+      "page:market": { mode: "specificUsers", allowedDiscordIds: ["222222222222222222", "invalid"] },
+      "page:map": { mode: "verified" },
+      "tab:market:live": { mode: "discord" },
+    } }),
+  });
+  assert.equal(saveAccessControl.status, 200);
+  const savedAccessControl = await saveAccessControl.json();
+  assert.deepEqual(savedAccessControl.config.rules["page:market"].allowedDiscordIds, ["222222222222222222"]);
+  const anonymousEffectiveAccess = await fetch(`${origin}/api/local/access-control/effective`, { headers: { origin } }).then((response) => response.json());
+  assert.equal(anonymousEffectiveAccess.targets["page:market"].allowed, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(anonymousEffectiveAccess.targets["page:market"], "allowedDiscordIds"), false);
+  const signedEffectiveAccess = await fetch(`${origin}/api/local/access-control/effective`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
+  assert.equal(signedEffectiveAccess.targets["page:map"].allowed, false);
   const refusedAnalytics = await fetch(`${origin}/api/local/analytics/event`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },
@@ -1045,7 +1062,12 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({}),
   });
   assert.equal(viewerSettingsMutation.status, 403);
-  const viewerUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: viewerCookie, origin } });
+  const viewerAccessControlMutation = await fetch(`${origin}/api/local/admin/access-control`, {
+    method: "PUT",
+    headers: { cookie: viewerCookie, origin, "content-type": "application/json", "x-csrf-token": viewerAuth.csrfToken },
+    body: JSON.stringify({ rules: {} }),
+  });
+  assert.equal(viewerAccessControlMutation.status, 403);  const viewerUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: viewerCookie, origin } });
   assert.equal(viewerUserList.status, 403);
   const createAdmin = await fetch(`${origin}/api/local/admin/users`, {
     method: "POST",
@@ -1256,6 +1278,9 @@ test("server collection paginates listings and protects production mutations", a
   const ageGatedActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(ageGatedActivity.events.filter((event) => event.event_type === "production_started").length, 3);
   assert.equal(ageGatedActivity.events.some((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3"), true);
+  const ageGatedProductionStart = ageGatedActivity.events.find((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3");
+  assert.ok(ageGatedProductionStart);
+  assert.match(ageGatedProductionStart.source_key, /^production_started:/);
 
   craftEntityRevision = 4;
   craftOwnerUsername = "Tester";

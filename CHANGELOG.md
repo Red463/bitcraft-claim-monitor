@@ -11,6 +11,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.35] - 2026-07-04
+
+### Added
+
+- Added admin-managed access controls for public app pages and first-level tabs, with options for public access, Discord sign-in, verified characters, or selected Discord users.
+
+### Fixed
+
+- Fixed duplicate in-app craft notifications by using stable production craft source keys for activity-event dedupe.
+
 ## [0.31.1-beta.34] - 2026-07-04
 
 ### Fixed

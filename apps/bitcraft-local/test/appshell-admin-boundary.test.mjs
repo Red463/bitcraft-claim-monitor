@@ -128,3 +128,19 @@ test("Admin configuration exposes global in-app notification defaults", () => {
   assert.match(adminPanel, /"production"/);
   assert.match(adminPanel, /draft\.toastSettings\[key\]/);
 });
+
+test("Admin configuration exposes page and tab access control management", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+  const permissions = readFileSync(new URL("../src/server/adminPermissions.mjs", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /Access Control/);
+  assert.match(adminPanel, /\/admin\/access-control/);
+  assert.match(adminPanel, /pageAccessTargets\(\)/);
+  assert.match(adminPanel, /tabAccessTargets\(pageTarget\.page\)/);
+  assert.match(adminPanel, /allowedDiscordIds/);
+  assert.match(adminPanel, /ACCESS_RULE_MODES/);
+  assert.match(adminCss, /\.access-control-list/);
+  assert.match(permissions, /\/api\/local\/admin\/access-control/);
+  assert.match(permissions, /settings\.manage/);
+});

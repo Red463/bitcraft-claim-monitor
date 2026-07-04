@@ -98,6 +98,7 @@ import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "
 import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey } from "../../utils/appSettings";
 import { listingTrackingKey, safeDisplayJson } from "../../utils/displayHelpers";
 import { NAV } from "../../navigation";
+import { ACCESS_RULE_MODES, normalizeAccessControlConfig, pageAccessTargets, tabAccessTargets, type AccessControlConfig, type AccessRuleMode } from "../../access/accessControl.mjs";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../../utils/professions";
 import type {
   ActiveRegion,
@@ -218,6 +219,7 @@ export function AdminPanel({
   const [tableOffset, setTableOffset] = React.useState(0);
   const [users, setUsers] = React.useState<AnyRecord[]>([]);
   const [linkedAccounts, setLinkedAccounts] = React.useState<AppUser[]>([]);
+  const [accessControlState, setAccessControlState] = React.useState<{ config: AccessControlConfig; accounts: AppUser[] } | null>(null);
   const [newUser, setNewUser] = React.useState({ discordId: "", displayName: "", role: "admin" });
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
   const [auditFilter, setAuditFilter] = React.useState("");
@@ -350,6 +352,40 @@ export function AdminPanel({
     setLinkedAccounts((await api("/admin/user-accounts")).accounts ?? []);
   }
 
+  async function refreshAccessControl() {
+    const result = await api("/admin/access-control");
+    setAccessControlState({
+      config: normalizeAccessControlConfig(result.config),
+      accounts: result.accounts ?? [],
+    });
+  }
+
+  function accessRule(targetId: string) {
+    return accessControlState?.config.rules[targetId] ?? { mode: "public" as AccessRuleMode, allowedDiscordIds: [] };
+  }
+
+  function updateAccessRule(targetId: string, patch: { mode?: AccessRuleMode; allowedDiscordIds?: string[] }) {
+    setAccessControlState((current) => {
+      const base = current ?? { config: { rules: {} }, accounts: linkedAccounts };
+      const existing = base.config.rules[targetId] ?? { mode: "public" as AccessRuleMode, allowedDiscordIds: [] };
+      const nextRule = {
+        mode: patch.mode ?? existing.mode,
+        allowedDiscordIds: patch.allowedDiscordIds ?? existing.allowedDiscordIds ?? [],
+      };
+      const rules = { ...base.config.rules, [targetId]: nextRule };
+      if (nextRule.mode !== "specificUsers") rules[targetId] = { mode: nextRule.mode, allowedDiscordIds: [] };
+      if (nextRule.mode === "public") delete rules[targetId];
+      return { ...base, config: normalizeAccessControlConfig({ rules }) };
+    });
+  }
+
+  async function saveAccessControl() {
+    await run(async () => {
+      const result = await api("/admin/access-control", { method: "PUT", body: JSON.stringify(accessControlState?.config ?? { rules: {} }) });
+      setAccessControlState({ config: normalizeAccessControlConfig(result.config), accounts: result.accounts ?? [] });
+    }, "Access control saved.", "access-control-save");
+  }
+
   async function refreshAudit() {
     setAuditData(await api("/admin/audit?limit=100"));
     setAuditVisibleCount(30);
@@ -418,6 +454,7 @@ export function AdminPanel({
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
       if (tab === "accounts") await refreshLinkedAccounts();
+      if (tab === "configuration") await refreshAccessControl();
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
       if (tab === "backups") await refreshBackups();
@@ -1559,7 +1596,71 @@ export function AdminPanel({
                 ))}
               </div>
             </div>
-            <div className="form-card nested-card">
+            <div className="form-card nested-card access-control-card">
+              <div className="split-header">
+                <div>
+                  <h3><Lock size={17} /> Access Control</h3>
+                  <p className="legend">Restrict public app pages and first-level tabs by Discord sign-in, character verification, or selected Discord users. Admin pages stay separate.</p>
+                </div>
+                <div className="toolbar-row">
+                  <button className="toolbar-button" type="button" onClick={() => run(refreshAccessControl, undefined, "access-control-refresh")}><RefreshCw size={14} /> Refresh</button>
+                  <button className="toolbar-button primary" type="button" disabled={!accessControlState || isBusyAction("access-control-save")} onClick={saveAccessControl}><Save size={14} /> Save Access</button>
+                </div>
+              </div>
+              {!accessControlState ? <p className="legend">Loading access control settings...</p> : (
+                <div className="access-control-list">
+                  {pageAccessTargets().map((pageTarget) => {
+                    const pageRule = accessRule(pageTarget.id);
+                    const pageTabs = tabAccessTargets(pageTarget.page);
+                    const accounts = accessControlState.accounts ?? [];
+                    const renderSpecificUsers = (targetId: string, selectedIds: string[]) => (
+                      <label className="field access-user-select">
+                        <span>Allowed Discord users</span>
+                        <select multiple value={selectedIds} onChange={(event) => updateAccessRule(targetId, { allowedDiscordIds: Array.from(event.currentTarget.selectedOptions).map((option) => option.value) })}>
+                          {accounts.map((account) => {
+                            const label = account.characterName || account.globalName || account.username || account.discordId || `User ${account.id}`;
+                            return <option key={account.discordId || account.id} value={String(account.discordId ?? "")}>{label} - {account.username || account.discordId} {account.characterStatus ? `(${account.characterStatus})` : ""}</option>;
+                          })}
+                        </select>
+                      </label>
+                    );
+                    return (
+                      <article className="access-control-group" key={pageTarget.id}>
+                        <div className="access-control-row">
+                          <strong>{pageTarget.label}</strong>
+                          <label className="field compact-field">
+                            <span>Restriction</span>
+                            <select value={pageRule.mode} onChange={(event) => updateAccessRule(pageTarget.id, { mode: event.target.value as AccessRuleMode })}>
+                              {ACCESS_RULE_MODES.map((mode) => <option key={mode.mode} value={mode.mode}>{mode.label}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                        {pageRule.mode === "specificUsers" ? renderSpecificUsers(pageTarget.id, pageRule.allowedDiscordIds ?? []) : null}
+                        {pageTabs.length ? (
+                          <div className="access-control-tabs">
+                            {pageTabs.map((tabTarget) => {
+                              const tabRule = accessRule(tabTarget.id);
+                              return (
+                                <div className="access-control-tab-row" key={tabTarget.id}>
+                                  <span>{tabTarget.label}</span>
+                                  <label className="field compact-field">
+                                    <span>Restriction</span>
+                                    <select value={tabRule.mode} onChange={(event) => updateAccessRule(tabTarget.id, { mode: event.target.value as AccessRuleMode })}>
+                                      {ACCESS_RULE_MODES.map((mode) => <option key={mode.mode} value={mode.mode}>{mode.label}</option>)}
+                                    </select>
+                                  </label>
+                                  {tabRule.mode === "specificUsers" ? renderSpecificUsers(tabTarget.id, tabRule.allowedDiscordIds ?? []) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>            <div className="form-card nested-card">
               <h3><MapPin size={17} /> GeoIP Location Source</h3>
               <p className="legend">Choose how visitor IPs are converted into approximate country/city statistics. ipapi.co is queried server-side only when a cached location is missing.</p>
               <label className="field">

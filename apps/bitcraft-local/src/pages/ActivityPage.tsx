@@ -9,6 +9,7 @@ import { unique } from "../utils/array";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import { activityActorName, activityContainerName, activitySummary, compactActivity } from "./activity/activityUtils";
 import { activityStyle } from "./activity/activityDisplay";
+import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
@@ -23,12 +24,17 @@ const ACTIVITY_FILTERS = [
   ["buildings", "Structures"],
 ] as const;
 
-export function ActivityPanel({ activity, activityTotal, claimId, error }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null }) {
+export function ActivityPanel({ activity, activityTotal, claimId, error, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; access?: EffectiveAccess | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
   const [searchState, setSearchState] = React.useState<{ loading: boolean; error: string | null; events: AnyRecord[]; total: number; query: string }>({ loading: false, error: null, events: [], total: 0, query: "" });
   const [compact, setCompact] = usePersistedState("activity.compact", true);
+  const visibleActivityFilters = React.useMemo(() => ACTIVITY_FILTERS.filter(([id]) => effectiveTargetAllowed(access, targetIdForTab("activity", id))), [access]);
+  React.useEffect(() => {
+    if (!visibleActivityFilters.length) return;
+    if (!visibleActivityFilters.some(([id]) => id === filter)) setFilter(visibleActivityFilters[0][0]);
+  }, [filter, setFilter, visibleActivityFilters]);
   const [members, setMembers] = React.useState<AnyRecord[]>([]);
   React.useEffect(() => {
     const controller = new AbortController();
@@ -89,7 +95,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error }: { act
           </div>
           <div className="dashboard-meta-cluster">
             <span>{memberFilter === "All" ? "All members" : memberFilter}</span>
-            <span>{filter === "all" ? "All categories" : ACTIVITY_FILTERS.find(([id]) => id === filter)?.[1]}</span>
+            <span>{filter === "all" ? "All categories" : visibleActivityFilters.find(([id]) => id === filter)?.[1]}</span>
           </div>
         </div>
       </header>
@@ -123,7 +129,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error }: { act
             </select>
           </label>
           <div className="activity-filters" role="group" aria-label="Activity categories">
-            {ACTIVITY_FILTERS.map(([id, label]) => (
+            {visibleActivityFilters.map(([id, label]) => (
               <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
                 <span>{label}</span>
                 <strong>{filterCounts.get(id) ?? 0}</strong>

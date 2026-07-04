@@ -1,0 +1,25 @@
+import type { ActivePanel } from "../types/app";
+import type { AppUser } from "../types/settings";
+
+export type AccessRuleMode = "public" | "discord" | "verified" | "specificUsers";
+export type AccessRule = { mode: AccessRuleMode; allowedDiscordIds: string[] };
+export type AccessControlConfig = { rules: Record<string, AccessRule> };
+export type AccessTargetKind = "page" | "tab";
+export type AccessTarget = { id: string; kind: AccessTargetKind; page: Exclude<ActivePanel, "admin">; tab?: string; label: string; parentLabel?: string };
+export type AccessSubject = { user?: Pick<AppUser, "discordId" | "characterStatus"> | null };
+export type AccessDecision = { allowed: boolean; mode: AccessRuleMode; reason: string };
+export type EffectiveAccess = { targets: Record<string, AccessDecision> };
+export const ACCESS_RULE_MODES: Array<{ mode: AccessRuleMode; label: string; deniedReason: string }>;
+export const ACCESS_TAB_GROUPS: Record<string, Array<{ id: string; label: string }>>;
+export const ACCESS_CONTROL_TARGETS: AccessTarget[];
+export function pageAccessTargets(): AccessTarget[];
+export function tabAccessTargets(page: string): AccessTarget[];
+export function normalizeAccessControlConfig(value: unknown): AccessControlConfig;
+export function accessRuleFor(config: AccessControlConfig, targetId: string): AccessRule;
+export function publicAccessDecision(config: AccessControlConfig, targetId: string, subject?: AccessSubject): AccessDecision;
+export function targetIdForPage(page: string): string;
+export function targetIdForTab(page: string, tab: string): string;
+export function firstAllowedPage(config: AccessControlConfig, subject?: AccessSubject, preferred?: string): Exclude<ActivePanel, "admin">;
+export function firstAllowedTab(config: AccessControlConfig, page: string, subject?: AccessSubject): string | null;
+export function effectiveTargetAllowed(effectiveAccess: EffectiveAccess | null | undefined, targetId: string): boolean;
+export function publicEffectiveAccess(config: AccessControlConfig, subject?: AccessSubject): EffectiveAccess;
