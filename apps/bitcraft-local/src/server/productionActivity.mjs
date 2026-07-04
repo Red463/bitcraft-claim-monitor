@@ -60,6 +60,7 @@ export function normalizeProductionJob(job, craftsPayload = {}) {
     tier: toNumber(item?.tier ?? job.tier ?? job.itemTier),
     rarity: item?.rarityStr ?? item?.rarity ?? job.rarityStr ?? job.rarity ?? null,
     iconAssetName: item?.iconAssetName ?? job.iconAssetName ?? null,
+    craftCount: toNumber(job.craftCount ?? output.quantity ?? output.qty),
     buildingName: job.buildingName ?? job.structureName ?? job.buildingNickname ?? null,
     crafterName: job.crafterName ?? job.crafterUsername ?? job.ownerUsername ?? job.playerUsername ?? job.userName ?? null,
     ...metrics,

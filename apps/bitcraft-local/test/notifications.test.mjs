@@ -117,7 +117,7 @@ test("formatToastMetaLine formats notification labels and local time", () => {
   const productionNotice = createToastNotice({
     id: "notice-1",
     title: "Craft completed",
-    body: "Fine Plank by Modular at Carpentry Station",
+    body: "12x Fine Plank by Modular at Carpentry Station",
     kind: "production",
     occurredAt: "2026-07-03T14:14:00",
     metaLabel: "Modular",
@@ -360,12 +360,12 @@ test("productionActivityToastDraft formats production activity with crafter, bui
     source_key: "production_completed:craft-1",
     summary: "Craft completed: Fine Cloth",
     occurred_at: "2026-07-03T10:42:00.000Z",
-    metadata_json: JSON.stringify({ itemName: "Fine Cloth", iconAssetName: "fine_cloth.png", crafterName: "Mosswick", buildingName: "Tailoring Station" }),
+    metadata_json: JSON.stringify({ itemName: "Fine Cloth", iconAssetName: "fine_cloth.png", crafterName: "Mosswick", buildingName: "Tailoring Station", craftCount: 167 }),
   };
 
   assert.deepEqual(productionActivityToastDraft(event, { production: true }, helpers), {
     title: "Craft completed",
-    body: "Fine Cloth by Mosswick at Tailoring Station",
+    body: "167x Fine Cloth by Mosswick at Tailoring Station",
     kind: "production",
     occurredAt: "2026-07-03T10:42:00.000Z",
     metaLabel: "Mosswick",
@@ -394,7 +394,7 @@ test("productionActivityToastDraft uses the craft metadata key for source dedupe
   assert.equal(draft.sourceKey, "production_started:craft-1");
 });
 test("productionCraftToastDraft builds started and completed notices", () => {
-  const job = { entityId: "craft-1", buildingName: "Carpentry Station", crafterName: "Modular", recipeId: "recipe-1" };
+  const job = { entityId: "craft-1", buildingName: "Carpentry Station", crafterName: "Modular", recipeId: "recipe-1", craftCount: 12 };
   const helpers = {
     displayName: () => "Fine Plank",
     item: () => ({ itemName: "Fine Plank", tier: 4 }),
@@ -402,7 +402,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
 
   assert.deepEqual(productionCraftToastDraft("started", "claim-1", "craft-1", job, helpers, "2026-07-03T09:58:00.000Z"), {
     title: "Craft started",
-    body: "Fine Plank by Modular at Carpentry Station",
+    body: "12x Fine Plank by Modular at Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T09:58:00.000Z",
@@ -412,7 +412,7 @@ test("productionCraftToastDraft builds started and completed notices", () => {
   });
   assert.deepEqual(productionCraftToastDraft("completed", "claim-1", "craft-1", job, helpers, "2026-07-03T10:42:00.000Z"), {
     title: "Craft completed",
-    body: "Fine Plank by Modular at Carpentry Station",
+    body: "12x Fine Plank by Modular at Carpentry Station",
     kind: "production",
     item: { itemName: "Fine Plank", tier: 4 },
     occurredAt: "2026-07-03T10:42:00.000Z",

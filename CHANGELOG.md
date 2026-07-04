@@ -10,6 +10,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.31.1-beta.40] - 2026-07-05
+
+### Changed
+
+- Updated in-app craft start and completion notifications to include the craft quantity when available.
+
 ## [0.31.1-beta.39] - 2026-07-04
 
 ### Fixed

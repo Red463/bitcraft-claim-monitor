@@ -163,13 +163,22 @@ function productionToastMeta(details: AnyRecord): { metaLabel?: string } {
   const crafterName = productionToastCrafterName(details);
   return crafterName ? { metaLabel: crafterName } : {};
 }
+function productionToastCraftCount(details: AnyRecord): number | null {
+  const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
+  const rawOutput = Array.isArray(raw.craftedItem) ? raw.craftedItem[0] ?? {} : {};
+  const value = details.craftCount ?? details.quantity ?? raw.craftCount ?? raw.quantity ?? rawOutput.quantity;
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : null;
+}
 
 function productionToastBody(_status: ProductionCraftToastStatus, details: AnyRecord, _occurredAt: unknown, fallbackName?: unknown): string {
   const raw = details.raw && typeof details.raw === "object" ? details.raw as AnyRecord : {};
   const itemName = firstNonEmptyString(details.itemName, details.label, details.name, raw.itemName, raw.name, fallbackName, "Craft");
+  const quantity = productionToastCraftCount(details);
+  const itemLabel = quantity ? `${quantity.toLocaleString()}x ${itemName}` : itemName;
   const crafterName = productionToastCrafterName(details);
   const buildingName = firstNonEmptyString(details.buildingName, details.structureName, raw.buildingName, raw.structureName, "Settlement production");
-  return `${itemName}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName}`;
+  return `${itemLabel}${crafterName ? ` by ${crafterName}` : ""} at ${buildingName}`;
 }
 
 function productionActivitySourceKey(event: AnyRecord, metadata: AnyRecord, helpers: MarketActivityToastHelpers): string {
