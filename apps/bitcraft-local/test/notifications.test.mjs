@@ -582,15 +582,50 @@ test("browserNotificationSourceDrafts queues live source rows without page-mount
     "activity:4",
     "deal-alert:5",
     "production_started:new-craft",
-    "production_completed:old-craft",
   ]);
   assert.deepEqual(next.drafts.map((draft) => draft.title), [
     "New market listing",
     "Market sale",
     "Market deal found",
     "Craft started",
-    "Craft completed",
   ]);
+});
+
+
+test("browserNotificationSourceDrafts does not emit browser fallback completions when activity feed is available", () => {
+  const helpers = {
+    activity: {
+      summary: (event) => event.summary,
+      item: (event) => ({ itemName: event.itemName }),
+      key: (event) => event.source_key ?? `activity:${event.id}`,
+    },
+    production: {
+      displayName: (job) => job.name,
+      item: (job) => ({ itemName: job.name }),
+    },
+  };
+  const enabledSettings = { marketListings: true, marketSales: true, production: true };
+  const seeded = browserNotificationSourceDrafts(null, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 1, events: [] },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [{ entityId: "old-craft", name: "Craft", buildingName: "Scholar Station", crafterName: "Modular" }],
+    hasProductionData: true,
+  }, helpers);
+
+  const next = browserNotificationSourceDrafts(seeded.snapshots, {
+    claimId: "claim-1",
+    appToastSettings: enabledSettings,
+    userToastSettings: enabledSettings,
+    notificationActivity: { refreshToken: 2, events: [] },
+    dealAlerts: { refreshToken: 0, alerts: [] },
+    productionCrafts: [],
+    hasProductionData: true,
+  }, helpers);
+
+  assert.deepEqual(next.drafts, []);
 });
 
 test("browserNotificationSourceDrafts surfaces fresh production activity on the first fetch", () => {
@@ -904,3 +939,4 @@ test("browserNotificationSourceDrafts preserves production snapshot when the cur
   assert.deepEqual([...noCraftPayloadPage.snapshots.production.jobs.keys()], ["old-craft"]);
   assert.deepEqual(refreshedProductionPage.drafts.map((draft) => draft.sourceKey), ["production_started:new-craft"]);
 });
+

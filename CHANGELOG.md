@@ -11,6 +11,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 
+## [0.31.1-beta.36] - 2026-07-04
+
+### Fixed
+
+- Fixed ghost craft completion notifications caused by the browser fallback treating temporary live craft payload gaps as completed crafts.
+
 ## [0.31.1-beta.35] - 2026-07-04
 
 ### Added

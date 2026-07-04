@@ -97,8 +97,10 @@ export function browserNotificationSourceDrafts(
   }
 
   if (options.hasProductionData) {
+    const activityFeedAvailable = Boolean(options.notificationActivity.refreshToken);
     const result = productionCraftQueueToastDrafts(snapshots.production, options.claimId, options.productionCrafts, helpers.production, {
       enabled: options.appToastSettings.production && options.userToastSettings.production,
+      maxCompleted: activityFeedAvailable ? 0 : undefined,
     });
     snapshots.production = result.snapshot;
     drafts.push(...result.drafts);
@@ -106,3 +108,4 @@ export function browserNotificationSourceDrafts(
 
   return { snapshots, drafts };
 }
+
