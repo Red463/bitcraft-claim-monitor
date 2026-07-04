@@ -44,5 +44,15 @@ test("sidebar exposes a persistent app account sign-in affordance", () => {
   assert.match(css, /\.sidebar-account-card/);
   assert.match(css, /\.sidebar-account-avatar/);
   assert.match(css, /\.sidebar-account-action/);
+  assert.match(css, /\.sidebar-top-stack/);
+  assert.match(css, /nav a, nav button \{[^}]*min-height:\s*34px/s);
+  assert.match(css, /nav a\.active, nav button\.active \{[^}]*inset 2px 0 0 var\(--active-color\)/s);
+});
+test("sidebar overview label preserves the existing command group key", () => {
+  const navigation = readFileSync(new URL("../src/navigation.ts", import.meta.url), "utf8");
+
+  assert.match(navigation, /\{\s*id:\s*"command",\s*label:\s*"Overview"/);
+  assert.doesNotMatch(navigation, /\{\s*id:\s*"overview"/);
+  assert.doesNotMatch(navigation, /label:\s*"Command"/);
 });
 

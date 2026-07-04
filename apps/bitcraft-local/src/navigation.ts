@@ -32,7 +32,7 @@ export type NavItem = readonly [ActivePanel, string, LucideIcon];
 export type NavGroup = { id: string; label: string; items: readonly NavItem[] };
 
 export const NAV_GROUPS = [
-  { id: "command", label: "Command", items: [
+  { id: "command", label: "Overview", items: [
     ["dashboard", "Dashboard", Home],
     ["leaderboard", "Leaderboard", Trophy],
   ] },
@@ -87,3 +87,4 @@ export function updateQueryState(values: Record<string, string | null>) {
 export function panelHref(panel: ActivePanel): string {
   return `/?page=${encodeURIComponent(panel)}`;
 }
+

@@ -552,23 +552,25 @@ function DashboardApp() {
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
-        <section className={`sidebar-account-card ${userAuth.user ? "signed-in" : "signed-out"}`} aria-label="Account">
-          {userAuth.user ? (
-            <button type="button" className="sidebar-account-main" onClick={() => setUserSettingsOpen(true)} title="Open account settings">
-              <span className="sidebar-account-avatar">{userAuth.user.avatarUrl ? <img src={userAuth.user.avatarUrl} alt="" /> : sidebarAccountInitial}</span>
-              <span className="sidebar-account-copy"><strong>{sidebarAccountName}</strong><small>{sidebarAccountStatus}</small></span>
-            </button>
-          ) : (
-            <>
-              <div className="sidebar-account-main">
-                <span className="sidebar-account-avatar"><MessageCircle size={16} /></span>
-                <span className="sidebar-account-copy"><strong>Not signed in</strong><small>Sign in to save settings and verify your character.</small></span>
-              </div>
-              {userAuth.discordLoginEnabled ? <a className="sidebar-account-action" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}><MessageCircle size={14} /> Sign in with Discord</a> : <span className="sidebar-account-disabled">Discord login unavailable</span>}
-            </>
-          )}
-        </section>
-        <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Discord Server</span><ExternalLink size={13} /></a>
+        <div className="sidebar-top-stack">
+          <section className={`sidebar-account-card ${userAuth.user ? "signed-in" : "signed-out"}`} aria-label="Account">
+            {userAuth.user ? (
+              <button type="button" className="sidebar-account-main" onClick={() => setUserSettingsOpen(true)} title="Open account settings">
+                <span className="sidebar-account-avatar">{userAuth.user.avatarUrl ? <img src={userAuth.user.avatarUrl} alt="" /> : sidebarAccountInitial}</span>
+                <span className="sidebar-account-copy"><strong>{sidebarAccountName}</strong><small>{sidebarAccountStatus}</small></span>
+              </button>
+            ) : (
+              <>
+                <div className="sidebar-account-main">
+                  <span className="sidebar-account-avatar"><MessageCircle size={16} /></span>
+                  <span className="sidebar-account-copy"><strong>Not signed in</strong><small>Sign in to save settings and verify your character.</small></span>
+                </div>
+                {userAuth.discordLoginEnabled ? <a className="sidebar-account-action" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}><MessageCircle size={14} /> Sign in with Discord</a> : <span className="sidebar-account-disabled">Discord login unavailable</span>}
+              </>
+            )}
+          </section>
+          <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Discord Server</span><ExternalLink size={13} /></a>
+        </div>
         <nav aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
             const visibleItems = group.items.filter(([id]) => isPageAllowed(id));
