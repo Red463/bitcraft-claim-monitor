@@ -357,7 +357,7 @@ export function Leaderboard({
           <header className="dashboard-card-title"><span><Users size={14} /> Online and sessions</span></header>
           {!onlineRows.length ? <div className="empty-state"><Users />No tracked settlement members are available.</div> : (
             <DataTable rows={onlineRows} columns={[
-              ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} /></strong>],
+              ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} members={data.members} /></strong>],
               ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
               ["Current session", (entry) => {
                 const sessionLabel = formatCurrentSession(entry.sessionSeconds);
@@ -410,3 +410,4 @@ export function Leaderboard({
     </div>
   );
 }
+

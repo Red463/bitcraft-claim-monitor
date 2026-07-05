@@ -1036,8 +1036,8 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .density-compact .section-header { margin-bottom: -2px; }
 .density-compact .mini-stat { padding-top: 10px; padding-bottom: 10px; }
 .legend { color: var(--muted); font-size: var(--font-caption); line-height: 1.4; margin: 0; }
-.tracked-owner-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: inherit; font: inherit; vertical-align: middle; }
-.tracked-owner-name svg { flex: 0 0 auto; color: var(--active-color, #f0c64f); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--active-color, #f0c64f) 28%, transparent)); }
+.tracked-owner-name, .tracked-co-owner-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: inherit; font: inherit; vertical-align: middle; }
+.tracked-owner-name svg, .tracked-co-owner-name svg { flex: 0 0 auto; color: var(--active-color, #f0c64f); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--active-color, #f0c64f) 28%, transparent)); }
 .tier-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 31px; height: 21px; border-radius: 5px; padding: 0 7px; font: 700 11px "JetBrains Mono", monospace; line-height: 1; vertical-align: middle; color: var(--tier-text); background: var(--tier-bg); border: 1px solid var(--tier-border); box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
 .tier-badge.tier-1, .tier-framed.tier-1 { --tier-text: #c9d1dd; --tier-bg: rgba(131,142,158,.16); --tier-border: rgba(131,142,158,.5); }
 .tier-badge.tier-2, .tier-framed.tier-2 { --tier-text: #ed9561; --tier-bg: rgba(190,99,39,.16); --tier-border: rgba(190,99,39,.58); }

@@ -83,7 +83,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const columns: Array<[string, string, (row: AnyRecord, index: number) => React.ReactNode]> = [
     ["#", "rank", (_r, i) => i + 1],
     ["Claim", "name", (r) => <span className={String(r.entityId) === String(data.claim.entityId) ? "mine-text" : ""}>{String(r.entityId) === String(data.claim.entityId) ? <Crown size={13} /> : null}{r.name}</span>],
-    ["Owner", "owner", (r) => <TrackedOwnerName name={getOwnerName(r)} claim={data.claim} />],
+    ["Owner", "owner", (r) => <TrackedOwnerName name={getOwnerName(r)} claim={data.claim} members={data.members} />],
     ["Score", "score", (r) => <strong title={scoreFormulaTitle}>{formatNumber(scoreFor(r), 0)}</strong>],
     ["Tier", "tier", (r) => <TierBadge tier={r.tier} />],
     ["Supplies", "supplies", (r) => formatNumber(r.supplies)],
@@ -140,7 +140,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
           <section className="nearby-panel">
             <h3><MapPin size={17} /> Close Settlements</h3>
             <p>These settlements are geographically closest to our monitored settlement.</p>
-            {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span><TrackedOwnerName name={getOwnerName(row)} claim={data.claim} /> <TierBadge tier={row.tier} /></span><small>{formatNumber(row.supplies)} supplies</small></div>)}
+            {nearbyRows.map((row) => <div key={row.entityId}><strong>{row.name}</strong><span><TrackedOwnerName name={getOwnerName(row)} claim={data.claim} members={data.members} /> <TierBadge tier={row.tier} /></span><small>{formatNumber(row.supplies)} supplies</small></div>)}
           </section>
         ) : null}
       </div>
@@ -163,3 +163,4 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
+

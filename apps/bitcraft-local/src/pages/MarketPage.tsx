@@ -413,7 +413,7 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
           ["Total Price", r => `${formatNumber(r.totalValue ?? r.total_value ?? (toNumber(r.price) * toNumber(r.quantity)))}g`],
           ["Tier", r => (r.itemTier ?? r.tier) ? <TierBadge tier={r.itemTier ?? r.tier} /> : "-"],
         ["Rarity", r => (r.itemRarityStr ?? r.rarity) ? <RarityBadge rarity={r.itemRarityStr ?? r.rarity} /> : "-"],
-        ["Owner", r => <TrackedOwnerName name={r.ownerUsername ?? "-"} claim={data.claim} />],
+        ["Owner", r => <TrackedOwnerName name={r.ownerUsername ?? "-"} claim={data.claim} members={data.members} />],
         ["Listed", r => listingListedAt(r) ? dateLabel(listingListedAt(r)) : "-"],
         ["Live", r => liveDaysSince(listingListedAt(r))],
       ]} />
@@ -422,3 +422,4 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
     </div>
   );
 }
+

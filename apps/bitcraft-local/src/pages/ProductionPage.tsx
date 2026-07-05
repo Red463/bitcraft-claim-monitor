@@ -273,7 +273,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                   disabled={!crafterMemberIdByName[name]}
                 >
                   <User size={12} />
-                  <strong><TrackedOwnerName name={name} claim={data.claim} /></strong>
+                  <strong><TrackedOwnerName name={name} claim={data.claim} members={data.members} /></strong>
                   <small>{count}</small>
                 </button>
               ))}
@@ -281,7 +281,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
           </div>
         ) : null}
       </div>
-      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong><TrackedOwnerName name={selectedMember.userName ?? selectedMember.username} claim={data.claim} /></strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
+      {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong><TrackedOwnerName name={selectedMember.userName ?? selectedMember.username} claim={data.claim} members={data.members} /></strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
       {data.crafts.length > 0 && visibleCrafts.length === 0 ? <div className="empty-state"><Lock />Private crafts are hidden by your Production controls.</div> : null}
       <div className="production-grid">
@@ -298,7 +298,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft. BitJita returned this through member craft data with isPublic false."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} /></span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft. BitJita returned this through member craft data with isPublic false."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} members={data.members} /></span></div>
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
@@ -317,7 +317,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                   <div className="contributors">
                     <small>Contributors</small>
                     {contributors.map((person) => (
-                      <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
+                      <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} members={data.members} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
                     ))}
                   </div>
                 ) : <small>No contributions recorded by the API.</small>}
@@ -330,3 +330,4 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     </div>
   );
 }
+

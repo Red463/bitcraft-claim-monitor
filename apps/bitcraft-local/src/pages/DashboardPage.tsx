@@ -196,7 +196,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
               <button key={player.entityId} onClick={() => onNavigate("members")}>
                 <span className="dashboard-avatar">{String(player.displayName ?? "?").slice(0, 1).toUpperCase()}<i className="online-dot is-online" /></span>
                 <span className="dashboard-member-copy">
-                  <strong><TrackedOwnerName name={player.displayName} claim={claim} /></strong>
+                  <strong><TrackedOwnerName name={player.displayName} claim={claim} members={members} /></strong>
                   <small>{player.regionName ?? "Location unknown"}</small>
                 </span>
                 <span className="dashboard-member-session">

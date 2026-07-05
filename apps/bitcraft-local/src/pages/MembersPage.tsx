@@ -22,6 +22,7 @@ import { summarizePassiveCrafts } from "../utils/crafts";
 import { formatCurrentSession, formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
 import { equippedCount, equipmentPresets, equipmentSlots, playerToolbeltTools, visibleEquipmentSlots } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
+import { memberClaimRole } from "../utils/ownership";
 
 const API = "/api/bitjita";
 
@@ -129,10 +130,13 @@ export function Members({
             ["Username", (m) => (
               <span className="member-name-cell">
                 <span className="member-row-avatar">{String(m.username ?? "?").slice(0, 1).toUpperCase()}<i className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} /></span>
-                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} /></strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
+                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} members={data.members} /></strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
               </span>
             )],
-            ["Role", (m) => <span className={`role-badge ${m.coOwnerPermission ? "owner" : m.officerPermission ? "officer" : ""}`}>{m.coOwnerPermission ? "Co-owner" : m.officerPermission ? "Officer" : "Member"}</span>],
+            ["Role", (m) => {
+              const role = memberClaimRole(m, data.claim);
+              return <span className={`role-badge ${role === "Owner" || role === "Co-owner" ? "owner" : role === "Officer" ? "officer" : ""}`}>{role}</span>;
+            }],
             ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
             ["Session", (m) => {
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
@@ -260,3 +264,4 @@ export function Members({
     </div>
   );
 }
+

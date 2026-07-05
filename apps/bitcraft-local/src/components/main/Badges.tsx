@@ -1,8 +1,8 @@
-import { Crown } from "lucide-react";
+import { Crown, Handshake } from "lucide-react";
 
 import type { AnyRecord } from "../../main-app-data";
 import { toNumber } from "../../main-app-data";
-import { isTrackedOwnerName } from "../../utils/ownership";
+import { isTrackedCoOwnerName, isTrackedOwnerName } from "../../utils/ownership";
 
 export function TierBadge({ tier }: { tier: unknown }) {
   const value = toNumber(tier);
@@ -30,14 +30,17 @@ export function RarityBadge({ rarity }: { rarity: unknown }) {
   return <span className={`rarity-badge ${getRarityClass(rarity)}`}>{String(rarity)}</span>;
 }
 
-export function TrackedOwnerName({ name, claim }: { name: unknown; claim: AnyRecord }) {
+export function TrackedOwnerName({ name, claim, members = [] }: { name: unknown; claim: AnyRecord; members?: AnyRecord[] }) {
   const label = String(name ?? "").trim();
   if (!label || label === "-") return <span className="muted-line">Unknown</span>;
   const isOwner = isTrackedOwnerName(label, claim);
+  const isCoOwner = !isOwner && isTrackedCoOwnerName(label, claim, members);
   return (
-    <span className={isOwner ? "tracked-owner-name" : undefined}>
+    <span className={isOwner ? "tracked-owner-name" : isCoOwner ? "tracked-co-owner-name" : undefined}>
       {label}
       {isOwner ? <Crown size={13} aria-label="Tracked settlement owner" /> : null}
+      {isCoOwner ? <Handshake size={13} aria-label="Tracked settlement co-owner" /> : null}
     </span>
   );
 }
+
