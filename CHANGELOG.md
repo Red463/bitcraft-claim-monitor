@@ -10,6 +10,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.31.1-beta.41] - 2026-07-05
+
+### Fixed
+
+- Fixed dashboard online members so the location line only shows a player's current region when BitJita provides one, instead of falling back to the monitored settlement region.
+
 ## [0.31.1-beta.40] - 2026-07-05
 
 ### Changed

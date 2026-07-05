@@ -86,7 +86,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     return {
       ...player,
       displayName: player.username ?? player.userName ?? member?.userName ?? "Unknown member",
-      regionName: player.regionName ?? claim.regionName,
+      regionName: player.regionName ?? null,
     };
   }).slice(0, 4);
   const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
@@ -188,7 +188,7 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
                 <span className="dashboard-avatar">{String(player.displayName ?? "?").slice(0, 1).toUpperCase()}<i className="online-dot is-online" /></span>
                 <span className="dashboard-member-copy">
                   <strong><TrackedOwnerName name={player.displayName} claim={claim} /></strong>
-                  <small>{player.regionName ?? "Online"}</small>
+                  <small>{player.regionName ?? "Location unknown"}</small>
                 </span>
                 <span className="dashboard-member-session">
                   <em>Online</em>

@@ -19,3 +19,10 @@ test("Dashboard recent activity previews the activity page feed", () => {
   assert.match(dashboard, /dashboardRecentActivityItems\(activity,\s*5\)/);
   assert.doesNotMatch(dashboard, /dashboardSummary\?\.recentActivity/);
 });
+
+test("Dashboard online members do not fall back to the settlement region as player location", () => {
+  const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(dashboard, /regionName:\s*player\.regionName\s*\?\?\s*claim\.regionName/);
+  assert.match(dashboard, /player\.regionName\s*\?\?\s*"Location unknown"/);
+});

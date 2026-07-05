@@ -40,10 +40,19 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     player.time_signed_in ??
     player.total_time_signed_in,
   );
+  const regionName = String(
+    player.regionName ??
+    player.currentRegionName ??
+    player.current_region_name ??
+    player.region?.name ??
+    player.currentRegion?.name ??
+    "",
+  ).trim();
   return {
     ...player,
     entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
+    regionName: regionName || null,
     signedIn,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : existingSessionSeconds > 0 ? existingSessionSeconds : null,
     timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
