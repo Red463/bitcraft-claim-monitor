@@ -24,5 +24,7 @@ test("Dashboard online members do not fall back to the settlement region as play
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(dashboard, /regionName:\s*player\.regionName\s*\?\?\s*claim\.regionName/);
+  assert.match(dashboard, /regionNameById/);
+  assert.match(dashboard, /regionNameById\.get\(regionId\)\s*\?\?\s*`R\$\{regionId\}`/);
   assert.match(dashboard, /player\.regionName\s*\?\?\s*"Location unknown"/);
 });

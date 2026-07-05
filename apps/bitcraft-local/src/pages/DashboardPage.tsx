@@ -80,13 +80,22 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
   const recentActivity = dashboardRecentActivityItems(activity, 5);
+  const regionNameById = new Map<string, string>();
+  for (const region of data.regionStatus ?? []) {
+    const regionId = String(region.regionId ?? "").trim();
+    const regionName = String(region.regionName ?? "").trim();
+    if (regionId && regionName) regionNameById.set(regionId, regionName);
+  }
   const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
   const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
     const member = memberByPlayerId.get(String(player.entityId));
+    const regionId = player.regionId == null ? "" : String(player.regionId).trim();
+    const regionName = player.regionName ?? (regionId ? regionNameById.get(regionId) ?? `R${regionId}` : null);
     return {
       ...player,
       displayName: player.username ?? player.userName ?? member?.userName ?? "Unknown member",
-      regionName: player.regionName ?? null,
+      regionId: regionId || null,
+      regionName,
     };
   }).slice(0, 4);
   const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
@@ -231,3 +240,4 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     </div>
   );
 }
+

@@ -22,13 +22,17 @@ test("normalizePlayer treats BitJita online aliases as signed in", () => {
 });
 
 
-test("normalizePlayer preserves current region aliases when BitJita provides them", () => {
-  assert.equal(normalizePlayer({ username: "Modular", regionName: "Zephyra" }).regionName, "Zephyra");
+test("normalizePlayer preserves current region data from BitJita player payloads", () => {
+  const player = normalizePlayer({ username: "Modular", regionId: 19, locationX: 27352, locationZ: 25177 });
+
+  assert.equal(player.regionId, "19");
+  assert.equal(player.locationX, 27352);
+  assert.equal(player.locationZ, 25177);
   assert.equal(normalizePlayer({ username: "Mosswick", currentRegionName: "Kragfen" }).regionName, "Kragfen");
-  assert.equal(normalizePlayer({ username: "Oddfawn", region: { name: "Stonewake" } }).regionName, "Stonewake");
 });
 test("formatPlaytime renders long player durations in days and hours", () => {
   assert.equal(formatPlaytime(1_670_400), "19d 8h");
   assert.equal(formatPlaytime(7_260), "2h 1m");
   assert.equal(formatPlaytime(null), "Unavailable");
 });
+

@@ -40,6 +40,13 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     player.time_signed_in ??
     player.total_time_signed_in,
   );
+  const regionId = String(
+    player.regionId ??
+    player.currentRegionId ??
+    player.current_region_id ??
+    player.location?.regionId ??
+    "",
+  ).trim();
   const regionName = String(
     player.regionName ??
     player.currentRegionName ??
@@ -52,6 +59,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     ...player,
     entityId: String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""),
     username: player.username ?? player.userName,
+    regionId: regionId || null,
     regionName: regionName || null,
     signedIn,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : existingSessionSeconds > 0 ? existingSessionSeconds : null,
@@ -84,3 +92,4 @@ export function normalizeData(raw: AnyRecord | null) {
   const tradeVolume = raw?.tradeVolume ?? {};
   return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, skills, contributions, marketApi, regionStatus, tradeVolume };
 }
+
