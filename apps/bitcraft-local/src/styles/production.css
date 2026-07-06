@@ -348,7 +348,8 @@
   gap: 3px;
   max-width: 100%;
 }
-.production-page .contributors span strong .tracked-owner-name {
+.production-page .contributors span strong .tracked-owner-name,
+.production-page .contributors span strong .tracked-co-owner-name {
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -358,7 +359,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.production-page .contributors span strong .tracked-owner-name svg {
+.production-page .contributors span strong .tracked-owner-name svg,
+.production-page .contributors span strong .tracked-co-owner-name svg {
   flex: 0 0 auto;
 }
 .production-page .settlement-passive-crafts {
@@ -434,3 +436,4 @@
   .production-member-banner { flex-wrap: wrap; }
   .production-member-banner small { margin-left: 0; width: 100%; }
 }
+
