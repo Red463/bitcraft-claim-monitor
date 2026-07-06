@@ -30,14 +30,13 @@ test("Map iframe is not remounted on every generated URL refresh", () => {
   assert.match(mapPage, /mapSignature/);
 });
 
-test("Map iframe ignores passive auto-online player churn", () => {
+test("Map iframe URL updates when auto-online tracked players change", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
 
-  assert.match(mapPage, /const \[autoFramePlayerIds, setAutoFramePlayerIds\] = React\.useState\(currentPlayerIds\)/);
-  assert.match(mapPage, /const framePlayerIds = selectedIds === null \? autoFramePlayerIds : currentPlayerIds/);
-  assert.match(mapPage, /playerIds: framePlayerIds/);
-  assert.match(mapPage, /bitcraftMapUrl\(framePlayerIds,/);
-  assert.match(mapPage, /onAutoOnline=\{setAutoOnlinePlayers\}/);
-  assert.match(mapPage, /setAutoFramePlayerIds\(defaultMapPlayerSelection\(roster\)\)/);
+  assert.match(mapPage, /const currentPlayerIds = React\.useMemo\(\(\) => \[\.\.\.current\]\.sort\(\), \[current\]\)/);
+  assert.match(mapPage, /playerIds: currentPlayerIds/);
+  assert.match(mapPage, /bitcraftMapUrl\(currentPlayerIds,/);
+  assert.match(mapPage, /setCurrentFrameUrl\(\(previousUrl\) => previousUrl === mapUrl \? previousUrl : mapUrl\)/);
+  assert.doesNotMatch(mapPage, /autoFramePlayerIds/);
 });
 
