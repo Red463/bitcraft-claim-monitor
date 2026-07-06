@@ -12,7 +12,7 @@ import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { updateQueryState } from "../navigation";
-import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
+import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
 import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 
 const LOCAL_API = "/api/local";
@@ -192,9 +192,26 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
-  const mapUrl = React.useMemo(() => bitcraftMapUrl([...current], mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [current, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
+  const currentPlayerIds = React.useMemo(() => [...current].sort(), [current]);
+  const [autoFramePlayerIds, setAutoFramePlayerIds] = React.useState(currentPlayerIds);
+  const framePlayerIds = selectedIds === null ? autoFramePlayerIds : currentPlayerIds;
+  const framePlayerIdsKey = framePlayerIds.join(",");
+  const currentPlayerIdsKey = currentPlayerIds.join(",");
+  const mapSignature = React.useMemo(() => mapEmbedSignature({
+    playerIds: framePlayerIds,
+    mapMarker,
+    flyTo: Boolean(focus),
+    resourceIds: selectedResourceIds,
+    regionIds: mapRegionIds,
+    enemyIds: selectedEnemyIds,
+  }), [framePlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
+  const mapUrl = React.useMemo(() => bitcraftMapUrl(framePlayerIds, mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [mapSignature]);
+  const [currentFrameUrl, setCurrentFrameUrl] = React.useState(mapUrl);
   React.useEffect(() => {
-    const parsed = parseBitcraftMapUrl(mapUrl);
+    setCurrentFrameUrl((previousUrl) => previousUrl === mapUrl ? previousUrl : mapUrl);
+  }, [mapSignature, mapUrl]);
+  React.useEffect(() => {
+    const parsed = parseBitcraftMapUrl(currentFrameUrl);
     setMapUrlLog((currentLog) => [{
       at: new Date().toISOString(),
       rosterSource,
@@ -204,15 +221,16 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
       playerDetailRequested: playerDetailDiagnostics.requested ?? roster.length,
       playerDetailFailed: playerDetailDiagnostics.failed ?? degradedPlayerCount,
       selectedMode: selectedIds === null ? "auto-online" : "manual",
-      selectedPlayerIds: [...current].sort(),
+      selectedPlayerIds: currentPlayerIds,
+      framePlayerIds,
       playerIdParam: parsed.playerId ?? "",
       resourceIdParam: parsed.resourceId ?? "",
       enemyIdParam: parsed.enemyId ?? "",
       regionIdParam: parsed.regionId ?? "",
       hasWaypoint: Boolean(parsed.hasWaypoint),
-      url: mapUrl,
+      url: currentFrameUrl,
     }, ...currentLog].slice(0, 20));
-  }, [mapUrl, rosterSource, roster.length, selectedIds, current]);
+  }, [currentFrameUrl, mapSignature, rosterSource, roster.length, selectedIds, currentPlayerIdsKey, framePlayerIdsKey]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
     if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
@@ -236,6 +254,10 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   }
   function setManualPlayers(ids: string[]) {
     setSelectedIds([...new Set(ids.filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+  }
+  function setAutoOnlinePlayers() {
+    setAutoFramePlayerIds(defaultMapPlayerSelection(roster));
+    setSelectedIds(null);
   }
   function trackOnlinePlayers() {
     setManualPlayers(defaultMapPlayerSelection(roster));
@@ -264,6 +286,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
     });
   }
   function resetMapFilters() {
+    setAutoFramePlayerIds(defaultMapPlayerSelection(roster));
     setSelectedIds(null);
     setSelectedResources([]);
     setResourceSearch("");
@@ -273,7 +296,6 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
     onClearFocus();
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
-  const currentFrameUrl = mapUrl;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
       <header className="members-topbar map-topbar">
@@ -300,7 +322,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
         roster={roster}
         selectedIds={selectedIds}
         current={current}
-        onAutoOnline={() => setSelectedIds(null)}
+        onAutoOnline={setAutoOnlinePlayers}
         onTrackOnline={trackOnlinePlayers}
         onTrackAll={trackAllPlayers}
         onTrackNone={trackNoPlayers}
@@ -350,8 +372,9 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
           </div></> : null}
         </aside>
-        <iframe key={currentFrameUrl} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
+        <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
       </div>
     </div>
   );
 }
+

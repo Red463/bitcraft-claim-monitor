@@ -22,3 +22,22 @@ test("Map page exposes compact player tracking controls", () => {
   assert.match(mapPage, /Track online/);
   assert.doesNotMatch(mapPage, /roster\.map\(\(player\) => \{/);
 });
+test("Map iframe is not remounted on every generated URL refresh", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(mapPage, /<iframe\s+key=\{currentFrameUrl\}/);
+  assert.match(mapPage, /const \[currentFrameUrl, setCurrentFrameUrl\] = React\.useState\(mapUrl\)/);
+  assert.match(mapPage, /mapSignature/);
+});
+
+test("Map iframe ignores passive auto-online player churn", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /const \[autoFramePlayerIds, setAutoFramePlayerIds\] = React\.useState\(currentPlayerIds\)/);
+  assert.match(mapPage, /const framePlayerIds = selectedIds === null \? autoFramePlayerIds : currentPlayerIds/);
+  assert.match(mapPage, /playerIds: framePlayerIds/);
+  assert.match(mapPage, /bitcraftMapUrl\(framePlayerIds,/);
+  assert.match(mapPage, /onAutoOnline=\{setAutoOnlinePlayers\}/);
+  assert.match(mapPage, /setAutoFramePlayerIds\(defaultMapPlayerSelection\(roster\)\)/);
+});
+

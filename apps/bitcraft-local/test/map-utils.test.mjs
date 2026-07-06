@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   bitcraftMapUrl,
+  mapEmbedSignature,
   mapResourceCategory,
   mapResourceToken,
   normalizeMapResourceToken,
@@ -40,3 +41,31 @@ test("map resource helpers handle resource and enemy catalog rows", () => {
   assert.equal(mapResourceCategory({ tag: "Ore", category: "Stone" }), "Ore");
   assert.equal(mapResourceCategory({ resourceType: "Tree" }), "Tree");
 });
+test("mapEmbedSignature only changes when map tracking inputs change", () => {
+  const signature = mapEmbedSignature({
+    playerIds: ["player-b", "player-a"],
+    mapMarker: { name: "Home", locationX: 10, locationZ: 20 },
+    flyTo: false,
+    resourceIds: ["30", "2"],
+    regionIds: ["19", "3"],
+    enemyIds: ["8", "1"],
+  });
+
+  assert.equal(signature, mapEmbedSignature({
+    playerIds: ["player-a", "player-b"],
+    mapMarker: { name: "Home", locationX: 10, locationZ: 20 },
+    flyTo: false,
+    resourceIds: ["2", "30"],
+    regionIds: ["3", "19"],
+    enemyIds: ["1", "8"],
+  }));
+  assert.notEqual(signature, mapEmbedSignature({
+    playerIds: ["player-a"],
+    mapMarker: { name: "Home", locationX: 10, locationZ: 20 },
+    flyTo: false,
+    resourceIds: ["2", "30"],
+    regionIds: ["3", "19"],
+    enemyIds: ["1", "8"],
+  }));
+});
+

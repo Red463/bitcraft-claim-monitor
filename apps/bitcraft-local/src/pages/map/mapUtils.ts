@@ -3,6 +3,29 @@ import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 export type MapFocus = { name: string; locationX: number; locationZ: number } | null;
 
 export const MAP_DEFAULT_LAYERS = ["roadsLayer", "towersLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
+type MapEmbedSignatureInput = {
+  playerIds: string[];
+  mapMarker: MapFocus;
+  flyTo?: boolean;
+  resourceIds?: string[];
+  regionIds?: string[];
+  enemyIds?: string[];
+};
+
+function sortedNumericStrings(values: string[] = []): string[] {
+  return values.filter(Boolean).sort((a, b) => toNumber(a) - toNumber(b));
+}
+
+export function mapEmbedSignature({ playerIds, mapMarker, flyTo = false, resourceIds = [], regionIds = [], enemyIds = [] }: MapEmbedSignatureInput): string {
+  const marker = mapMarker ? `${mapMarker.name}:${mapMarker.locationX}:${mapMarker.locationZ}:${flyTo ? "fly" : "nopan"}` : "";
+  return JSON.stringify({
+    players: playerIds.filter(Boolean).sort(),
+    resources: sortedNumericStrings(resourceIds),
+    enemies: sortedNumericStrings(enemyIds),
+    regions: sortedNumericStrings(regionIds),
+    marker,
+  });
+}
 
 export function bitcraftMapUrl(
   playerIds: string[],
@@ -68,3 +91,4 @@ export function normalizeMapResourceToken(token: string): string {
 export function mapResourceCategory(resource: AnyRecord): string {
   return String(resource.tag ?? resource.category ?? resource.resourceType ?? resource.type ?? "").trim();
 }
+
