@@ -6,6 +6,7 @@ export type ActivePanel =
   | "members"
   | "skills"
   | "production"
+  | "planning"
   | "publiccrafts"
   | "craftcalc"
   | "inventory"

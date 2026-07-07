@@ -46,6 +46,7 @@ import type { AppSettings, UserAuthState, UserToastSettings } from "./types/sett
 import { Construction } from "./pages/ConstructionPage";
 import { Empires } from "./pages/EmpiresPage";
 import { CraftCalculatorPage } from "./pages/CraftCalculatorPage";
+import { CraftPlanningPage } from "./pages/CraftPlanningPage";
 import { Members } from "./pages/MembersPage";
 import { Research } from "./pages/ResearchPage";
 import { Region } from "./pages/RegionPage";
@@ -489,6 +490,7 @@ function DashboardApp() {
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
     production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
+    planning: <CraftPlanningPage claimId={claimId} refreshToken={refreshToken} />,
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     craftcalc: <CraftCalculatorPage />,
     inventory: <Inventory data={data} />,
@@ -726,4 +728,3 @@ export default function App() {
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }
-

@@ -21,6 +21,7 @@ test("validAppPage preserves the existing default-page allow list", () => {
     "members",
     "skills",
     "production",
+    "planning",
     "publiccrafts",
     "craftcalc",
     "inventory",

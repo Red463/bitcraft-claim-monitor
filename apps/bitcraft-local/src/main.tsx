@@ -9,6 +9,7 @@ import "./styles/production.css";
 import "./styles/public-craft.css";
 import "./styles/market.css";
 import "./styles/craftcalc.css";
+import "./styles/craft-planning.css";
 import "./styles/members.css";
 import "./styles/skills.css";
 import "./styles/inventory.css";

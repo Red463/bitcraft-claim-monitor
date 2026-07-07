@@ -10,6 +10,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS admin_users",
     "CREATE TABLE IF NOT EXISTS user_accounts",
     "CREATE TABLE IF NOT EXISTS market_deal_alerts",
+    "CREATE TABLE IF NOT EXISTS craft_plan_settings",
     "CREATE TABLE IF NOT EXISTS production_jobs",
     "CREATE TABLE IF NOT EXISTS discord_delivery_log",
     "CREATE TABLE IF NOT EXISTS discord_notification_outbox",
@@ -20,6 +21,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status",
     "CREATE INDEX IF NOT EXISTS idx_domain_payload_claim",
+    "CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated",
     "CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured",
     "CREATE INDEX IF NOT EXISTS idx_snapshots_captured",
   ]) {

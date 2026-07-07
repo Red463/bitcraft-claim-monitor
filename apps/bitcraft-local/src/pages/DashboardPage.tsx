@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, AlertTriangle, ArrowUp, CircleDollarSign, Factory, Globe2, Hammer, Package, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, ArrowUp, CircleDollarSign, Factory, Globe2, Hammer, Package, Target, TrendingUp, Users } from "lucide-react";
 
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "../components/main/DashboardWidgets";
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
@@ -16,13 +16,10 @@ import {
   formatCurrentSession,
   formatDaysAndHours,
   formatNumber,
-  timeAgo,
 } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 import type { ActivePanel } from "../types/app";
-import { activityMetadata, activitySummary, signedDelta } from "./activity/activityUtils";
-import { activityStyle } from "./activity/activityDisplay";
-import { dashboardRecentActivityItems } from "./dashboard/dashboardRecentActivity";
+import { activityMetadata, signedDelta } from "./activity/activityUtils";
 import { buildMarketIncomeSummary } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
@@ -79,7 +76,22 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
-  const recentActivity = dashboardRecentActivityItems(activity, 5);
+  const [craftPlan, setCraftPlan] = React.useState<AnyRecord | null>(null);
+  React.useEffect(() => {
+    const monitoredClaimId = String(claim.entityId ?? claim.id ?? "").trim();
+    if (!monitoredClaimId) return;
+    let stale = false;
+    const controller = new AbortController();
+    fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(monitoredClaimId)}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => { if (!stale) setCraftPlan(body); })
+      .catch(() => { if (!stale) setCraftPlan(null); });
+    return () => { stale = true; controller.abort(); };
+  }, [claim.entityId, claim.id]);
+  const gatherNextPreview = (Array.isArray(craftPlan?.gatherNext) ? craftPlan.gatherNext : []).flatMap((group: AnyRecord) => {
+    const item = Array.isArray(group.items) ? group.items[0] : null;
+    return item ? [{ ...item, section: group.section ?? item.section ?? "Other" }] : [];
+  }).slice(0, 5);
   const regionNameById = new Map<string, string>();
   for (const region of data.regionStatus ?? []) {
     const regionId = String(region.regionId ?? "").trim();
@@ -173,19 +185,16 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
         </article>
 
         <article className="dashboard-card dashboard-card-activity">
-          <DashboardCardHeader title="Recent Activity" icon={<Activity size={15} />} action="View all" onClick={() => onNavigate("activity")} />
+          <DashboardCardHeader title="Gather Next" icon={<Target size={15} />} action="Open plan" onClick={() => onNavigate("planning")} />
           <div className="dashboard-feed">
-            {recentActivity.length ? recentActivity.map((event) => {
-              const style = activityStyle(event);
-              return (
-                <button key={event.id ?? `${event.event_type}-${event.occurred_at}`} className={`dashboard-feed-row ${style.tone}`} onClick={() => onNavigate("activity")}>
-                  <span>{style.icon}</span>
-                  <strong>{style.label}</strong>
-                  <small>{activitySummary(event)}</small>
-                  <time>{timeAgo(event.occurred_at)}</time>
-                </button>
-              );
-            }) : <div className="dashboard-empty">{activity.length ? "No dashboard activity outside production, treasury, or supply updates has been recorded yet." : "No local activity history has been recorded yet."}</div>}
+            {gatherNextPreview.length ? gatherNextPreview.map((item) => (
+              <button key={item.key ?? `${item.section}-${item.name}`} className="dashboard-feed-row warn" onClick={() => onNavigate("planning")}>
+                <span><ItemIcon item={item} /></span>
+                <strong>{item.section ?? "Other"}</strong>
+                <small>{item.name ?? "Unknown item"}</small>
+                <time>{formatNumber(item.missing, 0)}</time>
+              </button>
+            )) : <div className="dashboard-empty">No craft plan needs are configured yet.</div>}
           </div>
         </article>
 
@@ -240,4 +249,3 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     </div>
   );
 }
-

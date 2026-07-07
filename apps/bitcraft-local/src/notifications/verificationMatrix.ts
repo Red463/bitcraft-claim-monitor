@@ -137,6 +137,7 @@ export const NOTIFICATION_MATRIX_PAGES: readonly NotificationMatrixPage[] = [
   { panel: "members", label: "Members", path: "/?page=members" },
   { panel: "skills", label: "Professions", path: "/?page=skills" },
   { panel: "production", label: "Production", path: "/?page=production" },
+  { panel: "planning", label: "Craft Planning", path: "/?page=planning" },
   { panel: "inventory", label: "Inventory", path: "/?page=inventory" },
   { panel: "construction", label: "Construction", path: "/?page=construction" },
   { panel: "research", label: "Research", path: "/?page=research" },

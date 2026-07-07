@@ -10,6 +10,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.32.0-beta.1] - 2026-07-07
+
+### Added
+
+- Added an admin-controlled Craft Planning page for tracking settlement goals, recipe routes, storage sources, player inventories, deployables, and drop multipliers.
+- Added a read-only Craft Planning board so users can see targets, missing materials, active craft progress, recipe routes, and what to gather next.
+
+### Changed
+
+- Replaced the dashboard Recent Activity card with a Gather Next overview linked to Craft Planning.
+
 ## [0.31.1-beta.46] - 2026-07-06
 
 ### Fixed
@@ -2649,9 +2660,3 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
-
-
-
-
-
-

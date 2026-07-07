@@ -49,6 +49,7 @@ export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/popups") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/access-control") return method === "GET" ? "settings.view" : "settings.manage";
+  if (pathname === "/api/local/admin/craft-plan") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
   if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
   if (pathname === "/api/local/admin/branding") return "settings.manage";

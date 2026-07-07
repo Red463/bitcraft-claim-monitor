@@ -13,11 +13,13 @@ test("Dashboard page lives outside the legacy MainPages bundle", () => {
   assert.match(appShell, /import \{ Dashboard \} from "\.\/pages\/DashboardPage";/);
 });
 
-test("Dashboard recent activity previews the activity page feed", () => {
+test("Dashboard shows the craft planning Gather Next overview", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 
-  assert.match(dashboard, /dashboardRecentActivityItems\(activity,\s*5\)/);
-  assert.doesNotMatch(dashboard, /dashboardSummary\?\.recentActivity/);
+  assert.match(dashboard, /\/api\/local\/craft-plan/);
+  assert.match(dashboard, /Gather Next/);
+  assert.match(dashboard, /onNavigate\("planning"\)/);
+  assert.doesNotMatch(dashboard, /DashboardCardHeader title="Recent Activity"/);
 });
 
 test("Dashboard online members do not fall back to the settlement region as player location", () => {

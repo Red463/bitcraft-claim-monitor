@@ -202,7 +202,12 @@ export const schemaBootstrapSql = `
     last_error TEXT,
     updated_at TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS market_deal_watches (
+  CREATE TABLE IF NOT EXISTS craft_plan_settings (
+    plan_key TEXT PRIMARY KEY,
+    config_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );  CREATE TABLE IF NOT EXISTS market_deal_watches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     discord_id TEXT NOT NULL,
@@ -474,6 +479,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
   CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
   CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
+  CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_deal_watches_user ON market_deal_watches (user_id, enabled, updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_deal_watches_scan ON market_deal_watches (claim_id, region_id, enabled, item_id, item_type);
   CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_user ON market_deal_alerts (user_id, created_at DESC);

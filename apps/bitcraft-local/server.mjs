@@ -32,6 +32,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
+import { collectRecipeDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -1060,6 +1061,165 @@ const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTI
 const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
+
+const CRAFT_PLAN_KEY = "active";
+
+function storedCraftPlanConfig() {
+  const row = statements.getCraftPlan?.get(CRAFT_PLAN_KEY);
+  return normalizeCraftPlanConfig(safeJson(row?.config_json, {}));
+}
+
+function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
+  const normalized = normalizeCraftPlanConfig(config);
+  const existing = statements.getCraftPlan?.get(CRAFT_PLAN_KEY);
+  statements.upsertCraftPlan.run(CRAFT_PLAN_KEY, JSON.stringify(normalized), existing?.created_at ?? timestamp, timestamp);
+  return normalized;
+}
+
+function sourceItemFromContents(contents, lookup = new Map()) {
+  const itemId = String(contents?.item_id ?? contents?.itemId ?? "").trim();
+  if (!itemId) return null;
+  const rawType = contents?.item_type ?? contents?.itemType;
+  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
+  const item = lookup.get(itemId) ?? {};
+  return {
+    id: itemId,
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    quantity: Number(contents?.quantity ?? contents?.qty ?? 0) || 0,
+    name: item.name ?? contents?.itemName ?? contents?.name ?? `Item #${itemId}`,
+    tier: item.tier ?? contents?.tier ?? null,
+    rarityStr: item.rarityStr ?? item.rarity ?? contents?.rarityStr ?? null,
+    tag: item.tag ?? contents?.tag ?? null,
+    iconAssetName: item.iconAssetName ?? contents?.iconAssetName ?? null,
+  };
+}
+
+function sourceItemsFromSlots(slots = [], lookup = new Map()) {
+  return (Array.isArray(slots) ? slots : []).map((slot) => sourceItemFromContents(slot?.contents ?? slot, lookup)).filter((item) => item && item.quantity > 0);
+}
+
+function craftPlanCatalogLookup(payload = {}) {
+  return new Map([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item) => [String(item.id), item]));
+}
+
+function settlementStorageSourcesFromInventories(inventories = {}, allowedIds = []) {
+  const allowed = new Set(allowedIds.map(String));
+  const lookup = craftPlanCatalogLookup(inventories);
+  return (inventories.buildings ?? []).map((building) => {
+    const sourceId = String(building.entityId ?? building.id ?? building.buildingName ?? "");
+    return {
+      sourceId,
+      label: String(building.buildingNickname ?? building.buildingName ?? (sourceId || "Settlement storage")),
+      type: "Settlement storage",
+      items: sourceItemsFromSlots(building.inventory ?? [], lookup),
+    };
+  }).filter((source) => source.sourceId && (!allowed.size || allowed.has(source.sourceId)));
+}
+
+function playerInventoryContainerSources(playerId, label, payload = {}, allowedDeployableIds = []) {
+  const allowedDeployables = new Set(allowedDeployableIds.map(String));
+  const lookup = craftPlanCatalogLookup(payload);
+  const personalItems = [];
+  const deployables = [];
+  for (const inventory of payload.inventories ?? []) {
+    const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory");
+    const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
+    const sourceId = `${playerId}:${rawId}`;
+    const items = sourceItemsFromSlots([...(inventory.pockets ?? []), ...(inventory.inventory ?? [])], lookup);
+    if (!items.length) continue;
+    const looksDeployable = /cart|stash|deploy|housing|wagon|chest|container/i.test(inventoryName) || inventory.deployable || inventory.entityId;
+    if (looksDeployable) {
+      deployables.push({ sourceId, label: `${label} - ${inventoryName}`, type: "Player deployable", items });
+    } else {
+      personalItems.push(...items);
+    }
+  }
+  return {
+    inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
+    deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId)),
+    deployableOptions: deployables.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length })),
+  };
+}
+
+async function craftPlanAdminResponse(claimId = getSettings().claimId) {
+  const config = storedCraftPlanConfig();
+  const [membersPayload, inventoriesPayload] = await Promise.all([
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`).catch(() => ({ members: [] })),
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
+  ]);
+  const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, []);
+  const members = unwrap(membersPayload, "members", []);
+  const deployableOptions = [];
+  for (const member of members.filter((entry) => config.sourceRules.playerIds.includes(String(entry.playerEntityId ?? entry.entityId ?? "")))) {
+    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+    if (!playerId) continue;
+    const label = String(member.userName ?? member.username ?? playerId);
+    try {
+      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
+      deployableOptions.push(...playerInventoryContainerSources(playerId, label, payload).deployableOptions);
+    } catch {
+      // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
+    }
+  }
+  return {
+    config,
+    sources: {
+      storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length })),
+      players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),
+      deployables: deployableOptions,
+    },
+  };
+}
+
+function activeCraftPlanOutputs(craftsPayload = {}) {
+  const catalog = craftPlanCatalogLookup(craftsPayload);
+  return unwrap(craftsPayload, "craftResults", []).flatMap((craft) => (craft.craftedItem ?? craft.craftedItems ?? []).map((output, index) => {
+    const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "");
+    const item = catalog.get(itemId) ?? {};
+    return {
+      id: String(craft.entityId ?? craft.id ?? `${itemId}:${index}`),
+      itemId,
+      kind: output.item_type === "cargo" || output.itemType === 1 ? "cargo" : "items",
+      quantity: Number(craft.craftCount ?? output.quantity ?? output.qty ?? 0) || 0,
+      name: item.name ?? craftDisplayName(craft, craftsPayload),
+      iconAssetName: item.iconAssetName ?? null,
+      tier: item.tier ?? null,
+    };
+  })).filter((item) => item.itemId && item.quantity > 0);
+}
+
+async function computedCraftPlanResponse(claimId = getSettings().claimId) {
+  const config = storedCraftPlanConfig();
+  if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
+  const [detailsByKey, inventoriesPayload, craftsPayload] = await Promise.all([
+    collectRecipeDetails(config.targets, (target) => recipeDetailFromCatalogOrFetch(target), config.routeOverrides),
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
+    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
+  ]);
+  const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
+  const playerSources = [];
+  const deployableSources = [];
+  for (const playerId of config.sourceRules.playerIds) {
+    const label = playerId;
+    try {
+      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
+      const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
+      playerSources.push(sources.inventory);
+      deployableSources.push(...sources.deployables);
+    } catch (error) {
+      playerSources.push({ sourceId: playerId, label: `${label} inventory`, unavailable: true, error: error instanceof Error ? error.message : String(error), items: [] });
+    }
+  }
+  return computeCraftPlan({
+    config,
+    detailsByKey,
+    storageSources,
+    playerSources,
+    deployableSources,
+    activeCrafts: activeCraftPlanOutputs(craftsPayload),
+  });
+}
 const bitjitaProxyCache = createBitjitaProxyCache({
   appIdentifier,
   defaultTtlMs: UPSTREAM_CACHE_TTL_MS,
@@ -1943,7 +2103,7 @@ const analyticsEvents = new Set([
   "activity_member_filter_used",
   "activity_category_filter_used",
 ]);
-const analyticsPages = new Set(["dashboard", "leaderboard", "overview", "members", "skills", "production", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "empires", "map", "sync", "activity"]);
+const analyticsPages = new Set(["dashboard", "leaderboard", "overview", "members", "skills", "production", "planning", "publiccrafts", "craftcalc", "inventory", "construction", "research", "market", "empire", "empires", "map", "sync", "activity"]);
 const analyticsRetentionDays = 90;
 let lastAnalyticsPruneAt = 0;
 
@@ -7587,6 +7747,13 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
+    if (req.method === "GET" && url.pathname === "/api/local/craft-plan") {
+      try {
+        return send(res, 200, await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)));
+      } catch (error) {
+        return send(res, 502, { error: error instanceof Error ? error.message : "Unable to compute craft plan" });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/recipe-detail") {
       try {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
@@ -8117,6 +8284,15 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && url.pathname === "/api/local/admin/access-control") {
         return send(res, 200, adminAccessControlResponse());
       }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan") {
+        return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/craft-plan") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const config = saveCraftPlanConfig(body);
+        audit(user, "craft_plan.update", { targets: config.targets.length, players: config.sourceRules.playerIds.length, deployables: config.sourceRules.deployableContainerIds.length });
+        return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
+      }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/access-control") {
         const body = await readJson(req, BODY_LIMITS.settings);
         const config = normalizeAccessControlConfig(body);
@@ -8534,4 +8710,3 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
-

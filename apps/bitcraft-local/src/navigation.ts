@@ -3,6 +3,7 @@ import {
   Calculator,
   CircleDollarSign,
   Factory,
+  ClipboardList,
   FlaskConical,
   Globe2,
   GraduationCap,
@@ -40,6 +41,7 @@ export const NAV_GROUPS = [
     ["members", "Members", Users],
     ["skills", "Professions", GraduationCap],
     ["production", "Production", Factory],
+    ["planning", "Craft Planning", ClipboardList],
     ["inventory", "Inventory", Package],
     ["construction", "Construction", Hammer],
     ["research", "Research", FlaskConical],
@@ -87,4 +89,3 @@ export function updateQueryState(values: Record<string, string | null>) {
 export function panelHref(panel: ActivePanel): string {
   return `/?page=${encodeURIComponent(panel)}`;
 }
-

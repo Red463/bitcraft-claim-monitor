@@ -7,6 +7,7 @@ export const VALID_APP_PAGES = [
   "members",
   "skills",
   "production",
+  "planning",
   "publiccrafts",
   "craftcalc",
   "inventory",

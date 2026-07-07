@@ -63,6 +63,7 @@ import {
 } from "../bot/lazySections";
 import { Header, TablePanel, ToolbarButton } from "../main/AppChrome";
 import { AdminPopupsSection } from "./AdminPopupsSection";
+import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
 import { DataTable } from "../main/DataTable";
@@ -1660,7 +1661,9 @@ export function AdminPanel({
                   })}
                 </div>
               )}
-            </div>            <div className="form-card nested-card">
+            </div>
+            <AdminCraftPlanSection api={api} run={run} isBusy={isBusyAction} />
+            <div className="form-card nested-card">
               <h3><MapPin size={17} /> GeoIP Location Source</h3>
               <p className="legend">Choose how visitor IPs are converted into approximate country/city statistics. ipapi.co is queried server-side only when a cached location is missing.</p>
               <label className="field">

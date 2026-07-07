@@ -11,6 +11,7 @@ const PAGE_TARGETS = [
   ["members", "Members"],
   ["skills", "Professions"],
   ["production", "Production"],
+  ["planning", "Craft Planning"],
   ["inventory", "Inventory"],
   ["construction", "Construction"],
   ["research", "Research"],

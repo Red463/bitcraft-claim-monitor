@@ -56,7 +56,12 @@ export function createPreparedStatements(db) {
     INSERT OR IGNORE INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
     VALUES (?, ?, ?, ?, ?, ?)
   `),
-  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
+  getCraftPlan: db.prepare("SELECT * FROM craft_plan_settings WHERE plan_key = ?"),
+  upsertCraftPlan: db.prepare(`
+    INSERT INTO craft_plan_settings (plan_key, config_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(plan_key) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at
+  `),  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
   dealWatchByUserItem: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?"),
   dealWatchByIdForUser: db.prepare("SELECT * FROM market_deal_watches WHERE id = ? AND user_id = ?"),
   listDealWatchesForUser: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? ORDER BY enabled DESC, updated_at DESC"),

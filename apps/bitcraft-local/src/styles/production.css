@@ -437,3 +437,6 @@
   .production-member-banner small { margin-left: 0; width: 100%; }
 }
 
+
+.production-page .contributors span strong .tracked-owner-name { display: inline-flex; align-items: center; gap: 4px; }
+.production-page .contributors span strong .tracked-owner-name svg { flex: 0 0 auto; }
