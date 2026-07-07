@@ -90,8 +90,13 @@ function stackMatches(stack, target) {
   return stackId(stack) === String(target.id) && stackKind(stack) === target.kind;
 }
 
+function unwrapRecipeDetail(detail) {
+  return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
+}
+
 function detailTarget(detail, fallback) {
-  const source = detail?.item ?? detail?.cargo ?? detail ?? {};
+  const unwrapped = unwrapRecipeDetail(detail);
+  const source = unwrapped?.item ?? unwrapped?.cargo ?? unwrapped ?? {};
   const kind = normalizeKind(source.itemType ?? source.item_type ?? fallback?.kind);
   return {
     id: String(source.id ?? fallback?.id ?? "").trim(),
@@ -122,7 +127,8 @@ function recipeSortScore(recipe) {
 }
 
 function recipesForTarget(detail, target) {
-  return [...(detail?.craftingRecipes ?? []), ...(detail?.extractionRecipes ?? [])]
+  const unwrapped = unwrapRecipeDetail(detail);
+  return [...(unwrapped?.craftingRecipes ?? []), ...(unwrapped?.extractionRecipes ?? [])]
     .filter((recipe) => recipeOutputs(recipe).some((stack) => stackMatches(stack, target)))
     .sort((a, b) => recipeSortScore(a) - recipeSortScore(b));
 }
@@ -357,7 +363,7 @@ export function computeCraftPlan({
     targets,
     materials,
     steps,
-    gatherNext: groupGatherNext(materials.filter((item) => !item.isTarget || item.missing > 0)),
+    gatherNext: groupGatherNext(materials.filter((item) => !item.isTarget)),
     unavailableSources,
     warnings,
     totals: {

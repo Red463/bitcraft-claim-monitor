@@ -75,7 +75,7 @@ function sourceCard(source: AnyRecord, checked: boolean, onChange: (checked: boo
       <header>
         <div>
           <strong>{source.label}</strong>
-          <small>{source.type ?? `${formatNumber(source.itemCount ?? 0)} item stacks`}</small>
+          <small>{source.type ? `${source.type}${source.itemCount != null ? ` - ${formatNumber(Number(source.itemCount) || 0, 0)} stacks` : ""}` : `${formatNumber(source.itemCount ?? 0)} item stacks`}</small>
         </div>
         <label className="compact-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{checked ? "Included" : "Excluded"}</span></label>
       </header>

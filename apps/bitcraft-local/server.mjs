@@ -33,6 +33,7 @@ import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSe
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectRecipeDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
+import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -1075,78 +1076,6 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   statements.upsertCraftPlan.run(CRAFT_PLAN_KEY, JSON.stringify(normalized), existing?.created_at ?? timestamp, timestamp);
   return normalized;
 }
-
-function sourceItemFromContents(contents, lookup = new Map()) {
-  const itemId = String(contents?.item_id ?? contents?.itemId ?? "").trim();
-  if (!itemId) return null;
-  const rawType = contents?.item_type ?? contents?.itemType;
-  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
-  const item = lookup.get(itemId) ?? {};
-  return {
-    id: itemId,
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    quantity: Number(contents?.quantity ?? contents?.qty ?? 0) || 0,
-    name: item.name ?? contents?.itemName ?? contents?.name ?? `Item #${itemId}`,
-    tier: item.tier ?? contents?.tier ?? null,
-    rarityStr: item.rarityStr ?? item.rarity ?? contents?.rarityStr ?? null,
-    tag: item.tag ?? contents?.tag ?? null,
-    iconAssetName: item.iconAssetName ?? contents?.iconAssetName ?? null,
-  };
-}
-
-function sourceItemsFromSlots(slots = [], lookup = new Map()) {
-  return (Array.isArray(slots) ? slots : []).map((slot) => sourceItemFromContents(slot?.contents ?? slot, lookup)).filter((item) => item && item.quantity > 0);
-}
-
-function craftPlanCatalogLookup(payload = {}) {
-  return new Map([
-    ...(payload.items ?? []),
-    ...(payload.cargos ?? []),
-    ...(payload.data?.items ?? []),
-    ...(payload.data?.cargos ?? []),
-  ].map((item) => [String(item.id ?? item.itemId ?? ""), item]).filter(([id]) => id));
-}
-
-function settlementStorageSourcesFromInventories(inventories = {}, allowedIds = []) {
-  const allowed = new Set(allowedIds.map(String));
-  const lookup = craftPlanCatalogLookup(inventories);
-  return (inventories.buildings ?? []).map((building) => {
-    const sourceId = String(building.entityId ?? building.id ?? building.buildingName ?? "");
-    return {
-      sourceId,
-      label: String(building.buildingNickname ?? building.buildingName ?? (sourceId || "Settlement storage")),
-      type: "Settlement storage",
-      items: sourceItemsFromSlots(building.inventory ?? [], lookup),
-    };
-  }).filter((source) => source.sourceId && (!allowed.size || allowed.has(source.sourceId)));
-}
-
-function playerInventoryContainerSources(playerId, label, payload = {}, allowedDeployableIds = []) {
-  const allowedDeployables = new Set(allowedDeployableIds.map(String));
-  const lookup = craftPlanCatalogLookup(payload);
-  const personalItems = [];
-  const deployables = [];
-  for (const inventory of payload.inventories ?? []) {
-    const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory");
-    const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
-    const sourceId = `${playerId}:${rawId}`;
-    const items = sourceItemsFromSlots([...(inventory.pockets ?? []), ...(inventory.inventory ?? [])], lookup);
-    if (!items.length) continue;
-    const looksDeployable = /cart|stash|deploy|housing|wagon|chest|container/i.test(inventoryName) || inventory.deployable || inventory.entityId;
-    if (looksDeployable) {
-      deployables.push({ sourceId, label: `${label} - ${inventoryName}`, type: "Player deployable", items });
-    } else {
-      personalItems.push(...items);
-    }
-  }
-  return {
-    inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
-    deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId)),
-    deployableOptions: deployables.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
-  };
-}
-
 
 function craftPlanRequirementFromRaw(raw = {}, lookup = new Map()) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -8823,5 +8752,3 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
-
-

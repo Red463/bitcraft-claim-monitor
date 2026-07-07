@@ -9,6 +9,15 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.4] - 2026-07-07
+
+### Fixed
+
+- Fixed Craft Planning recipe expansion so tier preset targets expand into their underlying recipe chain instead of stopping at the final item.
+- Fixed Craft Planning Gather Next so final target items stay in the target overview instead of appearing as gather tasks.
+- Fixed Craft Planning player storage parsing so BitJita-visible player deployables and wrapped inventory payloads are handled safely.
+- Improved Craft Planning manager source cards and modal styling for a cleaner admin setup view.
+
 ## [0.32.0-beta.3] - 2026-07-07
 
 ### Fixed

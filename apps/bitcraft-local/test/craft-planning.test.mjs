@@ -111,3 +111,40 @@ test("computeCraftPlan applies per-item multipliers and records unavailable sour
   assert.equal(hair.missing, 18);
   assert.equal(plan.unavailableSources[0].sourceId, "player-1");
 });
+
+test("computeCraftPlan expands cached recipe-detail wrappers and keeps final targets out of gather next", () => {
+  const codexDetail = {
+    item: { id: "500", name: "Advanced Codex", itemType: 0, tag: "Research", tier: 5 },
+    craftingRecipes: [{
+      id: "advanced-codex-route",
+      name: "Advanced Codex",
+      buildingName: "Scholar Station",
+      craftedItemStacks: [{ item_id: "500", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "501", item_type: "item", quantity: 2 }],
+      consumedItems: [{ id: "501", name: "Advanced Research Notes", tag: "Research", tier: 5 }],
+      levelRequirements: [{ skill: { name: "Scholar" }, level: 50 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "500", kind: "items", name: "Advanced Codex", quantity: 25, itemType: 0 }] }),
+    detailsByKey: new Map([[recipeKey("items", "500"), { detail: codexDetail, cached: true }]]),
+  });
+
+  assert.equal(plan.targets[0].missing, 25);
+  assert.equal(plan.materials.some((material) => material.name === "Advanced Codex" && material.missing > 0), true);
+  assert.equal(plan.gatherNext.some((group) => group.items.some((item) => item.name === "Advanced Codex")), false);
+  const notes = plan.materials.find((material) => material.name === "Advanced Research Notes");
+  assert.equal(notes.required, 50);
+  assert.equal(plan.gatherNext[0].items[0].name, "Advanced Research Notes");
+});
+
+test("computeCraftPlan keeps uncrafted final targets out of gather next", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "500", kind: "items", name: "Advanced Codex", quantity: 25, itemType: 0 }] }),
+  });
+
+  assert.equal(plan.targets[0].missing, 25);
+  assert.equal(plan.materials.find((material) => material.name === "Advanced Codex")?.missing, 25);
+  assert.deepEqual(plan.gatherNext, []);
+});
