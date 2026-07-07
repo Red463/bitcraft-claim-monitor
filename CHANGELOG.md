@@ -10,6 +10,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ## [Unreleased]
 
 
+## [0.32.0-beta.2] - 2026-07-07
+
+### Added
+
+- Added a full-page Craft Planning manager for admins with room to manage targets, storage, player inventories, deployables, route overrides, and material buffers.
+- Added tier upgrade presets that can add required research materials to the plan while still allowing manual edits and removals.
+
+### Changed
+
+- Moved Craft Planning setup out of the Admin panel into the Craft Planning page, leaving Admin with a direct manager link.
 ## [0.32.0-beta.1] - 2026-07-07
 
 ### Added

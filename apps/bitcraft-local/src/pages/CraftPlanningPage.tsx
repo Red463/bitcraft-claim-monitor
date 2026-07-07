@@ -8,6 +8,7 @@ import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Info } from "../components/main/Stats";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
+import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 
 const LOCAL_API = "/api/local";
 
@@ -28,6 +29,16 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [plan, setPlan] = React.useState<AnyRecord | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [adminAuth, setAdminAuth] = React.useState<AnyRecord | null>(null);
+  const [managerOpen, setManagerOpen] = React.useState(false);
+  const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
+
+  React.useEffect(() => {
+    fetch(`${LOCAL_API}/admin/me`)
+      .then((response) => response.ok ? response.json() : { authenticated: false })
+      .then(setAdminAuth)
+      .catch(() => setAdminAuth({ authenticated: false }));
+  }, []);
 
   React.useEffect(() => {
     let stale = false;
@@ -50,7 +61,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       stale = true;
       controller.abort();
     };
-  }, [claimId, refreshToken]);
+  }, [claimId, refreshToken, managerRefreshToken]);
 
   const config = plan?.config ?? {};
   const totals = plan?.totals ?? {};
@@ -61,6 +72,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const warnings = Array.isArray(plan?.warnings) ? plan.warnings : [];
   const unavailableSources = Array.isArray(plan?.unavailableSources) ? plan.unavailableSources : [];
   const alternativeSteps = steps.filter((step: AnyRecord) => Number(step.alternatives) > 1);
+  const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
 
   if (loading && !plan) {
     return <div className="panel craft-planning-page"><div className="empty-state"><ClipboardList size={36} /><strong>Loading craft plan</strong><span>Checking targets, sources, active crafts, and recipe routes.</span></div></div>;
@@ -80,6 +92,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <p>{hasPlan ? String(config.name ?? "Settlement craft plan") : "Admin-controlled procurement board for settlement crafting goals."}</p>
         </div>
         <div className="top-meta">
+          {canManage ? <button className="toolbar-button primary" type="button" onClick={() => setManagerOpen(true)}>Manage Plan</button> : null}
           <span>{quantity(totals.missingItems)} missing items</span>
           <span>{quantity(totals.activeCraftQuantity)} in active crafts</span>
         </div>
@@ -89,7 +102,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <div className="empty-state">
           <Target size={36} />
           <strong>No craft plan configured</strong>
-          <span>An admin can add targets, inventory sources, route overrides, and uncertain-drop multipliers from the admin panel.</span>
+          <span>{canManage ? "Use Manage Plan to add targets, inventory sources, route overrides, and uncertain-drop multipliers." : "An admin can add targets, inventory sources, route overrides, and uncertain-drop multipliers."}</span>
         </div>
       ) : (
         <>
@@ -161,6 +174,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           ) : null}
         </>
       )}
+      {canManage ? <CraftPlanManagerDialog open={managerOpen} onClose={() => setManagerOpen(false)} csrfToken={String(adminAuth?.csrfToken)} onSaved={() => setManagerRefreshToken((value) => value + 1)} /> : null}
     </div>
   );
 }

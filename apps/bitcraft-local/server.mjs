@@ -1138,10 +1138,114 @@ function playerInventoryContainerSources(playerId, label, payload = {}, allowedD
   return {
     inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
     deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId)),
-    deployableOptions: deployables.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length })),
+    deployableOptions: deployables.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };
 }
 
+
+function craftPlanRequirementFromRaw(raw = {}, lookup = new Map()) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const itemId = String(raw.itemId ?? raw.itemEntityId ?? raw.item_id ?? raw.entityId ?? raw.id ?? raw.item?.id ?? "").trim();
+  const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.count ?? raw.amount ?? raw.requiredQuantity ?? raw.required ?? raw.value);
+  if (!/^\d+$/.test(itemId) || quantity <= 0) return null;
+  const rawType = raw.itemType ?? raw.item_type ?? raw.kind ?? raw.item?.itemType;
+  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
+  const item = lookup.get(itemId) ?? raw.item ?? {};
+  return {
+    id: itemId,
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    quantity: Math.ceil(quantity),
+    name: item.name ?? raw.itemName ?? raw.name ?? item.displayName ?? `Item #${itemId}`,
+    tier: item.tier ?? raw.tier ?? null,
+    rarityStr: item.rarityStr ?? item.rarity ?? raw.rarityStr ?? raw.rarity ?? null,
+    tag: item.tag ?? raw.tag ?? null,
+    iconAssetName: item.iconAssetName ?? raw.iconAssetName ?? null,
+  };
+}
+
+function collectCraftPlanRequirements(value, lookup = new Map(), depth = 0) {
+  if (!value || depth > 5) return [];
+  if (Array.isArray(value)) return value.flatMap((entry) => collectCraftPlanRequirements(entry, lookup, depth + 1));
+  if (typeof value !== "object") return [];
+  const direct = craftPlanRequirementFromRaw(value, lookup);
+  const nestedKeys = ["requirements", "requiredItems", "itemRequirements", "materials", "materialRequirements", "costs", "items", "inputs", "resources"];
+  const nested = nestedKeys.flatMap((key) => collectCraftPlanRequirements(value[key], lookup, depth + 1));
+  return direct ? [direct, ...nested] : nested;
+}
+
+function tierFromResearchRow(row = {}) {
+  const text = `${row.name ?? row.techName ?? row.title ?? ""} ${row.description ?? ""}`;
+  const match = text.match(/(?:tier|t)\s*(\d{1,2})/i);
+  return match ? Number(match[1]) : toNumber(row.tier);
+}
+
+function mergePresetRequirements(requirements = []) {
+  const merged = new Map();
+  for (const item of requirements) {
+    const key = `${item.kind === "cargo" ? "cargo" : "items"}:${item.id}`;
+    const current = merged.get(key);
+    if (current) current.quantity += Math.ceil(item.quantity || 0);
+    else merged.set(key, { ...item, quantity: Math.ceil(item.quantity || 0) });
+  }
+  return [...merged.values()].filter((item) => item.quantity > 0);
+}
+
+async function fallbackTierPresetFromMarket(tier, query, quantity) {
+  try {
+    const payload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`, { timeoutMs: 6000, cache: true });
+    const candidates = [...(payload.items ?? []), ...(payload.cargos ?? [])];
+    const item = candidates.find((candidate) => String(candidate.name ?? "").toLowerCase() === query.toLowerCase()) ?? candidates[0];
+    if (!item?.id) return null;
+    return {
+      key: `tier-${tier}`,
+      label: `T${tier}`,
+      tier,
+      source: "fallback",
+      items: [{ ...targetFromRecipeCatalogItem(item), quantity }],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function targetFromRecipeCatalogItem(item = {}) {
+  const kind = String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items";
+  return {
+    id: String(item.id ?? item.itemId ?? ""),
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    name: String(item.name ?? item.itemName ?? `Item #${item.id ?? ""}`),
+    tier: item.tier ?? null,
+    rarityStr: item.rarityStr ?? item.rarity ?? null,
+    tag: item.tag ?? null,
+    iconAssetName: item.iconAssetName ?? null,
+  };
+}
+
+async function craftPlanTierPresets(claimId) {
+  const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/research`).catch(() => ({}));
+  const rows = unwrap(payload, "technologies", []);
+  const lookup = craftPlanCatalogLookup(payload);
+  const presets = rows
+    .map((row) => {
+      const tier = tierFromResearchRow(row);
+      const name = String(row.name ?? row.techName ?? row.title ?? "");
+      const techType = String(row.techType ?? row.type ?? "").toLowerCase();
+      const looksLikeTierUpgrade = tier >= 2 && (/tier\s*\d+/i.test(name) || /township|settlement|claim upgrade|tier_upgrade/.test(`${name} ${techType}`.toLowerCase()));
+      if (!looksLikeTierUpgrade) return null;
+      const items = mergePresetRequirements(collectCraftPlanRequirements(row, lookup));
+      if (!items.length) return null;
+      return { key: `tier-${tier}`, label: `T${tier}`, tier, source: "research", items };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.tier - b.tier);
+  if (!presets.some((preset) => preset.tier === 6)) {
+    const fallback = await fallbackTierPresetFromMarket(6, "Advanced Codex", 25);
+    if (fallback) presets.push(fallback);
+  }
+  return presets.sort((a, b) => a.tier - b.tier);
+}
 async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   const [membersPayload, inventoriesPayload] = await Promise.all([
@@ -1165,9 +1269,10 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   return {
     config,
     sources: {
-      storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length })),
+      storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
       players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),
       deployables: deployableOptions,
+      tierPresets: await craftPlanTierPresets(claimId),
     },
   };
 }
@@ -8710,3 +8815,5 @@ if (processRoleConfig.serveHttp) {
   console.log(`BitCraft monitor worker started role=${processRole}`);
   startBackgroundTasks();
 }
+
+

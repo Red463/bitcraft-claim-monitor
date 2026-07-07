@@ -1662,7 +1662,7 @@ export function AdminPanel({
                 </div>
               )}
             </div>
-            <AdminCraftPlanSection api={api} run={run} isBusy={isBusyAction} />
+            <AdminCraftPlanSection />
             <div className="form-card nested-card">
               <h3><MapPin size={17} /> GeoIP Location Source</h3>
               <p className="legend">Choose how visitor IPs are converted into approximate country/city statistics. ipapi.co is queried server-side only when a cached location is missing.</p>
@@ -2290,3 +2290,4 @@ export function AdminPanel({
     </div>
   );
 }
+

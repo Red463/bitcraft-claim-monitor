@@ -15,29 +15,34 @@ test("Craft Planning page is registered in navigation, access control, and AppSh
   assert.match(appShell, /planning: <CraftPlanningPage/);
 });
 
-test("Craft Planning page renders read-only plan sections", () => {
+test("Craft Planning page renders read-only plan sections with an admin-only manager entry", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /\/api\/local\/craft-plan|LOCAL_API\}\/craft-plan/);
+  assert.match(page, /\/craft-plan\?claimId=/);
+  assert.match(page, /\/admin\/me/);
+  assert.match(page, /Manage Plan/);
   assert.match(page, /Gather Next/);
   assert.match(page, /Targets/);
   assert.match(page, /Materials/);
   assert.match(page, /Recipe Routes/);
   assert.match(page, /Unavailable sources/);
-  assert.doesNotMatch(page, /\/api\/local\/admin\/craft-plan/);
+  assert.match(page, /CraftPlanManagerDialog/);
 });
 
-test("Admin panel exposes Craft Planning configuration controls", () => {
-  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
-  const admin = `${adminPanel}\n${readFileSync(new URL("../src/components/admin/AdminCraftPlanSection.tsx", import.meta.url), "utf8")}`;
+test("Craft Planning manager owns full admin editing controls", () => {
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+  const admin = readFileSync(new URL("../src/components/admin/AdminCraftPlanSection.tsx", import.meta.url), "utf8");
 
-  assert.match(admin, /\/admin\/craft-plan/);
-  assert.match(admin, /Craft Planning/);
-  assert.match(admin, /Target items/);
-  assert.match(admin, /Storage sources/);
-  assert.match(admin, /Player inventories/);
-  assert.match(admin, /Player deployables/);
-  assert.match(admin, /Chance and drop multipliers/);
+  assert.match(admin, /Open Manager/);
+  assert.match(admin, /page=planning/);
+  assert.match(manager, /\/admin\/craft-plan/);
+  assert.match(manager, /Add tier upgrade materials/);
+  assert.match(manager, /tierPresets/);
+  assert.match(manager, /Target items/);
+  assert.match(manager, /Settlement storage/);
+  assert.match(manager, /Players & deployables/);
+  assert.match(manager, /Chance and drop multipliers/);
+  assert.match(manager, /mergeTargets/);
 });
 
 test("Dashboard shows Gather Next instead of Recent Activity", () => {
