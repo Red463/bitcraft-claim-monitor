@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.5] - 2026-07-07
+
+### Changed
+
+- Reworked the Craft Planning page into a cleaner Sync-style needs board with targets shown first and recipe-route details kept in the admin manager.
+
 ## [0.32.0-beta.4] - 2026-07-07
 
 ### Fixed

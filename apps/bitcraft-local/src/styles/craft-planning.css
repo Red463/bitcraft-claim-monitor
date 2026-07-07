@@ -81,3 +81,39 @@
   .craft-plan-manager-actions, .craft-plan-target-editor-row { grid-template-columns: 1fr; }
   .craft-plan-manager-buttons, .craft-plan-tier-presets-header { justify-content: start; flex-wrap: wrap; }
 }
+
+.craft-plan-page-header { align-items: flex-start; }
+.craft-plan-summary-band { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 12px; }
+.craft-plan-summary-stat { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(17, 26, 37, 0.86), rgba(8, 13, 20, 0.82)); padding: 14px 16px; min-width: 0; }
+.craft-plan-summary-stat .metric-icon { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(240, 198, 79, 0.1); color: var(--accent); }
+.craft-plan-summary-stat.green .metric-icon { background: rgba(78, 226, 138, 0.1); color: var(--positive); }
+.craft-plan-summary-stat.warn .metric-icon { background: rgba(255, 181, 71, 0.1); color: #ffb547; }
+.craft-plan-summary-stat span:last-child { display: grid; gap: 2px; min-width: 0; }
+.craft-plan-summary-stat small { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 800; }
+.craft-plan-summary-stat strong { color: var(--text); font-size: 1.65rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.craft-plan-summary-stat em { color: var(--muted); font-style: normal; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.craft-plan-targets-strip { order: initial; }
+.craft-plan-target-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.craft-plan-target-list .craft-plan-target { min-height: 0; }
+.craft-plan-needs-board { overflow: hidden; }
+.craft-plan-needs-scroll { display: grid; gap: 14px; overflow-x: auto; padding-bottom: 4px; scrollbar-gutter: stable; }
+.craft-plan-needs-group { min-width: 980px; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; overflow: hidden; background: rgba(6, 10, 16, 0.34); }
+.craft-plan-needs-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.craft-plan-needs-table th, .craft-plan-needs-table td { border-right: 1px solid rgba(139, 159, 184, 0.18); border-bottom: 1px solid rgba(139, 159, 184, 0.18); padding: 8px; vertical-align: middle; }
+.craft-plan-needs-table thead th { color: var(--text); background: rgba(255, 255, 255, 0.04); font-size: 0.8rem; text-align: center; }
+.craft-plan-needs-table thead th:first-child { text-align: left; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+.craft-plan-needs-table tbody th { width: 210px; color: var(--text); font-size: 0.92rem; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.craft-plan-needs-table td { width: 78px; height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
+.craft-plan-need-cell { display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; min-width: 0; color: var(--accent); }
+.craft-plan-need-icon { width: 25px; height: 25px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 7px; background: rgba(6, 10, 16, 0.55); }
+.craft-plan-need-icon .item-icon, .craft-plan-need-icon img { width: 20px; height: 20px; }
+.craft-plan-need-cell strong { color: var(--accent); font-size: 1.02rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.craft-plan-need-cell small { color: rgba(240, 198, 79, 0.68); font-size: 0.66rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.craft-plan-need-empty { color: rgba(139, 159, 184, 0.22); font-size: 0.8rem; }
+@media (max-width: 1100px) {
+  .craft-plan-summary-band { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .craft-plan-summary-band, .craft-plan-target-list { grid-template-columns: 1fr; }
+  .craft-plan-summary-stat em { white-space: normal; }
+}

@@ -21,10 +21,12 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /\/craft-plan\?claimId=/);
   assert.match(page, /\/admin\/me/);
   assert.match(page, /Manage Plan/);
-  assert.match(page, /Gather Next/);
-  assert.match(page, /Targets/);
-  assert.match(page, /Materials/);
-  assert.match(page, /Recipe Routes/);
+  assert.match(page, /<h3><Target size=\{17\} \/> Targets<\/h3>/);
+  assert.match(page, /Needs Board/);
+  assert.match(page, /craft-plan-needs-board/);
+  assert.match(page, /<h3><Package size=\{17\} \/> Materials<\/h3>/);
+  assert.ok(page.indexOf("Targets") < page.indexOf("Needs Board"), "targets should render before the public needs board");
+  assert.doesNotMatch(page, /<h3><Route size=\{17\} \/> Recipe Routes<\/h3>/);
   assert.match(page, /Unavailable sources/);
   assert.match(page, /CraftPlanManagerDialog/);
 });
