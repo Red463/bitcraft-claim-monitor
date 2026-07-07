@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.3] - 2026-07-07
+
+### Fixed
+
+- Fixed Craft Planning tier presets so they load claim tier and township upgrade materials directly from BitJita research data, including the correct T6 Advanced Codex total.
+- Improved the Craft Planning manager layout so tier presets are prominent and the manager opens as a proper viewport dialog.
+
 
 ## [0.32.0-beta.2] - 2026-07-07
 

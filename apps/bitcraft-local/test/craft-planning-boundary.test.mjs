@@ -32,12 +32,16 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
 test("Craft Planning manager owns full admin editing controls", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const admin = readFileSync(new URL("../src/components/admin/AdminCraftPlanSection.tsx", import.meta.url), "utf8");
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
 
   assert.match(admin, /Open Manager/);
   assert.match(admin, /page=planning/);
   assert.match(manager, /\/admin\/craft-plan/);
-  assert.match(manager, /Add tier upgrade materials/);
+  assert.match(manager, /Tier upgrade presets/);
+  assert.match(manager, /Loaded from BitJita claim research/);
   assert.match(manager, /tierPresets/);
+  assert.match(server, /nestedKeys = \["input", "inputs"/);
+  assert.match(server, /techType === "settlement"/);
   assert.match(manager, /Target items/);
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);

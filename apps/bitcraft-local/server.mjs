@@ -604,7 +604,7 @@ function currentAppAnnouncementKey() {
 
 function unwrap(payload, key, fallback) {
   if (Array.isArray(payload)) return payload;
-  return payload?.[key] ?? fallback;
+  return payload?.[key] ?? payload?.data?.[key] ?? fallback;
 }
 
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
@@ -1100,7 +1100,12 @@ function sourceItemsFromSlots(slots = [], lookup = new Map()) {
 }
 
 function craftPlanCatalogLookup(payload = {}) {
-  return new Map([...(payload.items ?? []), ...(payload.cargos ?? [])].map((item) => [String(item.id), item]));
+  return new Map([
+    ...(payload.items ?? []),
+    ...(payload.cargos ?? []),
+    ...(payload.data?.items ?? []),
+    ...(payload.data?.cargos ?? []),
+  ].map((item) => [String(item.id ?? item.itemId ?? ""), item]).filter(([id]) => id));
 }
 
 function settlementStorageSourcesFromInventories(inventories = {}, allowedIds = []) {
@@ -1169,7 +1174,7 @@ function collectCraftPlanRequirements(value, lookup = new Map(), depth = 0) {
   if (Array.isArray(value)) return value.flatMap((entry) => collectCraftPlanRequirements(entry, lookup, depth + 1));
   if (typeof value !== "object") return [];
   const direct = craftPlanRequirementFromRaw(value, lookup);
-  const nestedKeys = ["requirements", "requiredItems", "itemRequirements", "materials", "materialRequirements", "costs", "items", "inputs", "resources"];
+  const nestedKeys = ["input", "inputs", "requirements", "requiredItems", "itemRequirements", "materials", "materialRequirements", "costs", "items", "resources"];
   const nested = nestedKeys.flatMap((key) => collectCraftPlanRequirements(value[key], lookup, depth + 1));
   return direct ? [direct, ...nested] : nested;
 }
@@ -1191,22 +1196,25 @@ function mergePresetRequirements(requirements = []) {
   return [...merged.values()].filter((item) => item.quantity > 0);
 }
 
-async function fallbackTierPresetFromMarket(tier, query, quantity) {
+async function fetchCraftPlanItemDetail(item) {
+  const id = String(item.id ?? item.itemId ?? "").trim();
+  if (!/^\d+$/.test(id)) return item;
+  const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items")) === "cargo" ? "cargo" : "items";
   try {
-    const payload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`, { timeoutMs: 6000, cache: true });
-    const candidates = [...(payload.items ?? []), ...(payload.cargos ?? [])];
-    const item = candidates.find((candidate) => String(candidate.name ?? "").toLowerCase() === query.toLowerCase()) ?? candidates[0];
-    if (!item?.id) return null;
-    return {
-      key: `tier-${tier}`,
-      label: `T${tier}`,
-      tier,
-      source: "fallback",
-      items: [{ ...targetFromRecipeCatalogItem(item), quantity }],
-    };
+    const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`, { timeoutMs: 6000, cache: true });
+    return detail.item ?? detail.cargo ?? detail.data?.item ?? detail.data?.cargo ?? item;
   } catch {
-    return null;
+    return item;
   }
+}
+
+async function enrichCraftPlanRequirement(item) {
+  const detail = await fetchCraftPlanItemDetail(item);
+  return { ...item, ...targetFromRecipeCatalogItem({ ...detail, id: item.id, itemType: item.itemType }), quantity: item.quantity };
+}
+
+async function enrichCraftPlanRequirements(items = []) {
+  return Promise.all(items.map((item) => enrichCraftPlanRequirement(item)));
 }
 
 function targetFromRecipeCatalogItem(item = {}) {
@@ -1215,7 +1223,7 @@ function targetFromRecipeCatalogItem(item = {}) {
     id: String(item.id ?? item.itemId ?? ""),
     kind,
     itemType: kind === "cargo" ? 1 : 0,
-    name: String(item.name ?? item.itemName ?? `Item #${item.id ?? ""}`),
+    name: String(item.name ?? item.itemName ?? item.displayName ?? `Item #${item.id ?? item.itemId ?? ""}`),
     tier: item.tier ?? null,
     rarityStr: item.rarityStr ?? item.rarity ?? null,
     tag: item.tag ?? null,
@@ -1225,24 +1233,24 @@ function targetFromRecipeCatalogItem(item = {}) {
 
 async function craftPlanTierPresets(claimId) {
   const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/research`).catch(() => ({}));
-  const rows = unwrap(payload, "technologies", []);
+  const rows = unwrap(payload, "technologies", unwrap(payload, "research", []));
   const lookup = craftPlanCatalogLookup(payload);
-  const presets = rows
-    .map((row) => {
-      const tier = tierFromResearchRow(row);
-      const name = String(row.name ?? row.techName ?? row.title ?? "");
-      const techType = String(row.techType ?? row.type ?? "").toLowerCase();
-      const looksLikeTierUpgrade = tier >= 2 && (/tier\s*\d+/i.test(name) || /township|settlement|claim upgrade|tier_upgrade/.test(`${name} ${techType}`.toLowerCase()));
-      if (!looksLikeTierUpgrade) return null;
-      const items = mergePresetRequirements(collectCraftPlanRequirements(row, lookup));
-      if (!items.length) return null;
-      return { key: `tier-${tier}`, label: `T${tier}`, tier, source: "research", items };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.tier - b.tier);
-  if (!presets.some((preset) => preset.tier === 6)) {
-    const fallback = await fallbackTierPresetFromMarket(6, "Advanced Codex", 25);
-    if (fallback) presets.push(fallback);
+  const grouped = new Map();
+  for (const row of rows) {
+    const tier = tierFromResearchRow(row);
+    const name = String(row.name ?? row.techName ?? row.title ?? "").trim();
+    const techType = String(row.techType ?? row.type ?? "").toLowerCase();
+    const isClaimTierRow = tier >= 2 && (techType === "tier_upgrade" || techType === "settlement" || /^tier\s*\d+$/i.test(name));
+    if (!isClaimTierRow) continue;
+    const current = grouped.get(tier) ?? [];
+    current.push(...collectCraftPlanRequirements(row, lookup));
+    grouped.set(tier, current);
+  }
+  const presets = [];
+  for (const [tier, requirements] of grouped.entries()) {
+    const items = await enrichCraftPlanRequirements(mergePresetRequirements(requirements));
+    if (!items.length) continue;
+    presets.push({ key: `tier-${tier}`, label: `T${tier}`, tier, source: "bitjita-research", items });
   }
   return presets.sort((a, b) => a.tier - b.tier);
 }

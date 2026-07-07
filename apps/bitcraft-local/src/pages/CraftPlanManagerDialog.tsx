@@ -1,5 +1,5 @@
 import React from "react";
-import { ClipboardList, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X } from "lucide-react";
+import { ClipboardList, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import type { AnyRecord } from "../main-app-data";
@@ -84,6 +84,11 @@ function sourceCard(source: AnyRecord, checked: boolean, onChange: (checked: boo
   );
 }
 
+function presetSummary(preset: AnyRecord) {
+  const items = Array.isArray(preset.items) ? preset.items : [];
+  if (!items.length) return "No materials";
+  return items.map((item) => `${formatNumber(Number(item.quantity) || 0, 0)} ${String(item.name ?? item.id ?? "item")}`).join(", ");
+}
 export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { open: boolean; onClose: () => void; csrfToken: string; onSaved: () => void }) {
   const [state, setState] = React.useState<AnyRecord | null>(null);
   const [config, setConfig] = React.useState<CraftPlanConfig>(emptyConfig());
@@ -187,10 +192,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close craft plan manager"><X size={18} /></button>
         </header>
         <div className="craft-plan-manager-actions">
-          <label className="toggle-line"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Enable public board</strong><small>When disabled, users see an empty planning state.</small></span></label>
-          <label className="field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
-          <button className="toolbar-button" type="button" onClick={load} disabled={busy}><RefreshCw size={14} /> Refresh</button>
-          <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}><Save size={14} /> Save Plan</button>
+          <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
+          <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
+          <div className="craft-plan-manager-buttons">
+            <button className="toolbar-button" type="button" onClick={load} disabled={busy}><RefreshCw size={14} /> Refresh</button>
+            <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}><Save size={14} /> Save Plan</button>
+          </div>
         </div>
         {error ? <div className="alert error">{error}</div> : null}
         {status ? <div className="alert success">{status}</div> : null}
@@ -206,11 +213,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
         <div className="craft-plan-manager-body">
           {activeTab === "targets" ? <section className="craft-plan-manager-panel">
             <div className="split-header"><div><h3>Target items</h3><p className="legend">Preset buttons add normal target rows. You can change quantities or remove them at any time.</p></div></div>
-            <div className="craft-plan-preset-bar">
-              <span>Add tier upgrade materials</span>
-              {tierPresets.length ? tierPresets.map((preset: AnyRecord) => <button className="toolbar-button" type="button" key={preset.key} onClick={() => addTargets((preset.items ?? []).map((item: AnyRecord) => withQuantity(item, Number(item.quantity) || 1)), `Added ${preset.label} requirements.`)}>{preset.label}</button>) : <small>No tier presets exposed by BitJita yet.</small>}
-            </div>
-            <label className="field"><span>Add target</span><div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search BitJita items" /></div></label>
+            <section className="craft-plan-tier-presets" aria-label="Tier upgrade presets">
+              <div className="craft-plan-tier-presets-header">
+                <div><h4><Zap size={16} /> Tier upgrade presets</h4><p>Loaded from BitJita claim research. Click a tier to add its upgrade materials to the plan.</p></div>
+                <small>{tierPresets.length ? `${tierPresets.length} presets loaded` : "No presets loaded"}</small>
+              </div>
+              {tierPresets.length ? <div className="craft-plan-preset-grid">
+                {tierPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-card" type="button" key={preset.key} onClick={() => addTargets((preset.items ?? []).map((item: AnyRecord) => withQuantity(item, Number(item.quantity) || 1)), `Added ${preset.label} requirements.`)}><strong>{preset.label}</strong><span>{presetSummary(preset)}</span></button>)}
+              </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>BitJita did not return tier upgrade research materials for this settlement.</span></div>}
+            </section>
+            <label className="field"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search BitJita items" /></div></label>
             {searchResults.length ? <div className="craft-plan-search-results">{searchResults.map((item) => <button className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onClick={() => { addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`); setQuery(""); setSearchResults([]); }}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}><span className="craft-plan-item-label"><span className="craft-plan-item-icon"><ItemIcon item={target} /></span><ItemLabel item={target} /></span><label className="field compact-field"><span>Quantity</span><input type="number" min={1} value={target.quantity ?? 1} onChange={(event) => setConfig((current) => ({ ...current, targets: current.targets.map((row, i) => i === index ? { ...row, quantity: Math.max(1, Math.ceil(Number(event.target.value) || 1)) } : row) }))} /></label><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => ({ ...current, targets: current.targets.filter((_, i) => i !== index) }))}><Trash2 size={14} /> Remove</button></div>) : <p className="legend">No targets configured yet.</p>}
