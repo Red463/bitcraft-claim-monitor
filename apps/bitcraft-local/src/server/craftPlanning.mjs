@@ -1,4 +1,14 @@
 const DEFAULT_PLAN_NAME = "Settlement craft plan";
+const TIER_NAME_PREFIXES = {
+  Rough: 1,
+  Basic: 1,
+  Simple: 2,
+  Sturdy: 3,
+  Fine: 4,
+  Exquisite: 5,
+  Advanced: 5,
+};
+const UNTIERED_MATERIAL_PATTERN = /\b(sandpaper|binding ash|salvaged pirate|repaired shipwreck)\b/i;
 
 export function recipeKey(kind, id) {
   return `${String(kind) === "cargo" ? "cargo" : "items"}:${String(id ?? "").trim()}`;
@@ -25,6 +35,30 @@ function itemTypeFromKind(kind) {
   return kind === "cargo" ? 1 : 0;
 }
 
+function tierFromName(name) {
+  const lower = String(name ?? "").toLowerCase();
+  const prefix = Object.keys(TIER_NAME_PREFIXES).find((candidate) => lower.startsWith(`${candidate.toLowerCase()} `));
+  return prefix ? TIER_NAME_PREFIXES[prefix] : null;
+}
+
+function tierFromItemId(id) {
+  const value = String(id ?? "").trim();
+  if (!/^\d{6,}$/.test(value)) return null;
+  if (value.startsWith("10") && value.length >= 7) return 10;
+  const tier = Number(value[0]);
+  return Number.isInteger(tier) && tier >= 1 && tier <= 9 ? tier : null;
+}
+
+function normalizedTier(value, fallback = {}) {
+  const explicit = Number(value);
+  if (Number.isFinite(explicit) && explicit >= 1 && explicit <= 10) return explicit;
+  const name = String(fallback.name ?? fallback.itemName ?? "").trim();
+  const named = tierFromName(name);
+  if (named) return named;
+  if (UNTIERED_MATERIAL_PATTERN.test(name)) return null;
+  return tierFromItemId(fallback.id ?? fallback.itemId ?? fallback.item_id);
+}
+
 function normalizeTarget(value) {
   if (!value || typeof value !== "object") return null;
   const id = String(value.id ?? value.itemId ?? value.targetId ?? "").trim();
@@ -37,7 +71,7 @@ function normalizeTarget(value) {
     itemType: itemTypeFromKind(kind),
     name: String(value.name ?? value.itemName ?? `Item #${id}`).trim() || `Item #${id}`,
     quantity,
-    tier: Number.isFinite(Number(value.tier)) ? Number(value.tier) : null,
+    tier: normalizedTier(value.tier, { ...value, id }),
     rarityStr: value.rarityStr == null && value.rarity == null ? null : String(value.rarityStr ?? value.rarity),
     tag: value.tag == null ? null : String(value.tag),
     iconAssetName: value.iconAssetName == null ? null : String(value.iconAssetName),
@@ -103,7 +137,7 @@ function detailTarget(detail, fallback) {
     kind,
     itemType: itemTypeFromKind(kind),
     name: String(source.name ?? fallback?.name ?? "Unknown item"),
-    tier: Number.isFinite(Number(source.tier ?? fallback?.tier)) ? Number(source.tier ?? fallback?.tier) : null,
+    tier: normalizedTier(source.tier ?? fallback?.tier, { ...fallback, ...source }),
     rarityStr: source.rarityStr ?? source.rarity ?? fallback?.rarityStr ?? null,
     tag: source.tag ?? fallback?.tag ?? null,
     iconAssetName: source.iconAssetName ?? fallback?.iconAssetName ?? null,
@@ -145,7 +179,7 @@ function stackDisplay(stack, displays, index) {
     kind,
     itemType: itemTypeFromKind(kind),
     name: String(display.name ?? stack.name ?? `Item #${stackId(stack)}`),
-    tier: Number.isFinite(Number(display.tier ?? stack.tier)) ? Number(display.tier ?? stack.tier) : null,
+    tier: normalizedTier(display.tier ?? stack.tier, { ...stack, ...display, id: stackId(stack) }),
     rarityStr: display.rarityStr ?? display.rarity ?? stack.rarityStr ?? stack.rarity ?? null,
     tag: display.tag ?? stack.tag ?? null,
     iconAssetName: display.iconAssetName ?? stack.iconAssetName ?? null,
@@ -189,6 +223,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
   const required = new Map();
   const steps = [];
   const warnings = [];
+  const usages = new Map();
 
   function resolve(target, quantity, stack, parentRecipe) {
     const key = recipeKey(target.kind, target.id);
@@ -209,9 +244,26 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
     const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? selected.outputQuantity) || 1);
     const craftCount = Math.ceil(quantity / outputPerCraft);
     const section = sectionForMaterial(normalizedTarget, selected);
+    const alternatives = recipes.map((recipe) => ({
+      id: recipeId(recipe),
+      label: String(recipe.name ?? normalizedTarget.name),
+      inputs: recipeInputs(recipe).map((input, index) => stackDisplay(input, recipe.consumedItems, index)),
+    }));
     const inputs = recipeInputs(selected).map((input, index) => {
       const material = stackDisplay(input, selected.consumedItems, index);
       const requiredQuantity = toNumber(input.quantity) * craftCount;
+      const usageKey = recipeKey(material.kind, material.id);
+      const currentUsages = usages.get(usageKey) ?? [];
+      currentUsages.push({
+        outputKey: key,
+        output: { ...normalizedTarget, quantity: craftCount * outputPerCraft },
+        recipeName: String(selected.name ?? normalizedTarget.name),
+        selectedRecipeId: recipeId(selected),
+        alternatives,
+        buildingName: selected.buildingName ?? null,
+        section,
+      });
+      usages.set(usageKey, currentUsages);
       resolve(material, requiredQuantity, [...stack, key], selected);
       return { ...material, quantity: requiredQuantity };
     });
@@ -230,7 +282,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
   }
 
   for (const target of targets) resolve(target, target.quantity, [], null);
-  return { required, steps, warnings: [...new Set(warnings)] };
+  return { required, steps, usages, warnings: [...new Set(warnings)] };
 }
 
 
@@ -319,7 +371,7 @@ export function computeCraftPlan({
   if (!normalized.enabled || normalized.targets.length === 0) {
     return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [] };
   }
-  const { required, steps, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides);
+  const { required, steps, usages, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides);
   const availableTotals = new Map();
   const unavailableSources = [];
   addSourceTotals(availableTotals, storageSources, "Settlement storage", unavailableSources);
@@ -349,6 +401,7 @@ export function computeCraftPlan({
       inProgress,
       missing: Math.max(0, bufferedRequired - available - inProgress),
       sources: availableTotals.get(item.key)?.sources ?? [],
+      recipeUsages: usages.get(item.key) ?? [],
     };
   }).sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));
 

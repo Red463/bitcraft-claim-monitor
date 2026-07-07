@@ -9,6 +9,11 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.6] - 2026-07-08
+
+### Added
+
+- Added clickable Craft Planning needs-board cells that show stock locations, recipe details, and admin recipe route selection for alternate material paths.
 ## [0.32.0-beta.5] - 2026-07-07
 
 ### Changed

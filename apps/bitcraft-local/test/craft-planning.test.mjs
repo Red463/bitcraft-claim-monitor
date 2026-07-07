@@ -91,6 +91,59 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
   assert.equal(plan.gatherNext[0].items[0].name, "Lake Fish");
 });
 
+test("computeCraftPlan infers missing material tiers from BitJita item ids but keeps vendor materials untiered", () => {
+  const detail = {
+    item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },
+    craftingRecipes: [{
+      id: "tier-upgrade-route",
+      name: "Tier Upgrade",
+      craftedItemStacks: [{ item_id: "900000", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [
+        { item_id: "602001", item_type: "item", quantity: 4 },
+        { item_id: "102999", item_type: "item", quantity: 2 },
+      ],
+      consumedItems: [
+        { id: "602001", name: "Hexite Wood Fragment", itemType: 0 },
+        { id: "102999", name: "Woodworking Sandpaper", itemType: 0 },
+      ],
+      levelRequirements: [{ skill: { name: "Carpentry" }, level: 60 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "900000", kind: "items", name: "Tier Upgrade", quantity: 3, itemType: 0, tier: 6 }] }),
+    detailsByKey: new Map([[recipeKey("items", "900000"), detail]]),
+  });
+
+  const hexite = plan.materials.find((material) => material.name === "Hexite Wood Fragment");
+  const sandpaper = plan.materials.find((material) => material.name === "Woodworking Sandpaper");
+  assert.equal(hexite?.tier, 6);
+  assert.equal(hexite?.required, 12);
+  assert.equal(sandpaper?.tier, null);
+  assert.equal(sandpaper?.required, 6);
+});
+
+test("computeCraftPlan exposes source locations and recipe alternatives for material details", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 4, itemType: 0 }],
+  });
+
+  const plan = computeCraftPlan({
+    config,
+    detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
+    storageSources: [{ sourceId: "store-1", label: "Pantry", items: [{ id: "100", kind: "items", quantity: 5, name: "Ocean Fish" }] }],
+  });
+
+  const oceanFish = plan.materials.find((material) => material.name === "Ocean Fish");
+  assert.equal(oceanFish.required, 12);
+  assert.deepEqual(oceanFish.sources.map((source) => [source.label, source.quantity]), [["Pantry", 5]]);
+  assert.equal(oceanFish.recipeUsages.length, 1);
+  assert.equal(oceanFish.recipeUsages[0].output.name, "Fish Oil");
+  assert.equal(oceanFish.recipeUsages[0].selectedRecipeId, "ocean-route");
+  assert.deepEqual(oceanFish.recipeUsages[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
+});
+
 test("computeCraftPlan applies per-item multipliers and records unavailable sources", () => {
   const config = normalizeCraftPlanConfig({
     enabled: true,

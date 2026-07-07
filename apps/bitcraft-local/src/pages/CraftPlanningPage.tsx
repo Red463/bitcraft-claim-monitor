@@ -1,8 +1,7 @@
 import React from "react";
-import { AlertTriangle, ClipboardList, Factory, Package, Target } from "lucide-react";
+import { AlertTriangle, ClipboardList, Factory, Package, Route, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
-import { DataTable } from "../components/main/DataTable";
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Info } from "../components/main/Stats";
 import type { AnyRecord } from "../main-app-data";
@@ -11,6 +10,8 @@ import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 
 const LOCAL_API = "/api/local";
 const NEED_COLUMNS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "Materials"];
+const TIER_NAME_PREFIXES: Record<string, number> = { Rough: 1, Basic: 1, Simple: 2, Sturdy: 3, Fine: 4, Exquisite: 5, Advanced: 5 };
+const UNTIERED_MATERIAL_PATTERN = /\b(sandpaper|binding ash|salvaged pirate|repaired shipwreck)\b/i;
 const SECTION_ORDER = [
   "Carpentry",
   "Construction",
@@ -28,10 +29,11 @@ const SECTION_ORDER = [
   "Tailoring",
   "Other",
 ];
-const TIER_PREFIX_PATTERN = /^(Rough|Simple|Sturdy|Fine|Exquisite|Peerless|Basic|Advanced|Common|Uncommon|Rare|Epic|Legendary)\s+/i;
+const TIER_PREFIX_PATTERN = new RegExp(`^(${Object.keys(TIER_NAME_PREFIXES).join("|")})\\s+`, "i");
 
 type NeedCell = {
   item: AnyRecord;
+  items: AnyRecord[];
   name: string;
   missing: number;
   required: number;
@@ -73,9 +75,27 @@ function itemName(item: AnyRecord) {
   return String(item.name ?? item.label ?? item.itemName ?? item.key ?? "Unknown item");
 }
 
+function inferTierFromName(name: string) {
+  const prefix = Object.keys(TIER_NAME_PREFIXES).find((candidate) => name.toLowerCase().startsWith(`${candidate.toLowerCase()} `));
+  return prefix ? TIER_NAME_PREFIXES[prefix] : null;
+}
+
+function inferTierFromItemId(item: AnyRecord) {
+  const value = String(item.id ?? item.itemId ?? item.item_id ?? "").trim();
+  if (!/^\d{6,}$/.test(value)) return null;
+  if (value.startsWith("10") && value.length >= 7) return 10;
+  const tier = Number(value[0]);
+  return Number.isInteger(tier) && tier >= 1 && tier <= 9 ? tier : null;
+}
+
 function itemTier(item: AnyRecord) {
   const value = Number(item.tier ?? item.itemTier ?? item.tierLevel);
-  return Number.isFinite(value) && value >= 1 && value <= 10 ? value : null;
+  if (Number.isFinite(value) && value >= 1 && value <= 10) return value;
+  const name = itemName(item);
+  const named = inferTierFromName(name);
+  if (named) return named;
+  if (UNTIERED_MATERIAL_PATTERN.test(name)) return null;
+  return inferTierFromItemId(item);
 }
 
 function rowNameForNeed(item: AnyRecord) {
@@ -114,12 +134,13 @@ function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): NeedGrou
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
     if (existing) {
+      existing.items.push(material);
       existing.missing += missing;
       existing.required += required;
       existing.available += available;
       existing.inProgress += inProgress;
     } else {
-      row.cells.set(column, { item: material, name: itemName(material), missing, required, available, inProgress });
+      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress });
     }
     row.maxMissing = Math.max(row.maxMissing, missing);
   }
@@ -132,15 +153,29 @@ function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): NeedGrou
     }));
 }
 
-function needCellNode(cell?: NeedCell) {
+function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   return (
-    <span className="craft-plan-need-cell" title={cell.name}>
+    <button className="craft-plan-need-cell" type="button" title={cell.name} onClick={() => onSelect(cell)}>
       <span className="craft-plan-need-icon"><ItemIcon item={cell.item} /></span>
       <strong>{quantity(cell.missing)}</strong>
       <small>{quantity(cell.available)}/{quantity(cell.required)}</small>
-    </span>
+    </button>
   );
+}
+
+function cellSources(cell: NeedCell) {
+  return cell.items.flatMap((item) => Array.isArray(item.sources) ? item.sources : []);
+}
+
+function cellRecipeUsages(cell: NeedCell) {
+  return cell.items.flatMap((item) => Array.isArray(item.recipeUsages) ? item.recipeUsages : []);
+}
+
+function recipeOptionLabel(recipe: AnyRecord) {
+  const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
+  const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
+  return inputs.length ? label + " (" + inputs.join(", ") + ")" : label;
 }
 
 function summaryStat(icon: React.ReactNode, label: string, value: unknown, detail: string, tone?: string) {
@@ -163,6 +198,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord | null>(null);
   const [managerOpen, setManagerOpen] = React.useState(false);
   const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
+  const [selectedSection, setSelectedSection] = React.useState("all");
+  const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
+  const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
+  const [routeError, setRouteError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     fetch(`${LOCAL_API}/admin/me`)
@@ -201,7 +240,43 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const warnings = Array.isArray(plan?.warnings) ? plan.warnings : [];
   const unavailableSources = Array.isArray(plan?.unavailableSources) ? plan.unavailableSources : [];
   const needsBoard = React.useMemo(() => buildNeedsBoard(materials, targets), [materials, targets]);
+  const sectionFilters = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
+  const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
+
+  React.useEffect(() => {
+    if (selectedSection !== "all" && !sectionFilters.includes(selectedSection)) setSelectedSection("all");
+  }, [sectionFilters, selectedSection]);
+
+  async function saveRouteOverride(outputKey: string, recipeId: string) {
+    if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
+    setRouteStatus(null);
+    setRouteError(null);
+    try {
+      const nextConfig = {
+        ...config,
+        routeOverrides: {
+          ...(config.routeOverrides ?? {}),
+          [outputKey]: recipeId,
+        },
+      };
+      const response = await fetch(LOCAL_API + "/admin/craft-plan", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": String(adminAuth.csrfToken),
+        },
+        body: JSON.stringify(nextConfig),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
+      setRouteStatus("Recipe route updated.");
+      setManagerRefreshToken((value) => value + 1);
+      setSelectedNeed(null);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   if (loading && !plan) {
     return <div className="panel craft-planning-page"><div className="empty-state"><ClipboardList size={36} /><strong>Loading craft plan</strong><span>Checking targets, sources, active crafts, and materials.</span></div></div>;
@@ -256,8 +331,12 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
             <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
-            {needsBoard.length ? <div className="craft-plan-needs-scroll">
-              {needsBoard.map((group) => (
+            {needsBoard.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
+              <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoard.length}</span></button>
+              {needsBoard.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
+            </div> : null}
+            {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
+              {filteredNeedsBoard.map((group) => (
                 <article className="craft-plan-needs-group" key={group.section}>
                   <div className="craft-plan-needs-table-wrap">
                     <table className="craft-plan-needs-table">
@@ -268,7 +347,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         {group.rows.map((row) => (
                           <tr key={row.name}>
                             <th>{row.name}</th>
-                            {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column))}</td>)}
+                            {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), setSelectedNeed)}</td>)}
                           </tr>
                         ))}
                       </tbody>
@@ -277,19 +356,6 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 </article>
               ))}
             </div> : <p className="legend">All planned materials are covered by selected stock sources and active crafts.</p>}
-          </section>
-
-          <section className="form-card craft-plan-section">
-            <h3><Package size={17} /> Materials</h3>
-            <DataTable rows={materials} columns={[
-              ["Item", (row) => itemNode(row)],
-              ["Section", (row) => row.section ?? "Other"],
-              ["Required", (row) => quantity(row.required)],
-              ["Buffer", (row) => row.multiplier > 1 ? `x${row.multiplier}` : "-"],
-              ["Available", (row) => quantity(row.available)],
-              ["Active", (row) => quantity(row.inProgress)],
-              ["Still needed", (row) => <strong className={row.missing > 0 ? "craft-plan-missing" : ""}>{quantity(row.missing)}</strong>],
-            ]} />
           </section>
 
           {warnings.length || unavailableSources.length ? (
@@ -301,6 +367,64 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           ) : null}
         </>
       )}
+      {selectedNeed ? (
+        <div className="modal-backdrop craft-plan-need-detail-backdrop" role="presentation">
+          <section className="modal craft-plan-need-detail" role="dialog" aria-modal="true" aria-label="Craft plan item details">
+            <header className="modal-header">
+              <div>
+                <h2>{itemNode(selectedNeed.item)}</h2>
+                <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.inProgress)} in active crafts.</p>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setSelectedNeed(null)} aria-label="Close item details"><X size={18} /></button>
+            </header>
+            <div className="craft-plan-need-detail-grid">
+              <section className="form-card nested-card">
+                <h3><Package size={16} /> Stock locations</h3>
+                {cellSources(selectedNeed).length ? cellSources(selectedNeed).map((source, index) => (
+                  <div className="craft-plan-detail-row" key={String(source.sourceId ?? source.label ?? index) + "-" + index}>
+                    <span>{source.label ?? source.type ?? "Source"}</span>
+                    <strong>{quantity(source.quantity)}</strong>
+                  </div>
+                )) : <p className="legend">No counted stock found for this item.</p>}
+              </section>
+              <section className="form-card nested-card">
+                <h3><Route size={16} /> Recipe used</h3>
+                {cellRecipeUsages(selectedNeed).length ? cellRecipeUsages(selectedNeed).map((usage, index) => {
+                  const alternatives = Array.isArray(usage.alternatives) ? usage.alternatives : [];
+                  const selectedRecipe = alternatives.find((recipe: AnyRecord) => String(recipe.id) === String(usage.selectedRecipeId));
+                  return (
+                    <div className="craft-plan-route-detail" key={String(usage.outputKey ?? index) + "-" + index}>
+                      <div className="split-header">
+                        <div>
+                          <strong>{usage.output?.name ?? usage.recipeName ?? "Recipe"}</strong>
+                          <p className="legend">{usage.recipeName ?? "Selected recipe"}{usage.buildingName ? " - " + usage.buildingName : ""}</p>
+                        </div>
+                      </div>
+                      {selectedRecipe && Array.isArray(selectedRecipe.inputs) && selectedRecipe.inputs.length ? (
+                        <div className="craft-plan-route-inputs">
+                          {selectedRecipe.inputs.map((input: AnyRecord, inputIndex: number) => (
+                            <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantity)}</strong></span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {canManage && alternatives.length > 1 ? (
+                        <label className="field compact-field">
+                          <span>Recipe route</span>
+                          <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.outputKey ?? ""), event.target.value)}>
+                            {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
+                          </select>
+                        </label>
+                      ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
+                    </div>
+                  );
+                }) : <p className="legend">No recipe context was found. This is likely a base gathered or vendor material.</p>}
+                {routeStatus ? <p className="alert success">{routeStatus}</p> : null}
+                {routeError ? <p className="alert error">{routeError}</p> : null}
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {canManage ? <CraftPlanManagerDialog open={managerOpen} onClose={() => setManagerOpen(false)} csrfToken={String(adminAuth?.csrfToken)} onSaved={() => setManagerRefreshToken((value) => value + 1)} /> : null}
     </div>
   );
