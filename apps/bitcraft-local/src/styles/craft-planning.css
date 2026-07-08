@@ -56,6 +56,11 @@
 .craft-plan-source-items span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid rgba(101, 183, 250, 0.22); background: rgba(18, 35, 52, 0.58); border-radius: 7px; padding: 7px 9px; font-size: 0.84rem; }
 .craft-plan-source-items .craft-plan-item-label, .craft-plan-source-items .item-label { min-width: 0; }
 .craft-plan-source-items strong { color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.craft-plan-deployable-groups { display: grid; gap: 14px; }
+.craft-plan-deployable-group { display: grid; gap: 10px; border: 1px solid rgba(139, 159, 184, 0.22); border-radius: 10px; background: rgba(6, 10, 16, 0.28); padding: 12px; }
+.craft-plan-deployable-group > header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.craft-plan-deployable-group > header strong { color: var(--text); }
+.craft-plan-deployable-group > header small { color: var(--muted); }
 .craft-plan-manager-buttons { display: inline-flex; gap: 8px; justify-content: end; align-items: center; }
 .craft-plan-name-field { min-width: 0; }
 .craft-plan-public-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 8px; background: rgba(8, 13, 20, 0.78); padding: 8px 11px; white-space: nowrap; }
@@ -104,9 +109,7 @@
 .craft-plan-needs-table thead th:first-child { text-align: left; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
 .craft-plan-needs-table tbody th { width: 210px; color: var(--text); font-size: 0.92rem; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .craft-plan-needs-table td { width: 78px; height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
-.craft-plan-need-cell { display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; min-width: 0; color: var(--accent); }
-.craft-plan-need-icon { width: 25px; height: 25px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 7px; background: rgba(6, 10, 16, 0.55); }
-.craft-plan-need-icon .item-icon, .craft-plan-need-icon img { width: 20px; height: 20px; }
+.craft-plan-need-cell { display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
 .craft-plan-need-cell strong { color: var(--accent); font-size: 1.02rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-need-cell small { color: rgba(240, 198, 79, 0.68); font-size: 0.66rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-need-empty { color: rgba(139, 159, 184, 0.22); font-size: 0.8rem; }
@@ -141,9 +144,16 @@
   border-radius: 7px;
 }
 .craft-plan-need-detail-backdrop {
+  position: fixed;
+  inset: 0;
   z-index: 1450;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  overflow: auto;
   padding: 24px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
 }
 .craft-plan-need-detail {
   width: min(820px, calc(100vw - 48px));

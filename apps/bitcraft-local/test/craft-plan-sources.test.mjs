@@ -35,11 +35,13 @@ test("playerInventoryContainerSources reads wrapped BitJita inventories and sepa
   });
 
   assert.deepEqual(result.inventory.items.map((item) => item.name), ["Simple Wood Log"]);
-  assert.equal(result.deployableOptions.length, 2);
+  assert.equal(result.deployableOptions.length, 1);
   assert.equal(result.deployableOptions[0].sourceId, "player-1:personal-cache-1");
-  assert.equal(result.deployableOptions[0].label, "Modular - Modular's Personal Cache (III)");
+  assert.equal(result.deployableOptions[0].label, "Personal Cache (III)");
+  assert.equal(result.deployableOptions[0].playerName, "Modular");
+  assert.equal(result.deployableOptions[0].containerKind, "Personal Cache");
   assert.equal(result.deployableOptions[0].items[0].name, "Fine Plank");
-  assert.equal(result.deployableOptions[1].label, "Modular - Town Bank (Timbersteel Trade)");
+  assert.equal(result.deployableOptions.some((source) => /Town Bank/.test(source.label)), false);
 });
 
 test("playerInventoryContainerSources applies deployable allow-list only to counted sources", () => {

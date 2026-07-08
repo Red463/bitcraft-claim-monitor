@@ -84,6 +84,18 @@ function sourceCard(source: AnyRecord, checked: boolean, onChange: (checked: boo
   );
 }
 
+
+function groupDeployablesByPlayer(sources: AnyRecord[]) {
+  const groups = new Map<string, { playerId: string; playerName: string; sources: AnyRecord[] }>();
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const playerId = String(source.playerId ?? source.sourceId ?? "unknown").split(":")[0] || "unknown";
+    const playerName = String(source.playerName ?? source.ownerName ?? playerId);
+    const group = groups.get(playerId) ?? { playerId, playerName, sources: [] };
+    group.sources.push(source);
+    groups.set(playerId, group);
+  }
+  return [...groups.values()].sort((a, b) => a.playerName.localeCompare(b.playerName));
+}
 function presetSummary(preset: AnyRecord) {
   const items = Array.isArray(preset.items) ? preset.items : [];
   if (!items.length) return "No materials";
@@ -179,6 +191,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const storageSources = state?.sources?.storage ?? [];
   const playerSources = state?.sources?.players ?? [];
   const deployableSources = state?.sources?.deployables ?? [];
+  const deployableGroups = groupDeployablesByPlayer(deployableSources);
   const tierPresets = state?.sources?.tierPresets ?? [];
 
   return (
@@ -231,7 +244,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each BitJita storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
 
-          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Select players first, refresh, then include BitJita-visible carts, stash, and deployable storage.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => sourceCard({ sourceId: source.playerId, label: source.label, type: "Player inventory", items: [] }, config.sourceRules.playerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4><div className="craft-plan-source-grid">{deployableSources.length ? deployableSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked))) : <p className="legend">No deployables discovered for the selected players yet.</p>}</div></section> : null}
+          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Select players first, refresh, then include BitJita-visible carts, personal cache, and deployable storage.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => sourceCard({ sourceId: source.playerId, label: source.label, type: "Player inventory", items: [] }, config.sourceRules.playerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><h3>Recipe route overrides</h3><p className="legend">Advanced override path. Enter an output item key such as <code>items:123</code> and the selected recipe id.</p><div className="admin-craft-plan-multiplier-row"><label className="field compact-field"><span>Output key</span><input value={routeDraft.key} onChange={(event) => setRouteDraft((current) => ({ ...current, key: event.target.value }))} placeholder="items:..." /></label><label className="field compact-field"><span>Recipe id</span><input value={routeDraft.recipeId} onChange={(event) => setRouteDraft((current) => ({ ...current, recipeId: event.target.value }))} /></label><span /><button className="toolbar-button" type="button" onClick={() => { const key = routeDraft.key.trim(); const recipeId = routeDraft.recipeId.trim(); if (!key || !recipeId) return; setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [key]: recipeId } })); setRouteDraft({ key: "", recipeId: "" }); }}><Plus size={14} /> Add</button></div>{Object.entries(config.routeOverrides).map(([key, recipeId]) => <div className="admin-craft-plan-row" key={key}><strong>{key}</strong><span>{recipeId}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[key]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Remove</button></div>)}</section> : null}
 

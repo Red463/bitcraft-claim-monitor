@@ -10,8 +10,6 @@ import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 
 const LOCAL_API = "/api/local";
 const NEED_COLUMNS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "Materials"];
-const TIER_NAME_PREFIXES: Record<string, number> = { Rough: 1, Basic: 1, Simple: 2, Sturdy: 3, Fine: 4, Exquisite: 5, Advanced: 5 };
-const UNTIERED_MATERIAL_PATTERN = /\b(sandpaper|binding ash|salvaged pirate|repaired shipwreck)\b/i;
 const SECTION_ORDER = [
   "Carpentry",
   "Construction",
@@ -29,7 +27,7 @@ const SECTION_ORDER = [
   "Tailoring",
   "Other",
 ];
-const TIER_PREFIX_PATTERN = new RegExp(`^(${Object.keys(TIER_NAME_PREFIXES).join("|")})\\s+`, "i");
+const TIER_PREFIX_PATTERN = /^(Rough|Basic|Simple|Sturdy|Fine|Exquisite|Advanced)\s+/i;
 
 type NeedCell = {
   item: AnyRecord;
@@ -75,27 +73,9 @@ function itemName(item: AnyRecord) {
   return String(item.name ?? item.label ?? item.itemName ?? item.key ?? "Unknown item");
 }
 
-function inferTierFromName(name: string) {
-  const prefix = Object.keys(TIER_NAME_PREFIXES).find((candidate) => name.toLowerCase().startsWith(`${candidate.toLowerCase()} `));
-  return prefix ? TIER_NAME_PREFIXES[prefix] : null;
-}
-
-function inferTierFromItemId(item: AnyRecord) {
-  const value = String(item.id ?? item.itemId ?? item.item_id ?? "").trim();
-  if (!/^\d{6,}$/.test(value)) return null;
-  if (value.startsWith("10") && value.length >= 7) return 10;
-  const tier = Number(value[0]);
-  return Number.isInteger(tier) && tier >= 1 && tier <= 9 ? tier : null;
-}
-
 function itemTier(item: AnyRecord) {
   const value = Number(item.tier ?? item.itemTier ?? item.tierLevel);
-  if (Number.isFinite(value) && value >= 1 && value <= 10) return value;
-  const name = itemName(item);
-  const named = inferTierFromName(name);
-  if (named) return named;
-  if (UNTIERED_MATERIAL_PATTERN.test(name)) return null;
-  return inferTierFromItemId(item);
+  return Number.isFinite(value) && value >= 1 && value <= 10 ? value : null;
 }
 
 function rowNameForNeed(item: AnyRecord) {
@@ -157,7 +137,6 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   return (
     <button className="craft-plan-need-cell" type="button" title={cell.name} onClick={() => onSelect(cell)}>
-      <span className="craft-plan-need-icon"><ItemIcon item={cell.item} /></span>
       <strong>{quantity(cell.missing)}</strong>
       <small>{quantity(cell.available)}/{quantity(cell.required)}</small>
     </button>

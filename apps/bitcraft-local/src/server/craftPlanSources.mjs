@@ -1,4 +1,5 @@
-const DEPLOYABLE_INVENTORY_NAME = /cart|stash|cache|deploy|housing|wagon|chest|container|bank/i;
+const DEPLOYABLE_INVENTORY_NAME = /cart|stash|cache|deploy|housing|wagon|handcart|boat|ship|sled|mount/i;
+const SETTLEMENT_STORAGE_INVENTORY_NAME = /town bank|settlement storage|claim storage|community storage|bank/i;
 const PERSONAL_INVENTORY_NAME = /^(?:inventory|toolbelt|wallet)$/i;
 
 export function sourceItemFromContents(contents, lookup = new Map()) {
@@ -62,14 +63,39 @@ export function playerInventoryRows(payload = {}) {
   return [];
 }
 
+export function isSettlementStorageInventory(inventory = {}, inventoryName = "") {
+  const name = String(inventoryName || inventory.inventoryName || inventory.name || inventory.type || "Inventory").trim();
+  return SETTLEMENT_STORAGE_INVENTORY_NAME.test(name);
+}
+
 export function isPlayerDeployableInventory(inventory = {}, inventoryName = "") {
   const name = String(inventoryName || inventory.inventoryName || inventory.name || inventory.type || "Inventory").trim();
   if (PERSONAL_INVENTORY_NAME.test(name)) return false;
+  if (isSettlementStorageInventory(inventory, name)) return false;
   if (DEPLOYABLE_INVENTORY_NAME.test(name)) return true;
   if (inventory.deployable) return true;
-  const playerOwnerId = String(inventory.playerOwnerEntityId ?? inventory.playerOwnerId ?? "").trim();
-  const entityId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? "").trim();
-  return Boolean(playerOwnerId && entityId && playerOwnerId !== entityId);
+  return false;
+}
+
+function deployableKind(inventoryName) {
+  const name = String(inventoryName ?? "").trim();
+  if (/personal\s+(cache|stash)|cache|stash/i.test(name)) return "Personal Cache";
+  if (/wagon/i.test(name)) return "Wagon";
+  if (/handcart|\bcart\b/i.test(name)) return "Cart";
+  if (/boat|ship/i.test(name)) return "Boat";
+  if (/sled/i.test(name)) return "Sled";
+  if (/mount/i.test(name)) return "Mount";
+  if (/housing/i.test(name)) return "Housing Storage";
+  if (/deploy/i.test(name)) return "Deployable Storage";
+  return name || "Deployable Storage";
+}
+
+function deployableLabel(inventoryName, claimName) {
+  const kind = deployableKind(inventoryName);
+  const roman = String(inventoryName ?? "").match(/\(([^)]+)\)/)?.[1];
+  const suffix = roman && !kind.includes(roman) ? ` (${roman})` : "";
+  const claim = String(claimName ?? "").trim();
+  return `${kind}${suffix}${claim ? ` - ${claim}` : ""}`;
 }
 
 export function playerInventoryContainerSources(playerId, label, payload = {}, allowedDeployableIds = []) {
@@ -81,12 +107,22 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
     const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory").trim() || "Inventory";
     const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
     const sourceId = `${playerId}:${rawId}`;
+    if (isSettlementStorageInventory(inventory, inventoryName)) continue;
     const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup);
     if (!items.length) continue;
     if (isPlayerDeployableInventory(inventory, inventoryName)) {
       const claimName = String(inventory.claimName ?? "").trim();
-      const suffix = claimName ? ` (${claimName})` : "";
-      deployables.push({ sourceId, label: `${label} - ${inventoryName}${suffix}`, type: "Player storage", items });
+      deployables.push({
+        sourceId,
+        label: deployableLabel(inventoryName, claimName),
+        type: "Player deployable",
+        playerId: String(playerId),
+        playerName: String(label),
+        containerName: inventoryName,
+        containerKind: deployableKind(inventoryName),
+        claimName: claimName || null,
+        items,
+      });
     } else {
       personalItems.push(...items);
     }
@@ -94,6 +130,6 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
   return {
     inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
     deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId)),
-    deployableOptions: deployables.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
+    deployableOptions: deployables.map((source) => ({ ...source, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };
 }

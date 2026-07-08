@@ -91,7 +91,7 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
   assert.equal(plan.gatherNext[0].items[0].name, "Lake Fish");
 });
 
-test("computeCraftPlan infers missing material tiers from BitJita item ids but keeps vendor materials untiered", () => {
+test("computeCraftPlan uses API recipe detail tiers instead of name or id fallback inference", () => {
   const detail = {
     item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },
     craftingRecipes: [{
@@ -109,10 +109,16 @@ test("computeCraftPlan infers missing material tiers from BitJita item ids but k
       levelRequirements: [{ skill: { name: "Carpentry" }, level: 60 }],
     }],
   };
+  const hexiteDetail = { item: { id: "602001", name: "Hexite Wood Fragment", itemType: 0, tier: 6 }, craftingRecipes: [] };
+  const sandpaperDetail = { item: { id: "102999", name: "Woodworking Sandpaper", itemType: 0 }, craftingRecipes: [] };
 
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "900000", kind: "items", name: "Tier Upgrade", quantity: 3, itemType: 0, tier: 6 }] }),
-    detailsByKey: new Map([[recipeKey("items", "900000"), detail]]),
+    detailsByKey: new Map([
+      [recipeKey("items", "900000"), detail],
+      [recipeKey("items", "602001"), hexiteDetail],
+      [recipeKey("items", "102999"), sandpaperDetail],
+    ]),
   });
 
   const hexite = plan.materials.find((material) => material.name === "Hexite Wood Fragment");
@@ -121,6 +127,29 @@ test("computeCraftPlan infers missing material tiers from BitJita item ids but k
   assert.equal(hexite?.required, 12);
   assert.equal(sandpaper?.tier, null);
   assert.equal(sandpaper?.required, 6);
+});
+
+test("computeCraftPlan leaves missing tier null when API detail is unavailable", () => {
+  const detail = {
+    item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },
+    craftingRecipes: [{
+      id: "tier-upgrade-route",
+      name: "Tier Upgrade",
+      craftedItemStacks: [{ item_id: "900000", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "602001", item_type: "item", quantity: 4 }],
+      consumedItems: [{ id: "602001", name: "Hexite Wood Fragment", itemType: 0 }],
+      levelRequirements: [{ skill: { name: "Carpentry" }, level: 60 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "900000", kind: "items", name: "Tier Upgrade", quantity: 3, itemType: 0, tier: 6 }] }),
+    detailsByKey: new Map([[recipeKey("items", "900000"), detail]]),
+  });
+
+  const hexite = plan.materials.find((material) => material.name === "Hexite Wood Fragment");
+  assert.equal(hexite?.tier, null);
+  assert.equal(hexite?.required, 12);
 });
 
 test("computeCraftPlan exposes source locations and recipe alternatives for material details", () => {

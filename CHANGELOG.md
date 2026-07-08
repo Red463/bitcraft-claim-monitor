@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.7] - 2026-07-08
+
+### Fixed
+
+- Fixed Craft Planning needs-board tier grouping so item tiers come from BitJita item and recipe details instead of name or id guesses.
+- Fixed Craft Planning deployable discovery so player carts, caches, and stash-like storage are grouped by player while settlement storage is kept out of player deployables.
+- Improved Craft Planning needs-board cells and detail popups so cells are cleaner and item details open in a proper viewport dialog.
+
 ## [0.32.0-beta.6] - 2026-07-08
 
 ### Added

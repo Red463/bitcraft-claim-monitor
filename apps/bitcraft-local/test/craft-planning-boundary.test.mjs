@@ -30,11 +30,11 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Recipe used/);
   assert.match(page, /Stock locations/);
   assert.match(page, /selectedSection/);
-  assert.match(page, /inferTierFromName/);
-  assert.match(page, /inferTierFromItemId/);
-  assert.match(page, /UNTIERED_MATERIAL_PATTERN/);
-  assert.match(page, /Rough:\s*1/);
-  assert.match(page, /Exquisite:\s*5/);
+  assert.doesNotMatch(page, /inferTierFromName/);
+  assert.doesNotMatch(page, /inferTierFromItemId/);
+  assert.doesNotMatch(page, /UNTIERED_MATERIAL_PATTERN/);
+  assert.doesNotMatch(page, /TIER_NAME_PREFIXES/);
+  assert.doesNotMatch(page, /craft-plan-need-icon/);
   assert.ok(page.indexOf("Targets") < page.indexOf("Needs Board"), "targets should render before the public needs board");
   assert.doesNotMatch(page, /<h3><Package size=\{17\} \/> Materials<\/h3>/);
   assert.doesNotMatch(page, /<DataTable rows=\{materials\}/);
@@ -59,6 +59,8 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /Target items/);
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);
+  assert.match(manager, /groupDeployablesByPlayer/);
+  assert.match(manager, /craft-plan-deployable-group/);
   assert.match(manager, /Chance and drop multipliers/);
   assert.match(manager, /mergeTargets/);
 });

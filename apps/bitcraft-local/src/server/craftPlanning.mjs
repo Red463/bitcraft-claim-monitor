@@ -1,14 +1,4 @@
 const DEFAULT_PLAN_NAME = "Settlement craft plan";
-const TIER_NAME_PREFIXES = {
-  Rough: 1,
-  Basic: 1,
-  Simple: 2,
-  Sturdy: 3,
-  Fine: 4,
-  Exquisite: 5,
-  Advanced: 5,
-};
-const UNTIERED_MATERIAL_PATTERN = /\b(sandpaper|binding ash|salvaged pirate|repaired shipwreck)\b/i;
 
 export function recipeKey(kind, id) {
   return `${String(kind) === "cargo" ? "cargo" : "items"}:${String(id ?? "").trim()}`;
@@ -35,28 +25,9 @@ function itemTypeFromKind(kind) {
   return kind === "cargo" ? 1 : 0;
 }
 
-function tierFromName(name) {
-  const lower = String(name ?? "").toLowerCase();
-  const prefix = Object.keys(TIER_NAME_PREFIXES).find((candidate) => lower.startsWith(`${candidate.toLowerCase()} `));
-  return prefix ? TIER_NAME_PREFIXES[prefix] : null;
-}
-
-function tierFromItemId(id) {
-  const value = String(id ?? "").trim();
-  if (!/^\d{6,}$/.test(value)) return null;
-  if (value.startsWith("10") && value.length >= 7) return 10;
-  const tier = Number(value[0]);
-  return Number.isInteger(tier) && tier >= 1 && tier <= 9 ? tier : null;
-}
-
-function normalizedTier(value, fallback = {}) {
+function normalizedTier(value) {
   const explicit = Number(value);
-  if (Number.isFinite(explicit) && explicit >= 1 && explicit <= 10) return explicit;
-  const name = String(fallback.name ?? fallback.itemName ?? "").trim();
-  const named = tierFromName(name);
-  if (named) return named;
-  if (UNTIERED_MATERIAL_PATTERN.test(name)) return null;
-  return tierFromItemId(fallback.id ?? fallback.itemId ?? fallback.item_id);
+  return Number.isFinite(explicit) && explicit >= 1 && explicit <= 10 ? explicit : null;
 }
 
 function normalizeTarget(value) {
@@ -71,7 +42,7 @@ function normalizeTarget(value) {
     itemType: itemTypeFromKind(kind),
     name: String(value.name ?? value.itemName ?? `Item #${id}`).trim() || `Item #${id}`,
     quantity,
-    tier: normalizedTier(value.tier, { ...value, id }),
+    tier: normalizedTier(value.tier),
     rarityStr: value.rarityStr == null && value.rarity == null ? null : String(value.rarityStr ?? value.rarity),
     tag: value.tag == null ? null : String(value.tag),
     iconAssetName: value.iconAssetName == null ? null : String(value.iconAssetName),
@@ -137,7 +108,7 @@ function detailTarget(detail, fallback) {
     kind,
     itemType: itemTypeFromKind(kind),
     name: String(source.name ?? fallback?.name ?? "Unknown item"),
-    tier: normalizedTier(source.tier ?? fallback?.tier, { ...fallback, ...source }),
+    tier: normalizedTier(source.tier ?? fallback?.tier),
     rarityStr: source.rarityStr ?? source.rarity ?? fallback?.rarityStr ?? null,
     tag: source.tag ?? fallback?.tag ?? null,
     iconAssetName: source.iconAssetName ?? fallback?.iconAssetName ?? null,
@@ -171,6 +142,18 @@ function recipeId(recipe) {
   return String(recipe?.id ?? recipe?.name ?? "");
 }
 
+function mergeDetailTarget(detail, target) {
+  const detailed = detailTarget(detail, target);
+  return { ...target, ...detailed, quantity: target.quantity };
+}
+
+function enrichDisplayFromDetails(display, detailsByKey) {
+  const detail = detailsByKey.get(recipeKey(display.kind, display.id));
+  if (!detail) return display;
+  const detailed = detailTarget(detail, display);
+  return { ...display, ...detailed, id: display.id, kind: display.kind, itemType: itemTypeFromKind(display.kind) };
+}
+
 function stackDisplay(stack, displays, index) {
   const display = Array.isArray(displays) ? displays[index] ?? {} : {};
   const kind = stackKind(stack);
@@ -179,7 +162,7 @@ function stackDisplay(stack, displays, index) {
     kind,
     itemType: itemTypeFromKind(kind),
     name: String(display.name ?? stack.name ?? `Item #${stackId(stack)}`),
-    tier: normalizedTier(display.tier ?? stack.tier, { ...stack, ...display, id: stackId(stack) }),
+    tier: normalizedTier(display.tier ?? stack.tier),
     rarityStr: display.rarityStr ?? display.rarity ?? stack.rarityStr ?? stack.rarity ?? null,
     tag: display.tag ?? stack.tag ?? null,
     iconAssetName: display.iconAssetName ?? stack.iconAssetName ?? null,
@@ -233,7 +216,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
       if (!detail) warnings.push(`No recipe data was available for ${target.name}; it was treated as a source material.`);
       return;
     }
-    const normalizedTarget = { ...detailTarget(detail, target), ...target };
+    const normalizedTarget = mergeDetailTarget(detail, target);
     const recipes = recipesForTarget(detail, normalizedTarget);
     const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
     if (!selected) {
@@ -247,10 +230,10 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
     const alternatives = recipes.map((recipe) => ({
       id: recipeId(recipe),
       label: String(recipe.name ?? normalizedTarget.name),
-      inputs: recipeInputs(recipe).map((input, index) => stackDisplay(input, recipe.consumedItems, index)),
+      inputs: recipeInputs(recipe).map((input, index) => enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey)),
     }));
     const inputs = recipeInputs(selected).map((input, index) => {
-      const material = stackDisplay(input, selected.consumedItems, index);
+      const material = enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey);
       const requiredQuantity = toNumber(input.quantity) * craftCount;
       const usageKey = recipeKey(material.kind, material.id);
       const currentUsages = usages.get(usageKey) ?? [];
@@ -303,7 +286,7 @@ export async function collectRecipeDetails(targets, fetchDetail, routeOverrides 
     }
     pending.delete(key);
     details.set(key, detail);
-    const normalizedTarget = { ...detailTarget(detail, target), ...target };
+    const normalizedTarget = mergeDetailTarget(detail, target);
     const recipes = recipesForTarget(detail, normalizedTarget);
     const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
     if (!selected) return;
