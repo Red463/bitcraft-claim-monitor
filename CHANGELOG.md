@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.9] - 2026-07-08
+
+### Fixed
+
+- Fixed Craft Planning calculations so already-counted intermediates and active craft outputs reduce the recipe chain before gather requirements are expanded.
+- Fixed Craft Planning route selection so packed transport/unpack routes are not preferred over normal crafting recipes.
+- Improved Craft Planning documentation and safeguards around viewport dialogs and BitJita item/cargo metadata.
+
 ## [0.32.0-beta.8] - 2026-07-08
 
 ### Fixed

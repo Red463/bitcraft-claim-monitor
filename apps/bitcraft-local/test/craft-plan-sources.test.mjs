@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, sourceItemFromContents } from "../src/server/craftPlanSources.mjs";
 
 test("playerInventoryContainerSources reads wrapped BitJita inventories and separates player storage", () => {
   const result = playerInventoryContainerSources("player-1", "Modular", {
@@ -96,4 +96,16 @@ test("playerInventoryContainerSources exposes a selectable cart source even when
   assert.equal(option?.label, "Cart");
   assert.equal(option?.itemCount, 0);
   assert.equal(result.deployables.find((source) => source.sourceId === "player-1:cart")?.items.length, 0);
+});
+
+test("sourceItemFromContents uses BitJita itemType to distinguish items and cargo", () => {
+  const item = sourceItemFromContents({ itemId: 5130004, itemType: 0, quantity: 12 });
+  const cargo = sourceItemFromContents({ itemId: 3100001, itemType: 1, quantity: 34 });
+
+  assert.equal(item?.kind, "items");
+  assert.equal(item?.itemType, 0);
+  assert.equal(item?.name, "Item #5130004");
+  assert.equal(cargo?.kind, "cargo");
+  assert.equal(cargo?.itemType, 1);
+  assert.equal(cargo?.name, "Cargo #3100001");
 });

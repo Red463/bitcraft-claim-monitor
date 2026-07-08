@@ -60,11 +60,15 @@ function mergeTargets(existing: AnyRecord[], incoming: AnyRecord[]) {
   return [...byKey.values()];
 }
 
+function itemTypeLabel(item: AnyRecord) {
+  return itemKind(item) === "cargo" ? "Cargo" : "Item";
+}
+
 function itemPreview(items: AnyRecord[] = []) {
   const top = items.slice().sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0)).slice(0, 10);
   return top.length ? (
     <div className="craft-plan-source-items">
-      {top.map((item) => <span key={`${itemKey(item)}:${item.quantity}`}><ItemLabel item={item} /><strong>{formatNumber(Number(item.quantity) || 0, 0)}</strong></span>)}
+      {top.map((item) => <span key={`${itemKey(item)}:${item.quantity}`}><ItemLabel item={item} meta={itemTypeLabel(item)} /><strong>{formatNumber(Number(item.quantity) || 0, 0)}</strong></span>)}
     </div>
   ) : <p className="legend">No visible item stacks.</p>;
 }

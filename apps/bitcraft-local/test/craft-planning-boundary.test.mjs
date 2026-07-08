@@ -26,6 +26,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /craft-plan-needs-board/);
   assert.match(page, /craft-plan-section-filters/);
   assert.match(page, /selectedNeed/);
+  assert.match(page, /from "react-dom"/);
+  assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);
   assert.match(page, /craft-plan-need-detail/);
   assert.match(page, /Recipe used/);
   assert.match(page, /Stock locations/);
@@ -61,6 +63,8 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /Players & deployables/);
   assert.match(manager, /groupDeployablesByPlayer/);
   assert.match(manager, /craft-plan-deployable-group/);
+  assert.match(manager, /function itemTypeLabel/);
+  assert.match(manager, /meta=\{itemTypeLabel\(item\)\}/);
   assert.match(manager, /Chance and drop multipliers/);
   assert.match(manager, /mergeTargets/);
 });

@@ -561,6 +561,7 @@ Needs review: this table is based on current `server.mjs` environment reads. Dep
 - Browser calls go through `/api/bitjita/*`; the server applies cache and rate-limit policies before upstream requests.
 - Relevant files: `src/api/bitjita.ts`, `server.mjs`, `BITJITA_API_AUDIT.md`.
 - Accuracy rule: prefer real BitJita fields over inference. If a field is missing or ambiguous, show conservative UI or mark as unavailable.
+- Inventory stack rule: `itemType`/`item_type` identifies the catalog family. `0` is a regular item (`/api/items/{id}`), `1` is cargo (`/api/cargo/{id}`). Preserve this as `kind: "items" | "cargo"` in normalized data and UI labels where mixed inventories are shown.
 
 ### Discord
 

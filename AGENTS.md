@@ -580,6 +580,7 @@ When changing BitJita-related logic:
 * Avoid assuming every field is present.
 * Keep settlement-specific filtering accurate.
 * Do not expose admin-only app configuration just because the underlying game data is public.
+* For BitJita inventory stack contents, preserve `itemType` semantics: `0` is a regular item resolved through `/api/items/{id}`, and `1` is cargo resolved through `/api/cargo/{id}`. Do not treat numeric `itemId` values as globally unique across item and cargo catalogs.
 
 ## Final Response Expectations
 

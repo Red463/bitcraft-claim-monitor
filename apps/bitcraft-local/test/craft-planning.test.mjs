@@ -91,6 +91,77 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
   assert.equal(plan.gatherNext[0].items[0].name, "Lake Fish");
 });
 
+
+test("computeCraftPlan only expands the missing quantity of stocked intermediate crafts", () => {
+  const plankDetail = {
+    item: { id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 2 },
+    craftingRecipes: [{
+      id: "plank-route",
+      name: "Simple Plank",
+      craftedItemStacks: [{ item_id: "300", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "301", item_type: "item", quantity: 2 }],
+      consumedItems: [{ id: "301", name: "Simple Wood Log", itemType: 0, tag: "Wood Log", tier: 2 }],
+      levelRequirements: [{ skill: { name: "Carpentry" }, level: 20 }],
+    }],
+  };
+  const logDetail = { item: { id: "301", name: "Simple Wood Log", itemType: 0, tag: "Wood Log", tier: 2 }, craftingRecipes: [] };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "300", kind: "items", name: "Simple Plank", quantity: 10, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "300"), plankDetail],
+      [recipeKey("items", "301"), logDetail],
+    ]),
+    storageSources: [{ sourceId: "store-1", label: "Carpentry chest", items: [{ id: "300", kind: "items", quantity: 6, name: "Simple Plank" }] }],
+    activeCrafts: [{ id: "craft-1", itemId: "300", kind: "items", quantity: 1, name: "Simple Plank" }],
+  });
+
+  const plank = plan.materials.find((material) => material.name === "Simple Plank");
+  const logs = plan.materials.find((material) => material.name === "Simple Wood Log");
+
+  assert.equal(plank.required, 10);
+  assert.equal(plank.available, 6);
+  assert.equal(plank.inProgress, 1);
+  assert.equal(plank.missing, 3);
+  assert.equal(logs.required, 6);
+});
+
+test("computeCraftPlan prefers crafting recipes over unpacking packed transport items", () => {
+  const ropeDetail = {
+    item: { id: "400", name: "Fine Rope", itemType: 0, tag: "Rope", tier: 4 },
+    craftingRecipes: [
+      {
+        id: "packed-route",
+        name: "Open Packed Fine Rope",
+        craftedItemStacks: [{ item_id: "400", item_type: "item", quantity: 10 }],
+        consumedItemStacks: [{ item_id: "401", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "401", name: "Packed Fine Rope", itemType: 0, tag: "Rope", tier: 4 }],
+      },
+      {
+        id: "craft-route",
+        name: "Craft Fine Rope",
+        craftedItemStacks: [{ item_id: "400", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [
+          { item_id: "402", item_type: "item", quantity: 2 },
+          { item_id: "403", item_type: "item", quantity: 1 },
+        ],
+        consumedItems: [
+          { id: "402", name: "Fine Fiber", itemType: 0, tag: "Plant Fiber", tier: 4 },
+          { id: "403", name: "Fine Resin", itemType: 0, tag: "Resin", tier: 4 },
+        ],
+      },
+    ],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "400", kind: "items", name: "Fine Rope", quantity: 10, itemType: 0 }] }),
+    detailsByKey: new Map([[recipeKey("items", "400"), ropeDetail]]),
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "craft-route");
+  assert.equal(plan.materials.some((material) => material.name === "Packed Fine Rope"), false);
+  assert.equal(plan.materials.find((material) => material.name === "Fine Fiber")?.required, 20);
+});
 test("computeCraftPlan uses API recipe detail tiers instead of name or id fallback inference", () => {
   const detail = {
     item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },

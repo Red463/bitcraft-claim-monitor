@@ -124,7 +124,7 @@ function recipeInputs(recipe) {
 }
 
 function isUnpackRecipe(recipe) {
-  return /unpack|package/i.test(String(recipe?.name ?? ""));
+  return /unpack|packed|package/i.test(String(recipe?.name ?? ""));
 }
 
 function recipeSortScore(recipe) {
@@ -202,7 +202,7 @@ function sectionForMaterial(material, recipe) {
   return "Other";
 }
 
-function buildRequirementMap(targets, detailsByKey, routeOverrides) {
+function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
   const required = new Map();
   const steps = [];
   const warnings = [];
@@ -217,15 +217,18 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides) {
       return;
     }
     const normalizedTarget = mergeDetailTarget(detail, target);
+    const stocked = effectiveStockTotals.get(key)?.total ?? 0;
+    const alreadyAllocated = required.get(key)?.required ?? 0;
+    const unallocatedStock = Math.max(0, stocked - alreadyAllocated);
+    const quantityToCraft = Math.max(0, quantity - unallocatedStock);
+    addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, parentRecipe));
+    if (quantityToCraft <= 0) return;
     const recipes = recipesForTarget(detail, normalizedTarget);
     const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
-    if (!selected) {
-      addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, parentRecipe));
-      return;
-    }
+    if (!selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
     const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? selected.outputQuantity) || 1);
-    const craftCount = Math.ceil(quantity / outputPerCraft);
+    const craftCount = Math.ceil(quantityToCraft / outputPerCraft);
     const section = sectionForMaterial(normalizedTarget, selected);
     const alternatives = recipes.map((recipe) => ({
       id: recipeId(recipe),
@@ -354,7 +357,6 @@ export function computeCraftPlan({
   if (!normalized.enabled || normalized.targets.length === 0) {
     return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [] };
   }
-  const { required, steps, usages, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides);
   const availableTotals = new Map();
   const unavailableSources = [];
   addSourceTotals(availableTotals, storageSources, "Settlement storage", unavailableSources);
@@ -363,6 +365,13 @@ export function computeCraftPlan({
 
   const activeTotals = new Map();
   addSourceTotals(activeTotals, [{ sourceId: "active-crafts", label: "Active crafts", items: activeCrafts }], "Active craft", unavailableSources);
+
+  const effectiveStockTotals = new Map(availableTotals);
+  for (const [key, active] of activeTotals.entries()) {
+    const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
+    effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
+  }
+  const { required, steps, usages, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.map((target) => recipeKey(target.kind, target.id)));
   for (const target of normalized.targets) {

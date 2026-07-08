@@ -29,6 +29,14 @@ The maintained app now uses more of the public API than the original May audit c
 | Region and map | Regions, region status, regional claims, resources, creatures, skills, and trade-volume summary data. |
 | Logs and history | Storage logs, market activity history, production activity history, and background collector snapshots. |
 
+### Item And Cargo Inventory Type Rule
+
+Live `/api/players/{playerId}/inventories` payloads store stack identity in `pockets[].contents` using `itemId`, `itemType`, and `quantity`. Observed semantics:
+
+- `itemType: 0` means the stack is a regular item and should resolve through `/api/items/{itemId}`.
+- `itemType: 1` means the stack is cargo and should resolve through `/api/cargo/{itemId}`.
+- The app should preserve this distinction in normalized data as `kind: "items"` or `kind: "cargo"`, because the same numeric id space should not be assumed to mean the same catalog family.
+- Inventory, Craft Planning, market, and recipe UI should display the distinction where it affects user decisions, especially when showing mixed deployable storage such as carts, wagons, and personal caches.
 ### Documentation/Implementation Gaps
 
 The updated docs make several local gaps clearer:
