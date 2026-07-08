@@ -1,7 +1,6 @@
 # BitJita API Audit
 
-Tested on 2026-05-25 against the official documentation at
-<https://bitjita.com/docs/api> and the live API at <https://bitjita.com>.
+Initially tested on 2026-05-25 against the official documentation at <https://bitjita.com/docs/api> and the live API at <https://bitjita.com>. Rechecked against the updated public API documentation on 2026-07-08.
 
 ## Method
 
@@ -9,6 +8,45 @@ Tested on 2026-05-25 against the official documentation at
 - Data-bearing calls used the monitored settlement (`1369094286777412590`), an actual member, current listing, active craft, house, catalog item, resource, and empire ID so detail routes were tested with valid inputs.
 - Response shapes and counts were inspected. This report intentionally does not preserve player chat text, inventory contents, or other sensitive payload data.
 - The authentication validation endpoint was not submitted because it requires a real in-game verification code and is not a read endpoint.
+
+
+## 2026-07-08 Documentation Recheck
+
+BitJita's API documentation has been expanded into a much more useful reference for application work. The public docs now describe the API as a RESTful JSON interface for BitCraft data across players, market, claims, empires, items, and related game data. The app should continue to treat BitJita as the live source of truth and keep all browser calls behind the local `/api/bitjita/*` proxy so caching, rate limiting, CORS avoidance, stale-if-error handling, and the `x-app-identifier` header stay centralized.
+
+### Current App Coverage
+
+The maintained app now uses more of the public API than the original May audit captured:
+
+| Area | Current usage |
+| --- | --- |
+| Claims | Claim summary, members, citizens, buildings, construction, inventories, layout, recruitment, research, and claim market listings. |
+| Production | Claim craft queues, member craft queues, craft contribution detail, active craft normalization, and production activity history. |
+| Market | Search, claim listings, item/cargo price history, player trades, player order history, trade-volume stats, deal alerts, and confirmed sale matching. |
+| Players | Player details, equipment, equipment presets, inventories, housing, market collections, passive crafts, and live map/member status helpers. |
+| Planning and recipes | Item/cargo detail lookups, crafting recipes, alternate route selection, research tier presets, settlement storage, player inventories, deployable-style player storage, and active craft offsets. |
+| Empires | Empire list, empire detail, empire towers, tower member access data, aligned claims, and claim member drilldown. |
+| Region and map | Regions, region status, regional claims, resources, creatures, skills, and trade-volume summary data. |
+| Logs and history | Storage logs, market activity history, production activity history, and background collector snapshots. |
+
+### Documentation/Implementation Gaps
+
+The updated docs make several local gaps clearer:
+
+1. `lib/api-spec/openapi.yaml` is no longer representative of the public API surface. It only models a small set of local proxy routes and includes older paths such as `/bitjita/claims/{claimId}/productions`, while the app now mainly uses `/crafts?claimEntityId=...` plus many player, market, empire, resource, and planning endpoints.
+2. Craft Planning still discovers player deployables by interpreting `/players/{id}/inventories` container names. The updated docs expose deployables as their own API family, so we should verify whether player-owned carts, wagons, personal caches, and other containers can be joined to `/api/deployables` or player housing/container detail instead of relying on name heuristics.
+3. Recipe and item handling should prefer documented item/cargo detail fields over local fallbacks. The current planner now avoids tier guessing for needs-board placement, but the generated client types do not help enforce that contract yet.
+4. The proxy cache policy should be reviewed against the now clearer endpoint families. Static catalog endpoints can keep long TTLs; player inventory, craft, market listing, and storage-log endpoints should remain short-lived.
+5. Several useful player endpoints are used directly in page-specific code but are not reflected in local API docs: equipment, presets, housing, market collections, passive crafts, and inventories.
+
+### Suggested Changes From The Updated Docs
+
+1. **Regenerate or replace the local API spec.** Update `lib/api-spec/openapi.yaml` so generated clients cover the actual BitJita proxy endpoints we use today: player detail subroutes, item/cargo detail, market price history/trades/history, empire towers/claims, resources/creatures, and craft contribution routes. This will reduce stringly-typed endpoint drift.
+2. **Audit deployable source discovery against documented deployable/player storage routes.** Confirm the exact BitJita relationship between `/api/deployables`, `/api/players/{id}/inventories`, `/api/players/{id}/housing`, and any container IDs returned in those payloads. Then replace Craft Planning deployable name matching with ID/type-based normalization where the docs and live payloads support it.
+3. **Add endpoint shape fixtures for Craft Planning.** Capture safe, redacted examples for item detail, cargo detail, player inventory, player housing, and deployable/container payloads. Use them in tests so tier grouping, route overrides, stock locations, and deployable cards are driven by documented fields.
+4. **Document endpoint ownership in code.** Add a small maintained map of BitJita endpoint families used by each app feature: Dashboard, Members, Production, Inventory, Market, Empires, Map, Activity, and Craft Planning. This would make future API-doc changes faster to assess.
+5. **Review caching per endpoint family.** Add explicit cache policies for player housing, equipment, market collections, passive crafts, empire tower data, and deployables if we keep using those routes. Avoid relying on the proxy default TTL for operationally important live data.
+6. **Keep final target and material semantics explicit.** For Craft Planning, continue to separate target items, craftable intermediates, raw gathered materials, vendor/NPC materials, and uncertain drops. The updated docs should let us use official item/cargo tags, tiers, and recipe fields instead of name-based classification.
 
 ## Endpoint Results
 

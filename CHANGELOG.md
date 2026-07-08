@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.8] - 2026-07-08
+
+### Fixed
+
+- Fixed Craft Planning deployable tracking so Cart covers carts, wagons, and handcarts with one persistent per-player toggle.
+- Fixed Craft Planning player deployable item labels so BitJita item and cargo details are used instead of raw item ids.
+- Improved Craft Planning deployable item rows so source cards are easier to scan.
+
 ## [0.32.0-beta.7] - 2026-07-08
 
 ### Fixed

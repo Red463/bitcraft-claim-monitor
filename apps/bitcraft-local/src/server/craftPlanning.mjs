@@ -370,12 +370,20 @@ export function computeCraftPlan({
   }
 
   const materials = [...required.values()].map((item) => {
+    const enrichedItem = enrichDisplayFromDetails(item, detailsByKey);
     const multiplier = normalized.multipliers[item.key]?.multiplier ?? 1;
     const bufferedRequired = Math.ceil(item.required * multiplier);
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
     return {
       ...item,
+      ...enrichedItem,
+      key: item.key,
+      id: item.id,
+      kind: item.kind,
+      itemType: itemTypeFromKind(item.kind),
+      required: item.required,
+      section: item.section || sectionForMaterial(enrichedItem, null),
       isTarget: targetKeys.has(item.key),
       multiplier,
       multiplierNote: normalized.multipliers[item.key]?.note ?? "",
@@ -390,7 +398,8 @@ export function computeCraftPlan({
 
   const targets = normalized.targets.map((target) => {
     const material = materials.find((item) => item.key === recipeKey(target.kind, target.id));
-    return { ...target, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };
+    const enrichedTarget = enrichDisplayFromDetails(target, detailsByKey);
+    return { ...target, ...enrichedTarget, quantity: target.quantity, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };
   });
 
   return {

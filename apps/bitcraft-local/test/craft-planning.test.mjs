@@ -129,6 +129,37 @@ test("computeCraftPlan uses API recipe detail tiers instead of name or id fallba
   assert.equal(sandpaper?.required, 6);
 });
 
+test("computeCraftPlan enriches emitted materials from fetched item details", () => {
+  const detail = {
+    item: { id: "700", name: "Berry Jam", itemType: 0, tier: 6, tag: "Food" },
+    craftingRecipes: [{
+      id: "berry-jam-route",
+      name: "Berry Jam",
+      craftedItemStacks: [{ item_id: "700", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "6130004", item_type: "item", quantity: 2 }],
+      consumedItems: [{ id: "6130004", name: "Peerless Berry", itemType: 0 }],
+      levelRequirements: [{ skill: { name: "Foraging" }, level: 60 }],
+    }],
+  };
+  const peerlessBerryDetail = {
+    item: { id: "6130004", name: "Peerless Berry", itemType: 0, tag: "Berry", tier: 6 },
+    craftingRecipes: [],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "700", kind: "items", name: "Berry Jam", quantity: 5, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "700"), detail],
+      [recipeKey("items", "6130004"), peerlessBerryDetail],
+    ]),
+  });
+
+  const berry = plan.materials.find((material) => material.id === "6130004");
+  assert.equal(berry?.name, "Peerless Berry");
+  assert.equal(berry?.tag, "Berry");
+  assert.equal(berry?.tier, 6);
+  assert.equal(berry?.required, 10);
+});
 test("computeCraftPlan leaves missing tier null when API detail is unavailable", () => {
   const detail = {
     item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },

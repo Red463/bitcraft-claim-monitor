@@ -8,6 +8,8 @@ BitCraft Claim Monitor is a local-first operations dashboard for a BitCraft sett
 
 The main app is intended to display public BitJita game data for the selected settlement. Admin-only areas manage local app settings, jobs, stored data, Discord bot settings, moderation tools, branding, and user/account approvals.
 
+For the maintained public API endpoint audit, current app coverage, and follow-up recommendations, see [BITJITA_API_AUDIT.md](../BITJITA_API_AUDIT.md).
+
 ## High-Level Architecture
 
 ```mermaid

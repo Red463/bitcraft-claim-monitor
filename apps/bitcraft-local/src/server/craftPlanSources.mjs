@@ -81,7 +81,8 @@ function deployableKind(inventoryName) {
   const name = String(inventoryName ?? "").trim();
   if (/personal\s+(cache|stash)|cache|stash/i.test(name)) return "Personal Cache";
   if (/wagon/i.test(name)) return "Wagon";
-  if (/handcart|\bcart\b/i.test(name)) return "Cart";
+  if (/handcart/i.test(name)) return "Handcart";
+  if (/\bcart\b/i.test(name)) return "Cart";
   if (/boat|ship/i.test(name)) return "Boat";
   if (/sled/i.test(name)) return "Sled";
   if (/mount/i.test(name)) return "Mount";
@@ -90,12 +91,36 @@ function deployableKind(inventoryName) {
   return name || "Deployable Storage";
 }
 
+function isCartLikeDeployableKind(kind) {
+  return kind === "Cart" || kind === "Wagon" || kind === "Handcart";
+}
+
+function deployableSourceId(playerId, rawId, kind) {
+  return isCartLikeDeployableKind(kind) ? `${playerId}:cart` : `${playerId}:${rawId}`;
+}
+
 function deployableLabel(inventoryName, claimName) {
   const kind = deployableKind(inventoryName);
+  if (isCartLikeDeployableKind(kind)) return "Cart";
   const roman = String(inventoryName ?? "").match(/\(([^)]+)\)/)?.[1];
   const suffix = roman && !kind.includes(roman) ? ` (${roman})` : "";
   const claim = String(claimName ?? "").trim();
   return `${kind}${suffix}${claim ? ` - ${claim}` : ""}`;
+}
+
+function emptyCartDeployableSource(playerId, label) {
+  return {
+    sourceId: `${playerId}:cart`,
+    legacySourceIds: [],
+    label: "Cart",
+    type: "Player deployable",
+    playerId: String(playerId),
+    playerName: String(label),
+    containerName: "Cart",
+    containerKind: "Cart",
+    claimName: null,
+    items: [],
+  };
 }
 
 export function playerInventoryContainerSources(playerId, label, payload = {}, allowedDeployableIds = []) {
@@ -106,20 +131,22 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
   for (const inventory of playerInventoryRows(payload)) {
     const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory").trim() || "Inventory";
     const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
-    const sourceId = `${playerId}:${rawId}`;
+    const rawSourceId = `${playerId}:${rawId}`;
     if (isSettlementStorageInventory(inventory, inventoryName)) continue;
     const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup);
-    if (!items.length) continue;
     if (isPlayerDeployableInventory(inventory, inventoryName)) {
       const claimName = String(inventory.claimName ?? "").trim();
+      const containerKind = deployableKind(inventoryName);
+      const sourceId = deployableSourceId(playerId, rawId, containerKind);
       deployables.push({
         sourceId,
+        legacySourceIds: sourceId === rawSourceId ? [] : [rawSourceId],
         label: deployableLabel(inventoryName, claimName),
         type: "Player deployable",
         playerId: String(playerId),
         playerName: String(label),
         containerName: inventoryName,
-        containerKind: deployableKind(inventoryName),
+        containerKind,
         claimName: claimName || null,
         items,
       });
@@ -127,9 +154,12 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
       personalItems.push(...items);
     }
   }
+  if (!deployables.some((source) => source.sourceId === `${playerId}:cart`)) {
+    deployables.unshift(emptyCartDeployableSource(playerId, label));
+  }
   return {
     inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
-    deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId)),
+    deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId) || source.legacySourceIds?.some((id) => allowedDeployables.has(id))),
     deployableOptions: deployables.map((source) => ({ ...source, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };
 }

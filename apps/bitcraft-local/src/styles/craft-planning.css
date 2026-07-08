@@ -53,9 +53,12 @@
 .compact-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 .compact-toggle input { accent-color: var(--accent); }
 .craft-plan-source-items { display: grid; gap: 7px; }
-.craft-plan-source-items span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid rgba(101, 183, 250, 0.22); background: rgba(18, 35, 52, 0.58); border-radius: 7px; padding: 7px 9px; font-size: 0.84rem; }
-.craft-plan-source-items .craft-plan-item-label, .craft-plan-source-items .item-label { min-width: 0; }
-.craft-plan-source-items strong { color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.craft-plan-source-items > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid rgba(101, 183, 250, 0.22); background: rgba(18, 35, 52, 0.58); border-radius: 7px; padding: 7px 9px; font-size: 0.84rem; }
+.craft-plan-source-items .craft-plan-item-label, .craft-plan-source-items .item-label { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.craft-plan-source-items .craft-plan-item-label > span:last-child { display: block; min-width: 0; }
+.craft-plan-source-items .item-thumb, .craft-plan-source-items .craft-plan-item-icon { width: 30px; height: 30px; border-radius: 7px; }
+.craft-plan-source-items .craft-plan-item-label strong, .craft-plan-source-items .item-label strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.craft-plan-source-items > span > strong { color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .craft-plan-deployable-groups { display: grid; gap: 14px; }
 .craft-plan-deployable-group { display: grid; gap: 10px; border: 1px solid rgba(139, 159, 184, 0.22); border-radius: 10px; background: rgba(6, 10, 16, 0.28); padding: 12px; }
 .craft-plan-deployable-group > header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -146,32 +149,53 @@
 .craft-plan-need-detail-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1450;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: calc(var(--z-modal) + 5);
+  display: grid;
+  place-items: center;
   overflow: auto;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(6px);
+  overscroll-behavior: contain;
+  padding: 18px;
+  background: rgba(2, 4, 8, 0.72);
+  backdrop-filter: blur(4px);
 }
 .craft-plan-need-detail {
-  width: min(820px, calc(100vw - 48px));
-  max-height: calc(100vh - 56px);
-  overflow: auto;
+  width: min(840px, calc(100vw - 28px));
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid rgba(139, 159, 184, 0.34);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(16, 23, 33, 0.98), rgba(7, 11, 17, 0.99));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.58);
+}
+.craft-plan-need-detail .modal-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(139, 159, 184, 0.22);
+  background: rgba(14, 21, 30, 0.96);
 }
 .craft-plan-need-detail .modal-header h2 {
   margin: 0;
 }
+.craft-plan-need-detail .modal-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
 .craft-plan-need-detail-grid {
+  min-height: 0;
+  overflow: auto;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  align-items: start;
   gap: 12px;
-  padding: 0 16px 16px;
+  padding: 14px 16px 16px;
+  scrollbar-gutter: stable;
 }
 .craft-plan-need-detail-grid .nested-card {
   margin: 0;
   min-width: 0;
+  max-height: calc(100vh - 180px);
+  overflow: auto;
 }
 .craft-plan-need-detail-grid h3 {
   display: flex;
@@ -233,5 +257,8 @@
   white-space: nowrap;
 }
 @media (max-width: 760px) {
+  .craft-plan-need-detail-backdrop { padding: 10px; }
+  .craft-plan-need-detail { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   .craft-plan-need-detail-grid { grid-template-columns: 1fr; }
+  .craft-plan-need-detail-grid .nested-card { max-height: none; }
 }

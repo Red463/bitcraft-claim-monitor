@@ -490,6 +490,14 @@ For new CSS:
 * For focused new feature CSS, prefer a small module in `apps/bitcraft-local/src/styles/`.
 * Avoid appending large unrelated sections to `styles.css`.
 
+For popups, dialogs, wizards, and modal detail views:
+
+* Render them as viewport-fixed overlays, not in normal page flow.
+* Use `position: fixed`, `inset: 0`, viewport-bounded modal sizing such as `max-height: calc(100vh - ...)`, and internal scrolling for overflowing modal content.
+* Match existing modal patterns before adding feature-specific modal CSS.
+* Do not allow the user to scroll the underlying page to find a popup; it must appear in the current viewport.
+* Add or update a focused CSS/boundary test for new modal behavior when practical.
+
 ## Code Organisation Preference
 
 Use this order of preference:

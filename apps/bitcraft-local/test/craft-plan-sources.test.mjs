@@ -35,12 +35,13 @@ test("playerInventoryContainerSources reads wrapped BitJita inventories and sepa
   });
 
   assert.deepEqual(result.inventory.items.map((item) => item.name), ["Simple Wood Log"]);
-  assert.equal(result.deployableOptions.length, 1);
-  assert.equal(result.deployableOptions[0].sourceId, "player-1:personal-cache-1");
-  assert.equal(result.deployableOptions[0].label, "Personal Cache (III)");
-  assert.equal(result.deployableOptions[0].playerName, "Modular");
-  assert.equal(result.deployableOptions[0].containerKind, "Personal Cache");
-  assert.equal(result.deployableOptions[0].items[0].name, "Fine Plank");
+  assert.equal(result.deployableOptions.length, 2);
+  assert.equal(result.deployableOptions.some((source) => source.sourceId === "player-1:cart" && source.label === "Cart"), true);
+  const cache = result.deployableOptions.find((source) => source.sourceId === "player-1:personal-cache-1");
+  assert.equal(cache?.label, "Personal Cache (III)");
+  assert.equal(cache?.playerName, "Modular");
+  assert.equal(cache?.containerKind, "Personal Cache");
+  assert.equal(cache?.items[0].name, "Fine Plank");
   assert.equal(result.deployableOptions.some((source) => /Town Bank/.test(source.label)), false);
 });
 
@@ -52,7 +53,7 @@ test("playerInventoryContainerSources applies deployable allow-list only to coun
     ],
   }, ["player-1:stash-1"]);
 
-  assert.deepEqual(result.deployableOptions.map((source) => source.sourceId), ["player-1:cart-1", "player-1:stash-1"]);
+  assert.deepEqual(result.deployableOptions.map((source) => source.sourceId), ["player-1:cart", "player-1:stash-1"]);
   assert.deepEqual(result.deployables.map((source) => source.sourceId), ["player-1:stash-1"]);
 });
 
@@ -64,4 +65,35 @@ test("craft plan source lookup ignores non-array catalog wrappers", () => {
 
   assert.equal(result.inventory.items[0].name, "Item #999");
   assert.equal(result.inventory.items[0].quantity, 3);
+});
+test("playerInventoryContainerSources uses one stable cart source id for carts and wagons", () => {
+  const cartResult = playerInventoryContainerSources("player-1", "Modular", {
+    inventories: [
+      { entityId: "cart-iii", inventoryName: "Modular's Cart (III)", pockets: [{ contents: { itemId: 1, itemType: 0, quantity: 1 } }] },
+    ],
+  }, ["player-1:cart"]);
+  const wagonResult = playerInventoryContainerSources("player-1", "Modular", {
+    inventories: [
+      { entityId: "wagon-i", inventoryName: "Modular's Wagon (I)", pockets: [{ contents: { itemId: 1, itemType: 0, quantity: 1 } }] },
+    ],
+  }, ["player-1:cart"]);
+
+  assert.equal(cartResult.deployableOptions[0].sourceId, "player-1:cart");
+  assert.equal(cartResult.deployables[0].sourceId, "player-1:cart");
+  assert.equal(cartResult.deployableOptions[0].label, "Cart");
+  assert.equal(wagonResult.deployableOptions[0].sourceId, "player-1:cart");
+  assert.equal(wagonResult.deployables[0].sourceId, "player-1:cart");
+  assert.equal(wagonResult.deployableOptions[0].label, "Cart");
+});
+test("playerInventoryContainerSources exposes a selectable cart source even when none is deployed", () => {
+  const result = playerInventoryContainerSources("player-1", "Modular", {
+    inventories: [
+      { entityId: "player-inventory", inventoryName: "Inventory", pockets: [{ contents: { itemId: 1, itemType: 0, quantity: 1 } }] },
+    ],
+  }, ["player-1:cart"]);
+
+  const option = result.deployableOptions.find((source) => source.sourceId === "player-1:cart");
+  assert.equal(option?.label, "Cart");
+  assert.equal(option?.itemCount, 0);
+  assert.equal(result.deployables.find((source) => source.sourceId === "player-1:cart")?.items.length, 0);
 });

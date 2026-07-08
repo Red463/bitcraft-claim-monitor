@@ -1145,6 +1145,18 @@ async function enrichCraftPlanRequirement(item) {
 async function enrichCraftPlanRequirements(items = []) {
   return Promise.all(items.map((item) => enrichCraftPlanRequirement(item)));
 }
+async function enrichCraftPlanSourceItems(sources = []) {
+  const cache = new Map();
+  async function enrichItem(item) {
+    const key = `${String(item.kind ?? "items")}:${String(item.id ?? item.itemId ?? "")}`;
+    if (!cache.has(key)) cache.set(key, enrichCraftPlanRequirement(item));
+    return cache.get(key);
+  }
+  return Promise.all((Array.isArray(sources) ? sources : []).map(async (source) => {
+    const items = Array.isArray(source.items) ? await Promise.all(source.items.map(enrichItem)) : [];
+    return { ...source, items, itemCount: source.itemCount ?? items.length };
+  }));
+}
 
 function targetFromRecipeCatalogItem(item = {}) {
   const kind = String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items";
@@ -1198,7 +1210,8 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
     const label = String(member.userName ?? member.username ?? playerId);
     try {
       const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
-      deployableOptions.push(...playerInventoryContainerSources(playerId, label, payload).deployableOptions);
+      const sources = playerInventoryContainerSources(playerId, label, payload);
+      deployableOptions.push(...await enrichCraftPlanSourceItems(sources.deployableOptions));
     } catch {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
@@ -1247,8 +1260,9 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     try {
       const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
       const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
-      playerSources.push(sources.inventory);
-      deployableSources.push(...sources.deployables);
+      const [inventory] = await enrichCraftPlanSourceItems([sources.inventory]);
+      playerSources.push(inventory);
+      deployableSources.push(...await enrichCraftPlanSourceItems(sources.deployables));
     } catch (error) {
       playerSources.push({ sourceId: playerId, label: `${label} inventory`, unavailable: true, error: error instanceof Error ? error.message : String(error), items: [] });
     }

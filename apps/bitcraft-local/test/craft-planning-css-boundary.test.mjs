@@ -8,7 +8,14 @@ test("Craft planning item details use a fixed viewport modal", () => {
   assert.ok(match, "detail backdrop CSS should exist");
   assert.match(match[1], /position:\s*fixed/);
   assert.match(match[1], /inset:\s*0/);
-  assert.match(match[1], /display:\s*flex/);
+  assert.match(match[1], /display:\s*grid/);
+  assert.match(match[1], /place-items:\s*center/);
+  assert.match(match[1], /overscroll-behavior:\s*contain/);
+
+  const modalMatch = css.match(/\.craft-plan-need-detail\s*\{([^}]+)\}/);
+  assert.ok(modalMatch, "detail modal CSS should exist");
+  assert.match(modalMatch[1], /max-height:\s*calc\(100vh - 36px\)/);
+  assert.match(modalMatch[1], /overflow:\s*hidden/);
 });
 
 test("Craft planning needs board cells avoid item icons", () => {
