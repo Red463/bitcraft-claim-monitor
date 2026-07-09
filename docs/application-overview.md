@@ -1,4 +1,4 @@
-# Application Overview
+﻿# Application Overview
 
 BitCraft Claim Monitor is a local-first operations dashboard for a BitCraft settlement. The active app lives in `apps/bitcraft-local` and combines:
 
@@ -163,6 +163,18 @@ Routes are query-string based through `ActivePanel` in `apps/bitcraft-local/src/
 - Related files: `src/pages/CraftCalculatorPage.tsx`, `src/utils/recipeTree.ts`, `server.mjs`.
 - Needs review: the catalog is not a guaranteed complete recipe database; it refreshes known records rather than crawling all possible BitJita recipes.
 
+### Craft Planning
+
+- Route: `/?page=planning`
+- Purpose: show an admin-controlled procurement board for settlement goals, grouped by activity and tier, with counted settlement storage, selected player inventories, deployables, and active crafts.
+- Key components/functions: `CraftPlanningPage` in `src/pages/CraftPlanningPage.tsx`; `computeCraftPlan` and related helpers in `src/server/craftPlanning.mjs`; source normalization in `src/server/craftPlanSources.mjs`.
+- Data needs: configured target items, selected storage/player/deployable sources, active crafts, recipe detail records, item/cargo metadata, and route overrides.
+- Data source: `/api/local/craft-plan` for the read-only board and `/api/local/admin/craft-plan` for admin configuration; BitJita `/api/items/{id}`, `/api/cargo/{id}`, and `/api/cargo` provide authoritative metadata and cargo derivation candidates.
+- Fetching/transformation: server-side planning must use BitJita `tag` and `tier` from item/cargo detail data for board grouping. Inventory stack `itemType` remains part of the key: `0` resolves through `/api/items/{id}` and `1` resolves through `/api/cargo/{id}`. Cargo-derived production such as Trunk to Wood Log is discovered from the BitJita cargo catalog plus cargo/item detail routes and `itemListPossibilities`, not from hardcoded item-name parsing.
+- Actions: admins manage targets, storage/player/deployable sources, tier presets, route choices, buffers, and row section overrides; ordinary users view the computed board.
+- Auth: public read; admin mutations require existing admin permissions.
+- Loading/error/empty states: source failures are reported as unavailable sources and excluded from available-stock totals rather than blocking the whole plan.
+- Related files: `src/pages/CraftPlanningPage.tsx`, `src/server/craftPlanning.mjs`, `src/server/craftPlanSources.mjs`, `server.mjs`.
 ### Inventory
 
 - Route: `/?page=inventory`
@@ -658,3 +670,4 @@ Route permissions are mapped by `adminPermissionFor` in `server.mjs`.
 - Do not treat this as a replacement for live BitJita API validation. If the code and live API disagree, verify against the live response before changing calculations or labels.
 - Any statement marked "Needs review" is intentionally not asserted as a hard fact.
 - If future refactors move pages out of `main.tsx` or split `server.mjs`, update this document in the same change.
+

@@ -163,6 +163,67 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.equal(plan.materials.find((material) => material.name === "Fine Fiber")?.required, 20);
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route"]);
 });
+test("computeCraftPlan prefers loose-material routes over packaged transport routes", () => {
+  const mixDetail = {
+    item: { id: "910", name: "Infused Potter's Mix", itemType: 0, tag: "Potter's Mix", tier: 3 },
+    craftingRecipes: [
+      {
+        id: "packaged-mix-route",
+        name: "Mix Infused Potter's Mix",
+        craftedItemStacks: [{ item_id: "910", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [
+          { item_id: "911", item_type: "item", quantity: 5 },
+          { item_id: "912", item_type: "item", quantity: 1 },
+        ],
+        consumedItems: [
+          { id: "911", name: "Sturdy Pebbles", itemType: 0, tag: "Pebbles", tier: 3 },
+          { id: "912", name: "Infused Clay Lump Package", itemType: 0, tag: "Clay Lump Package", tier: 3 },
+        ],
+      },
+      {
+        id: "loose-mix-route",
+        name: "Mix Infused Potter's Mix",
+        craftedItemStacks: [{ item_id: "910", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [
+          { item_id: "911", item_type: "item", quantity: 5 },
+          { item_id: "913", item_type: "item", quantity: 2 },
+        ],
+        consumedItems: [
+          { id: "911", name: "Sturdy Pebbles", itemType: 0, tag: "Pebbles", tier: 3 },
+          { id: "913", name: "Infused Clay Lump", itemType: 0, tag: "Clay", tier: 3 },
+        ],
+      },
+    ],
+  };
+  const pebblesDetail = { item: { id: "911", name: "Sturdy Pebbles", itemType: 0, tag: "Pebbles", tier: 3 }, craftingRecipes: [] };
+  const clayPackageDetail = {
+    item: { id: "912", name: "Infused Clay Lump Package", itemType: 0, tag: "Clay Lump Package", tier: 3 },
+    craftingRecipes: [{
+      id: "package-clay-route",
+      name: "Package {I} into {O}",
+      craftedItemStacks: [{ item_id: "912", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "913", item_type: "item", quantity: 500 }],
+      consumedItems: [{ id: "913", name: "Infused Clay Lump", itemType: 0, tag: "Clay", tier: 3 }],
+    }],
+  };
+  const clayDetail = { item: { id: "913", name: "Infused Clay Lump", itemType: 0, tag: "Clay", tier: 3 }, craftingRecipes: [] };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "910", kind: "items", name: "Infused Potter's Mix", quantity: 4, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "910"), mixDetail],
+      [recipeKey("items", "911"), pebblesDetail],
+      [recipeKey("items", "912"), clayPackageDetail],
+      [recipeKey("items", "913"), clayDetail],
+    ]),
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "loose-mix-route");
+  assert.equal(plan.materials.some((material) => material.name === "Infused Clay Lump Package"), false);
+  const clay = plan.materials.find((material) => material.name === "Infused Clay Lump");
+  assert.equal(clay?.required, 8);
+  assert.deepEqual(clay?.recipeUsages.map((usage) => usage.output.name), ["Infused Potter's Mix"]);
+});
 test("computeCraftPlan uses API recipe detail tiers instead of name or id fallback inference", () => {
   const detail = {
     item: { id: "900000", name: "Tier Upgrade", itemType: 0, tier: 6 },
@@ -426,4 +487,63 @@ test("computeCraftPlan applies row section overrides after API section resolutio
   assert.equal(refinedPlank?.section, "Carpentry");
   assert.equal(refinedPlank?.sectionOverrideKey, "tag:Refined Plank");
   assert.equal(refinedPlank?.sectionOverride, "Carpentry");
+});
+
+test("computeCraftPlan expands item list possibilities through cargo processing routes", () => {
+  const woodLogDetail = {
+    item: { id: "5010001", name: "Exquisite Wood Log", itemType: 0, tag: "Wood Log", tier: 5 },
+    craftingRecipes: [{
+      id: "unpack-log-package",
+      name: "Unpack Exquisite Wood Log Package",
+      craftedItemStacks: [{ item_id: "5010001", item_type: "item", quantity: 100 }],
+      consumedItemStacks: [{ item_id: "550000", item_type: "cargo", quantity: 1 }],
+      consumedItems: [{ id: "550000", name: "Exquisite Wood Log Package", itemType: 1, tag: "Package", tier: 5 }],
+      levelRequirements: [{ skill: { name: "Forestry" }, level: 1 }],
+    }],
+  };
+  const woodLogOutputDetail = {
+    item: { id: "338345776", name: "Exquisite Wood Log Output", itemType: 0, tag: "Wood Log", tier: 5 },
+    craftingRecipes: [{
+      id: "split-trunk",
+      name: "Split into Exquisite Wood Log Output",
+      craftedItemStacks: [{ item_id: "338345776", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "1004", item_type: "cargo", quantity: 1 }],
+      consumedItems: [{ id: "1004", name: "Exquisite Trunk", itemType: 1, tag: "Trunk", tier: 5 }],
+      levelRequirements: [{ skill: { name: "Forestry" }, level: 50 }],
+    }],
+    itemListPossibilities: [{
+      targetId: "5010001",
+      targetItem: { id: "5010001", name: "Exquisite Wood Log", tier: 5 },
+      quantity: 6,
+      chance: 0.94,
+      isCargo: false,
+    }, {
+      targetId: "5010001",
+      targetItem: { id: "5010001", name: "Exquisite Wood Log", tier: 5 },
+      quantity: 6,
+      chance: 0.06,
+      isCargo: false,
+    }],
+  };
+  const trunkDetail = {
+    cargo: { id: "1004", name: "Exquisite Trunk", itemType: 1, tag: "Trunk", tier: 5 },
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "5010001", kind: "items", name: "Exquisite Wood Log", quantity: 18, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "5010001"), woodLogDetail],
+      [recipeKey("items", "338345776"), woodLogOutputDetail],
+      [recipeKey("cargo", "1004"), trunkDetail],
+    ]),
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "possibility:split-trunk:items:5010001");
+  assert.equal(plan.materials.some((material) => material.name === "Exquisite Wood Log Package"), false);
+  const trunk = plan.materials.find((material) => material.name === "Exquisite Trunk");
+  assert.equal(trunk?.kind, "cargo");
+  assert.equal(trunk?.tag, "Trunk");
+  assert.equal(trunk?.tier, 5);
+  assert.equal(trunk?.section, "Forestry");
+  assert.equal(trunk?.required, 3);
 });

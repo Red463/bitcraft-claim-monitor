@@ -89,6 +89,24 @@ test("public craft table actions keep usable click targets", () => {
   assert.match(mapLinkRule, /min-height:\s*28px\b/);
   assert.match(mapLinkRule, /padding:\s*0\s+4px\b/);
 });
+
+test("craft planning modals keep close buttons and target actions properly spaced", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const overrideHeaderRule = css.match(/\.craft-plan-section-override \.modal-header\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const overrideCloseRule = css.match(/\.craft-plan-section-override \.modal-header \.icon-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const targetRowRule = css.match(/\.craft-plan-target-editor-row\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const targetRemoveRule = css.match(/\.craft-plan-target-editor-row > \.toolbar-button\.danger\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(overrideHeaderRule, /position:\s*relative\b/);
+  assert.match(overrideHeaderRule, /padding:\s*18px\s+54px\s+12px\s+18px\b/);
+  assert.match(overrideCloseRule, /position:\s*absolute\b/);
+  assert.match(overrideCloseRule, /top:\s*14px\b/);
+  assert.match(overrideCloseRule, /right:\s*14px\b/);
+  assert.match(targetRowRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+140px\s+auto\b/);
+  assert.match(targetRowRule, /gap:\s*14px\b/);
+  assert.match(targetRemoveRule, /justify-self:\s*end\b/);
+  assert.match(targetRemoveRule, /min-width:\s*112px\b/);
+});
 test("bot dashboard shell styles live in the bot dashboard stylesheet", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const botCssUrl = new URL("../src/styles/bot-dashboard.css", import.meta.url);

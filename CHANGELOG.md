@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -8,6 +8,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 
 ## [Unreleased]
+
+## [0.32.0-beta.13] - 2026-07-09
+
+### Fixed
+
+- Fixed Craft Planning recipe expansion so BitJita cargo-derived routes, such as trunks producing wood logs, are discovered from the cargo API and counted in the needs board.
+- Improved Craft Planning route selection so transport package and unpack recipes stay out of normal crafting calculations when a real production route is available.
+- Improved Craft Planning modal spacing and documented the item/cargo API rules used by the planner.
 
 ## [0.32.0-beta.12] - 2026-07-09
 
@@ -2740,3 +2748,4 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Profession tools were incorrectly read from equipped hand slots; they are now sourced from the public Toolbelt inventory returned by the BitJita API.
 - Selected-member Production cards no longer flash into a pending Toolbelt-check state during each background refresh.
 - Passive craft recipe templates now resolve numbered placeholders such as tanning recipes returned as `Tan {1}`.
+
