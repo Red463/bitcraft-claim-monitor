@@ -1216,8 +1216,10 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
   }
+  const computedPlan = await computedCraftPlanResponse(claimId).catch((error) => ({ error: error instanceof Error ? error.message : String(error), steps: [], materials: [], targets: [] }));
   return {
     config,
+    plan: computedPlan,
     sources: {
       storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
       players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),

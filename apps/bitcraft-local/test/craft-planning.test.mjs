@@ -230,6 +230,7 @@ test("computeCraftPlan enriches emitted materials from fetched item details", ()
   assert.equal(berry?.tag, "Berry");
   assert.equal(berry?.tier, 6);
   assert.equal(berry?.required, 10);
+  assert.equal(berry?.section, "Foraging");
 });
 test("computeCraftPlan leaves missing tier null when API detail is unavailable", () => {
   const detail = {
@@ -273,6 +274,7 @@ test("computeCraftPlan exposes source locations and recipe alternatives for mate
   assert.equal(oceanFish.recipeUsages[0].output.name, "Fish Oil");
   assert.equal(oceanFish.recipeUsages[0].selectedRecipeId, "ocean-route");
   assert.deepEqual(oceanFish.recipeUsages[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
+  assert.deepEqual(plan.steps[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
 });
 
 test("computeCraftPlan applies per-item multipliers and records unavailable sources", () => {
@@ -331,4 +333,30 @@ test("computeCraftPlan keeps uncrafted final targets out of gather next", () => 
   assert.equal(plan.targets[0].missing, 25);
   assert.equal(plan.materials.find((material) => material.name === "Advanced Codex")?.missing, 25);
   assert.deepEqual(plan.gatherNext, []);
+});
+
+test("computeCraftPlan keeps refined materials under their natural profession instead of Scholar", () => {
+  const refinedPlankDetail = {
+    item: { id: "305", name: "Refined Simple Plank", itemType: 0, tag: "Refined Plank", tier: 2 },
+    craftingRecipes: [{
+      id: "refine-plank-route",
+      name: "Research Refined Simple Plank",
+      craftedItemStacks: [{ item_id: "305", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "300", item_type: "item", quantity: 5 }],
+      consumedItems: [{ id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Scholar" }, level: 20 }],
+    }],
+  };
+  const plankDetail = { item: { id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 1 }, craftingRecipes: [] };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "305", kind: "items", name: "Refined Simple Plank", quantity: 10, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "305"), refinedPlankDetail],
+      [recipeKey("items", "300"), plankDetail],
+    ]),
+  });
+
+  const refinedPlank = plan.materials.find((material) => material.name === "Refined Simple Plank");
+  assert.equal(refinedPlank?.section, "Carpentry");
 });

@@ -87,7 +87,10 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
 
   for (const material of materials) {
     const missing = Number(material.missing) || 0;
-    if (missing <= 0 || material.isTarget || targetKeys.has(itemKey(material))) continue;
+    const required = Number(material.required) || 0;
+    const recipeUsages = Array.isArray(material.recipeUsages) ? material.recipeUsages : [];
+    if (material.isTarget || targetKeys.has(itemKey(material))) continue;
+    if (required <= 0 || (missing <= 0 && recipeUsages.length === 0)) continue;
     const section = String(material.section ?? "Other");
     const rowName = rowNameForNeed(material);
     const column = columnForNeed(material);
@@ -96,7 +99,6 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     if (!rows.has(rowName)) rows.set(rowName, { name: rowName, maxMissing: 0, cells: new Map() });
     const row = rows.get(rowName)!;
     const existing = row.cells.get(column);
-    const required = Number(material.required) || 0;
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
     if (existing) {
@@ -108,7 +110,7 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     } else {
       row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress });
     }
-    row.maxMissing = Math.max(row.maxMissing, missing);
+    row.maxMissing = Math.max(row.maxMissing, missing > 0 ? missing : required);
   }
 
   return [...groups.entries()]

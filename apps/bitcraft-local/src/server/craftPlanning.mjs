@@ -138,6 +138,10 @@ function recipesForTarget(detail, target) {
     .sort((a, b) => recipeSortScore(a) - recipeSortScore(b));
 }
 
+function recipeLabel(recipe) {
+  return String(recipe?.label ?? recipe?.name ?? recipe?.recipeName ?? recipeId(recipe) ?? "Recipe");
+}
+
 function recipeId(recipe) {
   return String(recipe?.id ?? recipe?.name ?? "");
 }
@@ -189,16 +193,28 @@ function addRequired(map, target, quantity, section) {
   map.set(key, current);
 }
 
+function naturalSectionForMaterial(material) {
+  const text = `${material?.tag ?? ""} ${material?.name ?? ""}`.toLowerCase();
+  if (/plank|stripped wood|wood polish|woodworking|shipwright|empty bucket/.test(text)) return "Carpentry";
+  if (/brick|mortar|potter|glass|vial|masonry|building material/.test(text)) return "Masonry";
+  if (/cloth|thread|tailor|wispweave|fabric|clothmaker/.test(text)) return "Tailoring";
+  if (/leather|hide|pelt|boot|glove/.test(text)) return "Leatherworking";
+  if (/fish|bait|shell/.test(text)) return "Fishing";
+  if (/animal|hair|meat/.test(text)) return "Hunting";
+  if (/seed|crop|vegetable|bulb|starbulb|flax|grain/.test(text)) return "Farming";
+  if (/ore|stone|gem|coal|pebble|boulder/.test(text)) return "Mining";
+  if (/wood log|log|branch|bark|tree/.test(text)) return "Forestry";
+  if (/mushroom|herb|flower|fiber|plant|clay|sand|gypsite|citric|berry/.test(text)) return "Foraging";
+  if (/research|codex|pigment|scholar/.test(text)) return "Scholar";
+  if (/food|meal|sandwich|oil|soup|roasted|cooked/.test(text)) return "Cooking";
+  return null;
+}
+
 function sectionForMaterial(material, recipe) {
+  const natural = naturalSectionForMaterial(material);
+  if (natural) return natural;
   const skill = recipe?.levelRequirements?.[0]?.skill?.name ?? recipe?.skillName;
   if (skill) return String(skill);
-  const text = `${material?.tag ?? ""} ${material?.name ?? ""}`.toLowerCase();
-  if (/fish/.test(text)) return "Fishing";
-  if (/animal|hide|pelt|hair|meat/.test(text)) return "Hunting";
-  if (/seed|crop|vegetable|bulb|starbulb|flax/.test(text)) return "Farming";
-  if (/ore|stone|gem|coal/.test(text)) return "Mining";
-  if (/wood|log|plank|branch|bark/.test(text)) return "Forestry";
-  if (/mushroom|herb|flower|fiber|plant/.test(text)) return "Foraging";
   return "Other";
 }
 
@@ -262,7 +278,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
       outputPerCraft,
       section,
       buildingName: selected.buildingName ?? null,
-      alternatives: recipes.length,
+      alternatives: recipes.map((recipe) => ({ id: recipeId(recipe), label: recipeLabel(recipe), buildingName: recipe.buildingName ?? recipe.building_name ?? null })),
       selectedRecipeId: recipeId(selected),
     });
   }
@@ -428,3 +444,5 @@ export function computeCraftPlan({
     },
   };
 }
+
+

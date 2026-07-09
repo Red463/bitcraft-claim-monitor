@@ -28,3 +28,49 @@ test("buildNeedsBoard groups enriched API items by tag and authoritative tier", 
   assert.equal(board[0].rows[0].cells.has("Materials"), false);
   assert.equal(board[0].rows[0].cells.get("T6")?.missing, 42);
 });
+
+test("buildNeedsBoard keeps satisfied prerequisites when an unfinished recipe still needs them", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:102001",
+      id: "102001",
+      kind: "items",
+      name: "Simple Plank",
+      tag: "Plank",
+      tier: 1,
+      section: "Carpentry",
+      required: 1880,
+      available: 2500,
+      inProgress: 0,
+      missing: 0,
+      recipeUsages: [{ output: { name: "Refined Simple Plank" } }],
+    },
+  ], []);
+
+  assert.equal(board.length, 1);
+  const cell = board[0].rows[0].cells.get("T1");
+  assert.equal(cell?.missing, 0);
+  assert.equal(cell?.required, 1880);
+  assert.equal(cell?.available, 2500);
+});
+
+test("buildNeedsBoard ignores fully stocked items that are not used by the current recipe chain", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:102001",
+      id: "102001",
+      kind: "items",
+      name: "Simple Plank",
+      tag: "Plank",
+      tier: 1,
+      section: "Carpentry",
+      required: 10,
+      available: 100,
+      inProgress: 0,
+      missing: 0,
+      recipeUsages: [],
+    },
+  ], []);
+
+  assert.deepEqual(board, []);
+});

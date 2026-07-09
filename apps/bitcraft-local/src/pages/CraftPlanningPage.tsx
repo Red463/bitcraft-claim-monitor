@@ -27,10 +27,11 @@ function quantity(value: unknown) {
 
 function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
+  const satisfied = cell.missing <= 0;
   return (
-    <button className="craft-plan-need-cell" type="button" title={cell.name} onClick={() => onSelect(cell)}>
-      <strong>{quantity(cell.missing)}</strong>
-      <small>{quantity(cell.available)}/{quantity(cell.required)}</small>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : ""}`} type="button" title={cell.name} onClick={() => onSelect(cell)}>
+      <strong>{quantity(satisfied ? cell.available : cell.missing)}</strong>
+      <small>{satisfied ? quantity(cell.required) : `${quantity(cell.available)}/${quantity(cell.required)}`}</small>
     </button>
   );
 }

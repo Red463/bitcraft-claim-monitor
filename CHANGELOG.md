@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.10] - 2026-07-09
+
+### Fixed
+
+- Fixed Craft Planning needs-board grouping so materials use BitJita item tags and tiers, keeping refined materials under the relevant activity instead of Scholar.
+- Improved Craft Planning route management so admins can review the recipe chain in use and change available recipe alternatives from the manager.
+- Improved Craft Planning needs-board cells so fully stocked prerequisites remain visible while they are still needed for unfinished parent crafts.
+
 ## [0.32.0-beta.9] - 2026-07-08
 
 ### Fixed

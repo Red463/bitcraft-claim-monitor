@@ -83,6 +83,12 @@
 .craft-plan-preset-card span { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
 .craft-plan-preset-empty { display: grid; gap: 4px; border: 1px dashed var(--border); border-radius: 8px; padding: 12px; color: var(--muted); }
 .craft-plan-preset-empty strong { color: var(--text); }
+.craft-plan-route-overview-list { display: grid; gap: 10px; }
+.craft-plan-route-overview-card { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.2fr) auto; gap: 12px; align-items: end; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(8, 13, 20, 0.58); padding: 11px; }
+.craft-plan-route-overview-card > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.craft-plan-route-overview-card strong { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.craft-plan-route-overview-card small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.craft-plan-route-overview-card .legend { align-self: center; justify-self: end; }
 @media (max-width: 900px) {
   .craft-plan-manager-backdrop { padding: 10px; }
   .craft-plan-manager { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
@@ -116,6 +122,10 @@
 .craft-plan-need-cell strong { color: var(--accent); font-size: 1.02rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-need-cell small { color: rgba(240, 198, 79, 0.68); font-size: 0.66rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-need-empty { color: rgba(139, 159, 184, 0.22); font-size: 0.8rem; }
+.craft-plan-need-cell.is-satisfied strong { color: var(--positive); }
+.craft-plan-need-cell.is-satisfied small { color: rgba(78, 226, 138, 0.68); }
+.craft-plan-need-cell.is-satisfied:hover,
+.craft-plan-need-cell.is-satisfied:focus-visible { background: rgba(78, 226, 138, 0.08); outline-color: rgba(78, 226, 138, 0.42); }
 @media (max-width: 1100px) {
   .craft-plan-summary-band { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
 }
