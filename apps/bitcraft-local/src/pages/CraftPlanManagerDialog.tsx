@@ -17,11 +17,12 @@ type CraftPlanConfig = {
   sourceRules: { storageContainerIds: string[]; playerIds: string[]; deployableContainerIds: string[] };
   routeOverrides: Record<string, string>;
   sectionOverrides: Record<string, string>;
+  rowNameOverrides: Record<string, string>;
   multipliers: Record<string, { multiplier: number; note?: string }>;
 };
 
 function emptyConfig(): CraftPlanConfig {
-  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, multipliers: {} };
+  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {} };
 }
 
 function itemKind(item: AnyRecord) {

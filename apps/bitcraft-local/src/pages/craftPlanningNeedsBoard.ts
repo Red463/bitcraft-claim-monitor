@@ -32,9 +32,11 @@ export type NeedCell = {
 
 export type NeedRow = {
   name: string;
+  apiName: string;
   overrideKey: string;
   apiSection: string;
   sectionOverride: string | null;
+  rowNameOverride: string | null;
   maxMissing: number;
   cells: Map<string, NeedCell>;
 };
@@ -100,15 +102,17 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     if (material.isTarget || targetKeys.has(itemKey(material))) continue;
     if (required <= 0 || (missing <= 0 && recipeUsages.length === 0)) continue;
     const section = String(material.section ?? "Other");
-    const rowName = rowNameForNeed(material);
+    const apiName = rowNameForNeed(material);
     const rowOverrideKey = String(material.sectionOverrideKey ?? rowOverrideKeyForNeed(material));
+    const rowNameOverride = material.rowNameOverride == null ? null : String(material.rowNameOverride).trim() || null;
+    const rowName = rowNameOverride || apiName;
     const apiSection = String(material.apiSection ?? material.section ?? "Other");
     const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
     const column = columnForNeed(material);
     if (!groups.has(section)) groups.set(section, new Map());
     const rows = groups.get(section)!;
-    if (!rows.has(rowName)) rows.set(rowName, { name: rowName, overrideKey: rowOverrideKey, apiSection, sectionOverride, maxMissing: 0, cells: new Map() });
-    const row = rows.get(rowName)!;
+    if (!rows.has(rowOverrideKey)) rows.set(rowOverrideKey, { name: rowName, apiName, overrideKey: rowOverrideKey, apiSection, sectionOverride, rowNameOverride, maxMissing: 0, cells: new Map() });
+    const row = rows.get(rowOverrideKey)!;
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;

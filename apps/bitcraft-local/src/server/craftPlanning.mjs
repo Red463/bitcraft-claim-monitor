@@ -80,6 +80,12 @@ export function normalizeCraftPlanConfig(input = {}) {
     const section = String(value ?? "").trim();
     if (cleanKey && PLAN_SECTIONS.has(section)) sectionOverrides[cleanKey] = section;
   }
+  const rowNameOverrides = {};
+  for (const [key, value] of Object.entries(raw.rowNameOverrides ?? {})) {
+    const cleanKey = String(key ?? "").trim();
+    const cleanValue = String(value ?? "").trim().slice(0, 80);
+    if (cleanKey && cleanValue) rowNameOverrides[cleanKey] = cleanValue;
+  }
   const multipliers = {};
   for (const [key, value] of Object.entries(raw.multipliers ?? {})) {
     const cleanKey = String(key ?? "").trim();
@@ -103,6 +109,7 @@ export function normalizeCraftPlanConfig(input = {}) {
     },
     routeOverrides,
     sectionOverrides,
+    rowNameOverrides,
     multipliers,
   };
 }
@@ -487,6 +494,7 @@ export function computeCraftPlan({
     const apiSection = item.section || sectionForMaterial(enrichedItem, null);
     const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
     const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;
+    const rowNameOverride = normalized.rowNameOverrides[sectionOverrideKey] ?? null;
     return {
       ...item,
       ...enrichedItem,
@@ -498,6 +506,7 @@ export function computeCraftPlan({
       apiSection,
       sectionOverrideKey,
       sectionOverride,
+      rowNameOverride,
       section: sectionOverride || apiSection,
       isTarget: targetKeys.has(item.key),
       multiplier,

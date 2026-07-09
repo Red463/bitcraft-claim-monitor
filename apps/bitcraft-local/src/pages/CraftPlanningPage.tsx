@@ -68,7 +68,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
-  const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string } | null>(null);
+  const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
 
   React.useEffect(() => {
     fetch(`${LOCAL_API}/admin/me`)
@@ -111,21 +111,26 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
+  const currentRowNameOverrides = config.rowNameOverrides ?? {};
   const planSteps = Array.isArray(plan?.steps) ? plan.steps : [];
   const selectedNeedSources = selectedNeed ? groupNeedCellSources(selectedNeed) : [];
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, planSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const sectionOverrideDialog = selectedSectionOverride ? (
     <div className="modal-backdrop craft-plan-section-override-backdrop" role="presentation">
-      <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board section">
+      <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board row">
         <header className="modal-header">
           <div>
-            <h2>Move {selectedSectionOverride.row.name}</h2>
-            <p>API default: {selectedSectionOverride.row.apiSection}. This override applies to the same row across craft goals.</p>
+            <h2>Edit {selectedSectionOverride.row.name}</h2>
+            <p>API default: {selectedSectionOverride.row.apiName} in {selectedSectionOverride.row.apiSection}. Overrides apply to the same row across craft goals.</p>
           </div>
-          <button className="icon-button" type="button" onClick={() => setSelectedSectionOverride(null)} aria-label="Close section override"><X size={18} /></button>
+          <button className="icon-button" type="button" onClick={() => setSelectedSectionOverride(null)} aria-label="Close row override"><X size={18} /></button>
         </header>
         <div className="craft-plan-section-override-body">
+          <label className="field">
+            <span>Row display name</span>
+            <input value={selectedSectionOverride.name} placeholder={selectedSectionOverride.row.apiName} onChange={(event) => setSelectedSectionOverride((current) => current ? { ...current, name: event.target.value } : current)} />
+          </label>
           <label className="field">
             <span>Needs board section</span>
             <select value={selectedSectionOverride.section} onChange={(event) => setSelectedSectionOverride((current) => current ? { ...current, section: event.target.value } : current)}>
@@ -133,8 +138,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             </select>
           </label>
           <div className="modal-actions">
-            <button className="toolbar-button" type="button" onClick={() => void saveSectionOverride(selectedSectionOverride.row, null)}>Use API default</button>
-            <button className="toolbar-button primary" type="button" onClick={() => void saveSectionOverride(selectedSectionOverride.row, selectedSectionOverride.section)}>Save section</button>
+            <button className="toolbar-button" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, null, null)}>Use API defaults</button>
+            <button className="toolbar-button primary" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, selectedSectionOverride.section, selectedSectionOverride.name)}>Save row</button>
           </div>
         </div>
       </section>
@@ -261,17 +266,22 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   }, [sectionFilters, selectedSection]);
 
 
-  async function saveSectionOverride(row: NeedRow, section: string | null) {
+  async function saveRowOverride(row: NeedRow, section: string | null, name: string | null) {
     if (!canManage || !adminAuth?.csrfToken || !row.overrideKey) return;
     setRouteStatus(null);
     setRouteError(null);
     try {
-      const nextOverrides = { ...currentSectionOverrides };
-      if (!section || section === row.apiSection) delete nextOverrides[row.overrideKey];
-      else nextOverrides[row.overrideKey] = section;
+      const nextSectionOverrides = { ...currentSectionOverrides };
+      if (!section || section === row.apiSection) delete nextSectionOverrides[row.overrideKey];
+      else nextSectionOverrides[row.overrideKey] = section;
+      const nextRowNameOverrides = { ...currentRowNameOverrides };
+      const cleanName = String(name ?? "").trim();
+      if (!cleanName || cleanName === row.apiName) delete nextRowNameOverrides[row.overrideKey];
+      else nextRowNameOverrides[row.overrideKey] = cleanName;
       const nextConfig = {
         ...config,
-        sectionOverrides: nextOverrides,
+        sectionOverrides: nextSectionOverrides,
+        rowNameOverrides: nextRowNameOverrides,
       };
       const response = await fetch(LOCAL_API + "/admin/craft-plan", {
         method: "PUT",
@@ -283,7 +293,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      setRouteStatus(section ? "Needs board section updated." : "Needs board section reset to API default.");
+      setRouteStatus(section || cleanName ? "Needs board row updated." : "Needs board row reset to API defaults.");
       setSelectedSectionOverride(null);
       setManagerRefreshToken((value) => value + 1);
     } catch (err) {
@@ -388,7 +398,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <tbody>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
-                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Move ${row.name} to another section`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection })}>{row.name}</button> : row.name}</th>
+                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
                             {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), setSelectedNeed)}</td>)}
                           </tr>
                         ))}

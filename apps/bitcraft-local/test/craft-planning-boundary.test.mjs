@@ -29,7 +29,10 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /craft-plan-section-filters/);
   assert.match(page, /craft-plan-row-section-button/);
   assert.match(page, /sectionOverrides/);
-  assert.match(page, /Use API default/);
+  assert.match(page, /rowNameOverrides/);
+  assert.match(page, /Row display name/);
+  assert.match(page, /Use API defaults/);
+  assert.match(page, /Save row/);
   assert.match(page, /selectedNeed/);
   assert.match(page, /from "react-dom"/);
   assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);

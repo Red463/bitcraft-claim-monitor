@@ -122,3 +122,27 @@ test("buildNeedsBoard exposes stable section override row metadata", () => {
   assert.equal(board[0].rows[0].apiSection, "Scholar");
   assert.equal(board[0].rows[0].sectionOverride, "Carpentry");
 });
+
+test("buildNeedsBoard uses row name overrides without changing the stable row key", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:305",
+      id: "305",
+      kind: "items",
+      name: "Refined Simple Plank",
+      tag: "Refined Plank",
+      tier: 2,
+      section: "Scholar",
+      apiSection: "Scholar",
+      sectionOverrideKey: "tag:Refined Plank",
+      rowNameOverride: "Finished Planks",
+      required: 10,
+      missing: 10,
+    },
+  ], []);
+
+  assert.equal(board[0].rows[0].name, "Finished Planks");
+  assert.equal(board[0].rows[0].apiName, "Refined Plank");
+  assert.equal(board[0].rows[0].overrideKey, "tag:Refined Plank");
+  assert.equal(board[0].rows[0].cells.get("T2")?.name, "Refined Simple Plank");
+});

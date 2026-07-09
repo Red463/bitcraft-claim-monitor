@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.15] - 2026-07-09
+
+### Added
+
+- Added Craft Planning needs-board row name overrides so admins can rename rows while keeping BitJita API tags and tiers as the calculation source of truth.
+
 ## [0.32.0-beta.14] - 2026-07-09
 
 ### Changed

@@ -368,16 +368,18 @@
   padding: 18px 20px 20px;
 }
 .craft-plan-section-override .modal-header {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 14px;
-  padding: 20px;
+  padding: 18px 54px 12px 18px;
   border-bottom: 1px solid rgba(139, 159, 184, 0.18);
 }
 .craft-plan-section-override .modal-header .icon-button {
-  position: static;
-  flex: 0 0 auto;
+  position: absolute;
+  top: 14px;
+  right: 14px;
 }
 .craft-plan-section-override .modal-header h2 {
   margin: 0;

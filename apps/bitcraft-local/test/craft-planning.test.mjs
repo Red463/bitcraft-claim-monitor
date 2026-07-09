@@ -547,3 +547,43 @@ test("computeCraftPlan expands item list possibilities through cargo processing 
   assert.equal(trunk?.section, "Forestry");
   assert.equal(trunk?.required, 3);
 });
+
+test("normalizeCraftPlanConfig preserves valid row name overrides", () => {
+  const config = normalizeCraftPlanConfig({
+    rowNameOverrides: {
+      "tag:Refined Plank": "Finished Planks",
+      " ": "Ignored",
+      "tag:Empty": " ",
+    },
+  });
+
+  assert.deepEqual(config.rowNameOverrides, {
+    "tag:Refined Plank": "Finished Planks",
+  });
+});
+
+test("computeCraftPlan applies row name overrides after API row identity resolution", () => {
+  const detail = {
+    item: { id: "305", name: "Refined Simple Plank", itemType: 0, tag: "Refined Plank", tier: 2 },
+    craftingRecipes: [{
+      id: "refine-plank-route",
+      name: "Research Refined Simple Plank",
+      craftedItemStacks: [{ item_id: "305", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "300", item_type: "item", quantity: 5 }],
+      consumedItems: [{ id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Scholar" }, level: 20 }],
+    }],
+  };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "305", kind: "items", name: "Refined Simple Plank", quantity: 10, itemType: 0 }],
+      rowNameOverrides: { "tag:Refined Plank": "Finished Planks" },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "305"), detail]]),
+  });
+
+  const material = plan.materials.find((item) => item.name === "Refined Simple Plank");
+  assert.equal(material?.sectionOverrideKey, "tag:Refined Plank");
+  assert.equal(material?.rowNameOverride, "Finished Planks");
+});

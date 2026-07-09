@@ -28,14 +28,17 @@ test("Craft planning section override dialog has a structured viewport modal hea
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const headerMatch = css.match(/\.craft-plan-section-override \.modal-header\s*\{([^}]+)\}/);
   assert.ok(headerMatch, "section override header CSS should exist");
+  assert.match(headerMatch[1], /position:\s*relative/);
   assert.match(headerMatch[1], /display:\s*grid/);
   assert.match(headerMatch[1], /grid-template-columns:\s*minmax\(0, 1fr\) auto/);
   assert.match(headerMatch[1], /gap:\s*14px/);
-  assert.match(headerMatch[1], /padding:\s*20px/);
+  assert.match(headerMatch[1], /padding:\s*18px 54px 12px 18px/);
 
   const closeMatch = css.match(/\.craft-plan-section-override \.modal-header \.icon-button\s*\{([^}]+)\}/);
   assert.ok(closeMatch, "section override close-button CSS should exist");
-  assert.match(closeMatch[1], /position:\s*static/);
+  assert.match(closeMatch[1], /position:\s*absolute/);
+  assert.match(closeMatch[1], /top:\s*14px/);
+  assert.match(closeMatch[1], /right:\s*14px/);
 
   const bodyMatch = css.match(/\.craft-plan-section-override-body\s*\{([^}]+)\}/);
   assert.ok(bodyMatch, "section override body CSS should exist");
