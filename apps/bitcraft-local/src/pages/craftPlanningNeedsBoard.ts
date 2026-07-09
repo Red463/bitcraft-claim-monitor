@@ -2,7 +2,7 @@ import type { AnyRecord } from "../main-app-data";
 
 export const NEED_COLUMNS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "Materials"];
 
-const SECTION_ORDER = [
+export const NEED_SECTIONS = [
   "Carpentry",
   "Construction",
   "Cooking",
@@ -20,8 +20,6 @@ const SECTION_ORDER = [
   "Other",
 ];
 
-const FALLBACK_TIER_PREFIX_PATTERN = /^(Rough|Basic|Simple|Sturdy|Fine|Exquisite|Advanced|Peerless)\s+/i;
-
 export type NeedCell = {
   item: AnyRecord;
   items: AnyRecord[];
@@ -34,6 +32,9 @@ export type NeedCell = {
 
 export type NeedRow = {
   name: string;
+  overrideKey: string;
+  apiSection: string;
+  sectionOverride: string | null;
   maxMissing: number;
   cells: Map<string, NeedCell>;
 };
@@ -55,6 +56,7 @@ export function itemName(item: AnyRecord) {
 
 function itemTag(item: AnyRecord) {
   const tag = String(item.tag ?? item.itemTag ?? item.categoryTag ?? "").trim();
+  if (/^trade\s+good$/i.test(tag)) return null;
   return tag || null;
 }
 
@@ -66,7 +68,13 @@ function itemTier(item: AnyRecord) {
 function rowNameForNeed(item: AnyRecord) {
   const tag = itemTag(item);
   if (tag) return tag;
-  return itemName(item).trim().replace(FALLBACK_TIER_PREFIX_PATTERN, "") || itemName(item);
+  return itemName(item);
+}
+
+function rowOverrideKeyForNeed(item: AnyRecord) {
+  const tag = itemTag(item);
+  if (tag) return `tag:${tag}`;
+  return `item:${itemKey(item)}`;
 }
 
 function columnForNeed(item: AnyRecord) {
@@ -75,8 +83,8 @@ function columnForNeed(item: AnyRecord) {
 }
 
 function sortSectionName(a: string, b: string) {
-  const ai = SECTION_ORDER.indexOf(a);
-  const bi = SECTION_ORDER.indexOf(b);
+  const ai = NEED_SECTIONS.indexOf(a);
+  const bi = NEED_SECTIONS.indexOf(b);
   if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   return a.localeCompare(b);
 }
@@ -93,10 +101,13 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     if (required <= 0 || (missing <= 0 && recipeUsages.length === 0)) continue;
     const section = String(material.section ?? "Other");
     const rowName = rowNameForNeed(material);
+    const rowOverrideKey = String(material.sectionOverrideKey ?? rowOverrideKeyForNeed(material));
+    const apiSection = String(material.apiSection ?? material.section ?? "Other");
+    const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
     const column = columnForNeed(material);
     if (!groups.has(section)) groups.set(section, new Map());
     const rows = groups.get(section)!;
-    if (!rows.has(rowName)) rows.set(rowName, { name: rowName, maxMissing: 0, cells: new Map() });
+    if (!rows.has(rowName)) rows.set(rowName, { name: rowName, overrideKey: rowOverrideKey, apiSection, sectionOverride, maxMissing: 0, cells: new Map() });
     const row = rows.get(rowName)!;
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;

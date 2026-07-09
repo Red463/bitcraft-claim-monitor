@@ -25,6 +25,9 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Needs Board/);
   assert.match(page, /craft-plan-needs-board/);
   assert.match(page, /craft-plan-section-filters/);
+  assert.match(page, /craft-plan-row-section-button/);
+  assert.match(page, /sectionOverrides/);
+  assert.match(page, /Use API default/);
   assert.match(page, /selectedNeed/);
   assert.match(page, /from "react-dom"/);
   assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);

@@ -74,3 +74,51 @@ test("buildNeedsBoard ignores fully stocked items that are not used by the curre
 
   assert.deepEqual(board, []);
 });
+test("buildNeedsBoard splits generic trade-good tags by actual item name", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:1",
+      id: "1",
+      kind: "items",
+      name: "Guild Ledger",
+      tag: "Trade Good",
+      section: "Carpentry",
+      required: 10,
+      missing: 10,
+    },
+    {
+      key: "items:2",
+      id: "2",
+      kind: "items",
+      name: "Merchant Contract",
+      tag: "Trade Good",
+      section: "Carpentry",
+      required: 5,
+      missing: 5,
+    },
+  ], []);
+
+  assert.deepEqual(board[0].rows.map((row) => row.name).sort(), ["Guild Ledger", "Merchant Contract"]);
+});
+test("buildNeedsBoard exposes stable section override row metadata", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:305",
+      id: "305",
+      kind: "items",
+      name: "Refined Simple Plank",
+      tag: "Refined Plank",
+      tier: 2,
+      section: "Carpentry",
+      apiSection: "Scholar",
+      sectionOverrideKey: "tag:Refined Plank",
+      sectionOverride: "Carpentry",
+      required: 10,
+      missing: 10,
+    },
+  ], []);
+
+  assert.equal(board[0].rows[0].overrideKey, "tag:Refined Plank");
+  assert.equal(board[0].rows[0].apiSection, "Scholar");
+  assert.equal(board[0].rows[0].sectionOverride, "Carpentry");
+});

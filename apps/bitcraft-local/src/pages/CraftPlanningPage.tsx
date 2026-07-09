@@ -8,7 +8,7 @@ import { Info } from "../components/main/Stats";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
-import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, type NeedCell } from "./craftPlanningNeedsBoard";
+import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 
 const LOCAL_API = "/api/local";
 
@@ -74,6 +74,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
+  const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string } | null>(null);
 
   React.useEffect(() => {
     fetch(`${LOCAL_API}/admin/me`)
@@ -115,6 +116,33 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const sectionFilters = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
   const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
+  const currentSectionOverrides = config.sectionOverrides ?? {};
+  const sectionOverrideDialog = selectedSectionOverride ? (
+    <div className="modal-backdrop craft-plan-section-override-backdrop" role="presentation">
+      <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board section">
+        <header className="modal-header">
+          <div>
+            <h2>Move {selectedSectionOverride.row.name}</h2>
+            <p>API default: {selectedSectionOverride.row.apiSection}. This override applies to the same row across craft goals.</p>
+          </div>
+          <button className="icon-button" type="button" onClick={() => setSelectedSectionOverride(null)} aria-label="Close section override"><X size={18} /></button>
+        </header>
+        <div className="craft-plan-section-override-body">
+          <label className="field">
+            <span>Needs board section</span>
+            <select value={selectedSectionOverride.section} onChange={(event) => setSelectedSectionOverride((current) => current ? { ...current, section: event.target.value } : current)}>
+              {NEED_SECTIONS.map((section) => <option value={section} key={section}>{section}</option>)}
+            </select>
+          </label>
+          <div className="modal-actions">
+            <button className="toolbar-button" type="button" onClick={() => void saveSectionOverride(selectedSectionOverride.row, null)}>Use API default</button>
+            <button className="toolbar-button primary" type="button" onClick={() => void saveSectionOverride(selectedSectionOverride.row, selectedSectionOverride.section)}>Save section</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  ) : null;
+
   const needDetailDialog = selectedNeed ? (
     <div className="modal-backdrop craft-plan-need-detail-backdrop" role="presentation">
       <section className="modal craft-plan-need-detail" role="dialog" aria-modal="true" aria-label="Craft plan item details">
@@ -178,6 +206,36 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     if (selectedSection !== "all" && !sectionFilters.includes(selectedSection)) setSelectedSection("all");
   }, [sectionFilters, selectedSection]);
 
+
+  async function saveSectionOverride(row: NeedRow, section: string | null) {
+    if (!canManage || !adminAuth?.csrfToken || !row.overrideKey) return;
+    setRouteStatus(null);
+    setRouteError(null);
+    try {
+      const nextOverrides = { ...currentSectionOverrides };
+      if (!section || section === row.apiSection) delete nextOverrides[row.overrideKey];
+      else nextOverrides[row.overrideKey] = section;
+      const nextConfig = {
+        ...config,
+        sectionOverrides: nextOverrides,
+      };
+      const response = await fetch(LOCAL_API + "/admin/craft-plan", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": String(adminAuth.csrfToken),
+        },
+        body: JSON.stringify(nextConfig),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
+      setRouteStatus(section ? "Needs board section updated." : "Needs board section reset to API default.");
+      setSelectedSectionOverride(null);
+      setManagerRefreshToken((value) => value + 1);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : String(err));
+    }
+  }
   async function saveRouteOverride(outputKey: string, recipeId: string) {
     if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
     setRouteStatus(null);
@@ -276,7 +334,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <tbody>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
-                            <th>{row.name}</th>
+                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Move ${row.name} to another section`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection })}>{row.name}</button> : row.name}</th>
                             {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), setSelectedNeed)}</td>)}
                           </tr>
                         ))}
@@ -298,6 +356,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         </>
       )}
       {needDetailDialog ? createPortal(needDetailDialog, document.body) : null}
+      {sectionOverrideDialog ? createPortal(sectionOverrideDialog, document.body) : null}
       {canManage ? <CraftPlanManagerDialog open={managerOpen} onClose={() => setManagerOpen(false)} csrfToken={String(adminAuth?.csrfToken)} onSaved={() => setManagerRefreshToken((value) => value + 1)} /> : null}
     </div>
   );

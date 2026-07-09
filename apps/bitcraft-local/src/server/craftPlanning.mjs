@@ -1,4 +1,21 @@
 const DEFAULT_PLAN_NAME = "Settlement craft plan";
+const PLAN_SECTIONS = new Set([
+  "Carpentry",
+  "Construction",
+  "Cooking",
+  "Farming",
+  "Fishing",
+  "Foraging",
+  "Forestry",
+  "Hunting",
+  "Leatherworking",
+  "Masonry",
+  "Mining",
+  "Scholar",
+  "Smithing",
+  "Tailoring",
+  "Other",
+]);
 
 export function recipeKey(kind, id) {
   return `${String(kind) === "cargo" ? "cargo" : "items"}:${String(id ?? "").trim()}`;
@@ -57,6 +74,12 @@ export function normalizeCraftPlanConfig(input = {}) {
     const cleanValue = String(value ?? "").trim();
     if (cleanKey && cleanValue) routeOverrides[cleanKey] = cleanValue;
   }
+  const sectionOverrides = {};
+  for (const [key, value] of Object.entries(raw.sectionOverrides ?? {})) {
+    const cleanKey = String(key ?? "").trim();
+    const section = String(value ?? "").trim();
+    if (cleanKey && PLAN_SECTIONS.has(section)) sectionOverrides[cleanKey] = section;
+  }
   const multipliers = {};
   for (const [key, value] of Object.entries(raw.multipliers ?? {})) {
     const cleanKey = String(key ?? "").trim();
@@ -79,6 +102,7 @@ export function normalizeCraftPlanConfig(input = {}) {
       deployableContainerIds: uniqueStrings(raw.sourceRules?.deployableContainerIds),
     },
     routeOverrides,
+    sectionOverrides,
     multipliers,
   };
 }
@@ -193,29 +217,15 @@ function addRequired(map, target, quantity, section) {
   map.set(key, current);
 }
 
-function naturalSectionForMaterial(material) {
-  const text = `${material?.tag ?? ""} ${material?.name ?? ""}`.toLowerCase();
-  if (/plank|stripped wood|wood polish|woodworking|shipwright|empty bucket/.test(text)) return "Carpentry";
-  if (/brick|mortar|potter|glass|vial|masonry|building material/.test(text)) return "Masonry";
-  if (/cloth|thread|tailor|wispweave|fabric|clothmaker/.test(text)) return "Tailoring";
-  if (/leather|hide|pelt|boot|glove/.test(text)) return "Leatherworking";
-  if (/fish|bait|shell/.test(text)) return "Fishing";
-  if (/animal|hair|meat/.test(text)) return "Hunting";
-  if (/seed|crop|vegetable|bulb|starbulb|flax|grain/.test(text)) return "Farming";
-  if (/ore|stone|gem|coal|pebble|boulder/.test(text)) return "Mining";
-  if (/wood log|log|branch|bark|tree/.test(text)) return "Forestry";
-  if (/mushroom|herb|flower|fiber|plant|clay|sand|gypsite|citric|berry/.test(text)) return "Foraging";
-  if (/research|codex|pigment|scholar/.test(text)) return "Scholar";
-  if (/food|meal|sandwich|oil|soup|roasted|cooked/.test(text)) return "Cooking";
-  return null;
-}
-
 function sectionForMaterial(material, recipe) {
   const skill = recipe?.levelRequirements?.[0]?.skill?.name ?? recipe?.skillName;
-  if (skill) return String(skill);
-  const natural = naturalSectionForMaterial(material);
-  if (natural) return natural;
-  return "Other";
+  return skill ? String(skill) : "Other";
+}
+
+function sectionOverrideKeyForItem(item) {
+  const tag = String(item?.tag ?? item?.itemTag ?? item?.categoryTag ?? "").trim();
+  if (tag && !/^trade\s+good$/i.test(tag)) return `tag:${tag}`;
+  return `item:${recipeKey(item?.kind, item?.id)}`;
 }
 
 function routeAlternativesForUi(recipes, selected) {
@@ -415,6 +425,9 @@ export function computeCraftPlan({
     const bufferedRequired = Math.ceil(item.required * multiplier);
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
+    const apiSection = item.section || sectionForMaterial(enrichedItem, null);
+    const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
+    const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;
     return {
       ...item,
       ...enrichedItem,
@@ -423,7 +436,10 @@ export function computeCraftPlan({
       kind: item.kind,
       itemType: itemTypeFromKind(item.kind),
       required: item.required,
-      section: item.section || sectionForMaterial(enrichedItem, null),
+      apiSection,
+      sectionOverrideKey,
+      sectionOverride,
+      section: sectionOverride || apiSection,
       isTarget: targetKeys.has(item.key),
       multiplier,
       multiplierNote: normalized.multipliers[item.key]?.note ?? "",

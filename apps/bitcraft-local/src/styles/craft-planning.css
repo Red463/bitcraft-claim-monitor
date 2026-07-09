@@ -272,3 +272,48 @@
   .craft-plan-need-detail-grid { grid-template-columns: 1fr; }
   .craft-plan-need-detail-grid .nested-card { max-height: none; }
 }
+.craft-plan-row-section-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.craft-plan-row-section-button:hover,
+.craft-plan-row-section-button:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.craft-plan-section-override-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 6);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 4, 8, 0.72);
+  backdrop-filter: blur(4px);
+}
+.craft-plan-section-override {
+  width: min(460px, calc(100vw - 28px));
+  max-height: calc(100vh - 36px);
+  overflow: hidden;
+  border: 1px solid rgba(139, 159, 184, 0.34);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(16, 23, 33, 0.98), rgba(7, 11, 17, 0.99));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.58);
+}
+.craft-plan-section-override-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+}

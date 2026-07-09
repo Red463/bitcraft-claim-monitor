@@ -365,3 +365,65 @@ test("computeCraftPlan keeps refined materials under the profession that crafts 
   const refinedPlank = plan.materials.find((material) => material.name === "Refined Simple Plank");
   assert.equal(refinedPlank?.section, "Scholar");
 });
+test("computeCraftPlan does not infer sections from item names or tags without recipe API context", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "800", kind: "items", name: "Advanced Codex", quantity: 1, itemType: 0 }] }),
+    detailsByKey: new Map([[recipeKey("items", "800"), {
+      item: { id: "800", name: "Advanced Codex", itemType: 0, tag: "Research", tier: 5 },
+      craftingRecipes: [{
+        id: "codex-route",
+        name: "Advanced Codex",
+        craftedItemStacks: [{ item_id: "800", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [{ item_id: "305", item_type: "item", quantity: 25 }],
+        consumedItems: [{ id: "305", name: "Refined Simple Plank", itemType: 0, tag: "Refined Plank", tier: 2 }],
+      }],
+    }]]),
+  });
+
+  const refinedPlank = plan.materials.find((material) => material.name === "Refined Simple Plank");
+  assert.equal(refinedPlank?.section, "Other");
+});
+test("normalizeCraftPlanConfig preserves valid section overrides", () => {
+  const config = normalizeCraftPlanConfig({
+    sectionOverrides: {
+      "tag:Refined Plank": "Scholar",
+      "item:items:123": "Foraging",
+      "bad": "Not A Section",
+      "tag:Blank": "",
+    },
+  });
+
+  assert.deepEqual(config.sectionOverrides, {
+    "tag:Refined Plank": "Scholar",
+    "item:items:123": "Foraging",
+  });
+});
+
+test("computeCraftPlan applies row section overrides after API section resolution", () => {
+  const detail = {
+    item: { id: "305", name: "Refined Simple Plank", itemType: 0, tag: "Refined Plank", tier: 2 },
+    craftingRecipes: [{
+      id: "refine-plank-route",
+      name: "Research Refined Simple Plank",
+      craftedItemStacks: [{ item_id: "305", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "300", item_type: "item", quantity: 5 }],
+      consumedItems: [{ id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Scholar" }, level: 20 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "305", kind: "items", name: "Refined Simple Plank", quantity: 10, itemType: 0 }],
+      sectionOverrides: { "tag:Refined Plank": "Carpentry" },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "305"), detail]]),
+  });
+
+  const refinedPlank = plan.materials.find((material) => material.name === "Refined Simple Plank");
+  assert.equal(refinedPlank?.apiSection, "Scholar");
+  assert.equal(refinedPlank?.section, "Carpentry");
+  assert.equal(refinedPlank?.sectionOverrideKey, "tag:Refined Plank");
+  assert.equal(refinedPlank?.sectionOverride, "Carpentry");
+});

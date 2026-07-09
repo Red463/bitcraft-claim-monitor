@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.12] - 2026-07-09
+
+### Added
+
+- Added Craft Planning needs-board section overrides so admins can move rows to a different activity while keeping BitJita API data as the default source of truth.
+
 ## [0.32.0-beta.11] - 2026-07-09
 
 ### Fixed
