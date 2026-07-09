@@ -98,13 +98,16 @@ export function normalizeCraftPlanConfig(input = {}) {
       };
     }
   }
+  const playerIds = uniqueStrings(raw.sourceRules?.playerIds);
+  const craftPlayerIds = Array.isArray(raw.sourceRules?.craftPlayerIds) ? uniqueStrings(raw.sourceRules.craftPlayerIds) : playerIds;
   return {
     enabled: raw.enabled !== false,
     name: String(raw.name ?? DEFAULT_PLAN_NAME).trim().slice(0, 120) || DEFAULT_PLAN_NAME,
     targets: (Array.isArray(raw.targets) ? raw.targets : []).map(normalizeTarget).filter(Boolean).slice(0, 50),
     sourceRules: {
       storageContainerIds: uniqueStrings(raw.sourceRules?.storageContainerIds),
-      playerIds: uniqueStrings(raw.sourceRules?.playerIds),
+      playerIds,
+      craftPlayerIds,
       deployableContainerIds: uniqueStrings(raw.sourceRules?.deployableContainerIds),
     },
     routeOverrides,
@@ -302,6 +305,29 @@ function routeAlternativesForUi(recipes, selected) {
   return normalRecipes.some((recipe) => recipeId(recipe) === selectedId) ? normalRecipes : [selected, ...normalRecipes];
 }
 
+function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
+  const detail = detailsByKey.get(recipeKey(target.kind, target.id));
+  if (!detail) return [];
+  const normalizedTarget = mergeDetailTarget(detail, target);
+  const key = recipeKey(normalizedTarget.kind, normalizedTarget.id);
+  const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
+  const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
+  const visibleRecipes = routeAlternativesForUi(recipes, selected);
+  return visibleRecipes.map((recipe) => ({
+    id: recipeId(recipe),
+    recipeName: recipeLabel(recipe),
+    output: normalizedTarget,
+    inputs: recipeInputs(recipe).map((input, index) => ({
+      ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
+      quantity: toNumber(input.quantity),
+      quantityPerCraft: toNumber(input.quantity),
+    })),
+    buildingName: recipe.buildingName ?? recipe.building_name ?? null,
+    selectedRecipeId: recipeId(recipe),
+    alternatives: visibleRecipes.map((alternative) => ({ id: recipeId(alternative), label: recipeLabel(alternative), buildingName: alternative.buildingName ?? alternative.building_name ?? null })),
+  }));
+}
+
 function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
   const required = new Map();
   const steps = [];
@@ -326,7 +352,8 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
     addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
     if (quantityToCraft <= 0 || !selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
-    const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? selected.outputQuantity) || 1);
+    const rawOutputPerCraft = toNumber(output?.quantity ?? selected.outputQuantity) || 1;
+    const outputPerCraft = String(selected.id ?? "").startsWith("possibility:") ? Math.max(0.0001, rawOutputPerCraft) : Math.max(1, rawOutputPerCraft);
     const craftCount = Math.ceil(quantityToCraft / outputPerCraft);
     const section = sectionForMaterial(normalizedTarget, selected);
     const visibleRecipes = routeAlternativesForUi(recipes, selected);
@@ -419,6 +446,10 @@ function normalizeSourceItem(item) {
     kind,
     quantity: toNumber(item?.quantity ?? item?.qty ?? item?.amount),
     name: item?.name == null ? `Item #${id}` : String(item.name),
+    playerId: item?.playerId == null ? null : String(item.playerId),
+    playerName: item?.playerName == null && item?.crafterName == null ? null : String(item.playerName ?? item.crafterName),
+    buildingName: item?.buildingName == null ? null : String(item.buildingName),
+    craftId: item?.craftId == null && item?.id == null ? null : String(item.craftId ?? item.id),
   };
 }
 
@@ -433,7 +464,16 @@ function addSourceTotals(totals, sources, type, unavailable) {
       if (!item || item.quantity <= 0) continue;
       const current = totals.get(item.key) ?? { total: 0, sources: [] };
       current.total += item.quantity;
-      current.sources.push({ sourceId: String(source.sourceId ?? ""), label: String(source.label ?? type), type, quantity: item.quantity });
+      current.sources.push({
+        sourceId: String(source.sourceId ?? ""),
+        label: String(source.label ?? item.buildingName ?? type),
+        type,
+        quantity: item.quantity,
+        playerId: source.playerId == null ? item.playerId : String(source.playerId),
+        playerName: source.playerName == null ? item.playerName : String(source.playerName),
+        buildingName: source.buildingName == null ? item.buildingName : String(source.buildingName),
+        craftId: source.craftId == null ? item.craftId : String(source.craftId),
+      });
       totals.set(item.key, current);
     }
   }
@@ -471,7 +511,20 @@ export function computeCraftPlan({
   addSourceTotals(availableTotals, deployableSources, "Player deployable", unavailableSources);
 
   const activeTotals = new Map();
-  addSourceTotals(activeTotals, [{ sourceId: "active-crafts", label: "Active crafts", items: activeCrafts }], "Active craft", unavailableSources);
+  const craftPlayerIds = new Set(normalized.sourceRules.craftPlayerIds.map(String));
+  const activeCraftSources = (activeCrafts ?? [])
+    .filter((craft) => craftPlayerIds.has(String(craft?.playerId ?? craft?.playerEntityId ?? "")))
+    .map((craft) => ({
+      sourceId: String(craft.id ?? craft.craftId ?? "active-craft"),
+      label: String(craft.buildingName ?? "Active craft"),
+      type: "Active craft",
+      playerId: craft.playerId ?? craft.playerEntityId ?? null,
+      playerName: craft.playerName ?? craft.crafterName ?? null,
+      buildingName: craft.buildingName ?? null,
+      craftId: craft.id ?? craft.craftId ?? null,
+      items: [craft],
+    }));
+  addSourceTotals(activeTotals, activeCraftSources, "Active craft", unavailableSources);
 
   const effectiveStockTotals = new Map(availableTotals);
   for (const [key, active] of activeTotals.entries()) {
@@ -516,6 +569,8 @@ export function computeCraftPlan({
       inProgress,
       missing: Math.max(0, bufferedRequired - available - inProgress),
       sources: availableTotals.get(item.key)?.sources ?? [],
+      activeCraftSources: activeTotals.get(item.key)?.sources ?? [],
+      sourceRoutes: sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides),
       recipeUsages: usages.get(item.key) ?? [],
     };
   }).sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));

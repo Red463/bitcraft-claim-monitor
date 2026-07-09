@@ -676,12 +676,13 @@ function recordProductionJobs(claimId, craftsPayload, occurredAt) {
       const sourceKey = `production_started:${job.key}`;
       statements.insertSourcedActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming), sourceKey);
       const skipReason = productionNotificationSkipReason("production_started", jobWithTiming);
+      const retryWhenOlder = isProductionStartAgeGateSkip(skipReason);
       if (skipReason) {
         diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", jobWithTiming) });
       } else {
         pendingNotifications.push({ jobKey: job.key, sourceKey, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
       }
-      statements.markProductionStartNotified.run(job.key);
+      if (!retryWhenOlder) statements.markProductionStartNotified.run(job.key);
     }
   }
 
@@ -1231,7 +1232,9 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
 
 
 const CRAFT_PLAN_CARGO_CATALOG_TTL_MS = 15 * 60 * 1000;
+const CRAFT_PLAN_ITEM_CATALOG_TTL_MS = 15 * 60 * 1000;
 let craftPlanCargoCatalogCache = { expiresAt: 0, rows: [] };
+let craftPlanItemCatalogCache = { expiresAt: 0, rows: [] };
 
 function unwrapRecipeDetailPayload(detail) {
   return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
@@ -1278,6 +1281,43 @@ function craftPlanCargoCatalogRows(payload) {
   return unwrap(payload, "cargos", []).filter((row) => row && typeof row === "object");
 }
 
+function craftPlanItemCatalogRows(payload) {
+  return unwrap(payload, "items", []).filter((row) => row && typeof row === "object");
+}
+
+function craftPlanHasItemListOutputs(row = {}) {
+  const itemListId = String(row.itemListId ?? row.item_list_id ?? "").trim();
+  return itemListId !== "" && itemListId !== "0";
+}
+
+const CRAFT_PLAN_ITEM_DISCOVERY_STOP_WORDS = new Set([
+  "rough", "simple", "sturdy", "fine", "exquisite", "peerless", "ornate", "pristine", "magnificent", "flawless",
+  "basic", "infused", "products", "product", "output", "outputs", "crushed", "refined", "package", "packed",
+]);
+
+function craftPlanDiscoveryTokens(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !CRAFT_PLAN_ITEM_DISCOVERY_STOP_WORDS.has(token));
+}
+
+function craftPlanItemProducerTokens(detailsByKey) {
+  const tokens = new Set();
+  for (const detail of detailsByKey.values()) {
+    const target = craftPlanDetailTarget(detail);
+    for (const token of craftPlanDiscoveryTokens(`${target.name ?? ""} ${target.tag ?? ""}`)) tokens.add(token);
+  }
+  return tokens;
+}
+
+function craftPlanItemProducerLooksRelevant(row = {}, tokens = new Set()) {
+  if (!tokens.size) return true;
+  const haystack = ` ${String(row.name ?? "").toLowerCase()} ${String(row.tag ?? "").toLowerCase()} `;
+  return [...tokens].some((token) => haystack.includes(token));
+}
+
 function craftPlanCargoLooksLikeTransportPackage(row = {}) {
   const tag = String(row.tag ?? "").trim();
   const name = String(row.name ?? "").trim();
@@ -1291,6 +1331,33 @@ async function craftPlanCargoCatalogRowsCached() {
   const rows = craftPlanCargoCatalogRows(payload);
   craftPlanCargoCatalogCache = { expiresAt: now + CRAFT_PLAN_CARGO_CATALOG_TTL_MS, rows };
   return rows;
+}
+
+async function craftPlanItemCatalogRowsCached() {
+  const now = Date.now();
+  if (craftPlanItemCatalogCache.expiresAt > now) return craftPlanItemCatalogCache.rows;
+  const payload = await fetchBitjita("/items").catch(() => null);
+  const rows = craftPlanItemCatalogRows(payload);
+  craftPlanItemCatalogCache = { expiresAt: now + CRAFT_PLAN_ITEM_CATALOG_TTL_MS, rows };
+  return rows;
+}
+
+async function craftPlanItemProducerIdsFromCatalog(detailsByKey) {
+  const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
+  if (!tiers.size) return [];
+  const tokens = craftPlanItemProducerTokens(detailsByKey);
+  const rows = await craftPlanItemCatalogRowsCached();
+  const ids = new Set();
+  for (const row of rows) {
+    const id = String(row.id ?? "").trim();
+    const tier = Number(row.tier);
+    if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
+    if (!craftPlanHasItemListOutputs(row)) continue;
+    if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
+    if (!craftPlanItemProducerLooksRelevant(row, tokens)) continue;
+    ids.add(id);
+  }
+  return [...ids];
 }
 
 async function craftPlanCargoIdsFromCatalog(detailsByKey) {
@@ -1322,6 +1389,22 @@ function craftPlanCargoIdsFromSources(sources = []) {
     }
   }
   return [...ids];
+}
+
+async function addCraftPlanItemOutputDetails(detailsByKey) {
+  const targetKeys = new Set([...detailsByKey.values()].map((detail) => {
+    const target = craftPlanDetailTarget(detail);
+    return target.id ? recipeCatalogKey(target.kind, target.id) : null;
+  }).filter(Boolean));
+  if (!targetKeys.size) return detailsByKey;
+
+  for (const itemId of await craftPlanItemProducerIdsFromCatalog(detailsByKey)) {
+    const key = recipeCatalogKey("items", itemId);
+    if (detailsByKey.has(key)) continue;
+    const detail = await recipeDetailFromCatalogOrFetch({ id: itemId, kind: "items", itemType: 0 }).catch(() => null);
+    if (detail && craftPlanOutputPossibilityMatchesTargets(detail, targetKeys)) detailsByKey.set(key, detail);
+  }
+  return detailsByKey;
 }
 
 async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
@@ -1363,19 +1446,29 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
 }
 function activeCraftPlanOutputs(craftsPayload = {}) {
   const catalog = craftPlanCatalogLookup(craftsPayload);
-  return unwrap(craftsPayload, "craftResults", []).flatMap((craft) => (craft.craftedItem ?? craft.craftedItems ?? []).map((output, index) => {
-    const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "");
-    const item = catalog.get(itemId) ?? {};
-    return {
-      id: String(craft.entityId ?? craft.id ?? `${itemId}:${index}`),
-      itemId,
-      kind: output.item_type === "cargo" || output.itemType === 1 ? "cargo" : "items",
-      quantity: Number(craft.craftCount ?? output.quantity ?? output.qty ?? 0) || 0,
-      name: item.name ?? craftDisplayName(craft, craftsPayload),
-      iconAssetName: item.iconAssetName ?? null,
-      tier: item.tier ?? null,
-    };
-  })).filter((item) => item.itemId && item.quantity > 0);
+  return unwrap(craftsPayload, "craftResults", []).flatMap((craft) => {
+    const playerId = String(craft.playerEntityId ?? craft.crafterEntityId ?? craft.crafterId ?? craft.ownerEntityId ?? craft.ownerId ?? craft.characterEntityId ?? "").trim();
+    const playerName = String(craft.crafterName ?? craft.crafterUsername ?? craft.ownerUsername ?? craft.playerName ?? craft.userName ?? "").trim();
+    const buildingName = String(craft.buildingName ?? craft.stationName ?? craft.craftingStationName ?? "").trim();
+    return (craft.craftedItem ?? craft.craftedItems ?? []).map((output, index) => {
+      const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "");
+      const item = catalog.get(itemId) ?? {};
+      const craftId = String(craft.entityId ?? craft.id ?? itemId + ":" + index);
+      return {
+        id: craftId,
+        craftId,
+        playerId,
+        playerName,
+        buildingName,
+        itemId,
+        kind: output.item_type === "cargo" || output.itemType === 1 ? "cargo" : "items",
+        quantity: Number(craft.craftCount ?? output.quantity ?? output.qty ?? 0) || 0,
+        name: item.name ?? craftDisplayName(craft, craftsPayload),
+        iconAssetName: item.iconAssetName ?? null,
+        tier: item.tier ?? null,
+      };
+    });
+  }).filter((item) => item.itemId && item.quantity > 0);
 }
 
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
@@ -1401,7 +1494,9 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
       playerSources.push({ sourceId: playerId, label: `${label} inventory`, unavailable: true, error: error instanceof Error ? error.message : String(error), items: [] });
     }
   }
-  await addCraftPlanCargoDerivationDetails(detailsByKey, [...storageSources, ...playerSources, ...deployableSources]);
+  const countedSources = [...storageSources, ...playerSources, ...deployableSources];
+  await addCraftPlanItemOutputDetails(detailsByKey);
+  await addCraftPlanCargoDerivationDetails(detailsByKey, countedSources);
   return computeCraftPlan({
     config,
     detailsByKey,
@@ -2444,6 +2539,10 @@ function productionNotificationSkipReason(eventType, metadata = {}, settings = g
     if (!allowedUsers.includes(crafter)) return `Crafter "${metadata.crafterName}" is not in allowed crafters: ${settings.productionUsers}`;
   }
   return "";
+}
+
+function isProductionStartAgeGateSkip(reason) {
+  return typeof reason === "string" && /^Craft has been present .* below /.test(reason);
 }
 
 function productionNotificationAllowed(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {

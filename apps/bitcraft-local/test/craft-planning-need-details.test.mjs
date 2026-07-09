@@ -96,3 +96,26 @@ test("groupNeedCellSourceRoutes finds selected plan recipes that create the clic
   assert.equal(routes[0].recipeName, "Process Rough Trunk");
   assert.equal(routes[0].inputs[0].name, "Rough Trunk");
 });
+
+
+test("groupNeedCellSourceRoutes also uses item source routes when no craft step was required", () => {
+  const routes = groupNeedCellSourceRoutes({
+    item: { key: "item:500", id: "500", kind: "item", name: "Rough Wispweave Filament", tier: 1 },
+    items: [{
+      key: "item:500",
+      id: "500",
+      kind: "item",
+      name: "Rough Wispweave Filament",
+      tier: 1,
+      sourceRoutes: [{
+        output: { key: "item:500", id: "500", kind: "item", name: "Rough Wispweave Filament", tier: 1 },
+        recipeName: "Basic Wispweave Plant",
+        selectedRecipeId: "basic-wispweave-plant",
+        inputs: [{ key: "item:501", name: "Rough Wispweave Plant", quantity: 1 }],
+      }],
+    }],
+  }, []);
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].recipeName, "Basic Wispweave Plant");
+  assert.equal(routes[0].inputs[0].name, "Rough Wispweave Plant");
+});

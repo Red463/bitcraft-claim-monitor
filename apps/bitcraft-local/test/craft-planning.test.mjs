@@ -43,6 +43,7 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
     sourceRules: {
       storageContainerIds: ["store-1", "", "store-1"],
       playerIds: ["player-1"],
+      craftPlayerIds: ["player-1"],
       deployableContainerIds: ["player-1:cart-1"],
     },
     routeOverrides: { [recipeKey("items", "900")]: "lake-route" },
@@ -53,9 +54,20 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
   assert.equal(config.targets[0].quantity, 12);
   assert.deepEqual(config.sourceRules.storageContainerIds, ["store-1"]);
   assert.deepEqual(config.sourceRules.playerIds, ["player-1"]);
+  assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1"]);
   assert.deepEqual(config.sourceRules.deployableContainerIds, ["player-1:cart-1"]);
   assert.equal(config.routeOverrides[recipeKey("items", "900")], "lake-route");
   assert.equal(config.multipliers[recipeKey("items", "200")].multiplier, 1.75);
+});
+
+test("normalizeCraftPlanConfig defaults craft tracking to selected players for existing plans", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 1, itemType: 0 }],
+    sourceRules: { playerIds: ["player-1", "player-2"] },
+  });
+
+  assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
 });
 
 test("computeCraftPlan applies recipe route overrides and offsets storage, players, deployables, and active crafts", () => {
@@ -76,7 +88,7 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
     storageSources: [{ sourceId: "store-1", label: "Pantry", items: [{ id: "101", kind: "items", quantity: 4, name: "Lake Fish" }] }],
     playerSources: [{ sourceId: "player-1", label: "Modular inventory", items: [{ id: "101", kind: "items", quantity: 6, name: "Lake Fish" }] }],
     deployableSources: [{ sourceId: "player-1:cart-1", label: "Modular cart", items: [{ id: "101", kind: "items", quantity: 5, name: "Lake Fish" }] }],
-    activeCrafts: [{ id: "craft-1", itemId: "101", kind: "items", quantity: 3, name: "Lake Fish" }],
+    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, name: "Lake Fish" }],
   });
 
   const lakeFish = plan.materials.find((material) => material.name === "Lake Fish");
@@ -91,6 +103,33 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
   assert.equal(plan.gatherNext[0].items[0].name, "Lake Fish");
 });
 
+
+test("computeCraftPlan counts active crafts only for craft-tracked players", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 10, itemType: 0 }],
+    sourceRules: {
+      playerIds: ["player-1", "player-2"],
+      craftPlayerIds: ["player-1"],
+    },
+    routeOverrides: { [recipeKey("items", "900")]: "lake-route" },
+  });
+
+  const plan = computeCraftPlan({
+    config,
+    detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
+    activeCrafts: [
+      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, name: "Lake Fish" },
+      { id: "craft-2", playerId: "player-2", playerName: "Mosswick", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 8, name: "Lake Fish" },
+    ],
+  });
+
+  const lakeFish = plan.materials.find((material) => material.name === "Lake Fish");
+
+  assert.equal(lakeFish.inProgress, 3);
+  assert.equal(lakeFish.missing, 27);
+  assert.deepEqual(lakeFish.activeCraftSources.map((source) => [source.label, source.playerName, source.quantity]), [["Fishing Station", "Modular", 3]]);
+});
 
 test("computeCraftPlan only expands the missing quantity of stocked intermediate crafts", () => {
   const plankDetail = {
@@ -107,13 +146,13 @@ test("computeCraftPlan only expands the missing quantity of stocked intermediate
   const logDetail = { item: { id: "301", name: "Simple Wood Log", itemType: 0, tag: "Wood Log", tier: 2 }, craftingRecipes: [] };
 
   const plan = computeCraftPlan({
-    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "300", kind: "items", name: "Simple Plank", quantity: 10, itemType: 0 }] }),
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "300", kind: "items", name: "Simple Plank", quantity: 10, itemType: 0 }], sourceRules: { playerIds: ["player-1"] } }),
     detailsByKey: new Map([
       [recipeKey("items", "300"), plankDetail],
       [recipeKey("items", "301"), logDetail],
     ]),
     storageSources: [{ sourceId: "store-1", label: "Carpentry chest", items: [{ id: "300", kind: "items", quantity: 6, name: "Simple Plank" }] }],
-    activeCrafts: [{ id: "craft-1", itemId: "300", kind: "items", quantity: 1, name: "Simple Plank" }],
+    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Carpentry Station", itemId: "300", kind: "items", quantity: 1, name: "Simple Plank" }],
   });
 
   const plank = plan.materials.find((material) => material.name === "Simple Plank");
@@ -489,6 +528,50 @@ test("computeCraftPlan applies row section overrides after API section resolutio
   assert.equal(refinedPlank?.sectionOverride, "Carpentry");
 });
 
+test("computeCraftPlan expands item list possibilities through producer item routes", () => {
+  const crushedShellDetail = {
+    item: { id: "1110012", name: "Crushed Rough Shells", itemType: 0, tag: "Crushed Shells", tier: 1 },
+    craftingRecipes: [],
+    recipesUsingItem: [],
+  };
+  const baitAndShellsDetail = {
+    item: { id: "1220019", name: "Basic Bait and Shells", itemType: 0, tag: "Bait Output", tier: 1, itemListId: "1110025" },
+    craftingRecipes: [{
+      id: "process-guppi",
+      name: "Process Briny Guppi",
+      craftedItemStacks: [{ item_id: "1220019", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "1220019", name: "Basic Bait and Shells", itemType: 0, tag: "Bait Output", tier: 1 }],
+      consumedItemStacks: [{ item_id: "900", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "900", name: "Briny Guppi", itemType: 0, tag: "Fish", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Fishing" }, level: 1 }],
+    }],
+    itemListPossibilities: [{
+      targetId: "1110012",
+      targetItem: { id: "1110012", name: "Crushed Rough Shells", tier: 1 },
+      quantity: 1,
+      chance: 0.1,
+      isCargo: false,
+    }],
+  };
+  const fishDetail = { item: { id: "900", name: "Briny Guppi", itemType: 0, tag: "Fish", tier: 1 } };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "1110012", kind: "items", name: "Crushed Rough Shells", quantity: 2, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "1110012"), crushedShellDetail],
+      [recipeKey("items", "1220019"), baitAndShellsDetail],
+      [recipeKey("items", "900"), fishDetail],
+    ]),
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "possibility:process-guppi:items:1110012");
+  const fish = plan.materials.find((material) => material.name === "Briny Guppi");
+  assert.equal(fish?.section, "Fishing");
+  assert.equal(fish?.required, 20);
+  const shells = plan.materials.find((material) => material.name === "Crushed Rough Shells");
+  assert.equal(shells?.sourceRoutes?.[0]?.recipeName, "Process Briny Guppi -> Crushed Rough Shells");
+});
+
 test("computeCraftPlan expands item list possibilities through cargo processing routes", () => {
   const woodLogDetail = {
     item: { id: "5010001", name: "Exquisite Wood Log", itemType: 0, tag: "Wood Log", tier: 5 },
@@ -546,6 +629,8 @@ test("computeCraftPlan expands item list possibilities through cargo processing 
   assert.equal(trunk?.tier, 5);
   assert.equal(trunk?.section, "Forestry");
   assert.equal(trunk?.required, 3);
+  const log = plan.materials.find((material) => material.name === "Exquisite Wood Log");
+  assert.equal(log?.sourceRoutes?.[0]?.recipeName, "Split into Exquisite Wood Log Output -> Exquisite Wood Log");
 });
 
 test("normalizeCraftPlanConfig preserves valid row name overrides", () => {

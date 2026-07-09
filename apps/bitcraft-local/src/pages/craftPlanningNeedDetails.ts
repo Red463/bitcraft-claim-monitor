@@ -86,19 +86,26 @@ export function groupNeedCellRecipeUsages(cell: NeedCell): GroupedNeedUsage[] {
 
 export function groupNeedCellSourceRoutes(cell: NeedCell, steps: AnyRecord[] = []): NeedSourceRoute[] {
   const keys = new Set((cell.items ?? []).map(itemIdentity));
-  const routes = [];
+  const routes: NeedSourceRoute[] = [];
   const seen = new Set<string>();
-  for (const step of steps) {
-    const output = step.output && typeof step.output === "object" ? step.output : {};
+
+  function addRoute(route: AnyRecord, fallbackOutput: AnyRecord = {}) {
+    const output = route.output && typeof route.output === "object" ? route.output : fallbackOutput;
     const key = itemIdentity(output);
-    if (!keys.has(key) || seen.has(`${key}|${step.selectedRecipeId ?? step.id ?? step.recipeName ?? "route"}`)) continue;
-    seen.add(`${key}|${step.selectedRecipeId ?? step.id ?? step.recipeName ?? "route"}`);
+    const routeKey = String(key) + "|" + String(route.selectedRecipeId ?? route.id ?? route.recipeName ?? "route");
+    if (!keys.has(key) || seen.has(routeKey)) return;
+    seen.add(routeKey);
     routes.push({
-      ...step,
+      ...route,
       key,
       output,
-      inputs: Array.isArray(step.inputs) ? step.inputs : [],
+      inputs: Array.isArray(route.inputs) ? route.inputs : [],
     });
   }
+
+  for (const item of cell.items ?? []) {
+    for (const route of Array.isArray(item.sourceRoutes) ? item.sourceRoutes : []) addRoute(route, item);
+  }
+  for (const step of steps) addRoute(step);
   return routes;
 }

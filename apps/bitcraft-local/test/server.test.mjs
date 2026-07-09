@@ -1281,6 +1281,10 @@ test("server collection paginates listings and protects production mutations", a
   const ageGatedProductionStart = ageGatedActivity.events.find((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3");
   assert.ok(ageGatedProductionStart);
   assert.match(ageGatedProductionStart.source_key, /^production_started:/);
+  const ageGateDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  const ageGatedJobRow = ageGateDb.prepare("SELECT start_notified FROM production_jobs WHERE raw_json LIKE ?").get('%"entityId":"public-craft-3"%');
+  ageGateDb.close();
+  assert.equal(ageGatedJobRow?.start_notified, 0);
 
   craftEntityRevision = 4;
   craftOwnerUsername = "Tester";

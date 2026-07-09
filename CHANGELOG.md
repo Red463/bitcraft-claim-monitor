@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.16] - 2026-07-09
+
+### Fixed
+
+- Fixed Craft Planning recipe discovery for BitJita byproduct outputs, such as crushed shells and farming products, by discovering producer items that expose item-list possibilities.
+- Improved Craft Planning active craft counting so admins can choose which tracked players' in-progress crafts reduce needed materials.
+- Fixed production Discord craft-start age gating so crafts skipped for being too new can still notify after they pass the configured age threshold.
+
 ## [0.32.0-beta.15] - 2026-07-09
 
 ### Added
