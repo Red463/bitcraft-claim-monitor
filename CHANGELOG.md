@@ -9,6 +9,11 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.11] - 2026-07-09
+
+### Fixed
+
+- Improved Craft Planning item detail popups so recipe context explains what each material is used for, uses a single item icon, and shows real per-craft input quantities.
 ## [0.32.0-beta.10] - 2026-07-09
 
 ### Fixed

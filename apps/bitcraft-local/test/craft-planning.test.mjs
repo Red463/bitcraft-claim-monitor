@@ -161,6 +161,7 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.equal(plan.steps[0].selectedRecipeId, "craft-route");
   assert.equal(plan.materials.some((material) => material.name === "Packed Fine Rope"), false);
   assert.equal(plan.materials.find((material) => material.name === "Fine Fiber")?.required, 20);
+  assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route"]);
 });
 test("computeCraftPlan uses API recipe detail tiers instead of name or id fallback inference", () => {
   const detail = {
@@ -272,8 +273,12 @@ test("computeCraftPlan exposes source locations and recipe alternatives for mate
   assert.deepEqual(oceanFish.sources.map((source) => [source.label, source.quantity]), [["Pantry", 5]]);
   assert.equal(oceanFish.recipeUsages.length, 1);
   assert.equal(oceanFish.recipeUsages[0].output.name, "Fish Oil");
+  assert.equal(oceanFish.recipeUsages[0].output.quantity, 4);
+  assert.equal(oceanFish.recipeUsages[0].requiredQuantity, 12);
+  assert.equal(oceanFish.recipeUsages[0].quantityPerCraft, 3);
   assert.equal(oceanFish.recipeUsages[0].selectedRecipeId, "ocean-route");
   assert.deepEqual(oceanFish.recipeUsages[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
+  assert.equal(oceanFish.recipeUsages[0].alternatives[0].inputs[0].quantityPerCraft, 3);
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
 });
 
@@ -335,7 +340,7 @@ test("computeCraftPlan keeps uncrafted final targets out of gather next", () => 
   assert.deepEqual(plan.gatherNext, []);
 });
 
-test("computeCraftPlan keeps refined materials under their natural profession instead of Scholar", () => {
+test("computeCraftPlan keeps refined materials under the profession that crafts them", () => {
   const refinedPlankDetail = {
     item: { id: "305", name: "Refined Simple Plank", itemType: 0, tag: "Refined Plank", tier: 2 },
     craftingRecipes: [{
@@ -358,5 +363,5 @@ test("computeCraftPlan keeps refined materials under their natural profession in
   });
 
   const refinedPlank = plan.materials.find((material) => material.name === "Refined Simple Plank");
-  assert.equal(refinedPlank?.section, "Carpentry");
+  assert.equal(refinedPlank?.section, "Scholar");
 });

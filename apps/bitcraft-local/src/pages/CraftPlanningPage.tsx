@@ -3,7 +3,7 @@ import { AlertTriangle, ClipboardList, Factory, Package, Route, Target, X } from
 import { createPortal } from "react-dom";
 
 import { TierBadge } from "../components/main/Badges";
-import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
+import { ItemIcon } from "../components/main/ItemDisplay";
 import { Info } from "../components/main/Stats";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
@@ -16,7 +16,7 @@ function itemNode(item: AnyRecord) {
   return (
     <span className="craft-plan-item-label">
       <span className="craft-plan-item-icon"><ItemIcon item={item} /></span>
-      <span><ItemLabel item={item} />{item.tier ? <TierBadge tier={item.tier} /> : null}</span>
+      <span><strong>{itemName(item)}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}</span>
     </span>
   );
 }
@@ -136,7 +136,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             )) : <p className="legend">No counted stock found for this item.</p>}
           </section>
           <section className="form-card nested-card">
-            <h3><Route size={16} /> Recipe used</h3>
+            <h3><Route size={16} /> Used for</h3>
             {cellRecipeUsages(selectedNeed).length ? cellRecipeUsages(selectedNeed).map((usage, index) => {
               const alternatives = Array.isArray(usage.alternatives) ? usage.alternatives : [];
               const selectedRecipe = alternatives.find((recipe: AnyRecord) => String(recipe.id) === String(usage.selectedRecipeId));
@@ -144,14 +144,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 <div className="craft-plan-route-detail" key={String(usage.outputKey ?? index) + "-" + index}>
                   <div className="split-header">
                     <div>
-                      <strong>{usage.output?.name ?? usage.recipeName ?? "Recipe"}</strong>
-                      <p className="legend">{usage.recipeName ?? "Selected recipe"}{usage.buildingName ? " - " + usage.buildingName : ""}</p>
+                      <strong>Needed for {quantity(usage.output?.quantity)} {usage.output?.name ?? "planned output"}</strong>
+                      <p className="legend">Recipe: {usage.recipeName ?? "Selected recipe"}{usage.buildingName ? " - " + usage.buildingName : ""}</p>
                     </div>
                   </div>
                   {selectedRecipe && Array.isArray(selectedRecipe.inputs) && selectedRecipe.inputs.length ? (
                     <div className="craft-plan-route-inputs">
                       {selectedRecipe.inputs.map((input: AnyRecord, inputIndex: number) => (
-                        <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantity)}</strong></span>
+                        <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantityPerCraft ?? input.quantity)}</strong></span>
                       ))}
                     </div>
                   ) : null}

@@ -211,11 +211,19 @@ function naturalSectionForMaterial(material) {
 }
 
 function sectionForMaterial(material, recipe) {
-  const natural = naturalSectionForMaterial(material);
-  if (natural) return natural;
   const skill = recipe?.levelRequirements?.[0]?.skill?.name ?? recipe?.skillName;
   if (skill) return String(skill);
+  const natural = naturalSectionForMaterial(material);
+  if (natural) return natural;
   return "Other";
+}
+
+function routeAlternativesForUi(recipes, selected) {
+  const normalRecipes = recipes.filter((recipe) => !isUnpackRecipe(recipe));
+  if (!normalRecipes.length) return recipes;
+  if (!selected || !isUnpackRecipe(selected)) return normalRecipes;
+  const selectedId = recipeId(selected);
+  return normalRecipes.some((recipe) => recipeId(recipe) === selectedId) ? normalRecipes : [selected, ...normalRecipes];
 }
 
 function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
@@ -237,19 +245,23 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
     const alreadyAllocated = required.get(key)?.required ?? 0;
     const unallocatedStock = Math.max(0, stocked - alreadyAllocated);
     const quantityToCraft = Math.max(0, quantity - unallocatedStock);
-    addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, parentRecipe));
-    if (quantityToCraft <= 0) return;
     const recipes = recipesForTarget(detail, normalizedTarget);
     const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
-    if (!selected) return;
+    addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
+    if (quantityToCraft <= 0 || !selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
     const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? selected.outputQuantity) || 1);
     const craftCount = Math.ceil(quantityToCraft / outputPerCraft);
     const section = sectionForMaterial(normalizedTarget, selected);
-    const alternatives = recipes.map((recipe) => ({
+    const visibleRecipes = routeAlternativesForUi(recipes, selected);
+    const alternatives = visibleRecipes.map((recipe) => ({
       id: recipeId(recipe),
       label: String(recipe.name ?? normalizedTarget.name),
-      inputs: recipeInputs(recipe).map((input, index) => enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey)),
+      inputs: recipeInputs(recipe).map((input, index) => ({
+        ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
+        quantity: toNumber(input.quantity),
+        quantityPerCraft: toNumber(input.quantity),
+      })),
     }));
     const inputs = recipeInputs(selected).map((input, index) => {
       const material = enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey);
@@ -262,6 +274,9 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
         recipeName: String(selected.name ?? normalizedTarget.name),
         selectedRecipeId: recipeId(selected),
         alternatives,
+        requiredQuantity,
+        quantityPerCraft: toNumber(input.quantity),
+        craftCount,
         buildingName: selected.buildingName ?? null,
         section,
       });
@@ -278,7 +293,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
       outputPerCraft,
       section,
       buildingName: selected.buildingName ?? null,
-      alternatives: recipes.map((recipe) => ({ id: recipeId(recipe), label: recipeLabel(recipe), buildingName: recipe.buildingName ?? recipe.building_name ?? null })),
+      alternatives: visibleRecipes.map((recipe) => ({ id: recipeId(recipe), label: recipeLabel(recipe), buildingName: recipe.buildingName ?? recipe.building_name ?? null })),
       selectedRecipeId: recipeId(selected),
     });
   }
@@ -444,5 +459,3 @@ export function computeCraftPlan({
     },
   };
 }
-
-

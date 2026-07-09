@@ -29,7 +29,9 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /from "react-dom"/);
   assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);
   assert.match(page, /craft-plan-need-detail/);
-  assert.match(page, /Recipe used/);
+  assert.match(page, /Used for/);
+  assert.match(page, /Needed for/);
+  assert.doesNotMatch(page, /ItemLabel/);
   assert.match(page, /Stock locations/);
   assert.match(page, /selectedSection/);
   assert.doesNotMatch(page, /inferTierFromName/);
