@@ -9,6 +9,7 @@ import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
+import { groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
 const LOCAL_API = "/api/local";
 
@@ -36,13 +37,6 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   );
 }
 
-function cellSources(cell: NeedCell) {
-  return cell.items.flatMap((item) => Array.isArray(item.sources) ? item.sources : []);
-}
-
-function cellRecipeUsages(cell: NeedCell) {
-  return cell.items.flatMap((item) => Array.isArray(item.recipeUsages) ? item.recipeUsages : []);
-}
 
 function recipeOptionLabel(recipe: AnyRecord) {
   const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
@@ -117,6 +111,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
+  const planSteps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const selectedNeedSources = selectedNeed ? groupNeedCellSources(selectedNeed) : [];
+  const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, planSteps) : [];
+  const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const sectionOverrideDialog = selectedSectionOverride ? (
     <div className="modal-backdrop craft-plan-section-override-backdrop" role="presentation">
       <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board section">
@@ -154,49 +152,105 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <button className="icon-button" type="button" onClick={() => setSelectedNeed(null)} aria-label="Close item details"><X size={18} /></button>
         </header>
         <div className="craft-plan-need-detail-grid">
-          <section className="form-card nested-card">
+          <section className="form-card nested-card craft-plan-stock-card">
             <h3><Package size={16} /> Stock locations</h3>
-            {cellSources(selectedNeed).length ? cellSources(selectedNeed).map((source, index) => (
-              <div className="craft-plan-detail-row" key={String(source.sourceId ?? source.label ?? index) + "-" + index}>
-                <span>{source.label ?? source.type ?? "Source"}</span>
-                <strong>{quantity(source.quantity)}</strong>
-              </div>
+            {selectedNeedSources.length ? selectedNeedSources.map((source) => (
+              <details className="craft-plan-detail-group" key={source.key} open={source.entries.length === 1 ? undefined : false}>
+                <summary className="craft-plan-detail-row">
+                  <span>{source.label}</span>
+                  <strong>{quantity(source.quantity)}</strong>
+                </summary>
+                {source.entries.length > 1 ? (
+                  <div className="craft-plan-detail-breakdown">
+                    {source.entries.map((entry: AnyRecord, index: number) => (
+                      <div className="craft-plan-detail-row subtle" key={String(entry.sourceId ?? entry.label ?? index) + "-" + index}>
+                        <span>{entry.type ?? "Source stack"}</span>
+                        <strong>{quantity(entry.quantity)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </details>
             )) : <p className="legend">No counted stock found for this item.</p>}
           </section>
-          <section className="form-card nested-card">
-            <h3><Route size={16} /> Used for</h3>
-            {cellRecipeUsages(selectedNeed).length ? cellRecipeUsages(selectedNeed).map((usage, index) => {
-              const alternatives = Array.isArray(usage.alternatives) ? usage.alternatives : [];
-              const selectedRecipe = alternatives.find((recipe: AnyRecord) => String(recipe.id) === String(usage.selectedRecipeId));
-              return (
-                <div className="craft-plan-route-detail" key={String(usage.outputKey ?? index) + "-" + index}>
-                  <div className="split-header">
+          <div className="craft-plan-need-detail-side">
+            <section className="form-card nested-card">
+              <h3><Factory size={16} /> How to get this</h3>
+              {selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
+                const alternatives = Array.isArray(route.alternatives) ? route.alternatives : [];
+                return (
+                  <div className="craft-plan-route-detail" key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
                     <div>
-                      <strong>Needed for {quantity(usage.output?.quantity)} {usage.output?.name ?? "planned output"}</strong>
-                      <p className="legend">Recipe: {usage.recipeName ?? "Selected recipe"}{usage.buildingName ? " - " + usage.buildingName : ""}</p>
+                      <strong>{route.recipeName ?? "Selected recipe"}</strong>
+                      <p className="legend">{route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
+                    {Array.isArray(route.inputs) && route.inputs.length ? (
+                      <div className="craft-plan-route-inputs">
+                        {route.inputs.map((input: AnyRecord, inputIndex: number) => (
+                          <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantity)}</strong></span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {canManage && alternatives.length > 1 ? (
+                      <label className="field compact-field">
+                        <span>Recipe route</span>
+                        <select value={route.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), event.target.value)}>
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
+                        </select>
+                      </label>
+                    ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
                   </div>
-                  {selectedRecipe && Array.isArray(selectedRecipe.inputs) && selectedRecipe.inputs.length ? (
-                    <div className="craft-plan-route-inputs">
-                      {selectedRecipe.inputs.map((input: AnyRecord, inputIndex: number) => (
-                        <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantityPerCraft ?? input.quantity)}</strong></span>
-                      ))}
+                );
+              }) : <p className="legend">The current plan does not need to craft this item. Stock locations show where it is counted from, or the item is treated as a raw gathered/vendor input.</p>}
+            </section>
+            <section className="form-card nested-card">
+              <h3><Route size={16} /> Used for</h3>
+              {selectedNeedUsages.length ? selectedNeedUsages.map((usage) => {
+                const alternatives = Array.isArray(usage.alternatives) ? usage.alternatives : [];
+                const selectedRecipe = alternatives.find((recipe: AnyRecord) => String(recipe.id) === String(usage.selectedRecipeId));
+                return (
+                  <div className="craft-plan-route-detail" key={usage.key}>
+                    <div className="split-header">
+                      <div>
+                        <strong>Needed for {quantity(usage.output?.quantity)} {usage.output?.name ?? "planned output"}</strong>
+                        <p className="legend">Uses {quantity(usage.requiredQuantity)} total from this cell</p>
+                      </div>
                     </div>
-                  ) : null}
-                  {canManage && alternatives.length > 1 ? (
-                    <label className="field compact-field">
-                      <span>Recipe route</span>
-                      <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.outputKey ?? ""), event.target.value)}>
-                        {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
-                      </select>
-                    </label>
-                  ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
-                </div>
-              );
-            }) : <p className="legend">No recipe context was found. This is likely a base gathered or vendor material.</p>}
-            {routeStatus ? <p className="alert success">{routeStatus}</p> : null}
-            {routeError ? <p className="alert error">{routeError}</p> : null}
-          </section>
+                    {selectedRecipe && Array.isArray(selectedRecipe.inputs) && selectedRecipe.inputs.length ? (
+                      <div className="craft-plan-route-inputs">
+                        {selectedRecipe.inputs.map((input: AnyRecord, inputIndex: number) => (
+                          <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantityPerCraft ?? input.quantity)}</strong></span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {usage.entries.length > 1 ? (
+                      <details className="craft-plan-usage-breakdown">
+                        <summary>Show {usage.entries.length} recipe demands</summary>
+                        <div className="craft-plan-detail-breakdown">
+                          {usage.entries.map((entry: AnyRecord, entryIndex: number) => (
+                            <div className="craft-plan-detail-row subtle" key={String(entry.outputKey ?? entryIndex) + "-" + entryIndex}>
+                              <span>{quantity(entry.output?.quantity)} via {entry.recipeName ?? "selected recipe"}{entry.buildingName ? " - " + entry.buildingName : ""}</span>
+                              <strong>{quantity(entry.requiredQuantity)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
+                    {canManage && alternatives.length > 1 ? (
+                      <label className="field compact-field">
+                        <span>Recipe route</span>
+                        <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.key ?? ""), event.target.value)}>
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
+                        </select>
+                      </label>
+                    ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
+                  </div>
+                );
+              }) : <p className="legend">No downstream recipe context was found. This is likely a final target, base gathered item, or vendor material.</p>}
+              {routeStatus ? <p className="alert success">{routeStatus}</p> : null}
+              {routeError ? <p className="alert error">{routeError}</p> : null}
+            </section>
+          </div>
         </div>
       </section>
     </div>
@@ -283,7 +337,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <h2><ClipboardList size={24} /> Craft Planning</h2>
           <p>{hasPlan ? String(config.name ?? "Settlement craft plan") : "Admin-controlled procurement board for settlement crafting goals."}</p>
         </div>
-        <div className="top-meta">
+        <div className="dashboard-top-meta">
           {canManage ? <button className="toolbar-button primary" type="button" onClick={() => setManagerOpen(true)}>Manage Plan</button> : null}
           <span>{quantity(totals.missingItems)} missing items</span>
           <span>{quantity(totals.activeCraftQuantity)} in active crafts</span>

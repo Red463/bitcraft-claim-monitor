@@ -264,7 +264,55 @@
   background: rgba(18, 35, 52, 0.58);
   padding: 7px 9px;
 }
-.craft-plan-route-inputs strong {
+.craft-plan-need-detail-side {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.craft-plan-detail-group {
+  display: block;
+}
+.craft-plan-detail-group + .craft-plan-detail-group {
+  margin-top: 7px;
+}
+.craft-plan-detail-group summary {
+  cursor: pointer;
+  list-style: none;
+}
+.craft-plan-detail-group summary::-webkit-details-marker {
+  display: none;
+}
+.craft-plan-detail-breakdown {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(139, 159, 184, 0.18);
+}
+.craft-plan-detail-row.subtle {
+  padding: 6px 8px;
+  background: rgba(10, 16, 24, 0.32);
+  border-color: rgba(139, 159, 184, 0.14);
+}
+.craft-plan-detail-row.subtle span,
+.craft-plan-detail-row.subtle strong {
+  font-size: 0.86rem;
+}
+.craft-plan-usage-breakdown {
+  border-top: 1px solid rgba(139, 159, 184, 0.16);
+  padding-top: 8px;
+}
+.craft-plan-usage-breakdown summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+  list-style: none;
+}
+.craft-plan-usage-breakdown summary::-webkit-details-marker {
+  display: none;
+}.craft-plan-route-inputs strong {
   color: var(--accent);
   white-space: nowrap;
 }
@@ -316,26 +364,31 @@
 }
 .craft-plan-section-override-body {
   display: grid;
-  gap: 14px;
-  padding: 16px 18px 18px;
+  gap: 16px;
+  padding: 18px 20px 20px;
 }
 .craft-plan-section-override .modal-header {
-  position: relative;
-  display: block;
-  padding: 18px 54px 12px 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 20px;
   border-bottom: 1px solid rgba(139, 159, 184, 0.18);
 }
 .craft-plan-section-override .modal-header .icon-button {
-  position: absolute;
-  top: 14px;
-  right: 14px;
+  position: static;
+  flex: 0 0 auto;
 }
 .craft-plan-section-override .modal-header h2 {
   margin: 0;
-  line-height: 1.1;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 .craft-plan-section-override .modal-header p {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.45;
+}
+.craft-plan-section-override .modal-actions {
+  padding-top: 2px;
 }

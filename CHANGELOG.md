@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -9,6 +9,11 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.14] - 2026-07-09
+
+### Changed
+
+- Improved Craft Planning item detail popups so stock locations are grouped, recipe sources are shown, and repeated "used for" entries can be expanded only when needed.
 ## [0.32.0-beta.13] - 2026-07-09
 
 ### Fixed

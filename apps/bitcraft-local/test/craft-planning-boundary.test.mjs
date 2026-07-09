@@ -21,6 +21,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /\/craft-plan\?claimId=/);
   assert.match(page, /\/admin\/me/);
   assert.match(page, /Manage Plan/);
+  assert.match(page, /className="dashboard-top-meta"/);
+  assert.doesNotMatch(page, /className="top-meta"/);
   assert.match(page, /<h3><Target size=\{17\} \/> Targets<\/h3>/);
   assert.match(page, /Needs Board/);
   assert.match(page, /craft-plan-needs-board/);
@@ -32,7 +34,15 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /from "react-dom"/);
   assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);
   assert.match(page, /craft-plan-need-detail/);
+  assert.match(page, /How to get this/);
   assert.match(page, /Used for/);
+  assert.match(page, /Show \{usage\.entries\.length\} recipe demands/);
+  assert.match(page, /selectedNeedSources/);
+  assert.match(page, /selectedNeedSourceRoutes/);
+  assert.match(page, /selectedNeedUsages/);
+  assert.match(page, /groupNeedCellSources/);
+  assert.match(page, /groupNeedCellSourceRoutes/);
+  assert.match(page, /groupNeedCellRecipeUsages/);
   assert.match(page, /Needed for/);
   assert.doesNotMatch(page, /ItemLabel/);
   assert.match(page, /Stock locations/);
