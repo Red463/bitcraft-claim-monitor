@@ -107,7 +107,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const warnings = Array.isArray(plan?.warnings) ? plan.warnings : [];
   const unavailableSources = Array.isArray(plan?.unavailableSources) ? plan.unavailableSources : [];
   const needsBoard = React.useMemo(() => buildNeedsBoard(materials, targets), [materials, targets]);
-  const sectionFilters = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
+  const needsBoardRowCount = React.useMemo(() => needsBoard.reduce((total, group) => total + group.rows.length, 0), [needsBoard]);
+  const needsBoardSections = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
   const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
@@ -262,8 +263,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   ) : null;
 
   React.useEffect(() => {
-    if (selectedSection !== "all" && !sectionFilters.includes(selectedSection)) setSelectedSection("all");
-  }, [sectionFilters, selectedSection]);
+    if (selectedSection !== "all" && !needsBoardSections.includes(selectedSection)) setSelectedSection("all");
+  }, [needsBoardSections, selectedSection]);
 
 
   async function saveRowOverride(row: NeedRow, section: string | null, name: string | null) {
@@ -384,7 +385,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
             <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
             {needsBoard.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
-              <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoard.length}</span></button>
+              <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoardRowCount}</span></button>
               {needsBoard.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
             </div> : null}
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">

@@ -489,7 +489,6 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   const startedAt = new Date().toISOString();
   const previousRun = gameCatalogRepository.getLatestRefreshRun();
   const resuming = previousRun && previousRun.status !== "completed";
-  const resumeCursor = resuming && previousRun.cursorKind && previousRun.cursorId ? `${previousRun.cursorKind}:${previousRun.cursorId}` : null;
   let refreshRun = resuming
     ? gameCatalogRepository.updateRefreshRun(previousRun.id, {
       status: "running",
@@ -504,45 +503,72 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       startedAt,
       updatedAt: startedAt,
     });
+  let queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+  let itemCount = refreshRun.itemCount;
+  let cargoCount = refreshRun.cargoCount;
 
-  updateScheduledJobProgress(jobKey, { stage: "list_items" });
-  const itemTargets = await fetchGameCatalogTargets("items");
-  for (const target of itemTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "items" });
-  refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-    phase: "list_cargo",
-    itemCount: itemTargets.length,
-    updatedAt: new Date().toISOString(),
-  });
+  if (queueCounts.total === 0) {
+    updateScheduledJobProgress(jobKey, { stage: "list_items", processedCount: 0, totalCount: 0 });
+    const itemTargets = await fetchGameCatalogTargets("items");
+    for (const target of itemTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "items" });
+    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+      phase: "list_cargo",
+      itemCount: itemTargets.length,
+      updatedAt: new Date().toISOString(),
+    });
 
-  updateScheduledJobProgress(jobKey, { stage: "list_cargo", itemCount: itemTargets.length });
-  const cargoTargets = await fetchGameCatalogTargets("cargo");
-  for (const target of cargoTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "cargo" });
-  seedCraftPlanCatalogCaches(itemTargets, cargoTargets);
+    updateScheduledJobProgress(jobKey, { stage: "list_cargo", itemCount: itemTargets.length, processedCount: 0, totalCount: 0 });
+    const cargoTargets = await fetchGameCatalogTargets("cargo");
+    for (const target of cargoTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "cargo" });
+    seedCraftPlanCatalogCaches(itemTargets, cargoTargets);
+    gameCatalogRepository.replaceRefreshTargets(refreshRun.id, [...itemTargets, ...cargoTargets]);
+    queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+    itemCount = itemTargets.length;
+    cargoCount = cargoTargets.length;
+    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+      phase: "detail_items",
+      cursorKind: null,
+      cursorId: null,
+      processedCount: 0,
+      totalCount: queueCounts.total,
+      itemCount,
+      cargoCount,
+      recipeCount: 0,
+      byproductCount: 0,
+      failureCount: 0,
+      lastError: null,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
-  const targets = [...itemTargets, ...cargoTargets];
-  const batch = selectResumeBatch(targets, {
-    cursor: resumeCursor,
-    batchSize: gameCatalogRefreshJobBudget.batchSize,
-    getKey: gameCatalogRefreshTargetKey,
-  });
-  const resumeCountsAvailable = Boolean(resuming && resumeCursor && batch.startedAfterCursor);
+  let batch = gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize);
+  let retryingFailures = false;
+  if (previousRun?.status === "failed" && queueCounts.failed > 0) {
+    const retries = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
+    const remainingSlots = Math.max(0, gameCatalogRefreshJobBudget.batchSize - retries.length);
+    batch = [...retries, ...gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, remainingSlots || 1).slice(0, remainingSlots)];
+    retryingFailures = retries.length > 0;
+  } else if (!batch.length && queueCounts.failed > 0) {
+    batch = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
+    retryingFailures = batch.length > 0;
+  }
   const startedAtMs = Date.now();
   let processedThisRun = 0;
-  let processedCount = resumeCountsAvailable ? previousRun.processedCount : 0;
-  let recipeCount = resumeCountsAvailable ? previousRun.recipeCount : 0;
-  let byproductCount = resumeCountsAvailable ? previousRun.byproductCount : 0;
-  let failureCount = resumeCountsAvailable ? previousRun.failureCount : 0;
-  let cursorKind = resumeCountsAvailable ? previousRun.cursorKind : null;
-  let cursorId = resumeCountsAvailable ? previousRun.cursorId : null;
+  let processedCount = queueCounts.processed;
+  let recipeCount = refreshRun.recipeCount;
+  let byproductCount = refreshRun.byproductCount;
+  let failureCount = refreshRun.failureCount;
+  let cursorKind = refreshRun.cursorKind;
+  let cursorId = refreshRun.cursorId;
   let pausedForBudget = false;
 
   refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-    phase: gameCatalogRefreshPhase(batch.items[0]),
+    phase: retryingFailures ? "retry_failures" : gameCatalogRefreshPhase(batch[0]),
     cursorKind,
     cursorId,
-    totalCount: targets.length,
-    itemCount: itemTargets.length,
-    cargoCount: cargoTargets.length,
+    totalCount: queueCounts.total,
+    itemCount,
+    cargoCount,
     processedCount,
     recipeCount,
     byproductCount,
@@ -551,7 +577,7 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     updatedAt: new Date().toISOString(),
   });
 
-  for (const target of batch.items) {
+  for (const target of batch) {
     if (!jobBudgetAllowsMore(startedAtMs, gameCatalogRefreshJobBudget, processedThisRun)) {
       pausedForBudget = true;
       break;
@@ -565,14 +591,17 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       byproductCount += detail.itemListOutputs.length;
       cursorKind = target.kind;
       cursorId = target.id;
+      gameCatalogRepository.markRefreshTargetProcessed(refreshRun.id, target.catalogKey);
+      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+      processedCount = queueCounts.processed;
       refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
         phase: gameCatalogRefreshPhase(target),
         cursorKind,
         cursorId,
         processedCount,
-        totalCount: targets.length,
-        itemCount: itemTargets.length,
-        cargoCount: cargoTargets.length,
+        totalCount: queueCounts.total,
+        itemCount,
+        cargoCount,
         recipeCount,
         byproductCount,
         failureCount,
@@ -583,26 +612,28 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
         cursorKind,
         cursorId,
         processedCount,
-        totalCount: targets.length,
-        itemCount: itemTargets.length,
-        cargoCount: cargoTargets.length,
+        totalCount: queueCounts.total,
+        itemCount,
+        cargoCount,
         recipeCount,
         byproductCount,
         failureCount,
       });
       if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
     } catch (error) {
-      failureCount += 1;
       const message = error instanceof Error ? error.message : String(error);
+      gameCatalogRepository.markRefreshTargetFailed(refreshRun.id, target.catalogKey, message);
+      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+      failureCount += 1;
       gameCatalogRepository.updateRefreshRun(refreshRun.id, {
         status: "failed",
         phase: gameCatalogRefreshPhase(target),
         cursorKind,
         cursorId,
         processedCount,
-        totalCount: targets.length,
-        itemCount: itemTargets.length,
-        cargoCount: cargoTargets.length,
+        totalCount: queueCounts.total,
+        itemCount,
+        cargoCount,
         recipeCount,
         byproductCount,
         failureCount,
@@ -613,17 +644,21 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     }
   }
 
-  if (pausedForBudget || !batch.complete) {
+  queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+  const retryableFailures = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, 1, 3).length;
+  if (pausedForBudget || queueCounts.pending > 0 || retryableFailures > 0) {
     const pausedAt = new Date().toISOString();
     gameCatalogRepository.updateRefreshRun(refreshRun.id, {
       status: "paused",
-      phase: gameCatalogRefreshPhase(batch.items[Math.max(0, processedThisRun - 1)] ?? batch.items[0] ?? null),
+      phase: retryableFailures > 0 && queueCounts.pending === 0
+        ? "retry_failures"
+        : gameCatalogRefreshPhase(batch[Math.max(0, processedThisRun - 1)] ?? batch[0] ?? null),
       cursorKind,
       cursorId,
       processedCount,
-      totalCount: targets.length,
-      itemCount: itemTargets.length,
-      cargoCount: cargoTargets.length,
+      totalCount: queueCounts.total,
+      itemCount,
+      cargoCount,
       recipeCount,
       byproductCount,
       failureCount,
@@ -634,13 +669,13 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       complete: false,
       continueAfterMs: gameCatalogRefreshContinueDelayMs,
       processedCount,
-      totalCount: targets.length,
-      itemCount: itemTargets.length,
-      cargoCount: cargoTargets.length,
+      totalCount: queueCounts.total,
+      itemCount,
+      cargoCount,
       recipeCount,
       byproductCount,
       failureCount,
-      resumed: resumeCountsAvailable,
+      resumed: resuming,
       cursorKind,
       cursorId,
     };
@@ -655,9 +690,9 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     cursorKind,
     cursorId,
     processedCount,
-    totalCount: targets.length,
-    itemCount: itemTargets.length,
-    cargoCount: cargoTargets.length,
+    totalCount: queueCounts.total,
+    itemCount,
+    cargoCount,
     recipeCount,
     byproductCount,
     failureCount,
@@ -669,13 +704,13 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   return {
     complete: true,
     processedCount,
-    totalCount: targets.length,
-    itemCount: itemTargets.length,
-    cargoCount: cargoTargets.length,
+    totalCount: queueCounts.total,
+    itemCount,
+    cargoCount,
     recipeCount,
     byproductCount,
     failureCount,
-    resumed: resumeCountsAvailable,
+    resumed: resuming,
     cursorKind,
     cursorId,
     ...legacyRefresh,
@@ -821,6 +856,7 @@ function seedScheduledJobs() {
 }
 
 const scheduledJobStaleAfterMs = 15 * 60 * 1000;
+const scheduledJobContinuationTimers = new Map();
 
 function recoverStaleScheduledJobs() {
   return recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
@@ -832,6 +868,24 @@ function scheduledJobRow(row) {
 
 function scheduledJobsStatus() {
   return scheduledJobsStatusResponse({ enabled: scheduledJobsEnabled, statements, recoverStaleJobs: recoverStaleScheduledJobs });
+}
+
+function scheduleScheduledJobContinuation(jobKey, delayMs) {
+  const existing = scheduledJobContinuationTimers.get(jobKey);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    scheduledJobContinuationTimers.delete(jobKey);
+    const row = statements.getScheduledJob.get(jobKey);
+    if (!row || row.running || !row.next_run_at) return;
+    const remainingMs = new Date(row.next_run_at).getTime() - Date.now();
+    if (remainingMs > 50) {
+      scheduleScheduledJobContinuation(jobKey, remainingMs);
+      return;
+    }
+    void runScheduledJob(jobKey).catch((error) => console.warn(`Scheduled job ${jobKey} continuation failed: ${error instanceof Error ? error.message : String(error)}`));
+  }, Math.max(0, delayMs));
+  timer.unref?.();
+  scheduledJobContinuationTimers.set(jobKey, timer);
 }
 
 function craftPlanCatalogRefreshStatus() {
@@ -865,6 +919,11 @@ async function runScheduledJob(jobKey, { manual = false } = {}) {
     error.statusCode = 409;
     throw error;
   }
+  const pendingContinuation = scheduledJobContinuationTimers.get(jobKey);
+  if (pendingContinuation) {
+    clearTimeout(pendingContinuation);
+    scheduledJobContinuationTimers.delete(jobKey);
+  }
   const startedAt = new Date().toISOString();
   statements.markScheduledJobRunning.run(startedAt, startedAt, jobKey);
   try {
@@ -874,6 +933,7 @@ async function runScheduledJob(jobKey, { manual = false } = {}) {
     if (metadata?.complete === false && continueAfterMs > 0) {
       const nextRunAt = new Date(Date.now() + continueAfterMs).toISOString();
       statements.markScheduledJobContinuation.run(nextRunAt, JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+      scheduleScheduledJobContinuation(jobKey, continueAfterMs);
     } else {
       statements.markScheduledJobSuccess.run(finishedAt, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
     }

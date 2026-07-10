@@ -50,6 +50,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.doesNotMatch(page, /ItemLabel/);
   assert.match(page, /Stock locations/);
   assert.match(page, /selectedSection/);
+  assert.match(page, /needsBoardRowCount/);
+  assert.doesNotMatch(page, /All <span>\{needsBoard\.length\}<\/span>/);
   assert.doesNotMatch(page, /inferTierFromName/);
   assert.doesNotMatch(page, /inferTierFromItemId/);
   assert.doesNotMatch(page, /UNTIERED_MATERIAL_PATTERN/);
@@ -105,6 +107,9 @@ test("Craft Planning manager shows compact catalog diagnostics and manual refres
   assert.match(manager, /lastSuccessAt/);
   assert.match(manager, /completedAt/);
   assert.match(manager, /scheduledJob\?\.running/);
+  assert.match(manager, /catalogContinuing/);
+  assert.match(manager, /Last full refresh/);
+  assert.match(manager, /Next batch queued/);
   assert.match(manager, /window\.setInterval\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
   assert.match(manager, /window\.clearInterval/);
   assert.doesNotMatch(manager, /window\.setTimeout\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);

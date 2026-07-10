@@ -162,7 +162,15 @@ function firstCount(...values: unknown[]) {
 
 function formatCatalogPhase(value: unknown) {
   const text = firstText(value);
-  return text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Idle";
+  const labels: Record<string, string> = {
+    list_items: "Discovering items",
+    list_cargo: "Discovering cargo",
+    detail_items: "Loading item details",
+    detail_cargo: "Loading cargo details",
+    retry_failures: "Retrying failed details",
+    complete: "Complete",
+  };
+  return labels[text] ?? (text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Idle");
 }
 
 function formatCatalogMoment(value: unknown) {
@@ -320,6 +328,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const successfulRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
   const completedRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
   const catalogRunning = Boolean(scheduledJob?.running);
+  const catalogContinuing = !catalogRunning && latestRun?.status === "paused" && scheduledJob?.metadata?.complete === false;
+  const catalogActive = catalogRunning || catalogContinuing;
   const catalogPhase = formatCatalogPhase(firstText(latestRun?.phase, scheduledJob?.metadata?.phase, scheduledJob?.metadata?.stage, scheduledJob?.metadata?.step));
   const processedCount = firstCount(latestRun?.processedCount, scheduledJob?.metadata?.processedCount, scheduledJob?.metadata?.current, scheduledJob?.metadata?.progressCurrent);
   const totalCount = firstCount(latestRun?.totalCount, scheduledJob?.metadata?.totalCount, scheduledJob?.metadata?.total, scheduledJob?.metadata?.progressTotal);
@@ -329,14 +339,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const byproductCount = firstCount(latestRun?.byproductCount, successfulRun?.byproductCount, scheduledJob?.metadata?.byproductCount);
   const failureCount = firstCount(latestRun?.failureCount, completedRun?.failureCount, scheduledJob?.metadata?.failureCount);
   const lastSuccessAt = firstText(scheduledJob?.lastSuccessAt, successfulRun?.completedAt, successfulRun?.updatedAt) || null;
-  const lastCompletedAt = firstText(latestRun?.completedAt, completedRun?.completedAt, scheduledJob?.lastRunAt, latestRun?.updatedAt) || null;
+  const lastCompletedAt = firstText(completedRun?.completedAt, completedRun?.updatedAt) || null;
   const nextRunAt = firstText(scheduledJob?.nextRunAt) || null;
   const noCatalog = !lastSuccessAt && recipeCount <= 0 && byproductCount <= 0;
-  const catalogActionBusy = busy || catalogBusy || catalogRunning;
-  const catalogStatusLabel = catalogRunning ? "Running" : noCatalog ? "Refresh required" : latestRun?.status === "failed" || firstText(scheduledJob?.lastError, latestRun?.lastError) ? "Attention" : "Ready";
+  const catalogActionBusy = busy || catalogBusy || catalogActive;
+  const catalogStatusLabel = catalogRunning ? "Running" : catalogContinuing ? "Continuing" : noCatalog ? "Refresh required" : latestRun?.status === "failed" || firstText(scheduledJob?.lastError, latestRun?.lastError) ? "Attention" : "Ready";
   const progressSummary = totalCount > 0 ? `${formatNumber(processedCount, 0)} / ${formatNumber(totalCount, 0)}` : processedCount > 0 ? formatNumber(processedCount, 0) : "Waiting";
   const catalogSummary = catalogRunning
     ? `${catalogPhase} in progress${totalCount > 0 ? `, ${progressSummary} processed.` : "."}`
+    : catalogContinuing
+      ? `Next batch queued${totalCount > 0 ? `, ${progressSummary} details loaded.` : "."}`
     : noCatalog
       ? "No planner catalog yet. Run a refresh to populate recipe diagnostics."
       : latestRun?.status === "failed"
@@ -345,7 +357,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const catalogSchedule = nextRunAt ? `Next scheduled run ${dateLabel(nextRunAt)}.` : (scheduledJob?.scheduleLabel ?? "Manual refresh only.");
   const lastSuccess = formatCatalogMoment(lastSuccessAt);
   const lastCompleted = formatCatalogMoment(lastCompletedAt);
-  const catalogPillClass = catalogRunning ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
+  const catalogPillClass = catalogActive ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
 
   return (
     <div className="modal-backdrop craft-plan-manager-backdrop" role="presentation">
@@ -381,7 +393,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               <div className="craft-plan-catalog-stat"><small>Status</small><strong>{catalogStatusLabel}</strong><span>{catalogPhase}</span></div>
               <div className="craft-plan-catalog-stat"><small>Progress</small><strong>{progressSummary}</strong><span>{totalCount > 0 ? `${formatNumber(processedCount, 0)} processed of ${formatNumber(totalCount, 0)}` : "Waiting for a completed scan"}</span></div>
               <div className="craft-plan-catalog-stat"><small>Last success</small><strong>{lastSuccess.summary}</strong><span>{lastSuccess.detail}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Last completed</small><strong>{lastCompleted.summary}</strong><span>{lastCompleted.detail}</span></div>
+              <div className="craft-plan-catalog-stat"><small>Last full refresh</small><strong>{lastCompleted.summary}</strong><span>{lastCompleted.detail}</span></div>
               <div className="craft-plan-catalog-stat"><small>Items</small><strong>{formatNumber(itemCount, 0)}</strong><span>Item entities</span></div>
               <div className="craft-plan-catalog-stat"><small>Cargo</small><strong>{formatNumber(cargoCount, 0)}</strong><span>Cargo entities</span></div>
               <div className="craft-plan-catalog-stat"><small>Recipes</small><strong>{formatNumber(recipeCount, 0)}</strong><span>Catalog recipes</span></div>

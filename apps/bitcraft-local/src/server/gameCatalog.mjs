@@ -313,6 +313,26 @@ function mapRefreshRunRow(row) {
   } : null;
 }
 
+function mapRefreshTargetRow(row) {
+  if (!row) return null;
+  return {
+    runId: toNumber(row.run_id),
+    sequence: toNumber(row.sequence),
+    catalogKey: row.catalog_key,
+    kind: row.kind,
+    id: row.target_id,
+    itemType: toNumber(row.item_type),
+    name: row.name,
+    tag: row.tag,
+    tier: normalizeInteger(row.tier),
+    rarityStr: row.rarity,
+    iconAssetName: row.icon_asset_name,
+    state: row.state,
+    attemptCount: toNumber(row.attempt_count),
+    lastError: row.last_error,
+  };
+}
+
 export function createGameCatalogRepository(db) {
   const statements = {
     upsertEntity: db.prepare(`
@@ -430,6 +450,44 @@ export function createGameCatalogRepository(db) {
           item_count = ?, cargo_count = ?, recipe_count = ?, byproduct_count = ?, failure_count = ?,
           started_at = ?, completed_at = ?, last_error = ?, updated_at = ?
       WHERE id = ?
+    `),
+    deleteRefreshTargets: db.prepare("DELETE FROM game_catalog_refresh_targets WHERE run_id = ?"),
+    insertRefreshTarget: db.prepare(`
+      INSERT INTO game_catalog_refresh_targets (
+        run_id, sequence, catalog_key, kind, target_id, item_type, name, tag, tier, rarity,
+        icon_asset_name, state, attempt_count, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, ?)
+    `),
+    countRefreshTargets: db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN state = 'processed' THEN 1 ELSE 0 END) AS processed,
+        SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END) AS failed
+      FROM game_catalog_refresh_targets
+      WHERE run_id = ?
+    `),
+    listPendingRefreshTargets: db.prepare(`
+      SELECT * FROM game_catalog_refresh_targets
+      WHERE run_id = ? AND state = 'pending'
+      ORDER BY sequence ASC
+      LIMIT ?
+    `),
+    listRetryableRefreshTargets: db.prepare(`
+      SELECT * FROM game_catalog_refresh_targets
+      WHERE run_id = ? AND state = 'failed' AND attempt_count < ?
+      ORDER BY sequence ASC
+      LIMIT ?
+    `),
+    markRefreshTargetProcessed: db.prepare(`
+      UPDATE game_catalog_refresh_targets
+      SET state = 'processed', attempt_count = attempt_count + 1, last_error = NULL, updated_at = ?
+      WHERE run_id = ? AND catalog_key = ?
+    `),
+    markRefreshTargetFailed: db.prepare(`
+      UPDATE game_catalog_refresh_targets
+      SET state = 'failed', attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
+      WHERE run_id = ? AND catalog_key = ?
     `),
   };
 
@@ -552,6 +610,60 @@ export function createGameCatalogRepository(db) {
     listRefreshRuns(limit = 20) {
       const normalizedLimit = Math.max(1, Math.floor(toNumber(limit, 20) || 20));
       return statements.listRefreshRuns.all(normalizedLimit).map((row) => mapRefreshRunRow(row));
+    },
+    replaceRefreshTargets(runId, targets = []) {
+      const updatedAt = new Date().toISOString();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        statements.deleteRefreshTargets.run(runId);
+        targets.forEach((source, sequence) => {
+          const entity = entityFromSource(source, {}, source.kind);
+          statements.insertRefreshTarget.run(
+            runId,
+            sequence,
+            entity.catalogKey,
+            entity.kind,
+            entity.targetId,
+            entity.itemType,
+            entity.name,
+            entity.tag,
+            entity.tier,
+            entity.rarity,
+            entity.iconAssetName,
+            updatedAt,
+          );
+        });
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      return this.getRefreshTargetCounts(runId);
+    },
+    getRefreshTargetCounts(runId) {
+      const row = statements.countRefreshTargets.get(runId) ?? {};
+      return {
+        total: toNumber(row.total),
+        pending: toNumber(row.pending),
+        processed: toNumber(row.processed),
+        failed: toNumber(row.failed),
+      };
+    },
+    listPendingRefreshTargets(runId, limit = 250) {
+      return statements.listPendingRefreshTargets.all(runId, Math.max(1, Math.floor(toNumber(limit, 250)))).map(mapRefreshTargetRow);
+    },
+    listRetryableRefreshTargets(runId, limit = 250, maxAttempts = 3) {
+      return statements.listRetryableRefreshTargets.all(
+        runId,
+        Math.max(1, Math.floor(toNumber(maxAttempts, 3))),
+        Math.max(1, Math.floor(toNumber(limit, 250))),
+      ).map(mapRefreshTargetRow);
+    },
+    markRefreshTargetProcessed(runId, catalogKey, updatedAt = new Date().toISOString()) {
+      statements.markRefreshTargetProcessed.run(updatedAt, runId, catalogKey);
+    },
+    markRefreshTargetFailed(runId, catalogKey, error, updatedAt = new Date().toISOString()) {
+      statements.markRefreshTargetFailed.run(String(error ?? "Unknown catalog refresh error"), updatedAt, runId, catalogKey);
     },
     upsertDetail(payload, { updatedAt = new Date().toISOString(), fallback = {} } = {}) {
       const normalized = normalizeGameCatalogDetail(payload, fallback);

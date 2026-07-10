@@ -278,6 +278,25 @@ export const schemaBootstrapSql = `
     last_error TEXT,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS game_catalog_refresh_targets (
+    run_id INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    catalog_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    item_type INTEGER NOT NULL,
+    name TEXT,
+    tag TEXT,
+    tier INTEGER,
+    rarity TEXT,
+    icon_asset_name TEXT,
+    state TEXT NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, catalog_key),
+    FOREIGN KEY (run_id) REFERENCES game_catalog_refresh_runs(id) ON DELETE CASCADE
+  );
   CREATE TABLE IF NOT EXISTS craft_plan_settings (
     plan_key TEXT PRIMARY KEY,
     config_json TEXT NOT NULL,
@@ -588,6 +607,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_status_time ON game_catalog_refresh_runs (status, started_at DESC, completed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_updated_at ON game_catalog_refresh_runs (updated_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_targets_queue ON game_catalog_refresh_targets (run_id, state, sequence);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
   CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured ON snapshots (claim_id, captured_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON snapshots (captured_at);

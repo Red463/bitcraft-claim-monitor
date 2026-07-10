@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.20] - 2026-07-10
+
+### Changed
+
+- Improved planner catalog refreshes so discovery runs once and later detail batches continue automatically from a local database queue without repeatedly requesting the full BitJita item and cargo lists.
+- Improved planner catalog diagnostics with clearer discovery, detail-loading, continuation, retry, and last-full-refresh states.
+
+### Fixed
+
+- Fixed the Craft Planning Needs Board's All count so it shows the total number of rows instead of the number of activity sections.
+
 ## [0.32.0-beta.19] - 2026-07-10
 
 ### Fixed

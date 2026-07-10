@@ -1703,15 +1703,23 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
 
   assert.deepEqual(detailRequests, ["items:100", "items:200", "items:200", "cargo:300", "items:999"]);
   assert.equal(item200Attempts, 2);
-  assert.equal(itemsPageRequests, 4);
-  assert.equal(cargoPageRequests, 2);
+  assert.equal(itemsPageRequests, 2);
+  assert.equal(cargoPageRequests, 1);
 });
 
 test("craft plan catalog refresh pauses cleanly and schedules an automatic continuation when a batch remains", async (t) => {
+  let itemListRequests = 0;
+  let cargoListRequests = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
-    if (url.pathname === "/api/items") return json(res, { items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }, { id: "200", itemType: 0, name: "Timber", tag: "Plank", tier: 1 }], pagination: { page: 1, totalPages: 1, total: 2 } });
-    if (url.pathname === "/api/cargo") return json(res, { cargos: [], metrics: { total: 0, totalPages: 1, page: 1 } });
+    if (url.pathname === "/api/items") {
+      itemListRequests += 1;
+      return json(res, { items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }, { id: "200", itemType: 0, name: "Timber", tag: "Plank", tier: 1 }], pagination: { page: 1, totalPages: 1, total: 2 } });
+    }
+    if (url.pathname === "/api/cargo") {
+      cargoListRequests += 1;
+      return json(res, { cargos: [], metrics: { total: 0, totalPages: 1, page: 1 } });
+    }
     if (url.pathname === "/api/items/100" || url.pathname === "/api/items/200") return json(res, { item: { id: url.pathname.endsWith("100") ? "100" : "200", itemType: 0, name: "Catalog item", tag: "Material", tier: 1 }, craftingRecipes: [] });
     return json(res, { error: "not found" }, 404);
   });
@@ -1738,7 +1746,7 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
       GAME_CATALOG_REFRESH_BATCH_SIZE: "1",
       GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
-      GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS: "60000",
+      GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS: "1000",
     },
     stdio: "ignore",
   });
@@ -1770,8 +1778,16 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
   assert.equal(paused.latestRun.lastError, null);
   assert.equal(paused.scheduledJob.lastError, null);
   assert.equal(paused.scheduledJob.metadata.complete, false);
-  assert.equal(paused.scheduledJob.metadata.continueAfterMs, 60000);
-  assert.ok(new Date(paused.scheduledJob.nextRunAt).getTime() < Date.now() + 65000);
+  assert.equal(paused.scheduledJob.metadata.continueAfterMs, 1000);
+  assert.ok(new Date(paused.scheduledJob.nextRunAt).getTime() < Date.now() + 5000);
+
+  const completed = await waitForCondition("self-continued catalog refresh", async () => {
+    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers: { cookie, origin, "x-csrf-token": auth.csrfToken } }).then((response) => response.json());
+    return payload.latestRun?.status === "completed" ? payload : null;
+  }, 10000);
+  assert.equal(completed.latestRun.processedCount, 2);
+  assert.equal(itemListRequests, 1);
+  assert.equal(cargoListRequests, 1);
 });
 test("craft plan catalog refresh resets stale resume cursor counters when the saved target disappears", async (t) => {
   const detailRequests = [];

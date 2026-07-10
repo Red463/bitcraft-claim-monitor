@@ -579,3 +579,35 @@ test("game catalog repository persists resumable refresh runs and list identity 
     updatedAt: UPDATED_AT,
   });
 });
+
+test("game catalog refresh targets persist a database-backed work queue", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  const run = repository.beginRefreshRun({ startedAt: UPDATED_AT, updatedAt: UPDATED_AT });
+
+  repository.replaceRefreshTargets(run.id, [
+    { id: "100", kind: "items", itemType: 0, name: "Resin" },
+    { id: "200", kind: "items", itemType: 0, name: "Timber" },
+    { id: "300", kind: "cargo", itemType: 1, name: "Trunk" },
+  ]);
+
+  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
+    total: 3,
+    pending: 3,
+    processed: 0,
+    failed: 0,
+  });
+  assert.deepEqual(repository.listPendingRefreshTargets(run.id, 2).map((target) => target.catalogKey), ["items:100", "items:200"]);
+
+  repository.markRefreshTargetProcessed(run.id, "items:100");
+  repository.markRefreshTargetFailed(run.id, "items:200", "temporary failure");
+
+  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
+    total: 3,
+    pending: 1,
+    processed: 1,
+    failed: 1,
+  });
+  assert.deepEqual(repository.listPendingRefreshTargets(run.id, 10).map((target) => target.catalogKey), ["cargo:300"]);
+  assert.deepEqual(repository.listRetryableRefreshTargets(run.id, 10, 3).map((target) => target.catalogKey), ["items:200"]);
+});
