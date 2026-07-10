@@ -202,6 +202,75 @@ export const schemaBootstrapSql = `
     last_error TEXT,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS game_catalog_entities (
+    catalog_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    item_type INTEGER NOT NULL DEFAULT 0,
+    name TEXT,
+    tag TEXT,
+    tier INTEGER,
+    rarity TEXT,
+    icon_asset_name TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_recipes (
+    recipe_key TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    name TEXT,
+    station_name TEXT,
+    skill_name TEXT,
+    is_passive INTEGER NOT NULL DEFAULT 0,
+    is_transport_route INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_recipe_inputs (
+    recipe_key TEXT NOT NULL,
+    input_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    PRIMARY KEY (recipe_key, input_key),
+    FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_recipe_outputs (
+    recipe_key TEXT NOT NULL,
+    output_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    is_primary_output INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (recipe_key, output_key),
+    FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_item_list_outputs (
+    producer_key TEXT NOT NULL,
+    output_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    chance REAL,
+    PRIMARY KEY (producer_key, output_key)
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_refresh_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL,
+    phase TEXT,
+    cursor_kind TEXT,
+    cursor_id TEXT,
+    processed_count INTEGER NOT NULL DEFAULT 0,
+    total_count INTEGER NOT NULL DEFAULT 0,
+    item_count INTEGER NOT NULL DEFAULT 0,
+    cargo_count INTEGER NOT NULL DEFAULT 0,
+    recipe_count INTEGER NOT NULL DEFAULT 0,
+    byproduct_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    last_error TEXT,
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS craft_plan_settings (
     plan_key TEXT PRIMARY KEY,
     config_json TEXT NOT NULL,
@@ -504,6 +573,13 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_kind_target ON game_catalog_entities (kind, target_id);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_recipes_source ON game_catalog_recipes (source_kind, source_id);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_outputs_output ON game_catalog_recipe_outputs (output_key, is_primary_output DESC, recipe_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_inputs_input ON game_catalog_recipe_inputs (input_key, recipe_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_status_time ON game_catalog_refresh_runs (status, started_at DESC, completed_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_updated_at ON game_catalog_refresh_runs (updated_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
   CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured ON snapshots (claim_id, captured_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON snapshots (captured_at);
@@ -512,3 +588,7 @@ export const schemaBootstrapSql = `
 export function applySchemaBootstrap(db) {
   db.exec(schemaBootstrapSql);
 }
+
+
+
+
