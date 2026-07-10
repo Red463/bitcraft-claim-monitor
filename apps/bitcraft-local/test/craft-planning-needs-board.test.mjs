@@ -29,6 +29,60 @@ test("buildNeedsBoard groups enriched API items by tag and authoritative tier", 
   assert.equal(board[0].rows[0].cells.get("T6")?.missing, 42);
 });
 
+
+
+test("buildNeedsBoard merges concrete item names into one row when API tags match", () => {
+  const board = buildNeedsBoard([
+    {
+      key: "items:2120001",
+      id: "2120001",
+      kind: "items",
+      name: "Simple Wispweave Filament",
+      tag: "Wispweave Filament",
+      tier: 2,
+      section: "Farming",
+      required: 100,
+      available: 10,
+      inProgress: 0,
+      missing: 90,
+    },
+    {
+      key: "items:3120001",
+      id: "3120001",
+      kind: "items",
+      name: "Infused Wispweave Filament",
+      tag: "Wispweave Filament",
+      tier: 3,
+      section: "Farming",
+      required: 50,
+      available: 5,
+      inProgress: 0,
+      missing: 45,
+    },
+    {
+      key: "items:5120001",
+      id: "5120001",
+      kind: "items",
+      name: "Exquisite Wispweave Filament",
+      tag: "Wispweave Filament",
+      tier: 5,
+      section: "Farming",
+      required: 25,
+      available: 0,
+      inProgress: 0,
+      missing: 25,
+    },
+  ], []);
+
+  assert.equal(board.length, 1);
+  assert.equal(board[0].rows.length, 1);
+  assert.equal(board[0].rows[0].name, "Wispweave Filament");
+  assert.equal(board[0].rows[0].cells.get("T2")?.name, "Simple Wispweave Filament");
+  assert.equal(board[0].rows[0].cells.get("T3")?.name, "Infused Wispweave Filament");
+  assert.equal(board[0].rows[0].cells.get("T5")?.name, "Exquisite Wispweave Filament");
+  assert.equal(board[0].rows[0].cells.has("Materials"), false);
+});
+
 test("buildNeedsBoard keeps satisfied prerequisites when an unfinished recipe still needs them", () => {
   const board = buildNeedsBoard([
     {

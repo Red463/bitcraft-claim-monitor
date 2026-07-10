@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.17] - 2026-07-10
+
+### Fixed
+
+- Fixed Craft Planning byproduct route discovery so materials such as gypsite, bark, and resin can use BitJita producer outputs instead of expensive direct crafts.
+
 ## [0.32.0-beta.16] - 2026-07-09
 
 ### Fixed

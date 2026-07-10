@@ -95,3 +95,29 @@ test("Dashboard shows Gather Next instead of Recent Activity", () => {
   assert.match(dashboard, /onNavigate\("planning"\)/);
   assert.doesNotMatch(dashboard, /DashboardCardHeader title="Recent Activity"/);
 });
+
+test("Craft Planning recipe discovery runs in the scheduled job, not page-load requests", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(server, /refreshCraftPlanProducerCatalog/);
+  assert.match(server, /craftPlanHasItemListOutputs/);
+  assert.match(server, /craftPlanCargoLooksLikeTransportPackage/);
+  assert.match(server, /runRecipeCatalogRefreshJob[\s\S]*refreshCraftPlanProducerCatalog/);
+  assert.match(server, /recipe_catalog_refresh:[\s\S]*producer\/byproduct metadata/);
+  assert.match(server, /recipeDetailHasPlanningMetadata/);
+  assert.match(server, /metadata_refresh/);
+  assert.match(server, /RECIPE_CATALOG_DISCOVERY_LIMIT \?\? 2000/);
+
+  const itemOutputHelper = server.match(/async function addCraftPlanItemOutputDetails[\s\S]*?async function addCraftPlanCargoDerivationDetails/)?.[0] ?? "";
+  assert.match(itemOutputHelper, /recipeDetailFromCatalog\(\{ id: itemId, kind: "items", itemType: 0 \}\)/);
+  assert.doesNotMatch(itemOutputHelper, /recipeDetailFromCatalogOrFetch\(\{ id: itemId, kind: "items", itemType: 0 \}\)/);
+
+  const itemProducerHelper = server.match(/async function craftPlanItemProducerIdsFromCatalog[\s\S]*?async function craftPlanCargoIdsFromCatalog/)?.[0] ?? "";
+  assert.doesNotMatch(itemProducerHelper, /craftPlanItemProducerLooksRelevant/);
+
+  const cargoHelper = server.match(/async function addCraftPlanCargoDerivationDetails[\s\S]*?function activeCraftPlanOutputs/)?.[0] ?? "";
+  assert.match(cargoHelper, /const sourceCargoIds = new Set\(craftPlanCargoIdsFromSources\(sources\)\)/);
+  assert.match(cargoHelper, /sourceCargoIds\.has\(cargoId\)[\s\S]*recipeDetailFromCatalogOrFetch/);
+  assert.match(cargoHelper, /recipeDetailFromCatalog\(target\)/);
+  assert.match(cargoHelper, /sourceCargoIds\.has\(cargoId\)[\s\S]*recipeDetailFromCatalogOrFetch\(outputTarget\)[\s\S]*recipeDetailFromCatalog\(outputTarget\)/);
+});

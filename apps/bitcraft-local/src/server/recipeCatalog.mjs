@@ -12,9 +12,14 @@ export function recipeKindFromItemType(value) {
   return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
 }
 
+function unwrapRecipeCatalogDetail(detail) {
+  return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
+}
+
 export function recipeTargetFromDetail(detail, fallback = {}) {
-  const source = detail?.item ?? detail?.cargo ?? detail ?? {};
-  const kind = detail?.cargo ? "cargo" : recipeKindFromItemType(source.itemType ?? source.item_type ?? fallback.itemType ?? fallback.kind);
+  const unwrapped = unwrapRecipeCatalogDetail(detail);
+  const source = unwrapped?.item ?? unwrapped?.cargo ?? unwrapped ?? {};
+  const kind = unwrapped?.cargo ? "cargo" : recipeKindFromItemType(source.itemType ?? source.item_type ?? fallback.itemType ?? fallback.kind);
   return {
     id: String(source.id ?? source.itemId ?? fallback.id ?? ""),
     kind,
@@ -25,6 +30,11 @@ export function recipeTargetFromDetail(detail, fallback = {}) {
     tag: source.tag ?? fallback.tag ?? null,
     iconAssetName: source.iconAssetName ?? fallback.iconAssetName ?? null,
   };
+}
+
+export function recipeDetailHasPlanningMetadata(detail, fallback = {}) {
+  const target = recipeTargetFromDetail(detail, fallback);
+  return Boolean(target.id && target.tag && target.tier != null);
 }
 
 export function recipeTargetFromRow(row) {

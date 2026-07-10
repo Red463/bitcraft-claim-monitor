@@ -672,3 +672,64 @@ test("computeCraftPlan applies row name overrides after API row identity resolut
   assert.equal(material?.sectionOverrideKey, "tag:Refined Plank");
   assert.equal(material?.rowNameOverride, "Finished Planks");
 });
+
+test("computeCraftPlan prefers byproduct producer routes over expensive direct crafts", () => {
+  const gypsiteDetail = {
+    item: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },
+    craftingRecipes: [{
+      id: "craft-gypsite",
+      name: "Craft Rough Gypsite",
+      craftedItemStacks: [{ item_id: "3001", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 }],
+      consumedItemStacks: [
+        { item_id: "4001", item_type: "item", quantity: 10 },
+        { item_id: "4002", item_type: "item", quantity: 20 },
+      ],
+      consumedItems: [
+        { id: "4001", name: "Rough Brick", itemType: 0, tag: "Brick", tier: 1 },
+        { id: "4002", name: "Ancient Mortar", itemType: 0, tag: "Mortar", tier: 1 },
+      ],
+      levelRequirements: [{ skill: { name: "Masonry" }, level: 1 }],
+    }],
+  };
+  const clayOutputDetail = {
+    item: { id: "5001", name: "Rough Clay Output", itemType: 0, tag: "Clay Output", tier: 1, itemListId: "5000" },
+    craftingRecipes: [{
+      id: "gather-clay",
+      name: "Gather Rough Clay",
+      craftedItemStacks: [{ item_id: "5001", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "5001", name: "Rough Clay Output", itemType: 0, tag: "Clay Output", tier: 1 }],
+      consumedItemStacks: [{ item_id: "6001", item_type: "cargo", quantity: 1 }],
+      consumedItems: [{ id: "6001", name: "Rough Clay Deposit", itemType: 1, tag: "Clay Deposit", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Foraging" }, level: 1 }],
+    }],
+    itemListPossibilities: [{
+      targetId: "3001",
+      targetItem: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },
+      quantity: 1,
+      chance: 0.25,
+      isCargo: false,
+    }],
+  };
+  const clayDepositDetail = {
+    cargo: { id: "6001", name: "Rough Clay Deposit", itemType: 1, tag: "Clay Deposit", tier: 1 },
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "3001", kind: "items", name: "Rough Gypsite", quantity: 4, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "3001"), gypsiteDetail],
+      [recipeKey("items", "5001"), clayOutputDetail],
+      [recipeKey("cargo", "6001"), clayDepositDetail],
+    ]),
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "possibility:gather-clay:items:3001");
+  assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
+  assert.equal(plan.materials.some((material) => material.name === "Ancient Mortar"), false);
+  const clayDeposit = plan.materials.find((material) => material.name === "Rough Clay Deposit");
+  assert.equal(clayDeposit?.kind, "cargo");
+  assert.equal(clayDeposit?.required, 16);
+  const gypsite = plan.materials.find((material) => material.name === "Rough Gypsite");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.recipeName, "Gather Rough Clay -> Rough Gypsite");
+});

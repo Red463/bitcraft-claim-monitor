@@ -1,4 +1,4 @@
-﻿import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -22,7 +22,7 @@ import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAl
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
-import { recipeCatalogKey, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
+import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
@@ -216,12 +216,31 @@ async function recipeDetailFromCatalogOrFetch(target) {
   const key = recipeCatalogKey(kind, id);
   const cached = statements.getRecipeCatalogEntry.get(key);
   if (cached?.detail_json) {
-    return {
-      detail: safeJson(cached.detail_json, {}),
-      cached: true,
-      lastSyncedAt: cached.last_synced_at,
-      lastError: cached.last_error,
-    };
+    const detail = safeJson(cached.detail_json, {});
+    if (recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) {
+      return {
+        detail,
+        cached: true,
+        lastSyncedAt: cached.last_synced_at,
+        lastError: cached.last_error,
+      };
+    }
+    try {
+      const refreshed = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "metadata_refresh");
+      return {
+        detail: refreshed,
+        cached: false,
+        lastSyncedAt: new Date().toISOString(),
+        lastError: null,
+      };
+    } catch {
+      return {
+        detail,
+        cached: true,
+        lastSyncedAt: cached.last_synced_at,
+        lastError: cached.last_error,
+      };
+    }
   }
   const detail = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "on_demand");
   return {
@@ -232,18 +251,77 @@ async function recipeDetailFromCatalogOrFetch(target) {
   };
 }
 
-async function runRecipeCatalogRefreshJob() {
+function recipeDetailFromCatalog(target) {
+  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
+  const id = String(target.id ?? "").trim();
+  const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
+  if (!cached?.detail_json) return null;
+  const detail = safeJson(cached.detail_json, {});
+  if (!recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) return null;
+  return {
+    detail,
+    cached: true,
+    lastSyncedAt: cached.last_synced_at,
+    lastError: cached.last_error,
+  };
+}
+
+function recipeCatalogCached(target) {
+  return Boolean(recipeDetailFromCatalog(target));
+}
+
+function craftPlanRecipeDiscoveryLimit() {
+  return Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_DISCOVERY_LIMIT ?? 2000), 2000));
+}
+
+function craftPlanCatalogCandidateTarget(kind, row = {}) {
+  const id = String(row.id ?? row.itemId ?? "").trim();
+  if (!/^\d+$/.test(id)) return null;
+  return { id, kind, itemType: kind === "cargo" ? 1 : 0, name: row.name, tier: row.tier, tag: row.tag, iconAssetName: row.iconAssetName };
+}
+
+async function refreshCraftPlanProducerCatalog({ jobKey } = {}) {
+  const [itemRows, cargoRows] = await Promise.all([
+    craftPlanItemCatalogRowsCached().catch(() => []),
+    craftPlanCargoCatalogRowsCached().catch(() => []),
+  ]);
+  const candidates = [
+    ...itemRows.filter((row) => craftPlanHasItemListOutputs(row) && !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("items", row)),
+    ...cargoRows.filter((row) => !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("cargo", row)),
+  ].filter(Boolean).filter((target) => !recipeCatalogCached(target));
+  const limit = craftPlanRecipeDiscoveryLimit();
+  const selected = candidates.slice(0, limit);
+  let discovered = 0;
+  let discoveryFailed = 0;
+  let stoppedEarly = false;
+  for (const target of selected) {
+    try {
+      await fetchAndStoreRecipeDetail(target, "scheduled_job");
+      discovered += 1;
+    } catch (error) {
+      discoveryFailed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), recipeCatalogKey(target.kind, target.id));
+      if (message.includes("HTTP 429")) {
+        stoppedEarly = true;
+        break;
+      }
+    }
+    if ((discovered + discoveryFailed) % 25 === 0) updateScheduledJobProgress(jobKey, { stage: "recipe_discovery", discovered, discoveryFailed, candidates: candidates.length });
+    await delay(100);
+  }
+  return {
+    discovered,
+    discoveryFailed,
+    discoverySkipped: Math.max(candidates.length - discovered - discoveryFailed, 0),
+    discoveryCandidates: candidates.length,
+    discoveryLimit: limit,
+    discoveryStoppedEarly: stoppedEarly,
+  };
+}
+async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   const limit = Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_REFRESH_LIMIT ?? 250), 1000));
   const rows = statements.listRecipeCatalogEntries.all(limit);
-  if (!rows.length) {
-    return {
-      refreshed: 0,
-      failed: 0,
-      skipped: 0,
-      knownRecipes: 0,
-      message: "No recipe records are cached yet. The Craft Calculator will add records as users look up items.",
-    };
-  }
 
   let refreshed = 0;
   let failed = 0;
@@ -265,16 +343,24 @@ async function runRecipeCatalogRefreshJob() {
     await delay(250);
   }
 
+  const discovery = stoppedEarly ? {
+    discovered: 0,
+    discoveryFailed: 0,
+    discoverySkipped: 0,
+    discoveryCandidates: 0,
+    discoveryLimit: craftPlanRecipeDiscoveryLimit(),
+    discoveryStoppedEarly: true,
+  } : await refreshCraftPlanProducerCatalog({ jobKey });
   const knownRecipes = toNumber(statements.recipeCatalogCount.get()?.count);
   return {
     refreshed,
     failed,
-    skipped: Math.max(knownRecipes - refreshed - failed, 0),
+    skipped: Math.max(knownRecipes - refreshed - failed - discovery.discovered, 0),
     knownRecipes,
-    stoppedEarly,
+    stoppedEarly: stoppedEarly || discovery.discoveryStoppedEarly,
+    ...discovery,
   };
 }
-
 function updateScheduledJobProgress(jobKey, metadata) {
   if (!jobKey) return;
   const row = statements.getScheduledJob.get(jobKey);
@@ -366,7 +452,7 @@ async function runGeoipRefreshJob({ jobKey } = {}) {
 const scheduledJobRegistry = {
   recipe_catalog_refresh: {
     label: "Recipe catalog refresh",
-    description: "Refreshes known Craft Calculator recipe records from BitJita once per day at midnight.",
+    description: "Refreshes known recipe records and discovers Craft Planning producer/byproduct metadata from BitJita once per day at midnight.",
     schedule: "daily_midnight",
     enabled: true,
     run: runRecipeCatalogRefreshJob,
@@ -1290,34 +1376,6 @@ function craftPlanHasItemListOutputs(row = {}) {
   return itemListId !== "" && itemListId !== "0";
 }
 
-const CRAFT_PLAN_ITEM_DISCOVERY_STOP_WORDS = new Set([
-  "rough", "simple", "sturdy", "fine", "exquisite", "peerless", "ornate", "pristine", "magnificent", "flawless",
-  "basic", "infused", "products", "product", "output", "outputs", "crushed", "refined", "package", "packed",
-]);
-
-function craftPlanDiscoveryTokens(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 4 && !CRAFT_PLAN_ITEM_DISCOVERY_STOP_WORDS.has(token));
-}
-
-function craftPlanItemProducerTokens(detailsByKey) {
-  const tokens = new Set();
-  for (const detail of detailsByKey.values()) {
-    const target = craftPlanDetailTarget(detail);
-    for (const token of craftPlanDiscoveryTokens(`${target.name ?? ""} ${target.tag ?? ""}`)) tokens.add(token);
-  }
-  return tokens;
-}
-
-function craftPlanItemProducerLooksRelevant(row = {}, tokens = new Set()) {
-  if (!tokens.size) return true;
-  const haystack = ` ${String(row.name ?? "").toLowerCase()} ${String(row.tag ?? "").toLowerCase()} `;
-  return [...tokens].some((token) => haystack.includes(token));
-}
-
 function craftPlanCargoLooksLikeTransportPackage(row = {}) {
   const tag = String(row.tag ?? "").trim();
   const name = String(row.name ?? "").trim();
@@ -1345,7 +1403,6 @@ async function craftPlanItemCatalogRowsCached() {
 async function craftPlanItemProducerIdsFromCatalog(detailsByKey) {
   const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
   if (!tiers.size) return [];
-  const tokens = craftPlanItemProducerTokens(detailsByKey);
   const rows = await craftPlanItemCatalogRowsCached();
   const ids = new Set();
   for (const row of rows) {
@@ -1354,7 +1411,6 @@ async function craftPlanItemProducerIdsFromCatalog(detailsByKey) {
     if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
     if (!craftPlanHasItemListOutputs(row)) continue;
     if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
-    if (!craftPlanItemProducerLooksRelevant(row, tokens)) continue;
     ids.add(id);
   }
   return [...ids];
@@ -1401,7 +1457,7 @@ async function addCraftPlanItemOutputDetails(detailsByKey) {
   for (const itemId of await craftPlanItemProducerIdsFromCatalog(detailsByKey)) {
     const key = recipeCatalogKey("items", itemId);
     if (detailsByKey.has(key)) continue;
-    const detail = await recipeDetailFromCatalogOrFetch({ id: itemId, kind: "items", itemType: 0 }).catch(() => null);
+    const detail = recipeDetailFromCatalog({ id: itemId, kind: "items", itemType: 0 });
     if (detail && craftPlanOutputPossibilityMatchesTargets(detail, targetKeys)) detailsByKey.set(key, detail);
   }
   return detailsByKey;
@@ -1414,13 +1470,17 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   }).filter(Boolean));
   if (!targetKeys.size) return detailsByKey;
 
-  const cargoIds = [...new Set([...craftPlanCargoIdsFromSources(sources), ...await craftPlanCargoIdsFromCatalog(detailsByKey)])];
+  const sourceCargoIds = new Set(craftPlanCargoIdsFromSources(sources));
+  const cargoIds = [...new Set([...sourceCargoIds, ...await craftPlanCargoIdsFromCatalog(detailsByKey)])];
   for (const cargoId of cargoIds) {
     const cargoKey = recipeCatalogKey("cargo", cargoId);
     if (!/^\d+$/.test(cargoId)) continue;
     let cargoDetail = detailsByKey.get(cargoKey);
     if (!cargoDetail) {
-      cargoDetail = await recipeDetailFromCatalogOrFetch({ id: cargoId, kind: "cargo", itemType: 1 }).catch(() => null);
+      const target = { id: cargoId, kind: "cargo", itemType: 1 };
+      cargoDetail = sourceCargoIds.has(cargoId)
+        ? await recipeDetailFromCatalogOrFetch(target).catch(() => null)
+        : recipeDetailFromCatalog(target);
       if (!cargoDetail) continue;
     }
     const payload = unwrapRecipeDetailPayload(cargoDetail);
@@ -1434,7 +1494,9 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
         const outputKey = recipeCatalogKey(outputTarget.kind, outputTarget.id);
         let outputDetail = detailsByKey.get(outputKey);
         if (!outputDetail) {
-          outputDetail = await recipeDetailFromCatalogOrFetch(outputTarget).catch(() => null);
+          outputDetail = sourceCargoIds.has(cargoId)
+            ? await recipeDetailFromCatalogOrFetch(outputTarget).catch(() => null)
+            : recipeDetailFromCatalog(outputTarget);
           if (outputDetail) detailsByKey.set(outputKey, outputDetail);
         }
         if (outputDetail && craftPlanOutputPossibilityMatchesTargets(outputDetail, targetKeys)) cargoIsRelevant = true;
@@ -2929,16 +2991,16 @@ async function resolvedColourRoles(settings = getDiscordSettingsRaw()) {
 function discordColourButtonEmoji(role) {
   const label = String(role?.label ?? "").toLowerCase();
   const color = toNumber(role?.color);
-  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¢";
-  if (label.includes("blue") || color === 0x5fa8ff || color === 0x244cff) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Âµ";
-  if (label.includes("purple") || color === 0x9b4acb) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â£";
-  if (label.includes("pink") || color === 0xff4f88) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â¸";
-  if (label.includes("red") || color === 0xff2028) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â´";
-  if (label.includes("yellow") || color === 0xf4c430) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¡";
-  if (label.includes("orange") || color === 0xff9f1c) return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â ";
-  if (label.includes("black") || color === 0x111111) return "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â«";
-  if (label.includes("white") || color === 0xf4f4f4) return "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Âª";
-  return "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨";
+  if (label.includes("green") || color === 0x2be56f || color === 0x1fb72e) return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢";
+  if (label.includes("blue") || color === 0x5fa8ff || color === 0x244cff) return "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Âµ";
+  if (label.includes("purple") || color === 0x9b4acb) return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â£";
+  if (label.includes("pink") || color === 0xff4f88) return "ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â¸";
+  if (label.includes("red") || color === 0xff2028) return "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´";
+  if (label.includes("yellow") || color === 0xf4c430) return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡";
+  if (label.includes("orange") || color === 0xff9f1c) return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â ";
+  if (label.includes("black") || color === 0x111111) return "ÃƒÂ¢Ã…Â¡Ã‚Â«";
+  if (label.includes("white") || color === 0xf4f4f4) return "ÃƒÂ¢Ã…Â¡Ã‚Âª";
+  return "ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¨";
 }
 async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   const channelId = String(settings.colourRolesChannelId || settings.channels?.notifications || settings.channelId || "").trim();

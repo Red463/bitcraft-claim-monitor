@@ -234,7 +234,7 @@ test("server collection paginates listings and protects production mutations", a
     if (url.pathname === "/api/items/2020003") {
       recipeDetailRequests += 1;
       return json(res, {
-        item: { id: "2020003", name: "Simple Plank", itemType: 0, tier: 2, rarityStr: "Common" },
+        item: { id: "2020003", name: "Simple Plank", itemType: 0, tier: 2, rarityStr: "Common", tag: "Plank" },
         craftingRecipes: [],
         extractionRecipes: [],
       });

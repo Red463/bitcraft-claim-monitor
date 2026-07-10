@@ -52,3 +52,16 @@ test("Craft planning item details style grouped stock and usage drilldowns", () 
   assert.match(css, /\.craft-plan-detail-row\.subtle\s*\{/);
   assert.match(css, /\.craft-plan-usage-breakdown summary\s*\{/);
 });
+
+test("Craft planning needs board row headings are allowed to wrap", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const rowHeader = css.match(/\.craft-plan-needs-table tbody th\s*\{([^}]+)\}/)?.[1] ?? "";
+  const rowButton = css.match(/\.craft-plan-row-section-button\s*\{([^}]+)\}/)?.[1] ?? "";
+
+  assert.match(rowHeader, /white-space:\s*normal/);
+  assert.match(rowHeader, /overflow:\s*visible/);
+  assert.match(rowHeader, /overflow-wrap:\s*anywhere/);
+  assert.match(rowButton, /white-space:\s*normal/);
+  assert.match(rowButton, /overflow:\s*visible/);
+  assert.match(rowButton, /overflow-wrap:\s*anywhere/);
+});
