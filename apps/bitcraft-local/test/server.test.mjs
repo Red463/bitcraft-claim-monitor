@@ -53,6 +53,26 @@ async function waitForCondition(description, check, timeoutMs = 5000) {
   throw new Error(`Timed out waiting for ${description}`);
 }
 
+async function writeDatabaseWithRetry(dbPath, mutate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec("PRAGMA busy_timeout = 250");
+      const result = mutate(db);
+      db.close();
+      return result;
+    } catch (error) {
+      db.close();
+      lastError = error;
+      if (!String(error?.message ?? "").includes("database is locked")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  throw lastError ?? new Error(`Timed out writing ${dbPath}`);
+}
+
 async function stop(child) {
   if (child.exitCode != null) return;
   child.kill();
@@ -1424,3 +1444,438 @@ test("background polling failures keep the server online", async (t) => {
   assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
 });
 
+
+test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache warm, persists resumable 429 state, and writes normalized catalog rows", async (t) => {
+  let itemsPageRequests = 0;
+  let cargoPageRequests = 0;
+  const detailRequests = [];
+  let firstDetailRelease = null;
+  const firstDetailGate = new Promise((resolve) => { firstDetailRelease = resolve; });
+  let item200Attempts = 0;
+  const upstream = createServer(async (req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/api/items") {
+      itemsPageRequests += 1;
+      const page = Number(url.searchParams.get("page") || 1);
+      if (page === 1) {
+        return json(res, {
+          data: {
+            items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png", itemListId: "55" }],
+            metrics: { total: 2, totalPages: 2, page },
+          },
+        });
+      }
+      if (page === 2) {
+        return json(res, {
+          items: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png", itemListId: "0" }],
+          pagination: { page, totalPages: 2, total: 2 },
+        });
+      }
+      return json(res, { items: [], pagination: { page, totalPages: 2, total: 2 } });
+    }
+    if (url.pathname === "/api/cargo") {
+      cargoPageRequests += 1;
+      return json(res, {
+        results: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" }],
+        count: 1,
+      });
+    }
+    if (url.pathname === "/api/items/100") {
+      detailRequests.push("items:100");
+      await firstDetailGate;
+      return json(res, {
+        detail: {
+          item: { id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" },
+          craftingRecipes: [{
+            id: "resin-pack",
+            name: "Pack Resin",
+            stationName: "Packing Station",
+            craftedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
+            craftedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
+            consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
+            consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+          }],
+          itemListPossibilities: [{
+            targetId: "400",
+            targetItem: { id: "400", itemType: 0, name: "Sticky Residue", tag: "Residue", tier: 1 },
+            quantity: 1,
+            chance: 0.2,
+            isCargo: false,
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/api/items/200") {
+      detailRequests.push("items:200");
+      item200Attempts += 1;
+      if (item200Attempts === 1) return json(res, { error: "rate limited" }, 429);
+      return json(res, {
+        item: { id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" },
+        craftingRecipes: [{
+          id: "timber-finish",
+          name: "Finish Timber",
+          stationName: "Workbench",
+          craftedItemStacks: [{ item_id: "200", item_type: "item", quantity: 2 }],
+          craftedItems: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2 }],
+          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 1 }],
+          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+        }],
+      });
+    }
+    if (url.pathname === "/api/items/999") {
+      detailRequests.push("items:999");
+      return json(res, {
+        item: { id: "999", itemType: 0, name: "Legacy Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "legacy.png" },
+        craftingRecipes: [],
+        extractionRecipes: [],
+        itemListPossibilities: [],
+      });
+    }
+    if (url.pathname === "/api/cargo/300") {
+      detailRequests.push("cargo:300");
+      return json(res, {
+        cargo: { id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" },
+        recipesUsingItem: [{
+          id: "bundle-unpack",
+          name: "Unpack Resin",
+          stationName: "Unpacking Station",
+          craftedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
+          craftedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+          consumedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
+          consumedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
+        }],
+      });
+    }
+    return json(res, { error: "not found" }, 404);
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => new Promise((resolve) => upstream.close(resolve)));
+
+  const appPort = await availablePort();
+  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      BITCRAFT_TEST: "true",
+      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+      ENABLE_SERVER_POLLING: "false",
+      ENABLE_SCHEDULED_JOBS: "false",
+      BITCRAFT_PROCESS_ROLE: "all",
+      ADMIN_SETUP_KEY: "test-setup-key",
+      APP_HOST: "127.0.0.1",
+      APP_PORT: String(appPort),
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
+    },
+    stdio: "ignore",
+  });
+  t.after(async () => {
+    await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const origin = `http://127.0.0.1:${appPort}`;
+  await waitForHealth(origin, child);
+
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (seededDb) => {
+    seededDb.prepare(`
+      INSERT INTO recipe_catalog_entries (
+        catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
+        detail_json, source, last_synced_at, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "items:999",
+      "items",
+      "999",
+      0,
+      "Legacy Resin",
+      1,
+      "Common",
+      "Material",
+      "legacy.png",
+      JSON.stringify({ item: { id: "999", itemType: 0, name: "Legacy Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "legacy.png" }, craftingRecipes: [], extractionRecipes: [] }),
+      "seeded",
+      "2026-06-01T00:00:00.000Z",
+      "stale legacy row",
+      "2026-06-01T00:00:00.000Z",
+    );
+  });
+
+  const setup = await fetch(`${origin}/api/local/admin/setup`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
+  });
+  assert.equal(setup.status, 200);
+  const auth = await setup.json();
+  const cookie = setup.headers.get("set-cookie").split(";")[0];
+
+  const initialStatus = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
+  }).then((response) => response.json());
+  assert.equal(initialStatus.scheduledJob.key, "recipe_catalog_refresh");
+  assert.equal(initialStatus.scheduledJob.schedule, "weekly@1@00:00");
+
+  const firstRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(firstRun.status, 202);
+
+  const duplicateRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(duplicateRun.status, 409);
+  firstDetailRelease();
+
+  const failedStatus = await waitForCondition("failed craft plan catalog refresh", async () => {
+    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
+    }).then((response) => response.json());
+    return payload.latestRun?.status === "failed" ? payload : null;
+  });
+  assert.equal(failedStatus.latestRun.cursorKind, "items");
+  assert.equal(failedStatus.latestRun.cursorId, "100");
+  assert.equal(failedStatus.latestRun.itemCount, 2);
+  assert.equal(failedStatus.latestRun.cargoCount, 1);
+  assert.equal(failedStatus.latestRun.failureCount, 1);
+  assert.match(failedStatus.latestRun.lastError ?? "", /HTTP 429/);
+  assert.deepEqual(detailRequests, ["items:100", "items:200"]);
+  assert.equal(item200Attempts, 1);
+
+  const failedDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_entities").get().count, 3);
+  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes").get().count, 1);
+  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 2);
+  failedDb.close();
+
+  const resumedRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(resumedRun.status, 202);
+
+  const completedStatus = await waitForCondition("completed craft plan catalog refresh", async () => {
+    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
+    }).then((response) => response.json());
+    return payload.latestRun?.status === "completed" ? payload : null;
+  });
+  assert.equal(completedStatus.latestRun.processedCount, 3);
+  assert.equal(completedStatus.latestRun.failureCount, 1);
+  assert.equal(completedStatus.latestRun.recipeCount, 3);
+  assert.equal(completedStatus.latestRun.byproductCount, 1);
+  assert.equal(completedStatus.scheduledJob.running, false);
+  assert.ok(completedStatus.scheduledJob.lastSuccessAt);
+
+  const completedDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_entities").get().count, 3);
+  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes").get().count, 3);
+  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs").get().count, 1);
+  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 4);
+  const legacyRow = completedDb.prepare("SELECT source, last_error FROM recipe_catalog_entries WHERE catalog_key = ?").get("items:999");
+  const latestRunRow = completedDb.prepare("SELECT status, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count, recipe_count, byproduct_count, failure_count FROM game_catalog_refresh_runs ORDER BY id DESC LIMIT 1").get();
+  completedDb.close();
+  assert.deepEqual({ ...legacyRow }, {
+    source: "scheduled_job",
+    last_error: null,
+  });
+  assert.deepEqual({ ...latestRunRow }, {
+    status: "completed",
+    cursor_kind: "cargo",
+    cursor_id: "300",
+    processed_count: 3,
+    total_count: 3,
+    item_count: 2,
+    cargo_count: 1,
+    recipe_count: 3,
+    byproduct_count: 1,
+    failure_count: 1,
+  });
+
+  assert.deepEqual(detailRequests, ["items:100", "items:200", "items:200", "cargo:300", "items:999"]);
+  assert.equal(item200Attempts, 2);
+  assert.equal(itemsPageRequests, 4);
+  assert.equal(cargoPageRequests, 2);
+});
+
+test("craft plan catalog refresh resets stale resume cursor counters when the saved target disappears", async (t) => {
+  const detailRequests = [];
+  const upstream = createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/api/items") {
+      const page = Number(url.searchParams.get("page") || 1);
+      if (page === 1) {
+        return json(res, {
+          items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" }],
+          pagination: { page, totalPages: 2, total: 2 },
+        });
+      }
+      if (page === 2) {
+        return json(res, {
+          items: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" }],
+          pagination: { page, totalPages: 2, total: 2 },
+        });
+      }
+      return json(res, { items: [], pagination: { page, totalPages: 2, total: 2 } });
+    }
+    if (url.pathname === "/api/cargo") {
+      return json(res, {
+        cargos: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" }],
+        metrics: { total: 1, totalPages: 1, page: 1 },
+      });
+    }
+    if (url.pathname === "/api/items/100") {
+      detailRequests.push("items:100");
+      return json(res, {
+        item: { id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" },
+        craftingRecipes: [{
+          id: "resin-pack",
+          name: "Pack Resin",
+          stationName: "Packing Station",
+          craftedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
+          craftedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
+          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
+          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+        }],
+        itemListPossibilities: [{
+          targetId: "400",
+          targetItem: { id: "400", itemType: 0, name: "Sticky Residue", tag: "Residue", tier: 1 },
+          quantity: 1,
+          chance: 0.2,
+          isCargo: false,
+        }],
+      });
+    }
+    if (url.pathname === "/api/items/200") {
+      detailRequests.push("items:200");
+      return json(res, {
+        item: { id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" },
+        craftingRecipes: [{
+          id: "timber-finish",
+          name: "Finish Timber",
+          stationName: "Workbench",
+          craftedItemStacks: [{ item_id: "200", item_type: "item", quantity: 2 }],
+          craftedItems: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2 }],
+          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 1 }],
+          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+        }],
+      });
+    }
+    if (url.pathname === "/api/cargo/300") {
+      detailRequests.push("cargo:300");
+      return json(res, {
+        cargo: { id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" },
+        recipesUsingItem: [{
+          id: "bundle-unpack",
+          name: "Unpack Resin",
+          stationName: "Unpacking Station",
+          craftedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
+          craftedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
+          consumedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
+          consumedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
+        }],
+      });
+    }
+    return json(res, { error: "not found" }, 404);
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => new Promise((resolve) => upstream.close(resolve)));
+
+  const appPort = await availablePort();
+  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      BITCRAFT_TEST: "true",
+      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+      ENABLE_SERVER_POLLING: "false",
+      ENABLE_SCHEDULED_JOBS: "false",
+      BITCRAFT_PROCESS_ROLE: "all",
+      ADMIN_SETUP_KEY: "test-setup-key",
+      APP_HOST: "127.0.0.1",
+      APP_PORT: String(appPort),
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
+    },
+    stdio: "ignore",
+  });
+  t.after(async () => {
+    await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const origin = `http://127.0.0.1:${appPort}`;
+  await waitForHealth(origin, child);
+
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (seedDb) => {
+    seedDb.prepare(`
+      INSERT INTO game_catalog_refresh_runs (
+        status, phase, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count,
+        recipe_count, byproduct_count, failure_count, started_at, completed_at, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "failed",
+      "item_detail",
+      "items",
+      "999",
+      7,
+      9,
+      5,
+      4,
+      11,
+      13,
+      17,
+      "2026-06-01T00:00:00.000Z",
+      null,
+      "stale resume cursor",
+      "2026-06-01T00:00:00.000Z",
+    );
+  });
+
+  const setup = await fetch(`${origin}/api/local/admin/setup`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
+  });
+  assert.equal(setup.status, 200);
+  const auth = await setup.json();
+  const cookie = setup.headers.get("set-cookie").split(";")[0];
+
+  const run = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(run.status, 202);
+
+  const completedStatus = await waitForCondition("completed craft plan catalog refresh after stale cursor reset", async () => {
+    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
+    }).then((response) => response.json());
+    return payload.latestRun?.status === "completed" ? payload : null;
+  });
+
+  assert.deepEqual(detailRequests, ["items:100", "items:200", "cargo:300"]);
+  assert.equal(completedStatus.latestRun.cursorKind, "cargo");
+  assert.equal(completedStatus.latestRun.cursorId, "300");
+  assert.equal(completedStatus.latestRun.processedCount, 3);
+  assert.equal(completedStatus.latestRun.totalCount, 3);
+  assert.equal(completedStatus.latestRun.itemCount, 2);
+  assert.equal(completedStatus.latestRun.cargoCount, 1);
+  assert.equal(completedStatus.latestRun.recipeCount, 3);
+  assert.equal(completedStatus.latestRun.byproductCount, 1);
+  assert.equal(completedStatus.latestRun.failureCount, 0);
+});

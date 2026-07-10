@@ -377,3 +377,109 @@ test("game catalog repository stores normalized entries, preserves item-cargo co
   assert.deepEqual(repository.listRecipesConsumingInput("items:1220019"), []);
   assert.deepEqual(repository.listByproductProducersForOutput("items:1110012"), []);
 });
+
+test("game catalog repository persists resumable refresh runs and list identity writes", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+
+  repository.upsertEntityIdentity({ id: "1220019", itemType: 0, name: "Basic Bait and Shells", tag: "Bait Output", tier: 1, rarityStr: "Common", iconAssetName: "bait-shells.png" }, { updatedAt: UPDATED_AT, kind: "items" });
+  repository.upsertEntityIdentity({ id: "1220019", itemType: 1, name: "Cargo With Colliding Id", tag: "Package", tier: 4, rarityStr: "Rare", iconAssetName: "cargo-collision.png" }, { updatedAt: UPDATED_AT, kind: "cargo" });
+
+  const started = repository.beginRefreshRun({
+    status: "running",
+    phase: "detail_items",
+    totalCount: 2,
+    itemCount: 1,
+    cargoCount: 1,
+    startedAt: "2026-07-10T12:00:00.000Z",
+    updatedAt: "2026-07-10T12:00:00.000Z",
+  });
+
+  assert.equal(started.status, "running");
+  assert.equal(started.phase, "detail_items");
+  assert.equal(started.totalCount, 2);
+
+  repository.updateRefreshRun(started.id, {
+    status: "failed",
+    phase: "detail_cargo",
+    cursorKind: "items",
+    cursorId: "1220019",
+    processedCount: 1,
+    recipeCount: 3,
+    byproductCount: 2,
+    failureCount: 1,
+    lastError: "HTTP 429",
+    updatedAt: "2026-07-10T12:05:00.000Z",
+  });
+
+  assert.deepEqual(repository.getLatestRefreshRun(), {
+    id: started.id,
+    status: "failed",
+    phase: "detail_cargo",
+    cursorKind: "items",
+    cursorId: "1220019",
+    processedCount: 1,
+    totalCount: 2,
+    itemCount: 1,
+    cargoCount: 1,
+    recipeCount: 3,
+    byproductCount: 2,
+    failureCount: 1,
+    startedAt: "2026-07-10T12:00:00.000Z",
+    completedAt: null,
+    lastError: "HTTP 429",
+    updatedAt: "2026-07-10T12:05:00.000Z",
+  });
+
+  repository.updateRefreshRun(started.id, {
+    status: "completed",
+    phase: "complete",
+    processedCount: 2,
+    completedAt: "2026-07-10T12:06:00.000Z",
+    updatedAt: "2026-07-10T12:06:00.000Z",
+  });
+
+  assert.deepEqual(repository.listRefreshRuns(5), [{
+    id: started.id,
+    status: "completed",
+    phase: "complete",
+    cursorKind: "items",
+    cursorId: "1220019",
+    processedCount: 2,
+    totalCount: 2,
+    itemCount: 1,
+    cargoCount: 1,
+    recipeCount: 3,
+    byproductCount: 2,
+    failureCount: 1,
+    startedAt: "2026-07-10T12:00:00.000Z",
+    completedAt: "2026-07-10T12:06:00.000Z",
+    lastError: "HTTP 429",
+    updatedAt: "2026-07-10T12:06:00.000Z",
+  }]);
+
+  assert.deepEqual(repository.getEntity(gameCatalogKey("items", "1220019")), {
+    catalogKey: "items:1220019",
+    kind: "items",
+    targetId: "1220019",
+    itemType: 0,
+    name: "Basic Bait and Shells",
+    tag: "Bait Output",
+    tier: 1,
+    rarity: "Common",
+    iconAssetName: "bait-shells.png",
+    updatedAt: UPDATED_AT,
+  });
+  assert.deepEqual(repository.getEntity(gameCatalogKey("cargo", "1220019")), {
+    catalogKey: "cargo:1220019",
+    kind: "cargo",
+    targetId: "1220019",
+    itemType: 1,
+    name: "Cargo With Colliding Id",
+    tag: "Package",
+    tier: 4,
+    rarity: "Rare",
+    iconAssetName: "cargo-collision.png",
+    updatedAt: UPDATED_AT,
+  });
+});

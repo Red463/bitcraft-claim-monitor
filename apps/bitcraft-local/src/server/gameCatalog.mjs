@@ -265,6 +265,27 @@ function mapRecipeRow(row, inputs, outputs) {
   };
 }
 
+function mapRefreshRunRow(row) {
+  return row ? {
+    id: toNumber(row.id),
+    status: row.status,
+    phase: row.phase ?? null,
+    cursorKind: row.cursor_kind ?? null,
+    cursorId: row.cursor_id ?? null,
+    processedCount: toNumber(row.processed_count),
+    totalCount: toNumber(row.total_count),
+    itemCount: toNumber(row.item_count),
+    cargoCount: toNumber(row.cargo_count),
+    recipeCount: toNumber(row.recipe_count),
+    byproductCount: toNumber(row.byproduct_count),
+    failureCount: toNumber(row.failure_count),
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? null,
+    lastError: row.last_error ?? null,
+    updatedAt: row.updated_at,
+  } : null;
+}
+
 export function createGameCatalogRepository(db) {
   const statements = {
     upsertEntity: db.prepare(`
@@ -363,6 +384,22 @@ export function createGameCatalogRepository(db) {
       WHERE outputs.output_key = ?
       ORDER BY entities.name COLLATE NOCASE ASC, outputs.producer_key ASC
     `),
+    insertRefreshRun: db.prepare(`
+      INSERT INTO game_catalog_refresh_runs (
+        status, phase, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count,
+        recipe_count, byproduct_count, failure_count, started_at, completed_at, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    getRefreshRun: db.prepare("SELECT * FROM game_catalog_refresh_runs WHERE id = ?"),
+    getLatestRefreshRun: db.prepare("SELECT * FROM game_catalog_refresh_runs ORDER BY updated_at DESC, id DESC LIMIT 1"),
+    listRefreshRuns: db.prepare("SELECT * FROM game_catalog_refresh_runs ORDER BY updated_at DESC, id DESC LIMIT ?"),
+    saveRefreshRun: db.prepare(`
+      UPDATE game_catalog_refresh_runs
+      SET status = ?, phase = ?, cursor_kind = ?, cursor_id = ?, processed_count = ?, total_count = ?,
+          item_count = ?, cargo_count = ?, recipe_count = ?, byproduct_count = ?, failure_count = ?,
+          started_at = ?, completed_at = ?, last_error = ?, updated_at = ?
+      WHERE id = ?
+    `),
   };
 
   function recipeWithLinks(row) {
@@ -385,6 +422,106 @@ export function createGameCatalogRepository(db) {
   }
 
   return {
+    upsertEntityIdentity(source, { updatedAt = new Date().toISOString(), kind = null } = {}) {
+      const entity = entityFromSource(source, {}, kind);
+      statements.upsertEntity.run(
+        entity.catalogKey,
+        entity.kind,
+        entity.targetId,
+        entity.itemType,
+        entity.name,
+        entity.tag,
+        entity.tier,
+        entity.rarity,
+        entity.iconAssetName,
+        updatedAt,
+      );
+      return { ...entity, updatedAt };
+    },
+    beginRefreshRun({
+      status = "running",
+      phase = null,
+      cursorKind = null,
+      cursorId = null,
+      processedCount = 0,
+      totalCount = 0,
+      itemCount = 0,
+      cargoCount = 0,
+      recipeCount = 0,
+      byproductCount = 0,
+      failureCount = 0,
+      startedAt = new Date().toISOString(),
+      completedAt = null,
+      lastError = null,
+      updatedAt = startedAt,
+    } = {}) {
+      const result = statements.insertRefreshRun.run(
+        status,
+        phase,
+        cursorKind,
+        cursorId,
+        processedCount,
+        totalCount,
+        itemCount,
+        cargoCount,
+        recipeCount,
+        byproductCount,
+        failureCount,
+        startedAt,
+        completedAt,
+        lastError,
+        updatedAt,
+      );
+      return mapRefreshRunRow(statements.getRefreshRun.get(result.lastInsertRowid));
+    },
+    updateRefreshRun(id, patch = {}) {
+      const current = mapRefreshRunRow(statements.getRefreshRun.get(id));
+      if (!current) return null;
+      const next = {
+        id: current.id,
+        status: patch.status ?? current.status,
+        phase: Object.prototype.hasOwnProperty.call(patch, "phase") ? patch.phase : current.phase,
+        cursorKind: Object.prototype.hasOwnProperty.call(patch, "cursorKind") ? patch.cursorKind : current.cursorKind,
+        cursorId: Object.prototype.hasOwnProperty.call(patch, "cursorId") ? patch.cursorId : current.cursorId,
+        processedCount: patch.processedCount ?? current.processedCount,
+        totalCount: patch.totalCount ?? current.totalCount,
+        itemCount: patch.itemCount ?? current.itemCount,
+        cargoCount: patch.cargoCount ?? current.cargoCount,
+        recipeCount: patch.recipeCount ?? current.recipeCount,
+        byproductCount: patch.byproductCount ?? current.byproductCount,
+        failureCount: patch.failureCount ?? current.failureCount,
+        startedAt: patch.startedAt ?? current.startedAt,
+        completedAt: Object.prototype.hasOwnProperty.call(patch, "completedAt") ? patch.completedAt : current.completedAt,
+        lastError: Object.prototype.hasOwnProperty.call(patch, "lastError") ? patch.lastError : current.lastError,
+        updatedAt: patch.updatedAt ?? new Date().toISOString(),
+      };
+      statements.saveRefreshRun.run(
+        next.status,
+        next.phase,
+        next.cursorKind,
+        next.cursorId,
+        next.processedCount,
+        next.totalCount,
+        next.itemCount,
+        next.cargoCount,
+        next.recipeCount,
+        next.byproductCount,
+        next.failureCount,
+        next.startedAt,
+        next.completedAt,
+        next.lastError,
+        next.updatedAt,
+        next.id,
+      );
+      return mapRefreshRunRow(statements.getRefreshRun.get(next.id));
+    },
+    getLatestRefreshRun() {
+      return mapRefreshRunRow(statements.getLatestRefreshRun.get());
+    },
+    listRefreshRuns(limit = 20) {
+      const normalizedLimit = Math.max(1, Math.floor(toNumber(limit, 20) || 20));
+      return statements.listRefreshRuns.all(normalizedLimit).map((row) => mapRefreshRunRow(row));
+    },
     upsertDetail(payload, { updatedAt = new Date().toISOString(), fallback = {} } = {}) {
       const normalized = normalizeGameCatalogDetail(payload, fallback);
       statements.upsertEntity.run(

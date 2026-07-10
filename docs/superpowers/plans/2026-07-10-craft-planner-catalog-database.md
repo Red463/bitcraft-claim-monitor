@@ -63,7 +63,7 @@
 ### Task 4: Admin Catalog Diagnostics
 
 **Files:**
-- Modify: `apps/bitcraft-local/src/components/planning/CraftPlanManager.tsx`
+- Modify: `apps/bitcraft-local/src/pages/CraftPlanManagerDialog.tsx`
 - Modify: `apps/bitcraft-local/src/styles/craft-planning.css`
 - Modify: `apps/bitcraft-local/test/craft-planning-boundary.test.mjs`
 
