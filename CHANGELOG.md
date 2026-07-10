@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.19] - 2026-07-10
+
+### Fixed
+
+- Fixed Craft Planning catalog refreshes when BitJita reports duplicate byproduct outputs for the same producer.
+
 ## [0.32.0-beta.18] - 2026-07-10
 
 ### Added

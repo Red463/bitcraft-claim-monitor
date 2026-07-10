@@ -260,6 +260,61 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   ]);
 });
 
+test("normalizeGameCatalogDetail coalesces duplicate item-list outputs for one producer", () => {
+  const normalized = normalizeGameCatalogDetail({
+    item: { id: "7000", itemType: 0, name: "Rough Clay", tag: "Clay", tier: 1 },
+    itemListPossibilities: [
+      {
+        targetId: "7010",
+        targetItem: { id: "7010", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 1,
+        chance: 0.1,
+      },
+      {
+        targetId: "7010",
+        targetItem: { id: "7010", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 2,
+        chance: 0.05,
+      },
+      {
+        targetId: "7010",
+        targetItem: { id: "7010", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 1,
+        chance: 0.25,
+      },
+    ],
+  });
+
+  assert.deepEqual(normalized.itemListOutputs, [
+    { producerKey: "items:7000", outputKey: "items:7010", kind: "items", targetId: "7010", quantity: 1, chance: 0.25 },
+  ]);
+
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail({
+    item: { id: "7000", itemType: 0, name: "Rough Clay", tag: "Clay", tier: 1 },
+    itemListPossibilities: [
+      {
+        targetId: "7010",
+        targetItem: { id: "7010", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 1,
+        chance: 0.1,
+      },
+      {
+        targetId: "7010",
+        targetItem: { id: "7010", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 1,
+        chance: 0.25,
+      },
+    ],
+  }, { updatedAt: UPDATED_AT });
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs WHERE producer_key = ? AND output_key = ?").get("items:7000", "items:7010").count,
+    1,
+  );
+});
+
 test("normalizeGameCatalogDetail preserves top-level cargo payloads without itemType and declared-output-only recipes", () => {
   assert.deepEqual(normalizeGameCatalogDetail(implicitCargoDetail).entity, {
     catalogKey: "cargo:8080",
