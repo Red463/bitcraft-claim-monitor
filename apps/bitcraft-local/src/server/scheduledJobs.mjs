@@ -86,7 +86,11 @@ export function seedScheduledJobs({
   for (const [key, job] of Object.entries(registry)) {
     statements.upsertScheduledJob.run(key, job.label, job.description, job.schedule, job.enabled ? 1 : 0, nextRunIso(job.schedule), seededAt);
     const row = statements.getScheduledJob.get(key);
-    if (!row?.next_run_at) {
+    const legacySchedules = Array.isArray(job.legacySchedules) ? job.legacySchedules : [];
+    if (row?.schedule !== job.schedule && legacySchedules.includes(row?.schedule)) {
+      db.prepare("UPDATE scheduled_jobs SET schedule = ?, next_run_at = ?, updated_at = ? WHERE job_key = ?")
+        .run(job.schedule, nextRunIso(job.schedule), seededAt, key);
+    } else if (!row?.next_run_at) {
       db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?").run(nextRunIso(row?.schedule ?? job.schedule), seededAt, key);
     }
   }

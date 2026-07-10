@@ -126,16 +126,16 @@ function recipeLooksTransportRoute(recipe, outputs = [], inputs = []) {
   return [...outputs, ...inputs].some((entry) => displayLooksTransport(entry.name) || displayLooksTransport(entry.tag));
 }
 
-function recipeStableKey(sourceEntity, recipe, outputs, inputs) {
+function recipeStableKey(_sourceEntity, recipe, outputs, inputs) {
   const rawId = String(recipe?.id ?? recipe?.recipeId ?? recipe?.recipe_id ?? "").trim();
-  if (rawId) return `${sourceEntity.catalogKey}:recipe:${rawId}`;
+  if (rawId) return `recipe:${rawId}`;
   const signature = JSON.stringify({
     name: String(recipe?.name ?? recipe?.recipeName ?? ""),
     station: recipeStationName(recipe),
-    outputs: outputs.map((output) => [output.key, output.quantity]),
-    inputs: inputs.map((input) => [input.key, input.quantity]),
+    outputs: outputs.map((output) => [output.key, output.quantity]).sort(),
+    inputs: inputs.map((input) => [input.key, input.quantity]).sort(),
   });
-  return `${sourceEntity.catalogKey}:recipe:${createHash("sha1").update(signature).digest("hex").slice(0, 12)}`;
+  return `recipe-hash:${createHash("sha1").update(signature).digest("hex").slice(0, 16)}`;
 }
 
 function normalizeRecipe(recipe, sourceEntity) {
@@ -221,11 +221,14 @@ export function normalizeGameCatalogDetail(payload, fallback = {}) {
   const kindHint = detail?.cargo ? "cargo" : detail?.item ? "items" : null;
   const entity = entityFromSource(source, fallback, kindHint);
 
-  const recipes = [
+  const recipes = [...new Map([
     ...unwrapArray(detail?.craftingRecipes),
     ...unwrapArray(detail?.extractionRecipes),
     ...unwrapArray(detail?.recipesUsingItem),
-  ].map((recipe) => normalizeRecipe(recipe, entity)).filter(Boolean);
+  ]
+    .map((recipe) => normalizeRecipe(recipe, entity))
+    .filter(Boolean)
+    .map((recipe) => [recipe.recipeKey, recipe])).values()];
 
   const itemListOutputs = unwrapArray(detail?.itemListPossibilities)
     .map((possibility) => normalizeItemListOutput(possibility, entity))
@@ -304,10 +307,14 @@ export function createGameCatalogRepository(db) {
         updated_at = excluded.updated_at
     `),
     getEntity: db.prepare("SELECT * FROM game_catalog_entities WHERE catalog_key = ?"),
-    listRecipeKeysByPrefix: db.prepare("SELECT recipe_key FROM game_catalog_recipes WHERE recipe_key LIKE ? ESCAPE '\\'"),
+    listRecipeKeysBySource: db.prepare("SELECT recipe_key FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
+    deleteRecipeSourcesForEntity: db.prepare("DELETE FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
+    insertRecipeSource: db.prepare("INSERT OR IGNORE INTO game_catalog_recipe_sources (catalog_key, recipe_key) VALUES (?, ?)"),
+    countRecipeSources: db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipe_sources WHERE recipe_key = ?"),
     deleteRecipeInputs: db.prepare("DELETE FROM game_catalog_recipe_inputs WHERE recipe_key = ?"),
     deleteRecipeOutputs: db.prepare("DELETE FROM game_catalog_recipe_outputs WHERE recipe_key = ?"),
     deleteRecipe: db.prepare("DELETE FROM game_catalog_recipes WHERE recipe_key = ?"),
+    deleteOrphanRecipes: db.prepare("DELETE FROM game_catalog_recipes WHERE NOT EXISTS (SELECT 1 FROM game_catalog_recipe_sources AS sources WHERE sources.recipe_key = game_catalog_recipes.recipe_key)"),
     deleteItemListOutputs: db.prepare("DELETE FROM game_catalog_item_list_outputs WHERE producer_key = ?"),
     insertRecipe: db.prepare(`
       INSERT INTO game_catalog_recipes (
@@ -524,48 +531,59 @@ export function createGameCatalogRepository(db) {
     },
     upsertDetail(payload, { updatedAt = new Date().toISOString(), fallback = {} } = {}) {
       const normalized = normalizeGameCatalogDetail(payload, fallback);
-      statements.upsertEntity.run(
-        normalized.entity.catalogKey,
-        normalized.entity.kind,
-        normalized.entity.targetId,
-        normalized.entity.itemType,
-        normalized.entity.name,
-        normalized.entity.tag,
-        normalized.entity.tier,
-        normalized.entity.rarity,
-        normalized.entity.iconAssetName,
-        updatedAt,
-      );
-
-      for (const row of statements.listRecipeKeysByPrefix.all(`${normalized.entity.catalogKey}:recipe:%`)) {
-        statements.deleteRecipeInputs.run(row.recipe_key);
-        statements.deleteRecipeOutputs.run(row.recipe_key);
-        statements.deleteRecipe.run(row.recipe_key);
-      }
-      statements.deleteItemListOutputs.run(normalized.entity.catalogKey);
-
-      for (const recipe of normalized.recipes) {
-        statements.insertRecipe.run(
-          recipe.recipeKey,
-          recipe.sourceKind,
-          recipe.sourceId,
-          recipe.name,
-          recipe.stationName,
-          recipe.skillName,
-          recipe.isPassive ? 1 : 0,
-          recipe.isTransportRoute ? 1 : 0,
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        statements.upsertEntity.run(
+          normalized.entity.catalogKey,
+          normalized.entity.kind,
+          normalized.entity.targetId,
+          normalized.entity.itemType,
+          normalized.entity.name,
+          normalized.entity.tag,
+          normalized.entity.tier,
+          normalized.entity.rarity,
+          normalized.entity.iconAssetName,
           updatedAt,
         );
-        for (const input of recipe.inputs) {
-          statements.insertRecipeInput.run(recipe.recipeKey, input.inputKey, input.kind, input.targetId, input.quantity);
-        }
-        for (const output of recipe.outputs) {
-          statements.insertRecipeOutput.run(recipe.recipeKey, output.outputKey, output.kind, output.targetId, output.quantity, output.isPrimaryOutput ? 1 : 0);
-        }
-      }
 
-      for (const output of normalized.itemListOutputs) {
-        statements.insertItemListOutput.run(output.producerKey, output.outputKey, output.kind, output.targetId, output.quantity, output.chance);
+        const previousRecipeKeys = statements.listRecipeKeysBySource.all(normalized.entity.catalogKey).map((row) => row.recipe_key);
+        statements.deleteRecipeSourcesForEntity.run(normalized.entity.catalogKey);
+        statements.deleteItemListOutputs.run(normalized.entity.catalogKey);
+
+        for (const recipe of normalized.recipes) {
+          statements.insertRecipe.run(
+            recipe.recipeKey,
+            recipe.sourceKind,
+            recipe.sourceId,
+            recipe.name,
+            recipe.stationName,
+            recipe.skillName,
+            recipe.isPassive ? 1 : 0,
+            recipe.isTransportRoute ? 1 : 0,
+            updatedAt,
+          );
+          statements.deleteRecipeInputs.run(recipe.recipeKey);
+          statements.deleteRecipeOutputs.run(recipe.recipeKey);
+          for (const input of recipe.inputs) {
+            statements.insertRecipeInput.run(recipe.recipeKey, input.inputKey, input.kind, input.targetId, input.quantity);
+          }
+          for (const output of recipe.outputs) {
+            statements.insertRecipeOutput.run(recipe.recipeKey, output.outputKey, output.kind, output.targetId, output.quantity, output.isPrimaryOutput ? 1 : 0);
+          }
+          statements.insertRecipeSource.run(normalized.entity.catalogKey, recipe.recipeKey);
+        }
+
+        for (const output of normalized.itemListOutputs) {
+          statements.insertItemListOutput.run(output.producerKey, output.outputKey, output.kind, output.targetId, output.quantity, output.chance);
+        }
+
+        for (const recipeKey of previousRecipeKeys) {
+          if (toNumber(statements.countRecipeSources.get(recipeKey)?.count) === 0) statements.deleteRecipe.run(recipeKey);
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
       }
 
       return {
@@ -573,6 +591,9 @@ export function createGameCatalogRepository(db) {
         entity: { ...normalized.entity, updatedAt },
         recipes: normalized.recipes.map((recipe) => ({ ...recipe, updatedAt })),
       };
+    },
+    deleteOrphanRecipes() {
+      return statements.deleteOrphanRecipes.run().changes;
     },
     getEntity(catalogKey) {
       return mapEntityRow(statements.getEntity.get(catalogKey));
@@ -596,5 +617,3 @@ export function createGameCatalogRepository(db) {
     },
   };
 }
-
-

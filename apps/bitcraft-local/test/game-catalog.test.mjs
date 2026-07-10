@@ -163,6 +163,7 @@ test("game catalog schema bootstraps normalized catalog tables, indexes, and cas
     "game_catalog_recipes",
     "game_catalog_recipe_inputs",
     "game_catalog_recipe_outputs",
+    "game_catalog_recipe_sources",
     "game_catalog_item_list_outputs",
     "game_catalog_refresh_runs",
   ]) {
@@ -378,6 +379,46 @@ test("game catalog repository stores normalized entries, preserves item-cargo co
   assert.deepEqual(repository.listByproductProducersForOutput("items:1110012"), []);
 });
 
+test("game catalog recipes use one global identity across direct and reverse detail payloads", () => {
+  const direct = normalizeGameCatalogDetail(baitAndShellsDetail).recipes.find((recipe) => recipe.name === "Process Briny Guppi");
+  const reverse = normalizeGameCatalogDetail({
+    item: { id: "900", itemType: 0, name: "Briny Guppi", tag: "Fish", tier: 1 },
+    recipesUsingItem: [baitAndShellsDetail.detail.craftingRecipes[0]],
+  }).recipes[0];
+  assert.equal(direct.recipeKey, reverse.recipeKey);
+
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail(baitAndShellsDetail, { updatedAt: UPDATED_AT });
+  repository.upsertDetail({
+    item: { id: "900", itemType: 0, name: "Briny Guppi", tag: "Fish", tier: 1 },
+    recipesUsingItem: [baitAndShellsDetail.detail.craftingRecipes[0]],
+  }, { updatedAt: UPDATED_AT });
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes WHERE name = ?").get("Process Briny Guppi").count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipe_sources WHERE recipe_key = ?").get(direct.recipeKey).count, 2);
+});
+
+test("game catalog detail replacement rolls back all writes when a linked row fails", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail(baitAndShellsDetail, { updatedAt: UPDATED_AT });
+  const before = db.prepare("SELECT recipe_key, name FROM game_catalog_recipes ORDER BY recipe_key").all();
+  db.exec(`
+    CREATE TRIGGER fail_catalog_output
+    BEFORE INSERT ON game_catalog_recipe_outputs
+    BEGIN
+      SELECT RAISE(ABORT, 'forced catalog output failure');
+    END;
+  `);
+
+  assert.throws(
+    () => repository.upsertDetail(baitAndShellsDetailUpdated, { updatedAt: "2026-07-10T12:05:00.000Z" }),
+    /forced catalog output failure/,
+  );
+  assert.deepEqual(db.prepare("SELECT recipe_key, name FROM game_catalog_recipes ORDER BY recipe_key").all(), before);
+  assert.equal(repository.listProducerRecipesForOutput("items:1220019").length, 2);
+});
 test("game catalog repository persists resumable refresh runs and list identity writes", () => {
   const db = createDb();
   const repository = createGameCatalogRepository(db);

@@ -433,6 +433,8 @@ function catalogEntityDisplay(entity, fallback = {}) {
 
 function catalogRouteId(recipe) {
   const value = String(recipe?.recipeKey ?? "").trim();
+  if (value.startsWith("recipe-hash:")) return recipe?.name ? String(recipe.name) : value.slice("recipe-hash:".length);
+  if (value.startsWith("recipe:")) return value.slice("recipe:".length);
   const marker = ":recipe:";
   const index = value.indexOf(marker);
   const suffix = index >= 0 ? value.slice(index + marker.length) : value;

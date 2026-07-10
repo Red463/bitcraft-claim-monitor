@@ -115,6 +115,32 @@ test("seedScheduledJobs repairs jobs missing a next run time", () => {
     ["repair", "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ?", "next:weekly@1@00:00", "seeded-at", "catalog"],
   ]);
 });
+test("seedScheduledJobs migrates an explicitly listed legacy default schedule", () => {
+  const calls = [];
+  const statements = {
+    upsertScheduledJob: { run: (...args) => calls.push(["upsert", ...args]) },
+    getScheduledJob: { get: () => ({ schedule: "daily_midnight", next_run_at: "old-next" }) },
+  };
+  const db = { prepare: (sql) => ({ run: (...args) => calls.push(["migrate", sql, ...args]) }) };
+
+  seedScheduledJobs({
+    db,
+    statements,
+    registry: {
+      catalog: {
+        label: "Catalog",
+        description: "Refresh catalog",
+        schedule: "weekly@1@00:00",
+        enabled: true,
+        legacySchedules: ["daily_midnight", "daily@00:00"],
+      },
+    },
+    now: () => "seeded-at",
+    nextRunIso: (schedule) => `next:${schedule}`,
+  });
+
+  assert.equal(calls.some((call) => call[0] === "migrate" && call.slice(-4).join("|") === "weekly@1@00:00|next:weekly@1@00:00|seeded-at|catalog"), true);
+});
 test("recoverStaleScheduledJobs resets abandoned running jobs with deterministic metadata", () => {
   const calls = [];
   const statements = {

@@ -1707,6 +1707,72 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   assert.equal(cargoPageRequests, 2);
 });
 
+test("craft plan catalog refresh pauses cleanly and schedules an automatic continuation when a batch remains", async (t) => {
+  const upstream = createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/api/items") return json(res, { items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }, { id: "200", itemType: 0, name: "Timber", tag: "Plank", tier: 1 }], pagination: { page: 1, totalPages: 1, total: 2 } });
+    if (url.pathname === "/api/cargo") return json(res, { cargos: [], metrics: { total: 0, totalPages: 1, page: 1 } });
+    if (url.pathname === "/api/items/100" || url.pathname === "/api/items/200") return json(res, { item: { id: url.pathname.endsWith("100") ? "100" : "200", itemType: 0, name: "Catalog item", tag: "Material", tier: 1 }, craftingRecipes: [] });
+    return json(res, { error: "not found" }, 404);
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => new Promise((resolve) => upstream.close(resolve)));
+
+  const appPort = await availablePort();
+  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      BITCRAFT_TEST: "true",
+      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+      ENABLE_SERVER_POLLING: "false",
+      ENABLE_SCHEDULED_JOBS: "false",
+      BITCRAFT_PROCESS_ROLE: "all",
+      ADMIN_SETUP_KEY: "test-setup-key",
+      APP_HOST: "127.0.0.1",
+      APP_PORT: String(appPort),
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_CATALOG_REFRESH_BATCH_SIZE: "1",
+      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
+      GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS: "60000",
+    },
+    stdio: "ignore",
+  });
+  t.after(async () => {
+    await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const origin = `http://127.0.0.1:${appPort}`;
+  await waitForHealth(origin, child);
+  const setup = await fetch(`${origin}/api/local/admin/setup`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
+  });
+  const auth = await setup.json();
+  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  assert.equal((await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: "{}",
+  })).status, 202);
+
+  const paused = await waitForCondition("paused catalog continuation", async () => {
+    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers: { cookie, origin, "x-csrf-token": auth.csrfToken } }).then((response) => response.json());
+    return payload.latestRun?.status === "paused" ? payload : null;
+  });
+  assert.equal(paused.latestRun.processedCount, 1);
+  assert.equal(paused.latestRun.lastError, null);
+  assert.equal(paused.scheduledJob.lastError, null);
+  assert.equal(paused.scheduledJob.metadata.complete, false);
+  assert.equal(paused.scheduledJob.metadata.continueAfterMs, 60000);
+  assert.ok(new Date(paused.scheduledJob.nextRunAt).getTime() < Date.now() + 65000);
+});
 test("craft plan catalog refresh resets stale resume cursor counters when the saved target disappears", async (t) => {
   const detailRequests = [];
   const upstream = createServer((req, res) => {

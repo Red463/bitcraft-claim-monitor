@@ -244,6 +244,13 @@ export const schemaBootstrapSql = `
     PRIMARY KEY (recipe_key, output_key),
     FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS game_catalog_recipe_sources (
+    catalog_key TEXT NOT NULL,
+    recipe_key TEXT NOT NULL,
+    PRIMARY KEY (catalog_key, recipe_key),
+    FOREIGN KEY (catalog_key) REFERENCES game_catalog_entities(catalog_key) ON DELETE CASCADE,
+    FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
+  );
   CREATE TABLE IF NOT EXISTS game_catalog_item_list_outputs (
     producer_key TEXT NOT NULL,
     output_key TEXT NOT NULL,
@@ -576,6 +583,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_kind_target ON game_catalog_entities (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipes_source ON game_catalog_recipes (source_kind, source_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_outputs_output ON game_catalog_recipe_outputs (output_key, is_primary_output DESC, recipe_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_sources_recipe ON game_catalog_recipe_sources (recipe_key, catalog_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_inputs_input ON game_catalog_recipe_inputs (input_key, recipe_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_status_time ON game_catalog_refresh_runs (status, started_at DESC, completed_at DESC);
@@ -588,7 +596,3 @@ export const schemaBootstrapSql = `
 export function applySchemaBootstrap(db) {
   db.exec(schemaBootstrapSql);
 }
-
-
-
-

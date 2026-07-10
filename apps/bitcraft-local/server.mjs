@@ -113,6 +113,10 @@ const gameCatalogRefreshDetailDelaySetting = Number(process.env.GAME_CATALOG_REF
 const gameCatalogRefreshDetailDelayMs = Number.isFinite(gameCatalogRefreshDetailDelaySetting) && gameCatalogRefreshDetailDelaySetting >= 0
   ? Math.floor(gameCatalogRefreshDetailDelaySetting)
   : 100;
+const gameCatalogRefreshContinueDelaySetting = Number(process.env.GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS ?? 5000);
+const gameCatalogRefreshContinueDelayMs = Number.isFinite(gameCatalogRefreshContinueDelaySetting) && gameCatalogRefreshContinueDelaySetting >= 1000
+  ? Math.floor(gameCatalogRefreshContinueDelaySetting)
+  : 5000;
 const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
@@ -530,6 +534,7 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   let failureCount = resumeCountsAvailable ? previousRun.failureCount : 0;
   let cursorKind = resumeCountsAvailable ? previousRun.cursorKind : null;
   let cursorId = resumeCountsAvailable ? previousRun.cursorId : null;
+  let pausedForBudget = false;
 
   refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
     phase: gameCatalogRefreshPhase(batch.items[0]),
@@ -548,23 +553,8 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
 
   for (const target of batch.items) {
     if (!jobBudgetAllowsMore(startedAtMs, gameCatalogRefreshJobBudget, processedThisRun)) {
-      const message = "Catalog refresh paused after reaching the configured batch budget";
-      gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "failed",
-        phase: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: targets.length,
-        itemCount: itemTargets.length,
-        cargoCount: cargoTargets.length,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        lastError: message,
-        updatedAt: new Date().toISOString(),
-      });
-      throw new Error(message);
+      pausedForBudget = true;
+      break;
     }
 
     try {
@@ -623,11 +613,11 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     }
   }
 
-  if (!batch.complete) {
-    const message = "Catalog refresh requires another run to continue from the saved cursor";
+  if (pausedForBudget || !batch.complete) {
+    const pausedAt = new Date().toISOString();
     gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      status: "failed",
-      phase: gameCatalogRefreshPhase(batch.items[batch.items.length - 1] ?? null),
+      status: "paused",
+      phase: gameCatalogRefreshPhase(batch.items[Math.max(0, processedThisRun - 1)] ?? batch.items[0] ?? null),
       cursorKind,
       cursorId,
       processedCount,
@@ -637,12 +627,26 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       recipeCount,
       byproductCount,
       failureCount,
-      lastError: message,
-      updatedAt: new Date().toISOString(),
+      lastError: null,
+      updatedAt: pausedAt,
     });
-    throw new Error(message);
+    return {
+      complete: false,
+      continueAfterMs: gameCatalogRefreshContinueDelayMs,
+      processedCount,
+      totalCount: targets.length,
+      itemCount: itemTargets.length,
+      cargoCount: cargoTargets.length,
+      recipeCount,
+      byproductCount,
+      failureCount,
+      resumed: resumeCountsAvailable,
+      cursorKind,
+      cursorId,
+    };
   }
 
+  gameCatalogRepository.deleteOrphanRecipes();
   const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
 
   gameCatalogRepository.updateRefreshRun(refreshRun.id, {
@@ -663,6 +667,7 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   });
 
   return {
+    complete: true,
     processedCount,
     totalCount: targets.length,
     itemCount: itemTargets.length,
@@ -770,6 +775,7 @@ const scheduledJobRegistry = {
     label: "Recipe catalog refresh",
     description: "Refreshes the Craft Planning catalog database from BitJita once per week, storing normalized item, cargo, recipe, and byproduct records for future planner reads.",
     schedule: "weekly@1@00:00",
+    legacySchedules: ["daily_midnight", "daily@00:00"],
     enabled: true,
     run: runRecipeCatalogRefreshJob,
   },
@@ -864,7 +870,13 @@ async function runScheduledJob(jobKey, { manual = false } = {}) {
   try {
     const metadata = await registryEntry.run({ manual, jobKey });
     const finishedAt = new Date().toISOString();
-    statements.markScheduledJobSuccess.run(finishedAt, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+    const continueAfterMs = Math.max(0, Math.floor(toNumber(metadata?.continueAfterMs)));
+    if (metadata?.complete === false && continueAfterMs > 0) {
+      const nextRunAt = new Date(Date.now() + continueAfterMs).toISOString();
+      statements.markScheduledJobContinuation.run(nextRunAt, JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+    } else {
+      statements.markScheduledJobSuccess.run(finishedAt, nextScheduledRunIso(row.schedule, new Date()), JSON.stringify({ ...metadata, manual }), finishedAt, jobKey);
+    }
     return { ok: true, key: jobKey, metadata, nextRunAt: statements.getScheduledJob.get(jobKey)?.next_run_at };
   } catch (error) {
     const finishedAt = new Date().toISOString();
