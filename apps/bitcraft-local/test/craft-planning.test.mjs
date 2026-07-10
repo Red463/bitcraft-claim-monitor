@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
+  collectLocalCatalogCraftPlanDetails,
   computeCraftPlan,
   normalizeCraftPlanConfig,
   recipeKey,
 } from "../src/server/craftPlanning.mjs";
+import { createGameCatalogRepository } from "../src/server/gameCatalog.mjs";
 
 const fishOilDetail = {
   item: { id: "900", name: "Fish Oil", itemType: 0, tag: "Oil" },
@@ -35,6 +39,20 @@ const animalHairDetail = {
   item: { id: "200", name: "Animal Hair", itemType: 0, tag: "Hunting" },
   craftingRecipes: [],
 };
+
+const CATALOG_UPDATED_AT = "2026-07-10T12:00:00.000Z";
+
+function createCatalogFixture(t) {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  db.exec("PRAGMA foreign_keys = ON;");
+  t.after(() => db.close());
+  return { db, repository: createGameCatalogRepository(db) };
+}
+
+function upsertCatalogDetails(repository, details) {
+  for (const detail of details) repository.upsertDetail(detail, { updatedAt: CATALOG_UPDATED_AT });
+}
 
 test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and multipliers", () => {
   const config = normalizeCraftPlanConfig({
@@ -200,7 +218,7 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.equal(plan.steps[0].selectedRecipeId, "craft-route");
   assert.equal(plan.materials.some((material) => material.name === "Packed Fine Rope"), false);
   assert.equal(plan.materials.find((material) => material.name === "Fine Fiber")?.required, 20);
-  assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route"]);
+  assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "packed-route"]);
 });
 test("computeCraftPlan prefers loose-material routes over packaged transport routes", () => {
   const mixDetail = {
@@ -258,6 +276,7 @@ test("computeCraftPlan prefers loose-material routes over packaged transport rou
   });
 
   assert.equal(plan.steps[0].selectedRecipeId, "loose-mix-route");
+  assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["loose-mix-route", "packaged-mix-route"]);
   assert.equal(plan.materials.some((material) => material.name === "Infused Clay Lump Package"), false);
   const clay = plan.materials.find((material) => material.name === "Infused Clay Lump");
   assert.equal(clay?.required, 8);
@@ -732,4 +751,433 @@ test("computeCraftPlan prefers byproduct producer routes over expensive direct c
   assert.equal(clayDeposit?.required, 16);
   const gypsite = plan.materials.find((material) => material.name === "Rough Gypsite");
   assert.equal(gypsite?.sourceRoutes?.[0]?.recipeName, "Gather Rough Clay -> Rough Gypsite");
+});
+test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from normalized local catalog rows", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "700", itemType: 0, name: "Peerless Berry Tart", tag: "Food", tier: 6 },
+      craftingRecipes: [{
+        id: "bake-tart",
+        name: "Bake Peerless Berry Tart",
+        stationName: "Cooking Station",
+        craftedItemStacks: [{ item_id: "700", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "700", itemType: 0, name: "Peerless Berry Tart", tag: "Food", tier: 6 }],
+        consumedItemStacks: [{ item_id: "701", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "701", itemType: 0, name: "Berry Filling" }],
+        levelRequirements: [{ skill: { name: "Cooking" }, level: 60 }],
+      }],
+    },
+    {
+      item: { id: "701", itemType: 0, name: "Peerless Berry Filling", tag: "Filling", tier: 6 },
+      craftingRecipes: [{
+        id: "cook-filling",
+        name: "Cook Peerless Berry Filling",
+        stationName: "Cooking Station",
+        craftedItemStacks: [{ item_id: "701", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "701", itemType: 0, name: "Peerless Berry Filling", tag: "Filling", tier: 6 }],
+        consumedItemStacks: [{ item_id: "6130004", item_type: "item", quantity: 3 }],
+        consumedItems: [{ id: "6130004", itemType: 0, name: "Peerless Berry" }],
+        levelRequirements: [{ skill: { name: "Cooking" }, level: 60 }],
+      }],
+    },
+    {
+      item: { id: "6130004", itemType: 0, name: "Peerless Berry", tag: "Berry", tier: 6 },
+      craftingRecipes: [],
+      extractionRecipes: [],
+      itemListPossibilities: [],
+    },
+  ]);
+
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "700", kind: "items", name: "Peerless Berry Tart", quantity: 2, itemType: 0 }],
+    sourceRules: { playerIds: ["player-1"], craftPlayerIds: ["player-1"] },
+  });
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({
+    config,
+    detailsByKey,
+    catalogWarnings: warnings,
+    storageSources: [{ sourceId: "store-1", label: "Pantry", items: [{ id: "6130004", kind: "items", quantity: 1, name: "Peerless Berry" }] }],
+    activeCrafts: [{ id: "craft-berry", playerId: "player-1", playerName: "Tester", buildingName: "Foraging Basket", itemId: "6130004", kind: "items", quantity: 2, name: "Peerless Berry" }],
+  });
+
+  assert.equal(detailsByKey.has(recipeKey("items", "700")), true);
+  assert.equal(detailsByKey.has(recipeKey("items", "701")), true);
+  assert.equal(detailsByKey.has(recipeKey("items", "6130004")), true);
+  assert.deepEqual(plan.steps.map((step) => step.selectedRecipeId), ["cook-filling", "bake-tart"]);
+  const berry = plan.materials.find((material) => material.id === "6130004");
+  assert.equal(berry?.name, "Peerless Berry");
+  assert.equal(berry?.tag, "Berry");
+  assert.equal(berry?.tier, 6);
+  assert.equal(berry?.required, 12);
+  assert.equal(berry?.available, 1);
+  assert.equal(berry?.inProgress, 2);
+  assert.equal(berry?.missing, 9);
+});
+
+test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes through clay and tree producers", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+      craftingRecipes: [{
+        id: "craft-gypsite",
+        name: "Craft Rough Gypsite",
+        stationName: "Masonry Station",
+        craftedItemStacks: [{ item_id: "3001", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 }],
+        consumedItemStacks: [
+          { item_id: "4001", item_type: "item", quantity: 10 },
+          { item_id: "4002", item_type: "item", quantity: 20 },
+        ],
+        consumedItems: [
+          { id: "4001", itemType: 0, name: "Rough Brick", tag: "Brick", tier: 1 },
+          { id: "4002", itemType: 0, name: "Ancient Mortar", tag: "Mortar", tier: 1 },
+        ],
+        levelRequirements: [{ skill: { name: "Masonry" }, level: 1 }],
+      }],
+    },
+    {
+      item: { id: "5001", itemType: 0, name: "Rough Clay Output", tag: "Clay Output", tier: 1 },
+      craftingRecipes: [{
+        id: "gather-clay",
+        name: "Gather Rough Clay",
+        stationName: "Foraging Camp",
+        craftedItemStacks: [{ item_id: "5001", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "5001", itemType: 0, name: "Rough Clay Output", tag: "Clay Output", tier: 1 }],
+        consumedItemStacks: [{ item_id: "6001", item_type: "cargo", quantity: 1 }],
+        consumedItems: [{ id: "6001", itemType: 1, name: "Rough Clay Deposit", tag: "Clay Deposit", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Foraging" }, level: 1 }],
+      }],
+      itemListPossibilities: [{
+        targetId: "3001",
+        targetItem: { id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+        quantity: 1,
+        chance: 0.25,
+        isCargo: false,
+      }],
+    },
+    { cargo: { id: "6001", itemType: 1, name: "Rough Clay Deposit", tag: "Clay Deposit", tier: 1 } },
+    {
+      item: { id: "3002", itemType: 0, name: "Rough Resin", tag: "Resin", tier: 1 },
+      craftingRecipes: [{
+        id: "craft-resin",
+        name: "Craft Rough Resin",
+        stationName: "Forestry Station",
+        craftedItemStacks: [{ item_id: "3002", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "3002", itemType: 0, name: "Rough Resin", tag: "Resin", tier: 1 }],
+        consumedItemStacks: [
+          { item_id: "4003", item_type: "item", quantity: 8 },
+          { item_id: "4004", item_type: "item", quantity: 4 },
+        ],
+        consumedItems: [
+          { id: "4003", itemType: 0, name: "Rough Bark", tag: "Bark", tier: 1 },
+          { id: "4004", itemType: 0, name: "Tree Sap", tag: "Sap", tier: 1 },
+        ],
+        levelRequirements: [{ skill: { name: "Forestry" }, level: 1 }],
+      }],
+    },
+    {
+      item: { id: "5002", itemType: 0, name: "Rough Trunk Output", tag: "Trunk Output", tier: 1 },
+      craftingRecipes: [{
+        id: "split-trunk",
+        name: "Split Rough Trunk",
+        stationName: "Forestry Camp",
+        craftedItemStacks: [{ item_id: "5002", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "5002", itemType: 0, name: "Rough Trunk Output", tag: "Trunk Output", tier: 1 }],
+        consumedItemStacks: [{ item_id: "6002", item_type: "cargo", quantity: 1 }],
+        consumedItems: [{ id: "6002", itemType: 1, name: "Rough Trunk", tag: "Trunk", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Forestry" }, level: 1 }],
+      }],
+      itemListPossibilities: [{
+        targetId: "3002",
+        targetItem: { id: "3002", itemType: 0, name: "Rough Resin", tag: "Resin", tier: 1 },
+        quantity: 2,
+        chance: 0.5,
+        isCargo: false,
+      }, {
+        targetId: "4003",
+        targetItem: { id: "4003", itemType: 0, name: "Rough Bark", tag: "Bark", tier: 1 },
+        quantity: 1,
+        chance: 1,
+        isCargo: false,
+      }],
+    },
+    { cargo: { id: "6002", itemType: 1, name: "Rough Trunk", tag: "Trunk", tier: 1 } },
+  ]);
+
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [
+      { id: "3001", kind: "items", name: "Rough Gypsite", quantity: 4, itemType: 0 },
+      { id: "3002", kind: "items", name: "Rough Resin", quantity: 3, itemType: 0 },
+    ],
+  });
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey, catalogWarnings: warnings });
+
+  assert.equal(plan.steps.find((step) => step.output.name === "Rough Gypsite")?.selectedRecipeId, "possibility:gather-clay:items:3001");
+  assert.equal(plan.steps.find((step) => step.output.name === "Rough Resin")?.selectedRecipeId, "possibility:split-trunk:items:3002");
+  assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
+  assert.equal(plan.materials.some((material) => material.name === "Ancient Mortar"), false);
+  assert.equal(plan.materials.some((material) => material.name === "Tree Sap"), false);
+  assert.equal(plan.materials.find((material) => material.name === "Rough Clay Deposit")?.required, 16);
+  assert.equal(plan.materials.find((material) => material.name === "Rough Trunk")?.required, 3);
+});
+
+test("collectLocalCatalogCraftPlanDetails reports missing local rows without inferring identity from names", (t) => {
+  const { repository } = createCatalogFixture(t);
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "999999", kind: "items", name: "Peerless Mythril T6 Bar", quantity: 2, itemType: 0 }],
+  });
+
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey, catalogWarnings: warnings });
+
+  assert.equal(detailsByKey.has(recipeKey("items", "999999")), false);
+  const material = plan.materials.find((item) => item.id === "999999");
+  assert.equal(material?.name, "Peerless Mythril T6 Bar");
+  assert.equal(material?.tag, null);
+  assert.equal(material?.tier, null);
+  assert.match(plan.warnings.join("\n"), /local catalog/i);
+  assert.match(plan.warnings.join("\n"), /items:999999/);
+});
+
+test("collectLocalCatalogCraftPlanDetails keeps transport routes available after real local routes and honors override ids", (t) => {
+  const { db, repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [{
+    item: { id: "8100", itemType: 0, name: "Treated Board", tag: "Board", tier: 3 },
+    craftingRecipes: [
+      {
+        id: "transport-route",
+        name: "A Trade Shipment",
+        stationName: "Hauling Station",
+        craftedItemStacks: [{ item_id: "8100", item_type: "item", quantity: 10 }],
+        craftedItems: [{ id: "8100", itemType: 0, name: "Treated Board", tag: "Board", tier: 3 }],
+        consumedItemStacks: [{ item_id: "8101", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "8101", itemType: 0, name: "Shipment Token", tag: "Transport", tier: 3 }],
+        levelRequirements: [{ skill: { name: "Construction" }, level: 1 }],
+      },
+      {
+        id: "craft-route",
+        name: "Z Saw Treated Board",
+        stationName: "Carpentry Station",
+        craftedItemStacks: [{ item_id: "8100", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8100", itemType: 0, name: "Treated Board", tag: "Board", tier: 3 }],
+        consumedItemStacks: [{ item_id: "8102", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "8102", itemType: 0, name: "Raw Board", tag: "Board", tier: 3 }],
+        levelRequirements: [{ skill: { name: "Carpentry" }, level: 30 }],
+      },
+    ],
+  }]);
+  repository.upsertEntityIdentity({ id: "8101", itemType: 0, name: "Shipment Token", tag: "Transport", tier: 3 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
+  repository.upsertEntityIdentity({ id: "8102", itemType: 0, name: "Raw Board", tag: "Board", tier: 3 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
+  db.prepare("UPDATE game_catalog_recipes SET is_transport_route = 1 WHERE recipe_key = ?").run("items:8100:recipe:transport-route");
+
+  const baseConfig = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "8100", kind: "items", name: "Treated Board", quantity: 10, itemType: 0 }],
+  });
+  const { detailsByKey } = collectLocalCatalogCraftPlanDetails(repository, baseConfig.targets, baseConfig.routeOverrides);
+  const defaultPlan = computeCraftPlan({ config: baseConfig, detailsByKey });
+  assert.equal(defaultPlan.steps[0].selectedRecipeId, "craft-route");
+  assert.deepEqual(defaultPlan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "transport-route"]);
+
+  const overrideConfig = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "8100", kind: "items", name: "Treated Board", quantity: 10, itemType: 0 }],
+    routeOverrides: { [recipeKey("items", "8100")]: "transport-route" },
+  });
+  const overridePlan = computeCraftPlan({ config: overrideConfig, detailsByKey });
+  assert.equal(overridePlan.steps[0].selectedRecipeId, "transport-route");
+  assert.equal(overridePlan.materials.find((material) => material.name === "Shipment Token")?.required, 1);
+  assert.deepEqual(overridePlan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "transport-route"]);
+});
+test("collectLocalCatalogCraftPlanDetails uses recipe names as legacy route ids for hashed normalized recipes", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [{
+    item: { id: "8200", itemType: 0, name: "Legacy Board", tag: "Board", tier: 2 },
+    craftingRecipes: [
+      {
+        name: "A Legacy Board Route",
+        stationName: "Carpentry Station",
+        craftedItemStacks: [{ item_id: "8200", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8200", itemType: 0, name: "Legacy Board", tag: "Board", tier: 2 }],
+        consumedItemStacks: [{ item_id: "8201", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "8201", itemType: 0, name: "A Route Input", tag: "Board", tier: 2 }],
+        levelRequirements: [{ skill: { name: "Carpentry" }, level: 20 }],
+      },
+      {
+        name: "Z Legacy Board Route",
+        stationName: "Carpentry Station",
+        craftedItemStacks: [{ item_id: "8200", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8200", itemType: 0, name: "Legacy Board", tag: "Board", tier: 2 }],
+        consumedItemStacks: [{ item_id: "8202", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "8202", itemType: 0, name: "Z Route Input", tag: "Board", tier: 2 }],
+        levelRequirements: [{ skill: { name: "Carpentry" }, level: 20 }],
+      },
+    ],
+  }]);
+  repository.upsertEntityIdentity({ id: "8201", itemType: 0, name: "A Route Input", tag: "Board", tier: 2 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
+  repository.upsertEntityIdentity({ id: "8202", itemType: 0, name: "Z Route Input", tag: "Board", tier: 2 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
+
+  const target = { id: "8200", kind: "items", name: "Legacy Board", quantity: 3, itemType: 0 };
+  const { detailsByKey } = collectLocalCatalogCraftPlanDetails(repository, [target], {});
+  const detail = detailsByKey.get(recipeKey("items", "8200"));
+  const routeIds = detail.craftingRecipes.map((recipe) => recipe.id);
+  assert.deepEqual(routeIds, ["A Legacy Board Route", "Z Legacy Board Route"]);
+
+  const nameOverrideConfig = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [target],
+    routeOverrides: { [recipeKey("items", "8200")]: "Z Legacy Board Route" },
+  });
+  const nameOverridePlan = computeCraftPlan({ config: nameOverrideConfig, detailsByKey });
+  assert.equal(nameOverridePlan.steps[0].selectedRecipeId, "Z Legacy Board Route");
+  assert.equal(nameOverridePlan.materials.find((material) => material.name === "Z Route Input")?.required, 6);
+
+  const fullCatalogKey = repository.listProducerRecipesForOutput(recipeKey("items", "8200"))
+    .find((recipe) => recipe.name === "Z Legacy Board Route")?.recipeKey;
+  const keyOverrideConfig = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [target],
+    routeOverrides: { [recipeKey("items", "8200")]: fullCatalogKey },
+  });
+  const keyOverridePlan = computeCraftPlan({ config: keyOverrideConfig, detailsByKey });
+  assert.equal(keyOverridePlan.steps[0].selectedRecipeId, "Z Legacy Board Route");
+});
+
+test("collectLocalCatalogCraftPlanDetails preloads dependencies for alternate producer routes", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "8300", itemType: 0, name: "Routing Target", tag: "Tool", tier: 3 },
+      craftingRecipes: [
+        {
+          id: "basic-route",
+          name: "Basic Route",
+          stationName: "Workshop",
+          craftedItemStacks: [{ item_id: "8300", item_type: "item", quantity: 1 }],
+          craftedItems: [{ id: "8300", itemType: 0, name: "Routing Target", tag: "Tool", tier: 3 }],
+          consumedItemStacks: [{ item_id: "8301", item_type: "item", quantity: 1 }],
+          consumedItems: [{ id: "8301", itemType: 0, name: "Basic Input", tag: "Part", tier: 3 }],
+          levelRequirements: [{ skill: { name: "Smithing" }, level: 30 }],
+        },
+        {
+          id: "deep-route",
+          name: "Deep Route",
+          stationName: "Workshop",
+          craftedItemStacks: [{ item_id: "8300", item_type: "item", quantity: 1 }],
+          craftedItems: [{ id: "8300", itemType: 0, name: "Routing Target", tag: "Tool", tier: 3 }],
+          consumedItemStacks: [{ item_id: "8302", item_type: "item", quantity: 2 }],
+          consumedItems: [{ id: "8302", itemType: 0, name: "Refined Input", tag: "Part", tier: 3 }],
+          levelRequirements: [{ skill: { name: "Smithing" }, level: 30 }],
+        },
+      ],
+    },
+    {
+      item: { id: "8301", itemType: 0, name: "Basic Input", tag: "Part", tier: 3 },
+      craftingRecipes: [],
+    },
+    {
+      item: { id: "8302", itemType: 0, name: "Refined Input", tag: "Part", tier: 3 },
+      craftingRecipes: [{
+        id: "refine-input",
+        name: "Refine Input",
+        stationName: "Smithing Station",
+        craftedItemStacks: [{ item_id: "8302", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8302", itemType: 0, name: "Refined Input", tag: "Part", tier: 3 }],
+        consumedItemStacks: [{ item_id: "8303", item_type: "item", quantity: 4 }],
+        consumedItems: [{ id: "8303", itemType: 0, name: "Deep Ore", tag: "Ore", tier: 3 }],
+        levelRequirements: [{ skill: { name: "Mining" }, level: 30 }],
+      }],
+    },
+    {
+      item: { id: "8303", itemType: 0, name: "Deep Ore", tag: "Ore", tier: 3 },
+      craftingRecipes: [],
+    },
+  ]);
+
+  const target = { id: "8300", kind: "items", name: "Routing Target", quantity: 2, itemType: 0 };
+  const { detailsByKey } = collectLocalCatalogCraftPlanDetails(repository, [target], {});
+  assert.equal(detailsByKey.has(recipeKey("items", "8302")), true);
+  assert.equal(detailsByKey.has(recipeKey("items", "8303")), true);
+
+  const overrideConfig = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [target],
+    routeOverrides: { [recipeKey("items", "8300")]: "deep-route" },
+  });
+  const overridePlan = computeCraftPlan({ config: overrideConfig, detailsByKey });
+  assert.equal(overridePlan.steps[0].selectedRecipeId, "refine-input");
+  assert.equal(overridePlan.steps[1].selectedRecipeId, "deep-route");
+  assert.equal(overridePlan.materials.find((material) => material.name === "Deep Ore")?.required, 16);
+});
+
+test("collectLocalCatalogCraftPlanDetails queries shared completed subgraphs once", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "8400", itemType: 0, name: "Shared Target", tag: "Tool", tier: 4 },
+      craftingRecipes: [{
+        id: "shared-target-route",
+        name: "Shared Target Route",
+        stationName: "Workshop",
+        craftedItemStacks: [{ item_id: "8400", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8400", itemType: 0, name: "Shared Target", tag: "Tool", tier: 4 }],
+        consumedItemStacks: [
+          { item_id: "8401", item_type: "item", quantity: 1 },
+          { item_id: "8402", item_type: "item", quantity: 1 },
+        ],
+        consumedItems: [
+          { id: "8401", itemType: 0, name: "Left Part", tag: "Part", tier: 4 },
+          { id: "8402", itemType: 0, name: "Right Part", tag: "Part", tier: 4 },
+        ],
+        levelRequirements: [{ skill: { name: "Smithing" }, level: 40 }],
+      }],
+    },
+    {
+      item: { id: "8401", itemType: 0, name: "Left Part", tag: "Part", tier: 4 },
+      craftingRecipes: [{
+        id: "left-route",
+        name: "Left Route",
+        craftedItemStacks: [{ item_id: "8401", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8401", itemType: 0, name: "Left Part", tag: "Part", tier: 4 }],
+        consumedItemStacks: [{ item_id: "8403", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "8403", itemType: 0, name: "Shared Core", tag: "Core", tier: 4 }],
+      }],
+    },
+    {
+      item: { id: "8402", itemType: 0, name: "Right Part", tag: "Part", tier: 4 },
+      craftingRecipes: [{
+        id: "right-route",
+        name: "Right Route",
+        craftedItemStacks: [{ item_id: "8402", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8402", itemType: 0, name: "Right Part", tag: "Part", tier: 4 }],
+        consumedItemStacks: [{ item_id: "8403", item_type: "item", quantity: 3 }],
+        consumedItems: [{ id: "8403", itemType: 0, name: "Shared Core", tag: "Core", tier: 4 }],
+      }],
+    },
+    {
+      item: { id: "8403", itemType: 0, name: "Shared Core", tag: "Core", tier: 4 },
+      craftingRecipes: [],
+    },
+  ]);
+
+  const calls = new Map();
+  const countedRepository = {
+    getEntity: (...args) => repository.getEntity(...args),
+    listByproductProducersForOutput: (...args) => repository.listByproductProducersForOutput(...args),
+    listProducerRecipesForOutput: (key) => {
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      return repository.listProducerRecipesForOutput(key);
+    },
+  };
+
+  collectLocalCatalogCraftPlanDetails(countedRepository, [{ id: "8400", kind: "items", name: "Shared Target", quantity: 1, itemType: 0 }], {});
+
+  assert.equal(calls.get(recipeKey("items", "8403")), 1);
 });

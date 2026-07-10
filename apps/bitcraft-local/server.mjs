@@ -33,7 +33,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectRecipeDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
@@ -1570,6 +1570,45 @@ async function enrichCraftPlanSourceItems(sources = []) {
   }));
 }
 
+function craftPlanSourceCatalogKey(item = {}) {
+  const id = String(item.id ?? item.itemId ?? "").trim();
+  if (!id) return null;
+  const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items")) === "cargo" ? "cargo" : "items";
+  return `${kind}:${id}`;
+}
+
+function enrichCraftPlanSourcesFromLocalCatalog(repository, sources, warnings = []) {
+  const sourceList = Array.isArray(sources) ? sources : [sources].filter(Boolean);
+  const cache = new Map();
+  function enrichItem(item) {
+    const key = craftPlanSourceCatalogKey(item);
+    if (!key) return item;
+    if (!cache.has(key)) cache.set(key, repository.getEntity(key));
+    const entity = cache.get(key);
+    if (!entity) {
+      if (Array.isArray(warnings)) warnings.push(`Local catalog identity is missing for source item ${key}; planner used the live source payload.`);
+      return item;
+    }
+    return {
+      ...item,
+      id: entity.targetId,
+      kind: entity.kind,
+      itemType: entity.itemType,
+      name: entity.name ?? item.name,
+      tier: entity.tier ?? null,
+      rarityStr: entity.rarity ?? null,
+      tag: entity.tag ?? null,
+      iconAssetName: entity.iconAssetName ?? null,
+      quantity: item.quantity,
+    };
+  }
+  const enriched = sourceList.map((source) => {
+    const items = Array.isArray(source.items) ? source.items.map(enrichItem) : [];
+    return { ...source, items, itemCount: source.itemCount ?? items.length };
+  });
+  return Array.isArray(sources) ? enriched : enriched[0] ?? sources;
+}
+
 function targetFromRecipeCatalogItem(item = {}) {
   const kind = String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items";
   return {
@@ -1861,8 +1900,8 @@ function activeCraftPlanOutputs(craftsPayload = {}) {
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
-  const [detailsByKey, inventoriesPayload, craftsPayload] = await Promise.all([
-    collectRecipeDetails(config.targets, (target) => recipeDetailFromCatalogOrFetch(target), config.routeOverrides),
+  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, config.targets, config.routeOverrides);
+  const [inventoriesPayload, craftsPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
   ]);
@@ -1874,19 +1913,17 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     try {
       const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
       const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
-      const [inventory] = await enrichCraftPlanSourceItems([sources.inventory]);
+      const inventory = enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.inventory, catalogWarnings);
       playerSources.push(inventory);
-      deployableSources.push(...await enrichCraftPlanSourceItems(sources.deployables));
+      deployableSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.deployables, catalogWarnings));
     } catch (error) {
       playerSources.push({ sourceId: playerId, label: `${label} inventory`, unavailable: true, error: error instanceof Error ? error.message : String(error), items: [] });
     }
   }
-  const countedSources = [...storageSources, ...playerSources, ...deployableSources];
-  await addCraftPlanItemOutputDetails(detailsByKey);
-  await addCraftPlanCargoDerivationDetails(detailsByKey, countedSources);
   return computeCraftPlan({
     config,
     detailsByKey,
+    catalogWarnings,
     storageSources,
     playerSources,
     deployableSources,

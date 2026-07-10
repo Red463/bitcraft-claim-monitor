@@ -113,7 +113,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(server, /GAME_CATALOG_REFRESH_DETAIL_DELAY_MS/);
   assert.match(server, /await delay\(gameCatalogRefreshDetailDelayMs\)/);
 
-  const itemOutputHelper = server.match(/async function addCraftPlanItemOutputDetails[\s\S]*?async function addCraftPlanCargoDerivationDetails/)?.[0] ?? "";
-  assert.match(itemOutputHelper, /recipeDetailFromCatalog\(\{ id: itemId, kind: "items", itemType: 0 \}\)/);
-  assert.doesNotMatch(itemOutputHelper, /recipeDetailFromCatalogOrFetch\(\{ id: itemId, kind: "items", itemType: 0 \}\)/);
+  const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
+  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, config\.targets, config\.routeOverrides\)/);
+  assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
+  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
+  assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`\)/);
+  assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });

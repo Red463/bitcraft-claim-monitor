@@ -162,6 +162,7 @@ function stackDisplayLooksTransport(display) {
 }
 
 function recipeLooksTransportRoute(recipe) {
+  if (recipe?.isTransportRoute === true) return true;
   if (/\b(unpack|unpackage|packed|package)\b/i.test(String(recipe?.name ?? ""))) return true;
   const inputDisplays = Array.isArray(recipe?.consumedItems) ? recipe.consumedItems : [];
   const outputDisplays = Array.isArray(recipe?.craftedItems) ? recipe.craftedItems : [];
@@ -239,6 +240,12 @@ function recipeId(recipe) {
   return String(recipe?.id ?? recipe?.name ?? "");
 }
 
+function recipeMatchesOverride(recipe, overrideId) {
+  const selected = String(overrideId ?? "").trim();
+  if (!selected) return false;
+  return recipeId(recipe) === selected || String(recipe?.recipeKey ?? recipe?.catalogRecipeKey ?? "") === selected;
+}
+
 function mergeDetailTarget(detail, target) {
   const detailed = detailTarget(detail, target);
   return { ...target, ...detailed, quantity: target.quantity };
@@ -297,12 +304,8 @@ function sectionOverrideKeyForItem(item) {
   return `item:${recipeKey(item?.kind, item?.id)}`;
 }
 
-function routeAlternativesForUi(recipes, selected) {
-  const normalRecipes = recipes.filter((recipe) => !recipeLooksTransportRoute(recipe));
-  if (!normalRecipes.length) return recipes;
-  if (!selected || !recipeLooksTransportRoute(selected)) return normalRecipes;
-  const selectedId = recipeId(selected);
-  return normalRecipes.some((recipe) => recipeId(recipe) === selectedId) ? normalRecipes : [selected, ...normalRecipes];
+function routeAlternativesForUi(recipes) {
+  return recipes;
 }
 
 function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
@@ -311,7 +314,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   const normalizedTarget = mergeDetailTarget(detail, target);
   const key = recipeKey(normalizedTarget.kind, normalizedTarget.id);
   const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
-  const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
+  const selected = recipes.find((recipe) => recipeMatchesOverride(recipe, routeOverrides[key])) ?? recipes[0];
   const visibleRecipes = routeAlternativesForUi(recipes, selected);
   return visibleRecipes.map((recipe) => ({
     id: recipeId(recipe),
@@ -348,7 +351,7 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
     const unallocatedStock = Math.max(0, stocked - alreadyAllocated);
     const quantityToCraft = Math.max(0, quantity - unallocatedStock);
     const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
-    const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
+    const selected = recipes.find((recipe) => recipeMatchesOverride(recipe, routeOverrides[key])) ?? recipes[0];
     addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
     if (quantityToCraft <= 0 || !selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
@@ -406,6 +409,186 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
 }
 
 
+function catalogKeyParts(key) {
+  const [rawKind, ...rest] = String(key ?? "").split(":");
+  const id = rest.join(":").trim();
+  return { kind: normalizeKind(rawKind), id };
+}
+
+
+function catalogEntityDisplay(entity, fallback = {}) {
+  const kind = normalizeKind(entity?.kind ?? fallback.kind ?? fallback.itemType ?? fallback.item_type);
+  const id = String(entity?.targetId ?? entity?.id ?? fallback.id ?? fallback.itemId ?? fallback.targetId ?? "").trim();
+  return {
+    id,
+    itemType: itemTypeFromKind(kind),
+    kind,
+    name: String(entity?.name ?? fallback.name ?? fallback.itemName ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`),
+    tag: entity?.tag ?? fallback.tag ?? null,
+    tier: normalizedTier(entity?.tier ?? fallback.tier),
+    rarityStr: entity?.rarity ?? fallback.rarityStr ?? fallback.rarity ?? null,
+    iconAssetName: entity?.iconAssetName ?? fallback.iconAssetName ?? null,
+  };
+}
+
+function catalogRouteId(recipe) {
+  const value = String(recipe?.recipeKey ?? "").trim();
+  const marker = ":recipe:";
+  const index = value.indexOf(marker);
+  const suffix = index >= 0 ? value.slice(index + marker.length) : value;
+  return /^[a-f0-9]{12}$/i.test(suffix) && recipe?.name ? String(recipe.name) : suffix;
+}
+
+function catalogStack(link = {}) {
+  const kind = normalizeKind(link.kind);
+  return {
+    item_id: String(link.targetId ?? link.id ?? ""),
+    item_type: kind === "cargo" ? "cargo" : "item",
+    quantity: toNumber(link.quantity),
+  };
+}
+
+function catalogLinkedDisplay(repository, link = {}, warnings, fallback = {}) {
+  const key = link.inputKey ?? link.outputKey ?? recipeKey(link.kind, link.targetId);
+  const entity = repository.getEntity(key);
+  if (!entity) warnings.add(`Local catalog identity is missing for ${key}; planner used an id-only fallback.`);
+  return catalogEntityDisplay(entity, { ...fallback, id: link.targetId, kind: link.kind });
+}
+
+function catalogPlannerRecipe(repository, recipe, warnings) {
+  const outputs = (recipe.outputs ?? []).map((output) => catalogStack(output));
+  const outputDisplays = (recipe.outputs ?? []).map((output) => catalogLinkedDisplay(repository, output, warnings));
+  const inputs = (recipe.inputs ?? []).map((input) => catalogStack(input));
+  const inputDisplays = (recipe.inputs ?? []).map((input) => catalogLinkedDisplay(repository, input, warnings));
+  const id = catalogRouteId(recipe);
+  return {
+    id,
+    recipeKey: recipe.recipeKey,
+    catalogRecipeKey: recipe.recipeKey,
+    name: String(recipe.name ?? (id || "Recipe")),
+    buildingName: recipe.stationName ?? null,
+    stationName: recipe.stationName ?? null,
+    skillName: recipe.skillName ?? null,
+    isPassive: recipe.isPassive === true,
+    isTransportRoute: recipe.isTransportRoute === true,
+    craftedItemStacks: outputs,
+    craftedItems: outputDisplays,
+    consumedItemStacks: inputs,
+    consumedItems: inputDisplays,
+    levelRequirements: recipe.skillName ? [{ skill: { name: recipe.skillName }, level: 0 }] : [],
+  };
+}
+
+function catalogByproductPossibility(repository, row, warnings) {
+  const outputKey = row.outputKey ?? recipeKey(row.kind, row.targetId);
+  const entity = repository.getEntity(outputKey);
+  if (!entity) warnings.add(`Local catalog identity is missing for ${outputKey}; planner used an id-only fallback.`);
+  const targetItem = catalogEntityDisplay(entity, { id: row.targetId, kind: row.kind });
+  return {
+    targetId: targetItem.id,
+    itemType: targetItem.itemType,
+    targetItem,
+    quantity: toNumber(row.quantity),
+    chance: row.chance == null ? 1 : toNumber(row.chance),
+    isCargo: targetItem.kind === "cargo",
+  };
+}
+
+function localCatalogDetail(repository, key, fallbackTarget, byproductRows, warnings) {
+  const { kind, id } = catalogKeyParts(key);
+  const entity = repository.getEntity(key);
+  const recipes = repository.listProducerRecipesForOutput(key);
+  if (!entity && recipes.length === 0 && byproductRows.length === 0) return null;
+  if (!entity) warnings.add(`Local catalog identity is missing for ${key}; planner used an id-only fallback.`);
+  const source = catalogEntityDisplay(entity, { ...fallbackTarget, id, kind });
+  return {
+    [kind === "cargo" ? "cargo" : "item"]: source,
+    craftingRecipes: recipes.map((recipe) => catalogPlannerRecipe(repository, recipe, warnings)),
+    extractionRecipes: [],
+    recipesUsingItem: [],
+    itemListPossibilities: byproductRows.map((row) => catalogByproductPossibility(repository, row, warnings)),
+  };
+}
+
+export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 14) {
+  const detailsByKey = new Map();
+  const warnings = new Set();
+  const byproductsByProducerKey = new Map();
+  const visiting = new Set();
+  const completed = new Set();
+
+  function addByproductProducer(row) {
+    if (!row?.producerKey) return;
+    const rows = byproductsByProducerKey.get(row.producerKey) ?? [];
+    if (!rows.some((existing) => existing.outputKey === row.outputKey && existing.targetId === row.targetId)) rows.push(row);
+    byproductsByProducerKey.set(row.producerKey, rows);
+  }
+
+  function setDetail(key, fallbackTarget = {}) {
+    const existing = detailsByKey.get(key);
+    if (existing) {
+      existing.itemListPossibilities = (byproductsByProducerKey.get(key) ?? []).map((row) => catalogByproductPossibility(repository, row, warnings));
+      return existing;
+    }
+    const detail = localCatalogDetail(repository, key, fallbackTarget, byproductsByProducerKey.get(key) ?? [], warnings);
+    if (detail) detailsByKey.set(key, detail);
+    return detail;
+  }
+
+  function visit(rawTarget, depth, isRoot = false) {
+    const target = normalizeTarget({ ...rawTarget, quantity: rawTarget?.quantity ?? 1 });
+    if (!target) return;
+    const key = recipeKey(target.kind, target.id);
+    if (depth > maxDepth) {
+      warnings.add(`Local catalog recursion limit reached while loading ${key}.`);
+      return;
+    }
+    if (visiting.has(key)) return;
+
+    const byproductProducers = repository.listByproductProducersForOutput(key);
+    for (const row of byproductProducers) addByproductProducer(row);
+    if (completed.has(key)) {
+      setDetail(key, target);
+      return;
+    }
+    visiting.add(key);
+
+    const detail = setDetail(key, target);
+    if (!detail && byproductProducers.length === 0) {
+      warnings.add(`Local catalog data is missing for ${key}; planner treated it as a source material.`);
+      visiting.delete(key);
+      return;
+    }
+    if (isRoot && detail && directRecipesForTarget(detail, mergeDetailTarget(detail, target)).length === 0 && byproductProducers.length === 0) {
+      warnings.add(`Local catalog has no producer recipe or byproduct route for ${key}; planner treated it as a source material.`);
+    }
+
+    for (const row of byproductProducers) {
+      const producerTarget = catalogEntityDisplay(row.producer, { id: row.producer?.targetId, kind: row.producer?.kind });
+      visit(producerTarget, depth + 1, false);
+      setDetail(row.producerKey, producerTarget);
+    }
+
+    const currentDetail = detailsByKey.get(key);
+    if (!currentDetail) {
+      visiting.delete(key);
+      return;
+    }
+    const normalizedTarget = mergeDetailTarget(currentDetail, target);
+    const recipes = recipesForTarget(currentDetail, normalizedTarget, detailsByKey);
+    for (const recipe of recipes) {
+      const inputs = recipeInputs(recipe);
+      for (let index = 0; index < inputs.length; index += 1) {
+        visit(stackDisplay(inputs[index], recipe.consumedItems, index), depth + 1, false);
+      }
+    }
+    completed.add(key);
+    visiting.delete(key);
+  }
+
+  for (const target of targets ?? []) visit(target, 0, true);
+  return { detailsByKey, warnings: [...warnings] };
+}
 export async function collectRecipeDetails(targets, fetchDetail, routeOverrides = {}, maxDepth = 14) {
   const details = new Map();
   const pending = new Set();
@@ -425,7 +608,7 @@ export async function collectRecipeDetails(targets, fetchDetail, routeOverrides 
     details.set(key, detail);
     const normalizedTarget = mergeDetailTarget(detail, target);
     const recipes = recipesForTarget(detail, normalizedTarget, details);
-    const selected = recipes.find((recipe) => recipeId(recipe) === routeOverrides[key]) ?? recipes[0];
+    const selected = recipes.find((recipe) => recipeMatchesOverride(recipe, routeOverrides[key])) ?? recipes[0];
     if (!selected) return;
     const inputs = recipeInputs(selected);
     for (let index = 0; index < inputs.length; index += 1) {
@@ -499,6 +682,7 @@ export function computeCraftPlan({
   playerSources = [],
   deployableSources = [],
   activeCrafts = [],
+  catalogWarnings = [],
 } = {}) {
   const normalized = normalizeCraftPlanConfig(config);
   if (!normalized.enabled || normalized.targets.length === 0) {
@@ -589,7 +773,7 @@ export function computeCraftPlan({
     steps,
     gatherNext: groupGatherNext(materials.filter((item) => !item.isTarget)),
     unavailableSources,
-    warnings,
+    warnings: [...new Set([...warnings, ...(Array.isArray(catalogWarnings) ? catalogWarnings : [])])],
     totals: {
       targets: targets.length,
       missingItems: materials.filter((item) => item.missing > 0).length,
