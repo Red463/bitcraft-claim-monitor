@@ -9,6 +9,23 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.18] - 2026-07-10
+
+### Added
+
+- Added a normalized local Craft Planning catalog for BitJita items, cargo, recipes, inputs, outputs, and byproducts.
+- Added weekly resumable catalog refreshes with an admin manual refresh action, progress, counts, and diagnostics.
+
+### Changed
+
+- Improved Craft Planning performance by calculating recipe chains from indexed local catalog tables while keeping inventories, deployables, and active crafts live.
+
+### Fixed
+
+- Fixed duplicate recipes returned through direct and reverse BitJita relationships and preserved existing route overrides.
+- Fixed large catalog refreshes so they continue automatically in controlled batches without being reported as failures.
+- Fixed existing default daily catalog schedules so they migrate to the new weekly schedule.
+
 ## [0.32.0-beta.17] - 2026-07-10
 
 ### Fixed
