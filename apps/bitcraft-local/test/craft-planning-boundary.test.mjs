@@ -87,6 +87,35 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /mergeTargets/);
 });
 
+
+test("Craft Planning manager shows compact catalog diagnostics and manual refresh controls", () => {
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(manager, /\/admin\/craft-plan\/catalog-refresh/);
+  assert.match(manager, /Refresh planner catalog/);
+  assert.match(manager, /No planner catalog yet/);
+  assert.match(manager, /processedCount/);
+  assert.match(manager, /totalCount/);
+  assert.match(manager, /itemCount/);
+  assert.match(manager, /cargoCount/);
+  assert.match(manager, /recipeCount/);
+  assert.match(manager, /byproductCount/);
+  assert.match(manager, /failureCount/);
+  assert.match(manager, /lastSuccessAt/);
+  assert.match(manager, /completedAt/);
+  assert.match(manager, /scheduledJob\?\.running/);
+  assert.match(manager, /window\.setInterval\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
+  assert.match(manager, /window\.clearInterval/);
+  assert.doesNotMatch(manager, /window\.setTimeout\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
+  assert.match(manager, /run\?\.status === "completed"/);
+  assert.doesNotMatch(manager, /run\?\.status === "complete"/);
+  assert.match(styles, /\.craft-plan-catalog-band/);
+  assert.match(styles, /\.craft-plan-catalog-stats/);
+  assert.match(styles, /\.craft-plan-catalog-stat/);
+  assert.match(styles, /\.craft-plan-catalog-empty/);
+  assert.match(styles, /\.craft-plan-manager-backdrop \{ position: fixed; inset: 0;/);
+});
 test("Dashboard shows Gather Next instead of Recent Activity", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 

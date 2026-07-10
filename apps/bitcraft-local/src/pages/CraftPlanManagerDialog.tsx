@@ -3,7 +3,7 @@ import { ClipboardList, Package, Plus, RefreshCw, Route, Save, Search, SlidersHo
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import type { AnyRecord } from "../main-app-data";
-import { formatNumber } from "../utils/format";
+import { dateLabel, formatNumber, timeAgo } from "../utils/format";
 
 const LOCAL_API = "/api/local";
 const BITJITA_API = "/api/bitjita";
@@ -135,6 +135,41 @@ function routeOptionLabel(recipe: AnyRecord) {
 function routeOutputKey(step: AnyRecord) {
   return itemKey(step.output ?? step);
 }
+
+const CATALOG_REFRESH_POLL_MS = 4000;
+
+type CatalogRefreshStatus = {
+  scheduledJob: AnyRecord | null;
+  latestRun: AnyRecord | null;
+  recentRuns: AnyRecord[];
+};
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function firstCount(...values: unknown[]) {
+  for (const value of values) {
+    const count = Number(value);
+    if (Number.isFinite(count)) return count;
+  }
+  return 0;
+}
+
+function formatCatalogPhase(value: unknown) {
+  const text = firstText(value);
+  return text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Idle";
+}
+
+function formatCatalogMoment(value: unknown) {
+  const text = firstText(value);
+  return text ? { summary: timeAgo(text), detail: dateLabel(text) } : { summary: "Never", detail: "Not available" };
+}
+
 export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { open: boolean; onClose: () => void; csrfToken: string; onSaved: () => void }) {
   const [state, setState] = React.useState<AnyRecord | null>(null);
   const [config, setConfig] = React.useState<CraftPlanConfig>(emptyConfig());
@@ -144,6 +179,9 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [status, setStatus] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [catalogStatus, setCatalogStatus] = React.useState<CatalogRefreshStatus | null>(null);
+  const [catalogError, setCatalogError] = React.useState<string | null>(null);
+  const [catalogBusy, setCatalogBusy] = React.useState(false);
   const [multiplierDraft, setMultiplierDraft] = React.useState({ key: "", multiplier: "1.5", note: "" });
 
   async function adminApi(path: string, options: RequestInit = {}) {
@@ -170,7 +208,37 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
   }, [csrfToken]);
 
-  React.useEffect(() => { if (open) void load(); }, [open, load]);
+  const loadCatalogStatus = React.useCallback(async (options: { silent?: boolean } = {}) => {
+    const silent = options.silent === true;
+    if (!silent) setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      const result = await adminApi("/admin/craft-plan/catalog-refresh");
+      setCatalogStatus({
+        scheduledJob: result.scheduledJob ?? null,
+        latestRun: result.latestRun ?? null,
+        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
+      });
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (!silent) setCatalogBusy(false);
+    }
+  }, [csrfToken]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    void load();
+    void loadCatalogStatus();
+  }, [open, load, loadCatalogStatus]);
+
+  React.useEffect(() => {
+    if (!open || !catalogStatus?.scheduledJob?.running) return;
+    const interval = window.setInterval(() => {
+      void loadCatalogStatus({ silent: true });
+    }, CATALOG_REFRESH_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [open, catalogStatus?.scheduledJob?.running, loadCatalogStatus]);
 
   React.useEffect(() => {
     const trimmed = query.trim();
@@ -202,6 +270,25 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setStatus(message);
   }
 
+  async function triggerCatalogRefresh() {
+    if (busy || catalogBusy || catalogStatus?.scheduledJob?.running) return;
+    setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      const result = await adminApi("/admin/craft-plan/catalog-refresh", { method: "POST", body: "{}" });
+      setCatalogStatus({
+        scheduledJob: result.scheduledJob ?? null,
+        latestRun: result.latestRun ?? null,
+        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
+      });
+      setStatus(result.result?.started ? "Planner catalog refresh started." : "Planner catalog status updated.");
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
     setError(null);
@@ -227,6 +314,38 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const deployableGroups = groupDeployablesByPlayer(deployableSources);
   const tierPresets = state?.sources?.tierPresets ?? [];
   const routeSteps = Array.isArray(state?.plan?.steps) ? state.plan.steps : [];
+  const scheduledJob = catalogStatus?.scheduledJob ?? null;
+  const recentRuns = Array.isArray(catalogStatus?.recentRuns) ? catalogStatus.recentRuns : [];
+  const latestRun = catalogStatus?.latestRun ?? null;
+  const successfulRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
+  const completedRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
+  const catalogRunning = Boolean(scheduledJob?.running);
+  const catalogPhase = formatCatalogPhase(firstText(latestRun?.phase, scheduledJob?.metadata?.phase, scheduledJob?.metadata?.stage, scheduledJob?.metadata?.step));
+  const processedCount = firstCount(latestRun?.processedCount, scheduledJob?.metadata?.processedCount, scheduledJob?.metadata?.current, scheduledJob?.metadata?.progressCurrent);
+  const totalCount = firstCount(latestRun?.totalCount, scheduledJob?.metadata?.totalCount, scheduledJob?.metadata?.total, scheduledJob?.metadata?.progressTotal);
+  const itemCount = firstCount(latestRun?.itemCount, successfulRun?.itemCount, scheduledJob?.metadata?.itemCount);
+  const cargoCount = firstCount(latestRun?.cargoCount, successfulRun?.cargoCount, scheduledJob?.metadata?.cargoCount);
+  const recipeCount = firstCount(latestRun?.recipeCount, successfulRun?.recipeCount, scheduledJob?.metadata?.recipeCount);
+  const byproductCount = firstCount(latestRun?.byproductCount, successfulRun?.byproductCount, scheduledJob?.metadata?.byproductCount);
+  const failureCount = firstCount(latestRun?.failureCount, completedRun?.failureCount, scheduledJob?.metadata?.failureCount);
+  const lastSuccessAt = firstText(scheduledJob?.lastSuccessAt, successfulRun?.completedAt, successfulRun?.updatedAt) || null;
+  const lastCompletedAt = firstText(latestRun?.completedAt, completedRun?.completedAt, scheduledJob?.lastRunAt, latestRun?.updatedAt) || null;
+  const nextRunAt = firstText(scheduledJob?.nextRunAt) || null;
+  const noCatalog = !lastSuccessAt && recipeCount <= 0 && byproductCount <= 0;
+  const catalogActionBusy = busy || catalogBusy || catalogRunning;
+  const catalogStatusLabel = catalogRunning ? "Running" : noCatalog ? "Refresh required" : latestRun?.status === "failed" || firstText(scheduledJob?.lastError, latestRun?.lastError) ? "Attention" : "Ready";
+  const progressSummary = totalCount > 0 ? `${formatNumber(processedCount, 0)} / ${formatNumber(totalCount, 0)}` : processedCount > 0 ? formatNumber(processedCount, 0) : "Waiting";
+  const catalogSummary = catalogRunning
+    ? `${catalogPhase} in progress${totalCount > 0 ? `, ${progressSummary} processed.` : "."}`
+    : noCatalog
+      ? "No planner catalog yet. Run a refresh to populate recipe diagnostics."
+      : latestRun?.status === "failed"
+        ? "The last refresh failed. Existing catalog data remains available until the next successful run."
+        : "Catalog diagnostics are ready for manual route and source review.";
+  const catalogSchedule = nextRunAt ? `Next scheduled run ${dateLabel(nextRunAt)}.` : (scheduledJob?.scheduleLabel ?? "Manual refresh only.");
+  const lastSuccess = formatCatalogMoment(lastSuccessAt);
+  const lastCompleted = formatCatalogMoment(lastCompletedAt);
+  const catalogPillClass = catalogRunning ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
 
   return (
     <div className="modal-backdrop craft-plan-manager-backdrop" role="presentation">
@@ -242,9 +361,34 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
           <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
           <div className="craft-plan-manager-buttons">
-            <button className="toolbar-button" type="button" onClick={load} disabled={busy}><RefreshCw size={14} /> Refresh</button>
+            <button className="toolbar-button" type="button" onClick={load} disabled={busy || catalogBusy}><RefreshCw size={14} /> Refresh</button>
             <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}><Save size={14} /> Save Plan</button>
           </div>
+          <section className="craft-plan-catalog-band" aria-label="Planner catalog diagnostics">
+            <div className="craft-plan-catalog-summary">
+              <div>
+                <strong>Planner catalog diagnostics</strong>
+                <p className={noCatalog ? "craft-plan-catalog-empty" : undefined}>{catalogSummary}</p>
+                <small>{catalogSchedule}</small>
+              </div>
+              <div className="craft-plan-catalog-controls">
+                <span className={catalogPillClass}>{catalogStatusLabel}</span>
+                <button className="toolbar-button" type="button" onClick={triggerCatalogRefresh} disabled={catalogActionBusy}><RefreshCw size={14} /> Refresh planner catalog</button>
+              </div>
+            </div>
+            {catalogError ? <p className="craft-plan-catalog-error">{catalogError}</p> : null}
+            <div className="craft-plan-catalog-stats">
+              <div className="craft-plan-catalog-stat"><small>Status</small><strong>{catalogStatusLabel}</strong><span>{catalogPhase}</span></div>
+              <div className="craft-plan-catalog-stat"><small>Progress</small><strong>{progressSummary}</strong><span>{totalCount > 0 ? `${formatNumber(processedCount, 0)} processed of ${formatNumber(totalCount, 0)}` : "Waiting for a completed scan"}</span></div>
+              <div className="craft-plan-catalog-stat"><small>Last success</small><strong>{lastSuccess.summary}</strong><span>{lastSuccess.detail}</span></div>
+              <div className="craft-plan-catalog-stat"><small>Last completed</small><strong>{lastCompleted.summary}</strong><span>{lastCompleted.detail}</span></div>
+              <div className="craft-plan-catalog-stat"><small>Items</small><strong>{formatNumber(itemCount, 0)}</strong><span>Item entities</span></div>
+              <div className="craft-plan-catalog-stat"><small>Cargo</small><strong>{formatNumber(cargoCount, 0)}</strong><span>Cargo entities</span></div>
+              <div className="craft-plan-catalog-stat"><small>Recipes</small><strong>{formatNumber(recipeCount, 0)}</strong><span>Catalog recipes</span></div>
+              <div className="craft-plan-catalog-stat"><small>Byproducts</small><strong>{formatNumber(byproductCount, 0)}</strong><span>Output variants</span></div>
+              <div className={`craft-plan-catalog-stat${failureCount > 0 ? " is-problem" : ""}`}><small>Failures</small><strong>{formatNumber(failureCount, 0)}</strong><span>{failureCount > 0 ? "Review the latest run before retrying" : "No failures recorded"}</span></div>
+            </div>
+          </section>
         </div>
         {error ? <div className="alert error">{error}</div> : null}
         {status ? <div className="alert success">{status}</div> : null}
