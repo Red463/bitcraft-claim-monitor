@@ -129,17 +129,19 @@
 .craft-plan-target-list .craft-plan-target { min-height: 0; }
 .craft-plan-needs-board { overflow: hidden; }
 .craft-plan-needs-scroll { overflow-x: auto; padding-bottom: 4px; scrollbar-gutter: stable; }
-.craft-plan-needs-matrix { min-width: 1080px; overflow: hidden; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(6, 10, 16, 0.34); }
+.craft-plan-needs-matrix { min-width: 1048px; overflow: hidden; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(6, 10, 16, 0.34); }
 .craft-plan-needs-group { min-width: 980px; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; overflow: hidden; background: rgba(6, 10, 16, 0.34); }
 .craft-plan-needs-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.craft-plan-needs-row-column { width: 190px; }
+.craft-plan-needs-data-column { width: 78px; }
 .craft-plan-needs-table th, .craft-plan-needs-table td { border-right: 1px solid rgba(139, 159, 184, 0.18); border-bottom: 1px solid rgba(139, 159, 184, 0.18); padding: 8px; vertical-align: middle; }
 .craft-plan-needs-table thead th { color: var(--text); background: rgba(255, 255, 255, 0.04); font-size: 0.8rem; text-align: center; }
 .craft-plan-needs-table thead th:first-child { text-align: left; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
 .craft-plan-needs-section-row th { position: sticky; top: 0; z-index: 1; color: var(--text); background: rgb(20, 28, 38); font-size: 0.76rem; font-weight: 800; text-align: center; text-transform: uppercase; }
-.craft-plan-needs-section-row th:first-child { width: 210px; text-align: left; color: var(--text); }
+.craft-plan-needs-section-row th:first-child { text-align: left; color: var(--text); }
 .craft-plan-needs-section-row th:first-child span { color: var(--positive); margin-left: 5px; font-size: 0.7rem; font-weight: 700; }
-.craft-plan-needs-table tbody th { width: 210px; color: var(--text); font-size: 0.92rem; line-height: 1.2; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
-.craft-plan-needs-table td { width: 78px; height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
+.craft-plan-needs-table tbody th { color: var(--text); font-size: 0.92rem; line-height: 1.2; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.craft-plan-needs-table td { height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
 .craft-plan-need-cell { position: relative; display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
 .craft-plan-need-cell strong { color: var(--accent); font-size: 1.02rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-need-cell small { color: rgba(240, 198, 79, 0.68); font-size: 0.66rem; line-height: 1; font-variant-numeric: tabular-nums; }

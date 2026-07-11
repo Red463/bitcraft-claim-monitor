@@ -27,7 +27,13 @@ test("Craft planning needs board cells avoid item icons", () => {
 
 test("Craft planning needs board uses one continuous compact matrix with status states", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
   assert.match(css, /\.craft-plan-needs-matrix\s*\{/);
+  assert.match(page, /<colgroup>/);
+  assert.match(page, /craft-plan-needs-row-column/);
+  assert.match(page, /craft-plan-needs-data-column/);
+  assert.match(css, /\.craft-plan-needs-row-column\s*\{[^}]*width:\s*190px/);
+  assert.match(css, /\.craft-plan-needs-data-column\s*\{[^}]*width:\s*78px/);
   assert.match(css, /\.craft-plan-needs-section-row\s+th/);
   assert.match(css, /\.craft-plan-need-cell\.is-blocked/);
   assert.match(css, /\.craft-plan-need-cell\.has-active/);

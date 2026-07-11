@@ -412,6 +412,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
               <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
                 <table className="craft-plan-needs-table">
+                  <colgroup>
+                    <col className="craft-plan-needs-row-column" />
+                    {NEED_COLUMNS.map((column) => <col className="craft-plan-needs-data-column" key={column} />)}
+                  </colgroup>
                   {filteredNeedsBoard.map((group) => (
                     <tbody key={group.section}>
                       <tr className="craft-plan-needs-section-row"><th>{group.section} <span>{group.completion}%</span></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>

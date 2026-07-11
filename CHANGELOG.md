@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.25] - 2026-07-11
+
+### Fixed
+
+- Fixed the Craft Planning Needs Board hiding the T9, T10, and Materials columns at normal desktop widths.
+
 ## [0.32.0-beta.24] - 2026-07-11
 
 ### Changed
