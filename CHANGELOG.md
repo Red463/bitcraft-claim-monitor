@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.29] - 2026-07-11
+
+### Changed
+
+- Improved planner catalog refresh monitoring with visible progress freshness and faster automatic continuation checks.
+
+### Fixed
+
+- Fixed stalled planner catalog refreshes remaining marked as running instead of recovering automatically.
+- Fixed the Craft Planning target quantity, remove action, and manual search focus styles overlapping or rendering duplicate borders.
+
 ## [0.32.0-beta.28] - 2026-07-11
 
 ### Fixed

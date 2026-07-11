@@ -226,3 +226,13 @@ test("server registers the YouTube channel monitor scheduled job", () => {
   assert.match(server, /youtube_channel_monitor/);
   assert.match(server, /interval@600/);
 });
+
+test("planner catalog refresh uses heartbeat-based recovery and a responsive scheduler", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const statements = readFileSync(new URL("../src/server/preparedStatements.mjs", import.meta.url), "utf8");
+
+  assert.match(server, /const recipeCatalogStaleAfterMs = 2 \* 60 \* 1000/);
+  assert.match(server, /resetStaleRecipeCatalogJob\.run/);
+  assert.match(server, /setInterval\(checkScheduledJobs, 10 \* 1000\)/);
+  assert.match(statements, /resetStaleRecipeCatalogJob:[^\n]+job_key = 'recipe_catalog_refresh'[^\n]+updated_at IS NULL OR updated_at < \?/);
+});

@@ -184,6 +184,7 @@ export function createPreparedStatements(db) {
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
+  resetStaleRecipeCatalogJob: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = 'recipe_catalog_refresh' AND running = 1 AND (updated_at IS NULL OR updated_at < ?)"),
   getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
   listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
   recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),

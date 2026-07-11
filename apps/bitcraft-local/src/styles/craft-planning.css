@@ -42,10 +42,15 @@
 .craft-plan-search-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .craft-plan-search-results button { justify-content: flex-start; }
 .craft-plan-target-search { width: min(520px, 100%); }
-.craft-plan-target-search .search { width: 100%; }
+.craft-plan-target-search .search { width: 100%; max-width: none; box-sizing: border-box; }
+.craft-plan-target-search .search:focus-within { border-color: var(--focus-border); box-shadow: 0 0 0 3px var(--focus-ring); }
+.craft-plan-target-search .search input:focus,
+.craft-plan-target-search .search input:focus-visible { border: 0; outline: 0; box-shadow: none; }
 .craft-plan-target-editor-list { display: grid; gap: 8px; }
 .craft-plan-target-editor-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(8, 13, 20, 0.62); }
-.craft-plan-target-editor-actions { display: grid; grid-template-columns: 120px auto; gap: 8px; align-items: end; flex: 0 0 auto; }
+.craft-plan-target-editor-actions { display: flex; gap: 8px; align-items: end; flex: 0 0 auto; min-width: 0; }
+.craft-plan-target-editor-actions .compact-field { width: 120px; min-width: 0; }
+.craft-plan-target-editor-actions .compact-field input { width: 100%; min-width: 0; box-sizing: border-box; }
 .craft-plan-target-editor-actions > .toolbar-button.danger { min-width: 112px; }
 .craft-plan-source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
 .craft-plan-source-grid.compact { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
@@ -113,7 +118,8 @@
   .craft-plan-manager { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   .craft-plan-manager-actions { grid-template-columns: 1fr; }
   .craft-plan-target-editor-row { align-items: stretch; flex-direction: column; }
-  .craft-plan-target-editor-actions { grid-template-columns: minmax(0, 1fr) auto; }
+  .craft-plan-target-editor-actions { width: 100%; }
+  .craft-plan-target-editor-actions .compact-field { flex: 1 1 auto; width: auto; }
   .craft-plan-manager-buttons, .craft-plan-tier-presets-header, .craft-plan-catalog-controls { justify-content: start; flex-wrap: wrap; }
   .craft-plan-catalog-summary { flex-direction: column; }
   .craft-plan-catalog-stats { grid-template-columns: repeat(2, minmax(138px, 1fr)); }

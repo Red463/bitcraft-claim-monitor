@@ -369,6 +369,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const catalogSchedule = nextRunAt ? `Next scheduled run ${dateLabel(nextRunAt)}.` : (scheduledJob?.scheduleLabel ?? "Manual refresh only.");
   const lastSuccess = formatCatalogMoment(lastSuccessAt);
   const lastCompleted = formatCatalogMoment(lastCompletedAt);
+  const lastProgress = formatCatalogMoment(firstText(latestRun?.updatedAt, scheduledJob?.updatedAt));
   const catalogPillClass = catalogActive ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
 
   return (
@@ -393,7 +394,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               <div>
                 <strong>Planner catalog diagnostics</strong>
                 <p className={noCatalog ? "craft-plan-catalog-empty" : undefined}>{catalogSummary}</p>
-                <small>{catalogSchedule}</small>
+                <small>{catalogSchedule}{catalogActive ? ` Last progress ${lastProgress.summary}.` : ""}</small>
               </div>
               <div className="craft-plan-catalog-controls">
                 <span className={catalogPillClass}>{catalogStatusLabel}</span>

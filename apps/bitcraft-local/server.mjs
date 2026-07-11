@@ -945,10 +945,22 @@ function seedScheduledJobs() {
 }
 
 const scheduledJobStaleAfterMs = 15 * 60 * 1000;
+const recipeCatalogStaleAfterMs = 2 * 60 * 1000;
 const scheduledJobContinuationTimers = new Map();
 
 function recoverStaleScheduledJobs() {
-  return recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
+  const recovered = recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
+  const current = new Date();
+  const updatedAt = current.toISOString();
+  const catalogCutoff = new Date(current.getTime() - recipeCatalogStaleAfterMs).toISOString();
+  const catalogResult = statements.resetStaleRecipeCatalogJob.run(
+    "Recovered stalled planner catalog refresh after two minutes without progress.",
+    updatedAt,
+    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes: 2, reason: "no_progress" }),
+    updatedAt,
+    catalogCutoff,
+  );
+  return recovered + catalogResult.changes;
 }
 
 function scheduledJobRow(row) {
@@ -9592,9 +9604,9 @@ function startBackgroundTasks() {
     scheduleServerPolling(0);
   }
   if (scheduledJobsEnabled && !isTestRuntime) {
-    console.log("Scheduled jobs enabled; checking every 60 seconds");
+    console.log("Scheduled jobs enabled; checking every 10 seconds");
     checkScheduledJobs();
-    setInterval(checkScheduledJobs, 60 * 1000);
+    setInterval(checkScheduledJobs, 10 * 1000);
   }
 }
 
