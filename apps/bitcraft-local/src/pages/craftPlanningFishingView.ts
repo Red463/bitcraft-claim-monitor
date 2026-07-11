@@ -38,8 +38,7 @@ function unavailableResult(board: NeedGroup[], preference: FishingRoutePreferenc
 }
 
 function finiteNonNegative(value: unknown) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function projectedCell(route: PersonalFishingRoute): NeedCell | null {
@@ -83,6 +82,10 @@ function newFishingRow(name: string): NeedRow {
   };
 }
 
+function isCanonicalFishingRow(row: NeedRow, canonicalName: string) {
+  return row.apiName === canonicalName || row.overrideKey === `tag:${canonicalName}`;
+}
+
 function recalculateFishingGroup(group: NeedGroup, rows: NeedRow[]): NeedGroup {
   const cells = rows.flatMap((row) => [...row.cells.values()]);
   const required = cells.reduce((sum, cell) => sum + cell.required, 0);
@@ -108,10 +111,11 @@ export function applyPersonalFishingView(
 
   const projections = new Map<string, NeedCell>();
   for (const tier of view.tiers) {
-    const tierNumber = Number(tier?.tier);
+    const tierNumber = tier?.tier;
     const route = tier?.routes?.[preference];
-    const guaranteedYield = Number(route?.guaranteedYield);
-    const cell = route?.available === true && Number.isInteger(tierNumber) && tierNumber >= 1 && tierNumber <= 10 && guaranteedYield > 0
+    const guaranteedYield = route?.guaranteedYield;
+    const cell = route?.available === true && typeof tierNumber === "number" && Number.isInteger(tierNumber) && tierNumber >= 1 && tierNumber <= 10
+      && typeof guaranteedYield === "number" && Number.isFinite(guaranteedYield) && guaranteedYield > 0
       ? projectedCell(route)
       : null;
     if (!cell || projections.has(`T${tierNumber}`)) return unavailableResult(board, preference);
@@ -121,7 +125,7 @@ export function applyPersonalFishingView(
   const fishing = board[fishingIndex];
   const selectedName = routeName(preference);
   const otherName = routeName(preference === "lake" ? "ocean" : "lake");
-  const existingSelected = fishing.rows.find((row) => row.name === selectedName);
+  const existingSelected = fishing.rows.find((row) => isCanonicalFishingRow(row, selectedName));
   const selectedRow = cloneRow(existingSelected ?? newFishingRow(selectedName));
   for (const [column, cell] of projections) selectedRow.cells.set(column, cell);
   selectedRow.maxMissing = rowMaxMissing(selectedRow);
@@ -129,11 +133,11 @@ export function applyPersonalFishingView(
   let rows: NeedRow[];
   if (existingSelected) {
     rows = fishing.rows
-      .filter((row) => row.name !== otherName)
-      .map((row) => row.name === selectedName ? selectedRow : row);
+      .filter((row) => !isCanonicalFishingRow(row, otherName))
+      .map((row) => row === existingSelected ? selectedRow : row);
   } else {
-    const alternativeIndex = fishing.rows.findIndex((row) => row.name === otherName);
-    rows = fishing.rows.filter((row) => row.name !== otherName);
+    const alternativeIndex = fishing.rows.findIndex((row) => isCanonicalFishingRow(row, otherName));
+    rows = fishing.rows.filter((row) => !isCanonicalFishingRow(row, otherName));
     if (alternativeIndex >= 0) rows.splice(Math.min(alternativeIndex, rows.length), 0, selectedRow);
     else rows.push(selectedRow);
   }

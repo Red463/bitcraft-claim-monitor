@@ -20,11 +20,11 @@ function makeCell(name, { required, missing, available = 0, inProgress = 0, plan
   };
 }
 
-function makeRow(name, cell, { apiName = name } = {}) {
+function makeRow(name, cell, { apiName = name, displayName = name, overrideKey = `tag:${apiName}` } = {}) {
   return {
-    name,
+    name: displayName,
     apiName,
-    overrideKey: `tag:${name}`,
+    overrideKey,
     apiSection: "Fishing",
     sectionOverride: null,
     rowNameOverride: null,
@@ -119,6 +119,86 @@ test("applies the ocean route and replaces only the interchangeable fish row", (
   assert.equal(ocean.cells.get("T1")?.missing, 15);
   assert.equal(fishing.rows.find((row) => row.name === "Baitfish")?.cells.get("T1")?.missing, 8);
   assert.equal(fishing.rows.find((row) => row.name === "Crushed Shells")?.cells.get("T1")?.missing, 6);
+});
+
+test("matches canonical fishing rows by stable API identity when display names are overridden", () => {
+  const board = makeBoard();
+  const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");
+  const lake = board[0].rows.find((row) => row.apiName === "Lake Fish");
+  ocean.name = "Open Water Catch";
+  ocean.rowNameOverride = "Open Water Catch";
+  lake.name = "Inland Catch";
+  lake.rowNameOverride = "Inland Catch";
+
+  const result = applyPersonalFishingView(board, makeRouteView(), "lake");
+  const fishing = result.board[0];
+
+  assert.equal(fishing.rows.filter((row) => row.apiName === "Ocean Fish").length, 0);
+  assert.equal(fishing.rows.filter((row) => row.apiName === "Lake Fish").length, 1);
+  assert.equal(fishing.rows.some((row) => row.name === "Open Water Catch"), false);
+  assert.equal(fishing.rows.find((row) => row.apiName === "Lake Fish")?.cells.get("T1")?.name, "Briny Argus");
+});
+
+test("rejects malformed projection numbers instead of coercing them", () => {
+  const malformedValues = [
+    ["tier", (view) => { view.tiers[0].tier = "1"; }],
+    ["guaranteed yield", (view) => { view.tiers[0].routes.ocean.guaranteedYield = "3"; }],
+    ["needed", (view) => { view.tiers[0].routes.ocean.needed = "15"; }],
+    ["stock quantity", (view) => { view.tiers[0].routes.ocean.stockQuantity = null; }],
+    ["tracked quantity", (view) => { view.tiers[0].routes.ocean.trackedQuantity = false; }],
+  ];
+
+  for (const [label, corrupt] of malformedValues) {
+    const board = makeBoard();
+    const view = makeRouteView();
+    corrupt(view);
+    const result = applyPersonalFishingView(board, view, "ocean");
+
+    assert.strictEqual(result.board, board, `${label} should preserve the authoritative board`);
+    assert.equal(result.available, false, `${label} should make the personal view unavailable`);
+    assert.equal(result.reason, "Verified Ocean Fish route unavailable");
+  }
+});
+
+test("transforms every available projected tier without dropping the tier matrix", () => {
+  const board = makeBoard();
+  const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");
+  ocean.cells.set("T2", makeCell("Ocean Fish T2", { required: 30, missing: 30 }));
+  const view = makeRouteView();
+  view.tiers.push({
+    tier: 2,
+    routes: {
+      ocean: { available: true, input: { key: "items:ocean-2", id: "ocean-2", kind: "items", name: "Deep Linus", tag: "Ocean Fish", tier: 2 }, guaranteedYield: 2, stockQuantity: 0, trackedQuantity: 0, needed: 12 },
+      lake: { available: true, input: { key: "items:lake-2", id: "lake-2", kind: "items", name: "Deep Argus", tag: "Lake Fish", tier: 2 }, guaranteedYield: 1, stockQuantity: 0, trackedQuantity: 0, needed: 24 },
+    },
+  });
+
+  const result = applyPersonalFishingView(board, view, "ocean");
+  const oceanRow = result.board[0].rows.find((row) => row.apiName === "Ocean Fish");
+
+  assert.deepEqual([...oceanRow.cells.keys()], ["T1", "T2"]);
+  assert.equal(oceanRow.cells.get("T1")?.missing, 15);
+  assert.equal(oceanRow.cells.get("T2")?.missing, 12);
+  assert.equal(result.board[0].rows.filter((row) => row.apiName === "Lake Fish").length, 0);
+});
+
+test("returns the untouched board when any projected tier lacks the selected route", () => {
+  const board = makeBoard();
+  const originalBoard = structuredClone(board);
+  const view = makeRouteView();
+  view.tiers.push({
+    tier: 2,
+    routes: {
+      lake: { available: true, input: { key: "items:lake-2", id: "lake-2", kind: "items", name: "Deep Argus", tag: "Lake Fish", tier: 2 }, guaranteedYield: 1, stockQuantity: 0, trackedQuantity: 0, needed: 24 },
+    },
+  });
+
+  const result = applyPersonalFishingView(board, view, "ocean");
+
+  assert.strictEqual(result.board, board);
+  assert.deepEqual(board, originalBoard);
+  assert.equal(result.available, false);
+  assert.equal(result.reason, "Verified Ocean Fish route unavailable");
 });
 
 test("keeps the authoritative board when the selected route is unavailable", () => {
