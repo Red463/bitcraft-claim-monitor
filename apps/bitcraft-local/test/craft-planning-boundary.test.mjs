@@ -78,6 +78,21 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /CraftPlanManagerDialog/);
 });
 
+test("Craft Planning keeps the preferred fishing route browser-local", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /usePersistedState<FishingRoutePreference>\("planning\.fishingRoute", "ocean"\)/);
+  assert.match(page, /normalizeFishingRoutePreference\(fishingRoute\)/);
+  assert.match(page, /applyPersonalFishingView\(needsBoard, plan\?\.personalViews\?\.fishing, normalizedFishingRoute\)/);
+  assert.match(page, /personalBoard\.board/);
+  assert.match(page, /aria-label="Preferred fishing route"/);
+  assert.match(page, />Ocean<\/button>/);
+  assert.match(page, />Lake<\/button>/);
+  assert.match(page, /personalBoard\.reason/);
+  assert.doesNotMatch(page.match(/async function saveRowOverride[\s\S]*?\n  }\n  async function saveRouteOverride/)?.[0] ?? "", /setFishingRoute/);
+  assert.doesNotMatch(page.match(/async function saveRouteOverride[\s\S]*?\n  }\n\n  if \(loading/)?.[0] ?? "", /setFishingRoute/);
+});
+
 test("Craft Planning manager owns full admin editing controls", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const admin = readFileSync(new URL("../src/components/admin/AdminCraftPlanSection.tsx", import.meta.url), "utf8");

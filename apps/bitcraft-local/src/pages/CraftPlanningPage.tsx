@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 import { TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { Info } from "../components/main/Stats";
+import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
+import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
 import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
@@ -72,6 +74,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
   const [selectedSection, setSelectedSection] = React.useState("all");
   const [shortagesOnly, setShortagesOnly] = React.useState(false);
+  const [fishingRoute, setFishingRoute] = usePersistedState<FishingRoutePreference>("planning.fishingRoute", "ocean");
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
@@ -114,13 +117,18 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const warnings = Array.isArray(plan?.warnings) ? plan.warnings : [];
   const unavailableSources = Array.isArray(plan?.unavailableSources) ? plan.unavailableSources : [];
   const needsBoard = React.useMemo(() => buildNeedsBoard(materials, targets), [materials, targets]);
-  const needsBoardRowCount = React.useMemo(() => needsBoard.reduce((total, group) => total + group.rows.length, 0), [needsBoard]);
-  const needsBoardSections = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
+  const normalizedFishingRoute = normalizeFishingRoutePreference(fishingRoute);
+  const personalBoard = React.useMemo(
+    () => applyPersonalFishingView(needsBoard, plan?.personalViews?.fishing, normalizedFishingRoute),
+    [needsBoard, plan?.personalViews?.fishing, normalizedFishingRoute],
+  );
+  const needsBoardRowCount = React.useMemo(() => personalBoard.board.reduce((total, group) => total + group.rows.length, 0), [personalBoard.board]);
+  const needsBoardSections = React.useMemo(() => personalBoard.board.map((group) => group.section), [personalBoard.board]);
   const filteredNeedsBoard = React.useMemo(() => {
-    const groups = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
+    const groups = selectedSection === "all" ? personalBoard.board : personalBoard.board.filter((group) => group.section === selectedSection);
     if (!shortagesOnly) return groups;
     return groups.map((group) => ({ ...group, rows: group.rows.filter((row) => [...row.cells.values()].some((cell) => cell.missing > 0)) })).filter((group) => group.rows.length > 0);
-  }, [needsBoard, selectedSection, shortagesOnly]);
+  }, [personalBoard.board, selectedSection, shortagesOnly]);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
@@ -409,9 +417,15 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
             <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
-            {needsBoard.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
+            {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoardRowCount}</span></button>
-              {needsBoard.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
+              {personalBoard.board.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
+              {personalBoard.board.some((group) => group.section === "Fishing") ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
+                <span>Fishing route</span>
+                <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
+                <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
+                {!personalBoard.available && personalBoard.reason ? <small>{personalBoard.reason}</small> : null}
+              </div> : null}
               <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
             </div> : null}
             <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
