@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.24] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning labels so tracked outputs clearly include crafts that are in progress or ready to collect.
+
+### Fixed
+
+- Fixed completed player crafts waiting to be collected not reducing Craft Planning requirements.
+- Fixed duplicate public and player craft records being counted with stale completion details.
+
 ## [0.32.0-beta.23] - 2026-07-11
 
 ### Changed

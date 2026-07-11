@@ -21,7 +21,7 @@ import { publicNotificationActivityEvent } from "./src/server/notificationActivi
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
-import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { craftDisplayName, isCompletedProductionJob, mergeCurrentCraftRows, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { classifyCatalogRefreshError, parseRetryAfterMs } from "./src/server/catalogRefreshRecovery.mjs";
@@ -2015,15 +2015,15 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
 }
 function activeCraftPlanOutputs(craftPayloads = []) {
   const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
+  const craftsPayload = {
+    items: payloads.flatMap((payload) => Array.isArray(payload?.items) ? payload.items : []),
+    cargos: payloads.flatMap((payload) => Array.isArray(payload?.cargos) ? payload.cargos : []),
+  };
   const catalog = new Map(payloads.flatMap((payload) => [...craftPlanCatalogLookup(payload).entries()]));
-  const crafts = new Map();
-  for (const payload of payloads) {
-    for (const craft of unwrap(payload, "craftResults", [])) {
-      const craftId = String(craft.entityId ?? craft.id ?? craft.craftEntityId ?? "").trim();
-      if (!craftId || !crafts.has(craftId)) crafts.set(craftId || `anonymous:${crafts.size}`, craft);
-    }
-  }
-  return [...crafts.values()].flatMap((craft) => {
+  const publicCrafts = unwrap(payloads[0], "craftResults", []);
+  const playerCrafts = payloads.slice(1).flatMap((payload) => unwrap(payload, "craftResults", []));
+  const crafts = mergeCurrentCraftRows(publicCrafts, playerCrafts);
+  return crafts.flatMap((craft) => {
     const playerId = String(craft.playerEntityId ?? craft.crafterEntityId ?? craft.crafterId ?? craft.ownerEntityId ?? craft.ownerId ?? craft.characterEntityId ?? "").trim();
     const playerName = String(craft.crafterName ?? craft.crafterUsername ?? craft.ownerUsername ?? craft.playerName ?? craft.userName ?? "").trim();
     const buildingName = String(craft.buildingName ?? craft.stationName ?? craft.craftingStationName ?? "").trim();
@@ -2055,12 +2055,22 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, config.targets, config.routeOverrides);
-  const [inventoriesPayload, publicCraftsPayload, ...playerCraftPayloads] = await Promise.all([
+  const [inventoriesPayload, publicCraftsPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
-    ...config.sourceRules.craftPlayerIds.map((playerId) => fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: 6000, cache: true }).catch(() => ({ craftResults: [] }))),
   ]);
-  const craftPayloads = [publicCraftsPayload, ...playerCraftPayloads];
+  const playerCraftResults = await Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
+    try {
+      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, cache: true });
+      return { playerId, payload, error: "" };
+    } catch (error) {
+      return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
+    }
+  }));
+  const craftPayloads = [publicCraftsPayload, ...playerCraftResults.map((result) => result.payload)];
+  const craftSourceErrors = playerCraftResults
+    .filter((result) => result.error)
+    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerId} crafts`, type: "Tracked crafts", error: result.error }));
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const deployableSources = [];
@@ -2084,6 +2094,7 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     playerSources,
     deployableSources,
     activeCrafts: activeCraftPlanOutputs(craftPayloads),
+    craftSourceErrors,
   });
 }
 const bitjitaProxyCache = createBitjitaProxyCache({

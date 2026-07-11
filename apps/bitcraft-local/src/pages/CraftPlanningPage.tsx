@@ -165,7 +165,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <header className="modal-header">
           <div>
             <h2>{itemNode(selectedNeed.item)}</h2>
-            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.inProgress)} in active crafts.</p>
+            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.inProgress)} in tracked crafts.</p>
           </div>
           <button className="icon-button" type="button" onClick={() => setSelectedNeed(null)} aria-label="Close item details"><X size={18} /></button>
         </header>
@@ -370,7 +370,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <div className="dashboard-top-meta">
           {canManage ? <button className="toolbar-button primary" type="button" onClick={() => setManagerOpen(true)}>Manage Plan</button> : null}
           <span>{quantity(totals.missingItems)} missing items</span>
-          <span>{quantity(totals.activeCraftQuantity)} in active crafts</span>
+          <span>{quantity(totals.activeCraftQuantity)} in tracked crafts</span>
         </div>
       </header>
 
@@ -384,8 +384,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <>
           <section className="craft-plan-summary-band" aria-label="Craft plan summary">
             {summaryStat(<Target />, "Active targets", totals.targets, `${quantity(totals.missingQuantity)} total still needed`)}
-            {summaryStat(<Package />, "Materials missing", totals.missingItems, "after stock and active crafts", "gold")}
-            {summaryStat(<Factory />, "Active crafts counted", totals.activeCraftQuantity, "outputs already in progress", "green")}
+            {summaryStat(<Package />, "Materials missing", totals.missingItems, "after stock and tracked crafts", "gold")}
+            {summaryStat(<Factory />, "Craft outputs counted", totals.activeCraftQuantity, "in progress or ready to collect", "green")}
             {summaryStat(<AlertTriangle />, "Unavailable sources", unavailableSources.length, "excluded from stock totals", unavailableSources.length ? "warn" : "green")}
           </section>
 
@@ -425,7 +425,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   ))}
                 </table>
               </div>
-            </div> : <p className="legend">All planned materials are covered by selected stock sources and active crafts.</p>}
+            </div> : <p className="legend">All planned materials are covered by selected stock sources and tracked crafts.</p>}
           </section>
 
           {warnings.length ? (

@@ -6,10 +6,34 @@ import {
   craftJobKey,
   craftOutputItem,
   isCompletedProductionJob,
+  mergeCurrentCraftRows,
   normalizeProductionJob,
   normalizeProfessionKey,
   productionMetrics,
 } from "../src/server/productionActivity.mjs";
+
+test("mergeCurrentCraftRows prefers completed selected-player craft data over public duplicates", () => {
+  const publicCraft = {
+    entityId: "craft-rough-plank",
+    ownerEntityId: "player-1",
+    ownerUsername: "Modular",
+    completed: false,
+    progress: 12000,
+  };
+  const completedPlayerCraft = {
+    ...publicCraft,
+    completed: true,
+    progress: 24480,
+    totalActionsRequired: 24480,
+    buildingName: "Exquisite Carpentry Station",
+  };
+
+  const merged = mergeCurrentCraftRows([publicCraft], [completedPlayerCraft]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].completed, true);
+  assert.equal(merged[0].buildingName, "Exquisite Carpentry Station");
+});
 
 test("production activity helpers keep stable craft identity independent of crafter changes", () => {
   const baseJob = {

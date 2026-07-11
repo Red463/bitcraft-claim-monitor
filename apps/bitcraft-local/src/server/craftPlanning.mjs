@@ -817,6 +817,7 @@ export function computeCraftPlan({
   playerSources = [],
   deployableSources = [],
   activeCrafts = [],
+  craftSourceErrors = [],
   catalogWarnings = [],
 } = {}) {
   const normalized = normalizeCraftPlanConfig(config);
@@ -828,6 +829,12 @@ export function computeCraftPlan({
   addSourceTotals(availableTotals, storageSources, "Settlement storage", unavailableSources);
   addSourceTotals(availableTotals, playerSources, "Player inventory", unavailableSources);
   addSourceTotals(availableTotals, deployableSources, "Player deployable", unavailableSources);
+  unavailableSources.push(...(craftSourceErrors ?? []).map((source) => ({
+    sourceId: String(source?.sourceId ?? "tracked-crafts"),
+    label: String(source?.label ?? "Tracked crafts"),
+    type: String(source?.type ?? "Tracked crafts"),
+    error: String(source?.error ?? "Unable to load tracked crafts"),
+  })));
 
   const activeTotals = new Map();
   const craftPlayerIds = new Set(normalized.sourceRules.craftPlayerIds.map(String));

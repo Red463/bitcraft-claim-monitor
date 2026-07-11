@@ -192,6 +192,41 @@ test("computeCraftPlan keeps tracked craft status and ready-to-collect outputs",
   ]);
 });
 
+test("computeCraftPlan counts completed uncollected Rough Plank and transitions it into inventory", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "1020003", kind: "items", name: "Rough Plank", quantity: 1880, itemType: 0 }],
+    sourceRules: { storageContainerIds: ["woodworking"], craftPlayerIds: ["player-1"] },
+  });
+  const detailsByKey = new Map([[recipeKey("items", "1020003"), {
+    item: { id: "1020003", name: "Rough Plank", itemType: 0, tag: "Plank", tier: 1 },
+  }]]);
+
+  const waitingCollection = computeCraftPlan({
+    config,
+    detailsByKey,
+    storageSources: [{ sourceId: "woodworking", label: "Woodworking", items: [{ id: "1020003", kind: "items", quantity: 1296, name: "Rough Plank" }] }],
+    activeCrafts: [{ id: "craft-rough-plank", playerId: "player-1", playerName: "Modular", buildingName: "Exquisite Carpentry Station", itemId: "1020003", kind: "items", quantity: 612, name: "Rough Plank", status: "Ready to collect", completed: true }],
+  });
+  const waitingPlank = waitingCollection.materials.find((material) => material.name === "Rough Plank");
+  assert.equal(waitingPlank.available, 1296);
+  assert.equal(waitingPlank.inProgress, 612);
+  assert.equal(waitingPlank.missing, 0);
+  assert.equal(waitingPlank.available + waitingPlank.inProgress - waitingPlank.bufferedRequired, 28);
+  assert.deepEqual(waitingPlank.activeCraftSources.map((source) => [source.playerName, source.status, source.quantity]), [["Modular", "Ready to collect", 612]]);
+
+  const collected = computeCraftPlan({
+    config,
+    detailsByKey,
+    storageSources: [{ sourceId: "woodworking", label: "Woodworking", items: [{ id: "1020003", kind: "items", quantity: 1908, name: "Rough Plank" }] }],
+    activeCrafts: [],
+  });
+  const collectedPlank = collected.materials.find((material) => material.name === "Rough Plank");
+  assert.equal(collectedPlank.available, 1908);
+  assert.equal(collectedPlank.inProgress, 0);
+  assert.equal(collectedPlank.missing, 0);
+});
+
 test("computeCraftPlan credits simultaneous farming co-products without recursive seed inflation", () => {
   const filamentDetail = { item: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 } };
   const productsDetail = {

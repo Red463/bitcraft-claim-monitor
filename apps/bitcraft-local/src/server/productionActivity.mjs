@@ -110,6 +110,27 @@ export function isCompletedProductionJob(job) {
   if (metrics.totalEffort > 0 && metrics.remainingEffort <= 0) return true;
   return metrics.progressPct >= 100;
 }
+
+export function mergeCurrentCraftRows(publicCrafts = [], playerCrafts = []) {
+  const merged = new Map();
+  const add = (craft, source) => {
+    const craftId = String(craft?.entityId ?? craft?.id ?? craft?.craftEntityId ?? "").trim();
+    const key = craftId || `${source}:anonymous:${merged.size}`;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...craft });
+      return;
+    }
+    merged.set(key, {
+      ...current,
+      ...craft,
+      completed: current.completed === true || craft.completed === true,
+    });
+  };
+  for (const craft of publicCrafts ?? []) add(craft, "public");
+  for (const craft of playerCrafts ?? []) add(craft, "player");
+  return [...merged.values()];
+}
 export function normalizeProfessionKey(value) {
   return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
 }
