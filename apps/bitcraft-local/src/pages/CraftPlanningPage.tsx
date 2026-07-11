@@ -28,6 +28,14 @@ function quantity(value: unknown) {
   return formatNumber(Number(value) || 0, 0);
 }
 
+function completionTone(value: number) {
+  if (value >= 100) return "is-complete";
+  if (value >= 75) return "is-high";
+  if (value >= 50) return "is-mid";
+  if (value >= 25) return "is-low";
+  return "is-critical";
+}
+
 function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   const satisfied = cell.missing <= 0;
@@ -35,7 +43,7 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   const supplied = cell.available + cell.inProgress + cell.plannedOutput;
   const blocked = !satisfied && cell.items.some((item) => Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0) && supplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : ""}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active, ${quantity(cell.plannedOutput)} from planned secondary outputs, ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active, ${quantity(cell.plannedOutput)} from planned secondary outputs, ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
       <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
       <small>{quantity(supplied)} / {quantity(cell.required)}</small>
       {hasActive ? <Factory size={11} aria-label="Actively being crafted" /> : null}
@@ -72,7 +80,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord | null>(null);
   const [managerOpen, setManagerOpen] = React.useState(false);
   const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
-  const [selectedSection, setSelectedSection] = React.useState("all");
+  const [selectedSections, setSelectedSections] = React.useState<string[]>([]);
   const [shortagesOnly, setShortagesOnly] = React.useState(false);
   const [fishingRoute, setFishingRoute] = usePersistedState<FishingRoutePreference>("planning.fishingRoute", "ocean");
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
@@ -125,10 +133,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const needsBoardRowCount = React.useMemo(() => personalBoard.board.reduce((total, group) => total + group.rows.length, 0), [personalBoard.board]);
   const needsBoardSections = React.useMemo(() => personalBoard.board.map((group) => group.section), [personalBoard.board]);
   const filteredNeedsBoard = React.useMemo(() => {
-    const groups = selectedSection === "all" ? personalBoard.board : personalBoard.board.filter((group) => group.section === selectedSection);
+    const groups = selectedSections.length === 0 ? personalBoard.board : personalBoard.board.filter((group) => selectedSections.includes(group.section));
     if (!shortagesOnly) return groups;
     return groups.map((group) => ({ ...group, rows: group.rows.filter((row) => [...row.cells.values()].some((cell) => cell.missing > 0)) })).filter((group) => group.rows.length > 0);
-  }, [personalBoard.board, selectedSection, shortagesOnly]);
+  }, [personalBoard.board, selectedSections, shortagesOnly]);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
@@ -296,8 +304,17 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   ) : null;
 
   React.useEffect(() => {
-    if (selectedSection !== "all" && !needsBoardSections.includes(selectedSection)) setSelectedSection("all");
-  }, [needsBoardSections, selectedSection]);
+    setSelectedSections((current) => {
+      const available = current.filter((section) => needsBoardSections.includes(section));
+      return available.length === current.length ? current : available;
+    });
+  }, [needsBoardSections]);
+
+  function toggleSection(section: string) {
+    setSelectedSections((current) => current.includes(section)
+      ? current.filter((selected) => selected !== section)
+      : [...current, section]);
+  }
 
 
   async function saveRowOverride(row: NeedRow, section: string | null, name: string | null) {
@@ -418,8 +435,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
             <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
-              <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoardRowCount}</span></button>
-              {personalBoard.board.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
+              <button className={selectedSections.length === 0 ? "active" : ""} type="button" aria-pressed={selectedSections.length === 0} onClick={() => setSelectedSections([])}>All <span>{needsBoardRowCount}</span></button>
+              {personalBoard.board.map((group) => {
+                const selected = selectedSections.includes(group.section);
+                return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
+              })}
               {personalBoard.board.some((group) => group.section === "Fishing") ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
                 <span>Fishing route</span>
                 <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
@@ -438,7 +458,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   </colgroup>
                   {filteredNeedsBoard.map((group) => (
                     <tbody key={group.section}>
-                      <tr className="craft-plan-needs-section-row"><th>{group.section} <span>{group.completion}%</span></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
+                      <tr className="craft-plan-needs-section-row"><th>{group.section} <span className={completionTone(group.completion)}>{group.completion}%</span></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
                             <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>

@@ -59,7 +59,10 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Needed for/);
   assert.doesNotMatch(page, /ItemLabel/);
   assert.match(page, /Stock locations/);
-  assert.match(page, /selectedSection/);
+  assert.match(page, /selectedSections/);
+  assert.match(page, /function toggleSection/);
+  assert.match(page, /aria-pressed=\{selected\}/);
+  assert.match(page, /setSelectedSections\(\[\]\)/);
   assert.match(page, /needsBoardRowCount/);
   assert.doesNotMatch(page, /All <span>\{needsBoard\.length\}<\/span>/);
   assert.doesNotMatch(page, /inferTierFromName/);

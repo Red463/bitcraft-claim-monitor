@@ -46,8 +46,13 @@ test("Craft planning needs board uses one continuous compact matrix with status 
   assert.match(css, /\.craft-plan-needs-row-column\s*\{[^}]*width:\s*190px/);
   assert.match(css, /\.craft-plan-needs-data-column\s*\{[^}]*width:\s*78px/);
   assert.match(css, /\.craft-plan-needs-section-row\s+th/);
+  assert.match(page, /is-shortage/);
+  assert.match(css, /\.craft-plan-need-cell\.is-shortage/);
   assert.match(css, /\.craft-plan-need-cell\.is-blocked/);
   assert.match(css, /\.craft-plan-need-cell\.has-active/);
+  assert.match(page, /completionTone\(group\.completion\)/);
+  assert.match(css, /span\.is-critical/);
+  assert.match(css, /span\.is-complete/);
   assert.match(css, /\.craft-plan-needs-legend/);
   assert.match(css, /\.craft-plan-needs-legend \.covered \{ color: var\(--good\); \}/);
   assert.match(css, /\.craft-plan-needs-legend \.short \{ color: var\(--gold\); \}/);

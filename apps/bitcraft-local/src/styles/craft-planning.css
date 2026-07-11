@@ -155,14 +155,19 @@
 .craft-plan-needs-table th, .craft-plan-needs-table td { border-right: 1px solid rgba(139, 159, 184, 0.18); border-bottom: 1px solid rgba(139, 159, 184, 0.18); padding: 8px; vertical-align: middle; }
 .craft-plan-needs-table thead th { color: var(--text); background: rgba(255, 255, 255, 0.04); font-size: 0.8rem; text-align: center; }
 .craft-plan-needs-table thead th:first-child { text-align: left; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
-.craft-plan-needs-section-row th { position: sticky; top: 0; z-index: 1; color: var(--text); background: rgb(20, 28, 38); font-size: 0.76rem; font-weight: 800; text-align: center; text-transform: uppercase; }
+.craft-plan-needs-section-row th { position: sticky; top: 0; z-index: 1; color: var(--text); background: rgb(20, 28, 38); font-size: 0.8rem; font-weight: 800; text-align: center; text-transform: uppercase; }
 .craft-plan-needs-section-row th:first-child { text-align: left; color: var(--text); }
-.craft-plan-needs-section-row th:first-child span { color: var(--positive); margin-left: 5px; font-size: 0.7rem; font-weight: 700; }
-.craft-plan-needs-table tbody th { color: var(--text); font-size: 0.92rem; line-height: 1.2; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.craft-plan-needs-section-row th:first-child span { margin-left: 6px; font-size: 0.74rem; font-weight: 800; }
+.craft-plan-needs-section-row th:first-child span.is-critical { color: #ff7c82; }
+.craft-plan-needs-section-row th:first-child span.is-low { color: #ffb547; }
+.craft-plan-needs-section-row th:first-child span.is-mid { color: #f0c64f; }
+.craft-plan-needs-section-row th:first-child span.is-high { color: #8fd47c; }
+.craft-plan-needs-section-row th:first-child span.is-complete { color: var(--positive); }
+.craft-plan-needs-table tbody th { color: var(--text); font-size: 0.96rem; line-height: 1.15; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .craft-plan-needs-table td { height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
 .craft-plan-need-cell { position: relative; display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
-.craft-plan-need-cell strong { color: var(--accent); font-size: 1.02rem; line-height: 1; font-variant-numeric: tabular-nums; }
-.craft-plan-need-cell small { color: rgba(240, 198, 79, 0.68); font-size: 0.66rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.craft-plan-need-cell strong { color: var(--accent); font-size: 1.08rem; line-height: 0.95; font-variant-numeric: tabular-nums; }
+.craft-plan-need-cell small { color: rgba(240, 198, 79, 0.72); font-size: 0.7rem; line-height: 0.95; font-variant-numeric: tabular-nums; }
 .craft-plan-need-empty { color: rgba(139, 159, 184, 0.22); font-size: 0.8rem; }
 .craft-plan-need-cell.is-satisfied strong { color: var(--positive); }
 .craft-plan-need-cell.is-satisfied small { color: rgba(78, 226, 138, 0.68); }
@@ -170,8 +175,10 @@
 .craft-plan-need-cell.is-satisfied:focus-visible { background: rgba(78, 226, 138, 0.08); outline-color: rgba(78, 226, 138, 0.42); }
 .craft-plan-need-cell.has-active::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: #65b7fa; }
 .craft-plan-need-cell.has-active svg { position: absolute; top: 4px; left: 5px; color: #65b7fa; }
-.craft-plan-need-cell.is-blocked { background: rgba(255, 181, 71, 0.05); }
-.craft-plan-need-cell.is-blocked::before { content: ""; position: absolute; inset: 4px; border: 1px dashed rgba(255, 181, 71, 0.28); border-radius: 5px; pointer-events: none; }
+.craft-plan-need-cell.is-shortage { background: rgba(240, 198, 79, 0.045); }
+.craft-plan-need-cell.is-shortage::before { content: ""; position: absolute; inset: 4px; border: 1px dashed rgba(240, 198, 79, 0.3); border-radius: 5px; pointer-events: none; }
+.craft-plan-need-cell.is-blocked { background: rgba(255, 181, 71, 0.075); }
+.craft-plan-need-cell.is-blocked::before { border-color: rgba(255, 181, 71, 0.52); }
 @media (max-width: 1100px) {
   .craft-plan-summary-band { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
 }

@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.32] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning Needs Board readability with clearer shortage highlighting, larger text, and completion-based section colours.
+- Activity filters on the Needs Board now support selecting multiple sections at once.
+
 ## [0.32.0-beta.31] - 2026-07-11
 
 ### Added
