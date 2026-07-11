@@ -1097,7 +1097,7 @@ test("computeCraftPlan applies row name overrides after API row identity resolut
   assert.equal(material?.rowNameOverride, "Finished Planks");
 });
 
-test("computeCraftPlan prefers byproduct producer routes over expensive direct crafts", () => {
+test("computeCraftPlan treats gathering byproducts as acquisition routes and ignores direct craft overrides", () => {
   const gypsiteDetail = {
     item: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },
     craftingRecipes: [{
@@ -1140,7 +1140,11 @@ test("computeCraftPlan prefers byproduct producer routes over expensive direct c
   };
 
   const plan = computeCraftPlan({
-    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "3001", kind: "items", name: "Rough Gypsite", quantity: 4, itemType: 0 }] }),
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "3001", kind: "items", name: "Rough Gypsite", quantity: 4, itemType: 0 }],
+      routeOverrides: { "items:3001": "craft-gypsite" },
+    }),
     detailsByKey: new Map([
       [recipeKey("items", "3001"), gypsiteDetail],
       [recipeKey("items", "5001"), clayOutputDetail],
@@ -1156,6 +1160,12 @@ test("computeCraftPlan prefers byproduct producer routes over expensive direct c
   assert.equal(clayDeposit?.required, 16);
   const gypsite = plan.materials.find((material) => material.name === "Rough Gypsite");
   assert.equal(gypsite?.sourceRoutes?.[0]?.recipeName, "Gather Rough Clay -> Rough Gypsite");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.gatheringSkill, "Foraging");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.producer?.name, "Rough Clay Output");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.expectedYield, 0.25);
+  assert.deepEqual(gypsite?.sourceRoutes?.[0]?.alternatives.map((route) => route.id), ["possibility:gather-clay:items:3001"]);
+  assert.equal(plan.steps.some((step) => step.selectedRecipeId === "craft-gypsite"), false);
 });
 test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from normalized local catalog rows", (t) => {
   const { repository } = createCatalogFixture(t);
@@ -1220,6 +1230,96 @@ test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from norm
   assert.equal(berry?.available, 1);
   assert.equal(berry?.inProgress, 2);
   assert.equal(berry?.missing, 9);
+});
+
+test("computeCraftPlan keeps direct overrides for non-gathering co-products", () => {
+  const catalyst = { id: "7100", name: "Basic Catalyst", itemType: 0, tag: "Catalyst", tier: 1 };
+  const batch = { id: "7200", name: "Basic Pigment Batch", itemType: 0, tag: "Pigment Output", tier: 1 };
+  const detailsByKey = new Map([
+    [recipeKey("items", catalyst.id), {
+      item: catalyst,
+      craftingRecipes: [{
+        id: "craft-catalyst",
+        name: "Craft Basic Catalyst",
+        craftedItemStacks: [{ item_id: catalyst.id, item_type: "item", quantity: 1 }],
+        craftedItems: [catalyst],
+        consumedItemStacks: [{ item_id: "7300", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "7300", name: "Basic Solvent", itemType: 0, tag: "Solvent", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Scholar" }, level: 1 }],
+      }],
+    }],
+    [recipeKey("items", batch.id), {
+      item: batch,
+      craftingRecipes: [{
+        id: "process-pigment",
+        name: "Process Basic Pigment",
+        craftedItemStacks: [{ item_id: batch.id, item_type: "item", quantity: 1 }],
+        craftedItems: [batch],
+        consumedItemStacks: [{ item_id: "7400", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "7400", name: "Basic Flower", itemType: 0, tag: "Flower", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Scholar" }, level: 1 }],
+      }],
+      itemListPossibilities: [{ targetId: catalyst.id, targetItem: catalyst, quantity: 1, chance: 0.5 }],
+    }],
+  ]);
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ ...catalyst, kind: "items", quantity: 1 }],
+      routeOverrides: { [`items:${catalyst.id}`]: "craft-catalyst" },
+    }),
+    detailsByKey,
+  });
+
+  assert.equal(plan.steps.find((step) => step.output.id === catalyst.id)?.selectedRecipeId, "craft-catalyst");
+  const route = plan.materials.find((material) => material.id === catalyst.id)?.sourceRoutes?.[0];
+  assert.equal(route?.routeType, "craft");
+  assert.equal(route?.alternatives.some((alternative) => alternative.routeType === "byproduct"), true);
+});
+
+test("computeCraftPlan classifies Crushed Shells from a Fishing item-list producer", () => {
+  const shells = { id: "1110012", name: "Crushed Rough Shells", itemType: 0, tag: "Crushed Shells", tier: 1 };
+  const baitOutput = { id: "1220019", name: "Basic Bait and Shells", itemType: 0, tag: "Bait Output", tier: 1 };
+  const detailsByKey = new Map([
+    [recipeKey("items", shells.id), {
+      item: shells,
+      craftingRecipes: [{
+        id: "craft-shells",
+        name: "Craft Crushed Rough Shells",
+        craftedItemStacks: [{ item_id: shells.id, item_type: "item", quantity: 1 }],
+        craftedItems: [shells],
+        consumedItemStacks: [{ item_id: "1110999", item_type: "item", quantity: 10 }],
+        consumedItems: [{ id: "1110999", name: "Shell Compound", itemType: 0, tag: "Material", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Scholar" }, level: 1 }],
+      }],
+    }],
+    [recipeKey("items", baitOutput.id), {
+      item: baitOutput,
+      craftingRecipes: [{
+        id: "fish-bait-shells",
+        name: "Catch Rough Bait and Shells",
+        craftedItemStacks: [{ item_id: baitOutput.id, item_type: "item", quantity: 1 }],
+        craftedItems: [baitOutput],
+        consumedItemStacks: [{ item_id: "6100", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "6100", name: "Basic Bait", itemType: 0, tag: "Bait", tier: 1 }],
+        levelRequirements: [{ skill: { name: "Fishing" }, level: 1 }],
+      }],
+      itemListPossibilities: [{ targetId: shells.id, targetItem: shells, quantity: 1, chance: 0.2 }],
+    }],
+  ]);
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ ...shells, kind: "items", quantity: 2 }],
+      routeOverrides: { [`items:${shells.id}`]: "craft-shells" },
+    }),
+    detailsByKey,
+  });
+
+  const route = plan.materials.find((material) => material.id === shells.id)?.sourceRoutes?.[0];
+  assert.equal(route?.routeType, "gathering-byproduct");
+  assert.equal(route?.gatheringSkill, "Fishing");
+  assert.equal(route?.alternatives.some((alternative) => alternative.id === "craft-shells"), false);
 });
 
 test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes through clay and tree producers", (t) => {
@@ -1325,6 +1425,9 @@ test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes th
 
   assert.equal(plan.steps.find((step) => step.output.name === "Rough Gypsite")?.selectedRecipeId, "possibility:gather-clay:items:3001");
   assert.equal(plan.steps.find((step) => step.output.name === "Rough Resin")?.selectedRecipeId, "possibility:split-trunk:items:3002");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Gypsite")?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.gatheringSkill, "Forestry");
   assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
   assert.equal(plan.materials.some((material) => material.name === "Ancient Mortar"), false);
   assert.equal(plan.materials.some((material) => material.name === "Tree Sap"), false);
@@ -1349,6 +1452,42 @@ test("collectLocalCatalogCraftPlanDetails reports missing local rows without inf
   assert.equal(material?.tier, null);
   assert.match(plan.warnings.join("\n"), /local catalog/i);
   assert.match(plan.warnings.join("\n"), /items:999999/);
+});
+
+test("collectLocalCatalogCraftPlanDetails reports incomplete byproduct producer recipes", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "8500", itemType: 0, name: "Rare Sap", tag: "Sap", tier: 2 },
+      craftingRecipes: [{
+        id: "craft-sap",
+        name: "Craft Rare Sap",
+        craftedItemStacks: [{ item_id: "8500", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8500", itemType: 0, name: "Rare Sap", tag: "Sap", tier: 2 }],
+        consumedItemStacks: [{ item_id: "8501", item_type: "item", quantity: 10 }],
+        consumedItems: [{ id: "8501", itemType: 0, name: "Sap Compound", tag: "Material", tier: 2 }],
+        levelRequirements: [{ skill: { name: "Scholar" }, level: 1 }],
+      }],
+    },
+    {
+      item: { id: "8600", itemType: 0, name: "Tree Output", tag: "Tree Output", tier: 2 },
+      craftingRecipes: [],
+      itemListPossibilities: [{
+        targetId: "8500",
+        targetItem: { id: "8500", itemType: 0, name: "Rare Sap", tag: "Sap", tier: 2 },
+        quantity: 1,
+        chance: 0.1,
+      }],
+    },
+  ]);
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "8500", kind: "items", name: "Rare Sap", quantity: 1, itemType: 0 }],
+  });
+
+  const { warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  assert.match(warnings.join("\n"), /byproduct producer route is incomplete/i);
+  assert.match(warnings.join("\n"), /items:8600/);
 });
 
 test("collectLocalCatalogCraftPlanDetails keeps transport routes available after real local routes and honors override ids", (t) => {

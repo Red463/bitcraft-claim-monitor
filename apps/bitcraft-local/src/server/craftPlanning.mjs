@@ -169,6 +169,30 @@ function recipeLooksTransportRoute(recipe) {
   return inputDisplays.some(stackDisplayLooksTransport) || outputDisplays.some(stackDisplayLooksTransport);
 }
 
+const GATHERING_SKILLS = new Set(["farming", "fishing", "foraging", "forestry", "hunting", "mining"]);
+
+function recipeSkillName(recipe) {
+  return String(recipe?.skillName ?? recipe?.levelRequirements?.[0]?.skill?.name ?? "").trim();
+}
+
+function isGatheringRecipe(recipe) {
+  return GATHERING_SKILLS.has(recipeSkillName(recipe).toLowerCase());
+}
+
+function isGatheringByproductRoute(recipe) {
+  return recipe?.routeType === "gathering-byproduct";
+}
+
+function routeMetadata(recipe) {
+  return {
+    routeType: recipe?.routeType ?? "craft",
+    gatheringSkill: recipe?.gatheringSkill ?? null,
+    producer: recipe?.producer ?? null,
+    producerRecipe: recipe?.producerRecipe ?? null,
+    expectedYield: recipe?.expectedYield == null ? null : toNumber(recipe.expectedYield),
+  };
+}
+
 function farmingRoutePreference(recipe, target, detailsByKey) {
   const targetTag = String(target?.tag ?? "").trim();
   const targetTier = normalizedTier(target?.tier);
@@ -256,6 +280,8 @@ function possibilityRecipesForTarget(target, detailsByKey) {
       if (recipeLooksTransportRoute(recipe)) continue;
       const output = recipeOutputs(recipe).find((stackItem) => stackMatches(stackItem, outputTarget));
       const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? recipe.outputQuantity) || 1);
+      const gatheringSkill = recipeSkillName(recipe);
+      const routeType = isGatheringRecipe(recipe) ? "gathering-byproduct" : "byproduct";
       const craftedOutputs = expectedOutputs.map((expectedOutput) => ({
         ...expectedOutput,
         quantity: expectedOutput.quantity * outputPerCraft,
@@ -274,6 +300,16 @@ function possibilityRecipesForTarget(target, detailsByKey) {
         consumedItems: Array.isArray(recipe?.consumedItems) ? recipe.consumedItems : [],
         sourceOutputKey: sourceKey,
         sourceOutput: outputTarget,
+        routeType,
+        gatheringSkill: routeType === "gathering-byproduct" ? gatheringSkill : null,
+        producer: outputTarget,
+        producerRecipe: {
+          id: recipeId(recipe),
+          name: recipeLabel(recipe),
+          buildingName: recipe.buildingName ?? recipe.building_name ?? null,
+          skillName: gatheringSkill || null,
+        },
+        expectedYield: yieldQuantity * outputPerCraft,
       });
     }
   }
@@ -281,7 +317,9 @@ function possibilityRecipesForTarget(target, detailsByKey) {
 }
 
 function recipesForTarget(detail, target, detailsByKey = null) {
-  return [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)]
+  const recipes = [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)];
+  const gatheringByproductRoutes = recipes.filter(isGatheringByproductRoute);
+  return (gatheringByproductRoutes.length ? gatheringByproductRoutes : recipes)
     .sort((a, b) => recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey));
 }
 
@@ -383,6 +421,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   return [{
     id: recipeId(selected),
     recipeName: recipeLabel(selected),
+    ...routeMetadata(selected),
     output: normalizedTarget,
     inputs: recipeInputs(selected).map((input, index) => ({
       ...enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey),
@@ -394,6 +433,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
     alternatives: visibleRecipes.map((alternative) => ({
       id: recipeId(alternative),
       label: recipeLabel(alternative),
+      ...routeMetadata(alternative),
       buildingName: alternative.buildingName ?? alternative.building_name ?? null,
       inputs: recipeInputs(alternative).map((input, index) => ({
         ...enrichDisplayFromDetails(stackDisplay(input, alternative.consumedItems, index), detailsByKey),
@@ -497,6 +537,7 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
     steps.push({
       id: recipeId(selected),
       recipeName: String(selected.name ?? normalizedTarget.name),
+      ...routeMetadata(selected),
       output: { ...normalizedTarget, quantity: craftCount * outputPerCraft },
       inputs,
       craftCount,
@@ -506,6 +547,7 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
       alternatives: visibleRecipes.map((recipe) => ({
         id: recipeId(recipe),
         label: recipeLabel(recipe),
+        ...routeMetadata(recipe),
         buildingName: recipe.buildingName ?? recipe.building_name ?? null,
         inputs: recipeInputs(recipe).map((input, index) => ({
           ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
@@ -698,7 +740,13 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
 
     for (const row of byproductProducers) {
       const producerTarget = catalogEntityDisplay(row.producer, { id: row.producer?.targetId, kind: row.producer?.kind });
-      setDetail(row.producerKey, producerTarget);
+      const producerDetail = setDetail(row.producerKey, producerTarget);
+      const producerRecipes = producerDetail
+        ? directRecipesForTarget(producerDetail, mergeDetailTarget(producerDetail, producerTarget))
+        : [];
+      if (producerRecipes.length === 0) {
+        warnings.add(`Local catalog byproduct producer route is incomplete for ${row.producerKey} -> ${key}; planner retained verified direct routes.`);
+      }
     }
 
     const currentDetail = detailsByKey.get(key);

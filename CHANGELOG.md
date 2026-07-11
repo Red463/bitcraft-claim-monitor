@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.26] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning so natural gathering byproducts use their verified gathering sources and expected yields.
+
+### Fixed
+
+- Fixed direct crafting recipes being preferred for gathering byproducts such as Gypsite, Resin, Bark, and Crushed Shells.
+- Fixed gathering-byproduct item details showing misleading crafting ingredients instead of their acquisition activity.
+
 ## [0.32.0-beta.25] - 2026-07-11
 
 ### Fixed

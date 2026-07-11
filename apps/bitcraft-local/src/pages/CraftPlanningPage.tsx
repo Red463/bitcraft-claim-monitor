@@ -203,13 +203,19 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
               <h3><Factory size={16} /> How to get this</h3>
               {selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
                 const alternatives = Array.isArray(route.alternatives) ? route.alternatives : [];
+                const gatheringByproduct = route.routeType === "gathering-byproduct";
                 return (
-                  <div className="craft-plan-route-detail" key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                  <div className={`craft-plan-route-detail${gatheringByproduct ? " is-gathering-byproduct" : ""}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
                     <div>
-                      <strong>{route.recipeName ?? "Selected recipe"}</strong>
-                      <p className="legend">{route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
+                      {gatheringByproduct ? <span className="craft-plan-route-kind">Gathering byproduct</span> : null}
+                      <strong>{gatheringByproduct ? route.producerRecipe?.name ?? route.recipeName : route.recipeName ?? "Selected recipe"}</strong>
+                      <p className="legend">{gatheringByproduct
+                        ? [route.gatheringSkill, route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
+                        : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
-                    {Array.isArray(route.inputs) && route.inputs.length ? (
+                    {gatheringByproduct ? (
+                      <p className="craft-plan-byproduct-note">Expected yield: {formatNumber(Number(route.expectedYield) || 0, Number(route.expectedYield) < 1 ? 2 : 1)} {itemName(route.output)} per gathering action.</p>
+                    ) : Array.isArray(route.inputs) && route.inputs.length ? (
                       <div className="craft-plan-route-inputs">
                         {route.inputs.map((input: AnyRecord, inputIndex: number) => (
                           <span key={itemKey(input) + "-" + inputIndex}>{itemNode(input)} <strong>x{quantity(input.quantity)}</strong></span>

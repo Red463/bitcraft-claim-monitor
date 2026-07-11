@@ -45,6 +45,9 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);
   assert.match(page, /craft-plan-need-detail/);
   assert.match(page, /How to get this/);
+  assert.match(page, /Gathering byproduct/);
+  assert.match(page, /route\.routeType === "gathering-byproduct"/);
+  assert.match(page, /Expected yield/);
   assert.match(page, /Used for/);
   assert.match(page, /Show \{usage\.entries\.length\} recipe demands/);
   assert.match(page, /selectedNeedSources/);
