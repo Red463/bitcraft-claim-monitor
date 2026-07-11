@@ -29,10 +29,14 @@ function quantity(value: unknown) {
 function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   const satisfied = cell.missing <= 0;
+  const hasActive = cell.inProgress > 0;
+  const supplied = cell.available + cell.inProgress + cell.plannedOutput;
+  const blocked = !satisfied && cell.items.some((item) => Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0) && supplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : ""}`} type="button" title={cell.name} onClick={() => onSelect(cell)}>
-      <strong>{quantity(satisfied ? cell.available : cell.missing)}</strong>
-      <small>{satisfied ? quantity(cell.required) : `${quantity(cell.available)}/${quantity(cell.required)}`}</small>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : ""}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active, ${quantity(cell.plannedOutput)} from planned secondary outputs, ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
+      <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
+      <small>{quantity(supplied)} / {quantity(cell.required)}</small>
+      {hasActive ? <Factory size={11} aria-label="Actively being crafted" /> : null}
     </button>
   );
 }
@@ -65,6 +69,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [managerOpen, setManagerOpen] = React.useState(false);
   const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
   const [selectedSection, setSelectedSection] = React.useState("all");
+  const [shortagesOnly, setShortagesOnly] = React.useState(false);
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
@@ -109,7 +114,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const needsBoard = React.useMemo(() => buildNeedsBoard(materials, targets), [materials, targets]);
   const needsBoardRowCount = React.useMemo(() => needsBoard.reduce((total, group) => total + group.rows.length, 0), [needsBoard]);
   const needsBoardSections = React.useMemo(() => needsBoard.map((group) => group.section), [needsBoard]);
-  const filteredNeedsBoard = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
+  const filteredNeedsBoard = React.useMemo(() => {
+    const groups = selectedSection === "all" ? needsBoard : needsBoard.filter((group) => group.section === selectedSection);
+    if (!shortagesOnly) return groups;
+    return groups.map((group) => ({ ...group, rows: group.rows.filter((row) => [...row.cells.values()].some((cell) => cell.missing > 0)) })).filter((group) => group.rows.length > 0);
+  }, [needsBoard, selectedSection, shortagesOnly]);
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
@@ -387,34 +396,37 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             {needsBoard.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <button className={selectedSection === "all" ? "active" : ""} type="button" onClick={() => setSelectedSection("all")}>All <span>{needsBoardRowCount}</span></button>
               {needsBoard.map((group) => <button className={selectedSection === group.section ? "active" : ""} type="button" key={group.section} onClick={() => setSelectedSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>)}
+              <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
             </div> : null}
+            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
-              {filteredNeedsBoard.map((group) => (
-                <article className="craft-plan-needs-group" key={group.section}>
-                  <div className="craft-plan-needs-table-wrap">
-                    <table className="craft-plan-needs-table">
-                      <thead>
-                        <tr><th>{group.section}</th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
-                      </thead>
-                      <tbody>
+              <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
+                <table className="craft-plan-needs-table">
+                  {filteredNeedsBoard.map((group) => (
+                    <tbody key={group.section}>
+                      <tr className="craft-plan-needs-section-row"><th>{group.section} <span>{group.completion}%</span></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
                             <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
                             {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), setSelectedNeed)}</td>)}
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-              ))}
+                    </tbody>
+                  ))}
+                </table>
+              </div>
             </div> : <p className="legend">All planned materials are covered by selected stock sources and active crafts.</p>}
           </section>
 
-          {warnings.length || unavailableSources.length ? (
+          {warnings.length ? (
             <section className="form-card craft-plan-section warning-card">
-              <h3><AlertTriangle size={17} /> Unavailable sources</h3>
+              <h3><AlertTriangle size={17} /> Catalog diagnostics</h3>
               {warnings.map((warning: string) => <p className="legend" key={warning}>{warning}</p>)}
+            </section>
+          ) : null}
+          {unavailableSources.length ? (
+            <section className="form-card craft-plan-section warning-card">
+              <h3><AlertTriangle size={17} /> Unavailable stock sources</h3>
               {unavailableSources.map((source: AnyRecord) => <p className="legend" key={`${source.type}-${source.sourceId}`}>{source.label}: {source.error}</p>)}
             </section>
           ) : null}

@@ -25,8 +25,15 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.doesNotMatch(page, /className="top-meta"/);
   assert.match(page, /<h3><Target size=\{17\} \/> Targets<\/h3>/);
   assert.match(page, /Needs Board/);
+  assert.match(page, /needed/);
+  assert.match(page, /quantity\(supplied\).*quantity\(cell\.required\)/s);
   assert.match(page, /craft-plan-needs-board/);
   assert.match(page, /craft-plan-section-filters/);
+  assert.match(page, /Shortages only/);
+  assert.match(page, /group\.completion/);
+  assert.match(page, /craft-plan-needs-section-row/);
+  assert.match(page, /craft-plan-needs-legend/);
+  assert.match(page, /plannedOutput/);
   assert.match(page, /craft-plan-row-section-button/);
   assert.match(page, /sectionOverrides/);
   assert.match(page, /rowNameOverrides/);
@@ -61,7 +68,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.doesNotMatch(page, /<h3><Package size=\{17\} \/> Materials<\/h3>/);
   assert.doesNotMatch(page, /<DataTable rows=\{materials\}/);
   assert.doesNotMatch(page, /<h3><Route size=\{17\} \/> Recipe Routes<\/h3>/);
-  assert.match(page, /Unavailable sources/);
+  assert.match(page, /Catalog diagnostics/);
+  assert.match(page, /Unavailable stock sources/);
   assert.match(page, /CraftPlanManagerDialog/);
 });
 
@@ -108,8 +116,10 @@ test("Craft Planning manager shows compact catalog diagnostics and manual refres
   assert.match(manager, /completedAt/);
   assert.match(manager, /scheduledJob\?\.running/);
   assert.match(manager, /catalogContinuing/);
+  assert.match(manager, /catalogPollingActive/);
   assert.match(manager, /Last full refresh/);
   assert.match(manager, /Next batch queued/);
+  assert.match(manager, /if \(!open \|\| !catalogPollingActive\) return/);
   assert.match(manager, /window\.setInterval\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
   assert.match(manager, /window\.clearInterval/);
   assert.doesNotMatch(manager, /window\.setTimeout\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);

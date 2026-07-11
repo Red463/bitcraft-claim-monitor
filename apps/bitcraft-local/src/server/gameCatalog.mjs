@@ -489,6 +489,11 @@ export function createGameCatalogRepository(db) {
       SET state = 'failed', attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
       WHERE run_id = ? AND catalog_key = ?
     `),
+    markRefreshTargetUnavailable: db.prepare(`
+      UPDATE game_catalog_refresh_targets
+      SET state = 'failed', attempt_count = ?, last_error = ?, updated_at = ?
+      WHERE run_id = ? AND catalog_key = ?
+    `),
   };
 
   function recipeWithLinks(row) {
@@ -664,6 +669,15 @@ export function createGameCatalogRepository(db) {
     },
     markRefreshTargetFailed(runId, catalogKey, error, updatedAt = new Date().toISOString()) {
       statements.markRefreshTargetFailed.run(String(error ?? "Unknown catalog refresh error"), updatedAt, runId, catalogKey);
+    },
+    markRefreshTargetUnavailable(runId, catalogKey, error, maxAttempts = 3, updatedAt = new Date().toISOString()) {
+      statements.markRefreshTargetUnavailable.run(
+        Math.max(1, Math.floor(toNumber(maxAttempts, 3) || 3)),
+        String(error ?? "Catalog entity unavailable"),
+        updatedAt,
+        runId,
+        catalogKey,
+      );
     },
     upsertDetail(payload, { updatedAt = new Date().toISOString(), fallback = {} } = {}) {
       const normalized = normalizeGameCatalogDetail(payload, fallback);

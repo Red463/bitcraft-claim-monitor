@@ -24,6 +24,15 @@ test("Craft planning needs board cells avoid item icons", () => {
   assert.doesNotMatch(cellBody, /ItemIcon/);
   assert.doesNotMatch(cellBody, /craft-plan-need-icon/);
 });
+
+test("Craft planning needs board uses one continuous compact matrix with status states", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  assert.match(css, /\.craft-plan-needs-matrix\s*\{/);
+  assert.match(css, /\.craft-plan-needs-section-row\s+th/);
+  assert.match(css, /\.craft-plan-need-cell\.is-blocked/);
+  assert.match(css, /\.craft-plan-need-cell\.has-active/);
+  assert.match(css, /\.craft-plan-needs-legend/);
+});
 test("Craft planning section override dialog has a structured viewport modal header", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const headerMatch = css.match(/\.craft-plan-section-override \.modal-header\s*\{([^}]+)\}/);

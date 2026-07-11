@@ -167,6 +167,7 @@ function formatCatalogPhase(value: unknown) {
     list_cargo: "Discovering cargo",
     detail_items: "Loading item details",
     detail_cargo: "Loading cargo details",
+    waiting_retry: "Waiting to retry",
     retry_failures: "Retrying failed details",
     complete: "Complete",
   };
@@ -191,6 +192,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [catalogError, setCatalogError] = React.useState<string | null>(null);
   const [catalogBusy, setCatalogBusy] = React.useState(false);
   const [multiplierDraft, setMultiplierDraft] = React.useState({ key: "", multiplier: "1.5", note: "" });
+  const catalogPollingActive = Boolean(
+    catalogStatus?.scheduledJob?.running
+    || catalogStatus?.scheduledJob?.metadata?.complete === false
+    || catalogStatus?.latestRun?.status === "running"
+    || catalogStatus?.latestRun?.status === "paused"
+  );
 
   async function adminApi(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
@@ -241,12 +248,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   }, [open, load, loadCatalogStatus]);
 
   React.useEffect(() => {
-    if (!open || !catalogStatus?.scheduledJob?.running) return;
+    if (!open || !catalogPollingActive) return;
     const interval = window.setInterval(() => {
       void loadCatalogStatus({ silent: true });
     }, CATALOG_REFRESH_POLL_MS);
     return () => window.clearInterval(interval);
-  }, [open, catalogStatus?.scheduledJob?.running, loadCatalogStatus]);
+  }, [open, catalogPollingActive, loadCatalogStatus]);
 
   React.useEffect(() => {
     const trimmed = query.trim();
@@ -328,8 +335,9 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const successfulRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
   const completedRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
   const catalogRunning = Boolean(scheduledJob?.running);
-  const catalogContinuing = !catalogRunning && latestRun?.status === "paused" && scheduledJob?.metadata?.complete === false;
-  const catalogActive = catalogRunning || catalogContinuing;
+  const catalogRetrying = !catalogRunning && latestRun?.phase === "waiting_retry" && scheduledJob?.metadata?.complete === false;
+  const catalogContinuing = !catalogRunning && !catalogRetrying && latestRun?.status === "paused" && scheduledJob?.metadata?.complete === false;
+  const catalogActive = catalogRunning || catalogRetrying || catalogContinuing;
   const catalogPhase = formatCatalogPhase(firstText(latestRun?.phase, scheduledJob?.metadata?.phase, scheduledJob?.metadata?.stage, scheduledJob?.metadata?.step));
   const processedCount = firstCount(latestRun?.processedCount, scheduledJob?.metadata?.processedCount, scheduledJob?.metadata?.current, scheduledJob?.metadata?.progressCurrent);
   const totalCount = firstCount(latestRun?.totalCount, scheduledJob?.metadata?.totalCount, scheduledJob?.metadata?.total, scheduledJob?.metadata?.progressTotal);
@@ -343,10 +351,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const nextRunAt = firstText(scheduledJob?.nextRunAt) || null;
   const noCatalog = !lastSuccessAt && recipeCount <= 0 && byproductCount <= 0;
   const catalogActionBusy = busy || catalogBusy || catalogActive;
-  const catalogStatusLabel = catalogRunning ? "Running" : catalogContinuing ? "Continuing" : noCatalog ? "Refresh required" : latestRun?.status === "failed" || firstText(scheduledJob?.lastError, latestRun?.lastError) ? "Attention" : "Ready";
+  const catalogStatusLabel = catalogRunning ? "Running" : catalogRetrying ? "Waiting to retry" : catalogContinuing ? "Continuing" : noCatalog ? "Refresh required" : latestRun?.status === "failed" ? "Attention" : "Ready";
   const progressSummary = totalCount > 0 ? `${formatNumber(processedCount, 0)} / ${formatNumber(totalCount, 0)}` : processedCount > 0 ? formatNumber(processedCount, 0) : "Waiting";
   const catalogSummary = catalogRunning
     ? `${catalogPhase} in progress${totalCount > 0 ? `, ${progressSummary} processed.` : "."}`
+    : catalogRetrying
+      ? `BitJita is temporarily unavailable. Retrying automatically${nextRunAt ? ` at ${dateLabel(nextRunAt)}` : " shortly"}.`
     : catalogContinuing
       ? `Next batch queued${totalCount > 0 ? `, ${progressSummary} details loaded.` : "."}`
     : noCatalog
@@ -398,7 +408,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               <div className="craft-plan-catalog-stat"><small>Cargo</small><strong>{formatNumber(cargoCount, 0)}</strong><span>Cargo entities</span></div>
               <div className="craft-plan-catalog-stat"><small>Recipes</small><strong>{formatNumber(recipeCount, 0)}</strong><span>Catalog recipes</span></div>
               <div className="craft-plan-catalog-stat"><small>Byproducts</small><strong>{formatNumber(byproductCount, 0)}</strong><span>Output variants</span></div>
-              <div className={`craft-plan-catalog-stat${failureCount > 0 ? " is-problem" : ""}`}><small>Failures</small><strong>{formatNumber(failureCount, 0)}</strong><span>{failureCount > 0 ? "Review the latest run before retrying" : "No failures recorded"}</span></div>
+              <div className={`craft-plan-catalog-stat${failureCount > 0 ? " is-problem" : ""}`}><small>Failures</small><strong>{formatNumber(failureCount, 0)}</strong><span>{failureCount > 0 ? (catalogActive ? "Automatic recovery is active" : "Unavailable entities were skipped") : "No failures recorded"}</span></div>
             </div>
           </section>
         </div>

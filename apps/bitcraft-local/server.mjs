@@ -24,6 +24,7 @@ import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatch
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
+import { classifyCatalogRefreshError, parseRetryAfterMs } from "./src/server/catalogRefreshRecovery.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
@@ -117,6 +118,12 @@ const gameCatalogRefreshContinueDelaySetting = Number(process.env.GAME_CATALOG_R
 const gameCatalogRefreshContinueDelayMs = Number.isFinite(gameCatalogRefreshContinueDelaySetting) && gameCatalogRefreshContinueDelaySetting >= 1000
   ? Math.floor(gameCatalogRefreshContinueDelaySetting)
   : 5000;
+const gameCatalogRefreshRetryDelaysMs = String(process.env.GAME_CATALOG_REFRESH_RETRY_DELAYS_MS ?? "15000,60000,300000")
+  .split(",")
+  .map((value) => Number(value.trim()))
+  .filter((value) => Number.isFinite(value) && value > 0)
+  .map((value) => Math.floor(value));
+if (!gameCatalogRefreshRetryDelaysMs.length) gameCatalogRefreshRetryDelaysMs.push(15000, 60000, 300000);
 const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
@@ -543,7 +550,12 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
 
   let batch = gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize);
   let retryingFailures = false;
-  if (previousRun?.status === "failed" && queueCounts.failed > 0) {
+  const resumeFailedTargetFirst = queueCounts.failed > 0 && (
+    previousRun?.status === "failed"
+    || previousRun?.phase === "waiting_retry"
+    || previousRun?.phase === "retry_failures"
+  );
+  if (resumeFailedTargetFirst) {
     const retries = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
     const remainingSlots = Math.max(0, gameCatalogRefreshJobBudget.batchSize - retries.length);
     batch = [...retries, ...gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, remainingSlots || 1).slice(0, remainingSlots)];
@@ -622,11 +634,71 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      gameCatalogRepository.markRefreshTargetFailed(refreshRun.id, target.catalogKey, message);
-      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+      const recovery = classifyCatalogRefreshError(error, {
+        attemptNumber: Number(target.attemptCount ?? 0) + 1,
+        retryDelaysMs: gameCatalogRefreshRetryDelaysMs,
+      });
+
+      if (recovery.action === "stop") {
+        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+          status: "failed",
+          phase: gameCatalogRefreshPhase(target),
+          cursorKind,
+          cursorId,
+          processedCount,
+          totalCount: queueCounts.total,
+          itemCount,
+          cargoCount,
+          recipeCount,
+          byproductCount,
+          failureCount,
+          lastError: message,
+          updatedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
+
       failureCount += 1;
-      gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "failed",
+      if (recovery.action === "retry") {
+        gameCatalogRepository.markRefreshTargetFailed(refreshRun.id, target.catalogKey, message);
+        queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+          status: "paused",
+          phase: "waiting_retry",
+          cursorKind,
+          cursorId,
+          processedCount,
+          totalCount: queueCounts.total,
+          itemCount,
+          cargoCount,
+          recipeCount,
+          byproductCount,
+          failureCount,
+          lastError: message,
+          updatedAt: new Date().toISOString(),
+        });
+        return {
+          complete: false,
+          continueAfterMs: recovery.delayMs,
+          retryReason: recovery.reason,
+          lastError: message,
+          processedCount,
+          totalCount: queueCounts.total,
+          itemCount,
+          cargoCount,
+          recipeCount,
+          byproductCount,
+          failureCount,
+          resumed: resuming,
+          cursorKind,
+          cursorId,
+        };
+      }
+
+      gameCatalogRepository.markRefreshTargetUnavailable(refreshRun.id, target.catalogKey, message, 3);
+      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
+      refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+        status: "running",
         phase: gameCatalogRefreshPhase(target),
         cursorKind,
         cursorId,
@@ -640,7 +712,6 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
         lastError: message,
         updatedAt: new Date().toISOString(),
       });
-      throw error;
     }
   }
 
@@ -4866,7 +4937,12 @@ async function fetchBitjita(pathname, options = {}) {
       const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
       if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
       response = await fetch(url, fetchOptions);
-      if (!response.ok) throw new Error(`${pathname}: HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = new Error(`${pathname}: HTTP ${response.status}`);
+        error.statusCode = response.status;
+        error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+        throw error;
+      }
       return response.json();
     }
     response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs });

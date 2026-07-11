@@ -76,7 +76,7 @@ test("buildNeedsBoard merges concrete item names into one row when API tags matc
 
   assert.equal(board.length, 1);
   assert.equal(board[0].rows.length, 1);
-  assert.equal(board[0].rows[0].name, "Wispweave Filament");
+  assert.equal(board[0].rows[0].name, "Filament");
   assert.equal(board[0].rows[0].cells.get("T2")?.name, "Simple Wispweave Filament");
   assert.equal(board[0].rows[0].cells.get("T3")?.name, "Infused Wispweave Filament");
   assert.equal(board[0].rows[0].cells.get("T5")?.name, "Exquisite Wispweave Filament");
@@ -199,4 +199,67 @@ test("buildNeedsBoard uses row name overrides without changing the stable row ke
   assert.equal(board[0].rows[0].apiName, "Refined Plank");
   assert.equal(board[0].rows[0].overrideKey, "tag:Refined Plank");
   assert.equal(board[0].rows[0].cells.get("T2")?.name, "Refined Simple Plank");
+});
+
+test("buildNeedsBoard applies canonical operational rows and hides internal cycle intermediates", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Basic Wispweave Filament", tag: "Wispweave Filament", tier: 1, section: "Farming", required: 20, missing: 10 },
+    { key: "items:2", name: "Simple Wispweave Seeds", tag: "Filament Seeds", tier: 2, section: "Farming", required: 30, missing: 30 },
+    { key: "items:3", name: "Simple Lake Fish Filet", tag: "Lake Fish Filet", tier: 2, section: "Fishing", required: 12, missing: 12 },
+    { key: "items:4", name: "Simple Lake Fish", tag: "Lake Fish", tier: 2, section: "Fishing", required: 12, missing: 12 },
+    { key: "items:5", name: "Food Waste", tag: "Food Waste", tier: 1, section: "Farming", required: 8, missing: 8 },
+  ], []);
+
+  assert.deepEqual(board.map((group) => [group.section, group.rows.map((row) => row.name)]), [
+    ["Farming", ["Filament"]],
+    ["Fishing", ["Lake Fish"]],
+  ]);
+});
+
+test("buildNeedsBoard follows stable workflow order and appends unknown API tags", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Rough Sandpaper", tag: "Woodworking Sandpaper", tier: null, section: "Carpentry", required: 1, missing: 1 },
+    { key: "items:2", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 1000, missing: 900 },
+    { key: "items:3", name: "Rough Stripped Wood", tag: "Stripped Wood", tier: 1, section: "Carpentry", required: 2, missing: 2 },
+    { key: "items:4", name: "Unknown Future Part", tag: "Unknown Future Part", tier: 1, section: "Carpentry", required: 5000, missing: 5000 },
+    { key: "items:5", name: "Water", tag: "Water", tier: null, section: "Carpentry", required: 20, missing: 20 },
+    { key: "items:6", name: "Refined Rough Plank", tag: "Refined Plank", tier: 1, section: "Carpentry", required: 5, missing: 5 },
+  ], []);
+
+  assert.deepEqual(board[0].rows.map((row) => row.name), [
+    "Stripped Wood",
+    "Plank",
+    "Water",
+    "Refined Plank",
+    "Woodworking Sandpaper",
+    "Unknown Future Part",
+  ]);
+});
+
+test("buildNeedsBoard follows Sync ordering for operational rows and sections", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Basic Citric Berry", tag: "Citric Berry", tier: 1, section: "Foraging", required: 1, missing: 1 },
+    { key: "items:2", name: "Basic Berry", tag: "Berry", tier: 1, section: "Foraging", required: 1, missing: 1 },
+    { key: "items:3", name: "Basic Leather", tag: "Leather", tier: 1, section: "Leatherworking", required: 1, missing: 1 },
+    { key: "items:4", name: "Basic Cloth", tag: "Cloth", tier: 1, section: "Tailoring", required: 1, missing: 1 },
+    { key: "items:5", name: "Basic Animal Food", tag: "Animal Food", tier: 1, section: "Taming", required: 1, missing: 1 },
+  ], []);
+
+  assert.deepEqual(board.map((group) => [group.section, group.rows.map((row) => row.name)]), [
+    ["Foraging", ["Berry", "Citric Berry"]],
+    ["Leatherwork", ["Leather"]],
+    ["Tailor", ["Cloth"]],
+    ["Taming", ["Animal Food"]],
+  ]);
+});
+
+test("buildNeedsBoard calculates section completion from required and covered quantities", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, available: 75, inProgress: 5, plannedOutput: 0, missing: 20 },
+    { key: "items:2", name: "Simple Plank", tag: "Plank", tier: 2, section: "Carpentry", required: 100, available: 100, inProgress: 0, plannedOutput: 0, missing: 0, recipeUsages: [{}] },
+  ], []);
+
+  assert.equal(board[0].required, 200);
+  assert.equal(board[0].covered, 180);
+  assert.equal(board[0].completion, 90);
 });

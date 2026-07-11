@@ -1,24 +1,9 @@
 import type { AnyRecord } from "../main-app-data";
+import { plannerRowOrder, plannerTaxonomyFor, PLANNER_SECTION_ORDER } from "./craftPlanningTaxonomy.ts";
 
 export const NEED_COLUMNS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "Materials"];
 
-export const NEED_SECTIONS = [
-  "Carpentry",
-  "Construction",
-  "Cooking",
-  "Farming",
-  "Fishing",
-  "Foraging",
-  "Forestry",
-  "Hunting",
-  "Leatherworking",
-  "Masonry",
-  "Mining",
-  "Scholar",
-  "Smithing",
-  "Tailoring",
-  "Other",
-];
+export const NEED_SECTIONS: string[] = [...PLANNER_SECTION_ORDER];
 
 export type NeedCell = {
   item: AnyRecord;
@@ -28,6 +13,7 @@ export type NeedCell = {
   required: number;
   available: number;
   inProgress: number;
+  plannedOutput: number;
 };
 
 export type NeedRow = {
@@ -44,6 +30,9 @@ export type NeedRow = {
 export type NeedGroup = {
   section: string;
   rows: NeedRow[];
+  required: number;
+  covered: number;
+  completion: number;
 };
 
 export function itemKey(item: AnyRecord) {
@@ -68,9 +57,7 @@ function itemTier(item: AnyRecord) {
 }
 
 function rowNameForNeed(item: AnyRecord) {
-  const tag = itemTag(item);
-  if (tag) return tag;
-  return itemName(item);
+  return plannerTaxonomyFor(item).row;
 }
 
 function rowOverrideKeyForNeed(item: AnyRecord) {
@@ -96,18 +83,20 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
   const groups = new Map<string, Map<string, NeedRow>>();
 
   for (const material of materials) {
+    const taxonomy = plannerTaxonomyFor(material);
+    if (taxonomy.hidden) continue;
     const missing = Number(material.missing) || 0;
-    const required = Number(material.required) || 0;
+    const required = Number(material.bufferedRequired ?? material.required) || 0;
     const recipeUsages = Array.isArray(material.recipeUsages) ? material.recipeUsages : [];
     if (material.isTarget || targetKeys.has(itemKey(material))) continue;
     if (required <= 0 || (missing <= 0 && recipeUsages.length === 0)) continue;
-    const section = String(material.section ?? "Other");
+    const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
+    const section = sectionOverride || taxonomy.section || String(material.section ?? "Other");
     const apiName = rowNameForNeed(material);
     const rowOverrideKey = String(material.sectionOverrideKey ?? rowOverrideKeyForNeed(material));
     const rowNameOverride = material.rowNameOverride == null ? null : String(material.rowNameOverride).trim() || null;
     const rowName = rowNameOverride || apiName;
     const apiSection = String(material.apiSection ?? material.section ?? "Other");
-    const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
     const column = columnForNeed(material);
     if (!groups.has(section)) groups.set(section, new Map());
     const rows = groups.get(section)!;
@@ -116,22 +105,27 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
+    const plannedOutput = Number(material.plannedOutput) || 0;
     if (existing) {
       existing.items.push(material);
       existing.missing += missing;
       existing.required += required;
       existing.available += available;
       existing.inProgress += inProgress;
+      existing.plannedOutput += plannedOutput;
     } else {
-      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress });
+      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress, plannedOutput });
     }
     row.maxMissing = Math.max(row.maxMissing, missing > 0 ? missing : required);
   }
 
   return [...groups.entries()]
     .sort(([a], [b]) => sortSectionName(a, b))
-    .map(([section, rows]) => ({
-      section,
-      rows: [...rows.values()].sort((a, b) => b.maxMissing - a.maxMissing || a.name.localeCompare(b.name)),
-    }));
+    .map(([section, rows]) => {
+      const sortedRows = [...rows.values()].sort((a, b) => plannerRowOrder(section, a.name) - plannerRowOrder(section, b.name) || a.name.localeCompare(b.name));
+      const cells = sortedRows.flatMap((row) => [...row.cells.values()]);
+      const required = cells.reduce((sum, cell) => sum + cell.required, 0);
+      const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress + cell.plannedOutput), 0);
+      return { section, rows: sortedRows, required, covered, completion: required > 0 ? Math.round((covered / required) * 1000) / 10 : 100 };
+    });
 }

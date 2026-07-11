@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.21] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning calculations so counted stock, active crafts, and planned byproducts are allocated across the complete recipe chain before unmet materials are expanded.
+- Reworked the Craft Planning Needs Board into a continuous Sync-style matrix with stable activity and row ordering, section progress, activity filters, shortage filtering, and clearer material states.
+- Improved planner catalog refresh recovery so temporary BitJita failures retry automatically and permanently unavailable entities no longer stop the remaining catalog refresh.
+
+### Fixed
+
+- Fixed planned secondary outputs being counted more than once or failing to offset demand in another target branch.
+- Fixed planner resources appearing under inconsistent activity names or row positions by applying a canonical operational taxonomy while retaining admin overrides and unknown future API tags.
+
 ## [0.32.0-beta.20] - 2026-07-10
 
 ### Changed

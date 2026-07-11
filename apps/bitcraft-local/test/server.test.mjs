@@ -1508,7 +1508,10 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
     if (url.pathname === "/api/items/200") {
       detailRequests.push("items:200");
       item200Attempts += 1;
-      if (item200Attempts === 1) return json(res, { error: "rate limited" }, 429);
+      if (item200Attempts === 1) {
+        res.writeHead(429, { "content-type": "application/json", "retry-after": "1" });
+        return res.end(JSON.stringify({ error: "rate limited" }));
+      }
       return json(res, {
         item: { id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" },
         craftingRecipes: [{
@@ -1570,6 +1573,7 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
       GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
+      GAME_CATALOG_REFRESH_RETRY_DELAYS_MS: "1000,1000,1000",
     },
     stdio: "ignore",
   });
@@ -1635,18 +1639,20 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   assert.equal(duplicateRun.status, 409);
   firstDetailRelease();
 
-  const failedStatus = await waitForCondition("failed craft plan catalog refresh", async () => {
+  const retryStatus = await waitForCondition("paused rate-limited craft plan catalog refresh", async () => {
     const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
       headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
     }).then((response) => response.json());
-    return payload.latestRun?.status === "failed" ? payload : null;
+    return payload.latestRun?.status === "paused" && payload.latestRun?.phase === "waiting_retry" ? payload : null;
   });
-  assert.equal(failedStatus.latestRun.cursorKind, "items");
-  assert.equal(failedStatus.latestRun.cursorId, "100");
-  assert.equal(failedStatus.latestRun.itemCount, 2);
-  assert.equal(failedStatus.latestRun.cargoCount, 1);
-  assert.equal(failedStatus.latestRun.failureCount, 1);
-  assert.match(failedStatus.latestRun.lastError ?? "", /HTTP 429/);
+  assert.equal(retryStatus.latestRun.cursorKind, "items");
+  assert.equal(retryStatus.latestRun.cursorId, "100");
+  assert.equal(retryStatus.latestRun.itemCount, 2);
+  assert.equal(retryStatus.latestRun.cargoCount, 1);
+  assert.equal(retryStatus.latestRun.failureCount, 1);
+  assert.match(retryStatus.latestRun.lastError ?? "", /HTTP 429/);
+  assert.equal(retryStatus.scheduledJob.metadata.complete, false);
+  assert.equal(retryStatus.scheduledJob.metadata.retryReason, "rate_limit");
   assert.deepEqual(detailRequests, ["items:100", "items:200"]);
   assert.equal(item200Attempts, 1);
 
@@ -1656,19 +1662,12 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 2);
   failedDb.close();
 
-  const resumedRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  });
-  assert.equal(resumedRun.status, 202);
-
   const completedStatus = await waitForCondition("completed craft plan catalog refresh", async () => {
     const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
       headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
     }).then((response) => response.json());
     return payload.latestRun?.status === "completed" ? payload : null;
-  });
+  }, 10000);
   assert.equal(completedStatus.latestRun.processedCount, 3);
   assert.equal(completedStatus.latestRun.failureCount, 1);
   assert.equal(completedStatus.latestRun.recipeCount, 3);

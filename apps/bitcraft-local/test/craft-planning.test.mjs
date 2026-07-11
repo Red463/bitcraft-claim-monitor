@@ -220,6 +220,199 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.equal(plan.materials.find((material) => material.name === "Fine Fiber")?.required, 20);
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "packed-route"]);
 });
+
+test("computeCraftPlan does not expand transport-only package loops by default", () => {
+  const berryDetail = {
+    item: { id: "100", name: "Basic Berry", itemType: 0, tag: "Berry", tier: 1 },
+    craftingRecipes: [{
+      id: "unpack-berry",
+      name: "Unpack Basic Berry Package",
+      isTransportRoute: true,
+      craftedItemStacks: [{ item_id: "100", item_type: "item", quantity: 500 }],
+      consumedItemStacks: [{ item_id: "200", item_type: "cargo", quantity: 1 }],
+      consumedItems: [{ id: "200", name: "Basic Berry Package", itemType: 1, tag: "Package", tier: 1 }],
+    }],
+  };
+  const packageDetail = {
+    cargo: { id: "200", name: "Basic Berry Package", itemType: 1, tag: "Package", tier: 1 },
+    craftingRecipes: [{
+      id: "pack-berry",
+      name: "Package Basic Berry",
+      isTransportRoute: true,
+      craftedItemStacks: [{ item_id: "200", item_type: "cargo", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 500 }],
+      consumedItems: [{ id: "100", name: "Basic Berry", itemType: 0, tag: "Berry", tier: 1 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 25, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "100"), berryDetail],
+      [recipeKey("cargo", "200"), packageDetail],
+    ]),
+  });
+
+  assert.equal(plan.steps.length, 0);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Berry")?.required, 25);
+  assert.equal(plan.materials.some((material) => material.name === "Basic Berry Package"), false);
+});
+
+test("computeCraftPlan stops cyclic production routes at the nearest source item", () => {
+  const plantDetail = {
+    item: { id: "300", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 },
+    craftingRecipes: [{
+      id: "grow-plant",
+      name: "Grow Basic Wispweave Plant",
+      craftedItemStacks: [{ item_id: "300", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "301", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "301", name: "Basic Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 1 }],
+    }],
+  };
+  const seedDetail = {
+    item: { id: "301", name: "Basic Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 1 },
+    craftingRecipes: [{
+      id: "harvest-seeds",
+      name: "Harvest Basic Wispweave Seeds",
+      craftedItemStacks: [{ item_id: "301", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "300", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "300", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "300", kind: "items", name: "Basic Wispweave Plant", quantity: 10, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "300"), plantDetail],
+      [recipeKey("items", "301"), seedDetail],
+    ]),
+  });
+
+  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Plant")?.required, 10);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Seeds")?.required, 10);
+  assert.equal(plan.steps.length, 1);
+});
+
+test("computeCraftPlan credits planned secondary outputs before expanding their demand", () => {
+  const assemblyDetail = {
+    item: { id: "1000", name: "Assembly", itemType: 0, tag: "Assembly", tier: 1 },
+    craftingRecipes: [{
+      id: "make-assembly",
+      name: "Make Assembly",
+      craftedItemStacks: [{ item_id: "1000", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [
+        { item_id: "1001", item_type: "item", quantity: 1 },
+        { item_id: "1002", item_type: "item", quantity: 1 },
+      ],
+      consumedItems: [
+        { id: "1001", name: "Primary Part", itemType: 0, tag: "Part", tier: 1 },
+        { id: "1002", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
+      ],
+    }],
+  };
+  const primaryDetail = {
+    item: { id: "1001", name: "Primary Part", itemType: 0, tag: "Part", tier: 1 },
+    craftingRecipes: [{
+      id: "make-primary-with-binding",
+      name: "Make Primary Part",
+      craftedItemStacks: [
+        { item_id: "1001", item_type: "item", quantity: 1 },
+        { item_id: "1002", item_type: "item", quantity: 1 },
+      ],
+      craftedItems: [
+        { id: "1001", name: "Primary Part", itemType: 0, tag: "Part", tier: 1 },
+        { id: "1002", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
+      ],
+      consumedItemStacks: [{ item_id: "1003", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "1003", name: "Raw Material", itemType: 0, tag: "Raw Material", tier: 1 }],
+    }],
+  };
+  const bindingDetail = {
+    item: { id: "1002", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
+    craftingRecipes: [{
+      id: "make-binding",
+      name: "Make Binding",
+      craftedItemStacks: [{ item_id: "1002", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "1004", item_type: "item", quantity: 10 }],
+      consumedItems: [{ id: "1004", name: "Binding Fibre", itemType: 0, tag: "Fibre", tier: 1 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "1000", kind: "items", name: "Assembly", quantity: 5, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "1000"), assemblyDetail],
+      [recipeKey("items", "1001"), primaryDetail],
+      [recipeKey("items", "1002"), bindingDetail],
+      [recipeKey("items", "1003"), { item: { id: "1003", name: "Raw Material", itemType: 0, tag: "Raw Material", tier: 1 }, craftingRecipes: [] }],
+      [recipeKey("items", "1004"), { item: { id: "1004", name: "Binding Fibre", itemType: 0, tag: "Fibre", tier: 1 }, craftingRecipes: [] }],
+    ]),
+  });
+
+  assert.equal(plan.materials.find((item) => item.name === "Binding")?.required, 5);
+  assert.equal(plan.materials.find((item) => item.name === "Binding")?.plannedOutput, 5);
+  assert.equal(plan.materials.find((item) => item.name === "Binding")?.missing, 0);
+  assert.equal(plan.materials.some((item) => item.name === "Binding Fibre"), false);
+  assert.equal(plan.materials.find((item) => item.name === "Raw Material")?.missing, 5);
+});
+
+test("computeCraftPlan nets planned secondary outputs across target branches regardless of target order", () => {
+  const bindingDetail = {
+    item: { id: "1102", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
+    craftingRecipes: [{
+      id: "make-binding",
+      name: "Make Binding",
+      craftedItemStacks: [{ item_id: "1102", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "1104", item_type: "item", quantity: 10 }],
+      consumedItems: [{ id: "1104", name: "Binding Fibre", itemType: 0, tag: "Fibre", tier: 1 }],
+    }],
+  };
+  const firstTarget = {
+    item: { id: "1100", name: "Bound Part", itemType: 0, tag: "Part", tier: 1 },
+    craftingRecipes: [{
+      id: "make-bound-part",
+      name: "Make Bound Part",
+      craftedItemStacks: [{ item_id: "1100", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: "1102", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "1102", name: "Binding", itemType: 0, tag: "Binding", tier: 1 }],
+    }],
+  };
+  const secondTarget = {
+    item: { id: "1101", name: "Primary Part", itemType: 0, tag: "Part", tier: 1 },
+    craftingRecipes: [{
+      id: "make-primary",
+      name: "Make Primary Part",
+      craftedItemStacks: [
+        { item_id: "1101", item_type: "item", quantity: 1 },
+        { item_id: "1102", item_type: "item", quantity: 1 },
+      ],
+      craftedItems: [
+        { id: "1101", name: "Primary Part", itemType: 0, tag: "Part", tier: 1 },
+        { id: "1102", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
+      ],
+      consumedItemStacks: [{ item_id: "1103", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "1103", name: "Raw Material", itemType: 0, tag: "Raw Material", tier: 1 }],
+    }],
+  };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [
+      { id: "1100", kind: "items", name: "Bound Part", quantity: 5, itemType: 0 },
+      { id: "1101", kind: "items", name: "Primary Part", quantity: 5, itemType: 0 },
+    ] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "1100"), firstTarget],
+      [recipeKey("items", "1101"), secondTarget],
+      [recipeKey("items", "1102"), bindingDetail],
+      [recipeKey("items", "1103"), { item: { id: "1103", name: "Raw Material", itemType: 0, tag: "Raw Material", tier: 1 }, craftingRecipes: [] }],
+      [recipeKey("items", "1104"), { item: { id: "1104", name: "Binding Fibre", itemType: 0, tag: "Fibre", tier: 1 }, craftingRecipes: [] }],
+    ]),
+  });
+
+  assert.equal(plan.materials.find((item) => item.name === "Binding")?.plannedOutput, 5);
+  assert.equal(plan.materials.find((item) => item.name === "Binding")?.missing, 0);
+  assert.equal(plan.materials.some((item) => item.name === "Binding Fibre"), false);
+});
 test("computeCraftPlan prefers loose-material routes over packaged transport routes", () => {
   const mixDetail = {
     item: { id: "910", name: "Infused Potter's Mix", itemType: 0, tag: "Potter's Mix", tier: 3 },
@@ -1050,7 +1243,7 @@ test("collectLocalCatalogCraftPlanDetails uses recipe names as legacy route ids 
   assert.equal(keyOverridePlan.steps[0].selectedRecipeId, "Z Legacy Board Route");
 });
 
-test("collectLocalCatalogCraftPlanDetails preloads dependencies for alternate producer routes", (t) => {
+test("collectLocalCatalogCraftPlanDetails loads only the selected producer route dependencies", (t) => {
   const { repository } = createCatalogFixture(t);
   upsertCatalogDetails(repository, [
     {
@@ -1103,18 +1296,63 @@ test("collectLocalCatalogCraftPlanDetails preloads dependencies for alternate pr
 
   const target = { id: "8300", kind: "items", name: "Routing Target", quantity: 2, itemType: 0 };
   const { detailsByKey } = collectLocalCatalogCraftPlanDetails(repository, [target], {});
-  assert.equal(detailsByKey.has(recipeKey("items", "8302")), true);
-  assert.equal(detailsByKey.has(recipeKey("items", "8303")), true);
+  assert.equal(detailsByKey.has(recipeKey("items", "8301")), true);
+  assert.equal(detailsByKey.has(recipeKey("items", "8302")), false);
+  assert.equal(detailsByKey.has(recipeKey("items", "8303")), false);
 
   const overrideConfig = normalizeCraftPlanConfig({
     enabled: true,
     targets: [target],
     routeOverrides: { [recipeKey("items", "8300")]: "deep-route" },
   });
-  const overridePlan = computeCraftPlan({ config: overrideConfig, detailsByKey });
+  const overrideDetails = collectLocalCatalogCraftPlanDetails(repository, [target], overrideConfig.routeOverrides).detailsByKey;
+  const overridePlan = computeCraftPlan({ config: overrideConfig, detailsByKey: overrideDetails });
   assert.equal(overridePlan.steps[0].selectedRecipeId, "refine-input");
   assert.equal(overridePlan.steps[1].selectedRecipeId, "deep-route");
   assert.equal(overridePlan.materials.find((material) => material.name === "Deep Ore")?.required, 16);
+});
+
+test("collectLocalCatalogCraftPlanDetails does not report depth warnings for unused alternate branches", (t) => {
+  const { repository } = createCatalogFixture(t);
+  const details = [];
+  for (let id = 9000; id <= 9020; id += 1) {
+    const nextId = id + 1;
+    details.push({
+      item: { id: String(id), itemType: 0, name: `Branch ${id}`, tag: "Part", tier: 1 },
+      craftingRecipes: id < 9020 ? [{
+        id: `route-${id}`,
+        name: `Route ${id}`,
+        craftedItemStacks: [{ item_id: String(id), item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: String(id), itemType: 0, name: `Branch ${id}`, tag: "Part", tier: 1 }],
+        consumedItemStacks: [{ item_id: String(nextId), item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: String(nextId), itemType: 0, name: `Branch ${nextId}`, tag: "Part", tier: 1 }],
+      }] : [],
+    });
+  }
+  details.unshift({
+    item: { id: "8999", itemType: 0, name: "Target", tag: "Tool", tier: 1 },
+    craftingRecipes: [{
+      id: "short-route",
+      name: "A Short Route",
+      craftedItemStacks: [{ item_id: "8999", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "8999", itemType: 0, name: "Target", tag: "Tool", tier: 1 }],
+      consumedItemStacks: [{ item_id: "9100", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "9100", itemType: 0, name: "Short Input", tag: "Part", tier: 1 }],
+    }, {
+      id: "deep-route",
+      name: "Z Deep Route",
+      craftedItemStacks: [{ item_id: "8999", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "8999", itemType: 0, name: "Target", tag: "Tool", tier: 1 }],
+      consumedItemStacks: [{ item_id: "9000", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "9000", itemType: 0, name: "Branch 9000", tag: "Part", tier: 1 }],
+    }],
+  }, { item: { id: "9100", itemType: 0, name: "Short Input", tag: "Part", tier: 1 }, craftingRecipes: [] });
+  upsertCatalogDetails(repository, details);
+
+  const result = collectLocalCatalogCraftPlanDetails(repository, [{ id: "8999", kind: "items", name: "Target", quantity: 1, itemType: 0 }], {});
+  assert.equal(result.detailsByKey.has(recipeKey("items", "9100")), true);
+  assert.equal(result.detailsByKey.has(recipeKey("items", "9000")), false);
+  assert.equal(result.warnings.some((warning) => /recursion limit/i.test(warning)), false);
 });
 
 test("collectLocalCatalogCraftPlanDetails queries shared completed subgraphs once", (t) => {

@@ -246,6 +246,16 @@ function recipeMatchesOverride(recipe, overrideId) {
   return recipeId(recipe) === selected || String(recipe?.recipeKey ?? recipe?.catalogRecipeKey ?? "") === selected;
 }
 
+function selectedRecipeForTarget(recipes, overrideId, blockedKeys = []) {
+  const overridden = recipes.find((recipe) => recipeMatchesOverride(recipe, overrideId));
+  if (overridden) return overridden;
+  const blocked = new Set(blockedKeys);
+  return recipes.find((recipe) => {
+    if (recipeLooksTransportRoute(recipe)) return false;
+    return !recipeInputs(recipe).some((input) => blocked.has(recipeKey(stackKind(input), stackId(input))));
+  }) ?? null;
+}
+
 function mergeDetailTarget(detail, target) {
   const detailed = detailTarget(detail, target);
   return { ...target, ...detailed, quantity: target.quantity };
@@ -314,7 +324,8 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   const normalizedTarget = mergeDetailTarget(detail, target);
   const key = recipeKey(normalizedTarget.kind, normalizedTarget.id);
   const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
-  const selected = recipes.find((recipe) => recipeMatchesOverride(recipe, routeOverrides[key])) ?? recipes[0];
+  const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [key]);
+  if (!selected) return [];
   const visibleRecipes = routeAlternativesForUi(recipes, selected);
   return visibleRecipes.map((recipe) => ({
     id: recipeId(recipe),
@@ -331,33 +342,52 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   }));
 }
 
-function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
+function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map(), assumedPlannedOutputs = new Map()) {
   const required = new Map();
   const steps = [];
   const warnings = [];
   const usages = new Map();
+  const plannedOutputs = new Map();
+  const remainingSupply = new Map([...effectiveStockTotals.entries()].map(([key, value]) => [key, Math.max(0, toNumber(value?.total))]));
+  for (const [key, quantity] of assumedPlannedOutputs.entries()) {
+    remainingSupply.set(key, (remainingSupply.get(key) ?? 0) + Math.max(0, toNumber(quantity)));
+  }
+
+  function creditPlannedOutput(output, quantity) {
+    if (!output?.id || quantity <= 0) return;
+    const key = recipeKey(output.kind, output.id);
+    plannedOutputs.set(key, (plannedOutputs.get(key) ?? 0) + quantity);
+  }
 
   function resolve(target, quantity, stack, parentRecipe) {
     const key = recipeKey(target.kind, target.id);
     const detail = detailsByKey.get(key);
-    if (!detail || stack.includes(key) || stack.length > 14) {
+    if (stack.includes(key)) return;
+    if (!detail || stack.length > 14) {
       addRequired(required, target, quantity, sectionForMaterial(target, parentRecipe));
       if (!detail) warnings.push(`No recipe data was available for ${target.name}; it was treated as a source material.`);
       return;
     }
     const normalizedTarget = mergeDetailTarget(detail, target);
-    const stocked = effectiveStockTotals.get(key)?.total ?? 0;
-    const alreadyAllocated = required.get(key)?.required ?? 0;
-    const unallocatedStock = Math.max(0, stocked - alreadyAllocated);
-    const quantityToCraft = Math.max(0, quantity - unallocatedStock);
+    const availableSupply = remainingSupply.get(key) ?? 0;
+    const allocatedSupply = Math.min(quantity, availableSupply);
+    remainingSupply.set(key, availableSupply - allocatedSupply);
+    const quantityToCraft = Math.max(0, quantity - allocatedSupply);
     const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
-    const selected = recipes.find((recipe) => recipeMatchesOverride(recipe, routeOverrides[key])) ?? recipes[0];
+    const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [...stack, key]);
     addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
     if (quantityToCraft <= 0 || !selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
     const rawOutputPerCraft = toNumber(output?.quantity ?? selected.outputQuantity) || 1;
     const outputPerCraft = String(selected.id ?? "").startsWith("possibility:") ? Math.max(0.0001, rawOutputPerCraft) : Math.max(1, rawOutputPerCraft);
     const craftCount = Math.ceil(quantityToCraft / outputPerCraft);
+    const craftedStacks = recipeOutputs(selected);
+    const craftedDisplays = Array.isArray(selected.craftedItems) ? selected.craftedItems : [];
+    craftedStacks.forEach((craftedStack, index) => {
+      const crafted = enrichDisplayFromDetails(stackDisplay(craftedStack, craftedDisplays, index), detailsByKey);
+      if (recipeKey(crafted.kind, crafted.id) === key) return;
+      creditPlannedOutput(crafted, toNumber(craftedStack.quantity) * craftCount);
+    });
     const section = sectionForMaterial(normalizedTarget, selected);
     const visibleRecipes = routeAlternativesForUi(recipes, selected);
     const alternatives = visibleRecipes.map((recipe) => ({
@@ -369,7 +399,20 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
         quantityPerCraft: toNumber(input.quantity),
       })),
     }));
-    const inputs = recipeInputs(selected).map((input, index) => {
+    const rawInputs = recipeInputs(selected).map((input, index) => ({ input, index }));
+    const siblingKeys = new Set(rawInputs.map(({ input }) => recipeKey(stackKind(input), stackId(input))));
+    rawInputs.sort((a, b) => {
+      const score = ({ input, index }) => {
+        const material = enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey);
+        const detail = detailsByKey.get(recipeKey(material.kind, material.id));
+        if (!detail) return 1;
+        const recipes = recipesForTarget(detail, material, detailsByKey);
+        const producer = selectedRecipeForTarget(recipes, routeOverrides[recipeKey(material.kind, material.id)], [...stack, key, recipeKey(material.kind, material.id)]);
+        return producer && recipeOutputs(producer).some((candidate) => siblingKeys.has(recipeKey(stackKind(candidate), stackId(candidate))) && !stackMatches(candidate, material)) ? 0 : 1;
+      };
+      return score(a) - score(b) || a.index - b.index;
+    });
+    const inputs = rawInputs.map(({ input, index }) => {
       const material = enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey);
       const requiredQuantity = toNumber(input.quantity) * craftCount;
       const usageKey = recipeKey(material.kind, material.id);
@@ -405,7 +448,26 @@ function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveSto
   }
 
   for (const target of targets) resolve(target, target.quantity, [], null);
-  return { required, steps, usages, warnings: [...new Set(warnings)] };
+  return { required, steps, usages, plannedOutputs, warnings: [...new Set(warnings)] };
+}
+
+function plannedOutputMapsEqual(a, b) {
+  const keys = new Set([...a.keys(), ...b.keys()]);
+  for (const key of keys) {
+    if (Math.abs((a.get(key) ?? 0) - (b.get(key) ?? 0)) > 0.0001) return false;
+  }
+  return true;
+}
+
+function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
+  let assumedPlannedOutputs = new Map();
+  let result = null;
+  for (let pass = 0; pass < 8; pass += 1) {
+    result = buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals, assumedPlannedOutputs);
+    if (plannedOutputMapsEqual(assumedPlannedOutputs, result.plannedOutputs)) return result;
+    assumedPlannedOutputs = result.plannedOutputs;
+  }
+  return result ?? buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals);
 }
 
 
@@ -512,7 +574,7 @@ function localCatalogDetail(repository, key, fallbackTarget, byproductRows, warn
   };
 }
 
-export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 14) {
+export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 64) {
   const detailsByKey = new Map();
   const warnings = new Set();
   const byproductsByProducerKey = new Map();
@@ -567,7 +629,6 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
 
     for (const row of byproductProducers) {
       const producerTarget = catalogEntityDisplay(row.producer, { id: row.producer?.targetId, kind: row.producer?.kind });
-      visit(producerTarget, depth + 1, false);
       setDetail(row.producerKey, producerTarget);
     }
 
@@ -578,10 +639,11 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
     }
     const normalizedTarget = mergeDetailTarget(currentDetail, target);
     const recipes = recipesForTarget(currentDetail, normalizedTarget, detailsByKey);
-    for (const recipe of recipes) {
-      const inputs = recipeInputs(recipe);
+    const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [...visiting]);
+    if (selected) {
+      const inputs = recipeInputs(selected);
       for (let index = 0; index < inputs.length; index += 1) {
-        visit(stackDisplay(inputs[index], recipe.consumedItems, index), depth + 1, false);
+        visit(stackDisplay(inputs[index], selected.consumedItems, index), depth + 1, false);
       }
     }
     completed.add(key);
@@ -717,7 +779,7 @@ export function computeCraftPlan({
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
-  const { required, steps, usages, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
+  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.map((target) => recipeKey(target.kind, target.id)));
   for (const target of normalized.targets) {
@@ -730,6 +792,7 @@ export function computeCraftPlan({
     const bufferedRequired = Math.ceil(item.required * multiplier);
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
+    const plannedOutput = plannedOutputs.get(item.key) ?? 0;
     const apiSection = item.section || sectionForMaterial(enrichedItem, null);
     const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
     const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;
@@ -753,7 +816,8 @@ export function computeCraftPlan({
       bufferedRequired,
       available,
       inProgress,
-      missing: Math.max(0, bufferedRequired - available - inProgress),
+      plannedOutput,
+      missing: Math.max(0, bufferedRequired - available - inProgress - plannedOutput),
       sources: availableTotals.get(item.key)?.sources ?? [],
       activeCraftSources: activeTotals.get(item.key)?.sources ?? [],
       sourceRoutes: sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides),

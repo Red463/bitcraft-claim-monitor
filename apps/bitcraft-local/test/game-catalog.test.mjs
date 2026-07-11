@@ -610,4 +610,13 @@ test("game catalog refresh targets persist a database-backed work queue", () => 
   });
   assert.deepEqual(repository.listPendingRefreshTargets(run.id, 10).map((target) => target.catalogKey), ["cargo:300"]);
   assert.deepEqual(repository.listRetryableRefreshTargets(run.id, 10, 3).map((target) => target.catalogKey), ["items:200"]);
+
+  repository.markRefreshTargetUnavailable(run.id, "cargo:300", "HTTP 404", 3);
+  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
+    total: 3,
+    pending: 0,
+    processed: 1,
+    failed: 2,
+  });
+  assert.deepEqual(repository.listRetryableRefreshTargets(run.id, 10, 3).map((target) => target.catalogKey), ["items:200"]);
 });
