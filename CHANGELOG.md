@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.22] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning recipe selection so one chosen route controls the required source shown on the board while alternate routes remain available in the dropdown.
+
+### Fixed
+
+- Fixed inflated farming and other chance-output requirements by calculating the complete expected yield across BitJita probability distributions.
+- Fixed simultaneous outputs, such as filament and seeds from the same farming harvest, failing to offset later recipe requirements.
+- Fixed planner item details showing every recipe alternative as though each route were selected.
+
 ## [0.32.0-beta.21] - 2026-07-11
 
 ### Changed

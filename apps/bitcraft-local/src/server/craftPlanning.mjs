@@ -188,22 +188,46 @@ function possibilityKind(possibility) {
 }
 
 function possibilityYieldForTarget(detail, target) {
+  return possibilityExpectedOutputs(detail)
+    .find((output) => output.id === String(target.id) && output.kind === target.kind)?.quantity ?? 0;
+}
+
+function possibilityExpectedOutputs(detail) {
   const unwrapped = unwrapRecipeDetail(detail);
-  const matching = (unwrapped?.itemListPossibilities ?? []).filter((possibility) => possibilityTargetId(possibility) === String(target.id) && possibilityKind(possibility) === target.kind);
-  if (!matching.length) return 0;
-  return matching.reduce((sum, possibility) => {
+  const outputs = new Map();
+  for (const possibility of unwrapped?.itemListPossibilities ?? []) {
+    const id = possibilityTargetId(possibility);
+    if (!id) continue;
+    const kind = possibilityKind(possibility);
     const quantity = Math.max(0, toNumber(possibility.quantity));
     const rawChance = possibility.chance == null ? 1 : toNumber(possibility.chance);
     const chance = rawChance > 1 ? rawChance / 100 : rawChance;
-    return sum + quantity * Math.max(0, Math.min(1, chance || 0));
-  }, 0);
+    const expectedYield = quantity * Math.max(0, Math.min(1, chance || 0));
+    if (expectedYield <= 0) continue;
+    const key = recipeKey(kind, id);
+    const current = outputs.get(key) ?? {
+      id,
+      kind,
+      itemType: itemTypeFromKind(kind),
+      name: String(possibility?.targetItem?.name ?? possibility?.name ?? `Item #${id}`),
+      tier: normalizedTier(possibility?.targetItem?.tier ?? possibility?.tier),
+      tag: possibility?.targetItem?.tag ?? possibility?.tag ?? null,
+      rarityStr: possibility?.targetItem?.rarityStr ?? possibility?.targetItem?.rarity ?? null,
+      iconAssetName: possibility?.targetItem?.iconAssetName ?? null,
+      quantity: 0,
+    };
+    current.quantity += expectedYield;
+    outputs.set(key, current);
+  }
+  return [...outputs.values()];
 }
 
 function possibilityRecipesForTarget(target, detailsByKey) {
   if (!(detailsByKey instanceof Map)) return [];
   const recipes = [];
   for (const [sourceKey, detail] of detailsByKey.entries()) {
-    const yieldQuantity = possibilityYieldForTarget(detail, target);
+    const expectedOutputs = possibilityExpectedOutputs(detail);
+    const yieldQuantity = expectedOutputs.find((output) => output.id === String(target.id) && output.kind === target.kind)?.quantity ?? 0;
     if (yieldQuantity <= 0) continue;
     const outputTarget = detailTarget(detail, {});
     if (!outputTarget.id || recipeKey(outputTarget.kind, outputTarget.id) === recipeKey(target.kind, target.id)) continue;
@@ -211,12 +235,20 @@ function possibilityRecipesForTarget(target, detailsByKey) {
       if (recipeLooksTransportRoute(recipe)) continue;
       const output = recipeOutputs(recipe).find((stackItem) => stackMatches(stackItem, outputTarget));
       const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? recipe.outputQuantity) || 1);
+      const craftedOutputs = expectedOutputs.map((expectedOutput) => ({
+        ...expectedOutput,
+        quantity: expectedOutput.quantity * outputPerCraft,
+      }));
       recipes.push({
         ...recipe,
         id: `possibility:${recipeId(recipe)}:${recipeKey(target.kind, target.id)}`,
         name: `${recipeLabel(recipe)} -> ${target.name}`,
-        craftedItemStacks: [{ item_id: target.id, item_type: target.kind === "cargo" ? "cargo" : "item", quantity: yieldQuantity * outputPerCraft }],
-        craftedItems: [{ ...target, itemType: itemTypeFromKind(target.kind), quantity: yieldQuantity * outputPerCraft }],
+        craftedItemStacks: craftedOutputs.map((craftedOutput) => ({
+          item_id: craftedOutput.id,
+          item_type: craftedOutput.kind === "cargo" ? "cargo" : "item",
+          quantity: craftedOutput.quantity,
+        })),
+        craftedItems: craftedOutputs,
         consumedItemStacks: recipeInputs(recipe),
         consumedItems: Array.isArray(recipe?.consumedItems) ? recipe.consumedItems : [],
         sourceOutputKey: sourceKey,
@@ -327,19 +359,19 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [key]);
   if (!selected) return [];
   const visibleRecipes = routeAlternativesForUi(recipes, selected);
-  return visibleRecipes.map((recipe) => ({
-    id: recipeId(recipe),
-    recipeName: recipeLabel(recipe),
+  return [{
+    id: recipeId(selected),
+    recipeName: recipeLabel(selected),
     output: normalizedTarget,
-    inputs: recipeInputs(recipe).map((input, index) => ({
-      ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
+    inputs: recipeInputs(selected).map((input, index) => ({
+      ...enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey),
       quantity: toNumber(input.quantity),
       quantityPerCraft: toNumber(input.quantity),
     })),
-    buildingName: recipe.buildingName ?? recipe.building_name ?? null,
-    selectedRecipeId: recipeId(recipe),
+    buildingName: selected.buildingName ?? selected.building_name ?? null,
+    selectedRecipeId: recipeId(selected),
     alternatives: visibleRecipes.map((alternative) => ({ id: recipeId(alternative), label: recipeLabel(alternative), buildingName: alternative.buildingName ?? alternative.building_name ?? null })),
-  }));
+  }];
 }
 
 function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map(), assumedPlannedOutputs = new Map()) {

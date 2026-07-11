@@ -255,12 +255,12 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   ]);
 
   assert.deepEqual(normalized.itemListOutputs, [
-    { producerKey: "items:1220019", outputKey: "items:1110012", kind: "items", targetId: "1110012", quantity: 1, chance: 0.1 },
-    { producerKey: "items:1220019", outputKey: "cargo:500100", kind: "cargo", targetId: "500100", quantity: 2, chance: 25 },
+    { producerKey: "items:1220019", outputKey: "items:1110012", kind: "items", targetId: "1110012", quantity: 0.1, chance: 1 },
+    { producerKey: "items:1220019", outputKey: "cargo:500100", kind: "cargo", targetId: "500100", quantity: 0.5, chance: 1 },
   ]);
 });
 
-test("normalizeGameCatalogDetail coalesces duplicate item-list outputs for one producer", () => {
+test("normalizeGameCatalogDetail sums expected yield across an item-list probability distribution", () => {
   const normalized = normalizeGameCatalogDetail({
     item: { id: "7000", itemType: 0, name: "Rough Clay", tag: "Clay", tier: 1 },
     itemListPossibilities: [
@@ -286,7 +286,7 @@ test("normalizeGameCatalogDetail coalesces duplicate item-list outputs for one p
   });
 
   assert.deepEqual(normalized.itemListOutputs, [
-    { producerKey: "items:7000", outputKey: "items:7010", kind: "items", targetId: "7010", quantity: 1, chance: 0.25 },
+    { producerKey: "items:7000", outputKey: "items:7010", kind: "items", targetId: "7010", quantity: 0.45, chance: 1 },
   ]);
 
   const db = createDb();
@@ -313,6 +313,31 @@ test("normalizeGameCatalogDetail coalesces duplicate item-list outputs for one p
     db.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs WHERE producer_key = ? AND output_key = ?").get("items:7000", "items:7010").count,
     1,
   );
+});
+
+test("normalizeGameCatalogDetail preserves the full expected yield of farming co-products", () => {
+  const normalized = normalizeGameCatalogDetail({
+    item: { id: "1220023", itemType: 0, name: "Basic Wispweave Products", tag: "Wispweave Products", tier: 1 },
+    itemListPossibilities: [
+      ...[3, 2, 1, 1, 1].map((quantity) => ({
+        targetId: "1100015",
+        targetItem: { id: "1100015", itemType: 0, name: "Basic Wispweave Seeds", tag: "Filament Seeds", tier: 1 },
+        quantity,
+        chance: 0.2,
+      })),
+      ...[3, 4, 5, 6, 7].map((quantity) => ({
+        targetId: "1100017",
+        targetItem: { id: "1100017", itemType: 0, name: "Rough Wispweave Filament", tag: "Filament", tier: 1 },
+        quantity,
+        chance: 0.2,
+      })),
+    ],
+  });
+
+  assert.deepEqual(normalized.itemListOutputs, [
+    { producerKey: "items:1220023", outputKey: "items:1100015", kind: "items", targetId: "1100015", quantity: 1.6, chance: 1 },
+    { producerKey: "items:1220023", outputKey: "items:1100017", kind: "items", targetId: "1100017", quantity: 5, chance: 1 },
+  ]);
 });
 
 test("normalizeGameCatalogDetail preserves top-level cargo payloads without itemType and declared-output-only recipes", () => {
@@ -419,8 +444,8 @@ test("game catalog repository stores normalized entries, preserves item-cargo co
     [{
       producerKey: "items:1220019",
       producerName: "Basic Bait and Shells",
-      quantity: 1,
-      chance: 0.1,
+      quantity: 0.1,
+      chance: 1,
     }],
   );
 

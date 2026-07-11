@@ -215,16 +215,9 @@ function normalizeItemListOutput(possibility, producerEntity) {
   };
 }
 
-function isBetterItemListOutput(candidate, existing) {
-  const candidateChance = Math.max(0, toNumber(candidate?.chance, 1));
-  const existingChance = Math.max(0, toNumber(existing?.chance, 1));
-  const candidateQuantity = Math.max(0, toNumber(candidate?.quantity, 0));
-  const existingQuantity = Math.max(0, toNumber(existing?.quantity, 0));
-  const candidateExpected = candidateQuantity * candidateChance;
-  const existingExpected = existingQuantity * existingChance;
-  if (candidateExpected !== existingExpected) return candidateExpected > existingExpected;
-  if (candidateQuantity !== existingQuantity) return candidateQuantity > existingQuantity;
-  return candidateChance > existingChance;
+function normalizedProbability(value) {
+  const raw = Math.max(0, toNumber(value, 1));
+  return Math.min(1, raw > 1 ? raw / 100 : raw);
 }
 
 function coalesceItemListOutputs(outputs) {
@@ -232,11 +225,17 @@ function coalesceItemListOutputs(outputs) {
   for (const output of outputs) {
     const key = `${output.producerKey}\u0000${output.outputKey}`;
     const existing = byPair.get(key);
-    // BitJita can report duplicate item-list possibilities for the same
-    // producer/output pair. The catalog stores one route per pair.
-    if (!existing || isBetterItemListOutput(output, existing)) byPair.set(key, output);
+    const expectedYield = Math.max(0, toNumber(output.quantity)) * normalizedProbability(output.chance);
+    if (!existing) {
+      byPair.set(key, { ...output, quantity: expectedYield, chance: 1 });
+      continue;
+    }
+    existing.quantity += expectedYield;
   }
-  return [...byPair.values()];
+  return [...byPair.values()].map((output) => ({
+    ...output,
+    quantity: Number(output.quantity.toFixed(12)),
+  }));
 }
 
 export function normalizeGameCatalogDetail(payload, fallback = {}) {

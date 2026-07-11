@@ -119,6 +119,87 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
   assert.equal(lakeFish.missing, 12);
   assert.equal(plan.gatherNext[0].section, "Fishing");
   assert.equal(plan.gatherNext[0].items[0].name, "Lake Fish");
+  const fishOil = plan.materials.find((material) => material.name === "Fish Oil");
+  assert.equal(fishOil.sourceRoutes.length, 1);
+  assert.equal(fishOil.sourceRoutes[0].selectedRecipeId, "lake-route");
+  assert.deepEqual(fishOil.sourceRoutes[0].alternatives.map((route) => route.id), ["ocean-route", "lake-route"]);
+});
+
+test("computeCraftPlan route overrides select either lake or ocean fish but never both", () => {
+  for (const [selectedRecipeId, expectedFish, excludedFish] of [
+    ["lake-route", "Lake Fish", "Ocean Fish"],
+    ["ocean-route", "Ocean Fish", "Lake Fish"],
+  ]) {
+    const plan = computeCraftPlan({
+      config: normalizeCraftPlanConfig({
+        enabled: true,
+        targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 10, itemType: 0 }],
+        routeOverrides: { [recipeKey("items", "900")]: selectedRecipeId },
+      }),
+      detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
+    });
+
+    assert.equal(plan.materials.find((material) => material.name === expectedFish)?.required, 30);
+    assert.equal(plan.materials.some((material) => material.name === excludedFish), false);
+    const fishOil = plan.materials.find((material) => material.name === "Fish Oil");
+    assert.equal(fishOil.sourceRoutes.length, 1);
+    assert.equal(fishOil.sourceRoutes[0].selectedRecipeId, selectedRecipeId);
+  }
+});
+
+test("computeCraftPlan credits simultaneous farming co-products without recursive seed inflation", () => {
+  const filamentDetail = { item: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 } };
+  const productsDetail = {
+    item: { id: "1220023", name: "Basic Wispweave Products", itemType: 0, tag: "Wispweave Products", tier: 1 },
+    craftingRecipes: [{
+      id: "harvest-wispweave",
+      name: "Harvest Basic Wispweave Plant",
+      craftedItemStacks: [{ item_id: "1220023", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "1220023", name: "Basic Wispweave Products", itemType: 0, tier: 1 }],
+      consumedItemStacks: [{ item_id: "1100016", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "1100016", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 }],
+      levelRequirements: [{ skill: { name: "Farming" }, level: 1 }],
+    }],
+    itemListPossibilities: [
+      { targetId: "1100015", targetItem: { id: "1100015", name: "Basic Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 1 }, quantity: 1.8, chance: 1 },
+      { targetId: "1100017", targetItem: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 }, quantity: 5, chance: 1 },
+    ],
+  };
+  const plantDetail = {
+    item: { id: "1100016", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 },
+    craftingRecipes: [{
+      id: "grow-wispweave",
+      name: "Grow Basic Wispweave Plant",
+      craftedItemStacks: [{ item_id: "1100016", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [
+        { item_id: "1100015", item_type: "item", quantity: 1 },
+        { item_id: "1100001", item_type: "item", quantity: 1 },
+      ],
+      consumedItems: [
+        { id: "1100015", name: "Basic Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 1 },
+        { id: "1100001", name: "Basic Fertilizer", itemType: 0, tag: "Fertilizer", tier: 1 },
+      ],
+      levelRequirements: [{ skill: { name: "Farming" }, level: 1 }],
+    }],
+  };
+  const seedDetail = { item: { id: "1100015", name: "Basic Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 1 } };
+  const fertilizerDetail = { item: { id: "1100001", name: "Basic Fertilizer", itemType: 0, tag: "Fertilizer", tier: 1 } };
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "1100017", kind: "items", name: "Rough Wispweave Filament", quantity: 715, itemType: 0 }] }),
+    detailsByKey: new Map([
+      [recipeKey("items", "1100017"), filamentDetail],
+      [recipeKey("items", "1220023"), productsDetail],
+      [recipeKey("items", "1100016"), plantDetail],
+      [recipeKey("items", "1100015"), seedDetail],
+      [recipeKey("items", "1100001"), fertilizerDetail],
+    ]),
+  });
+
+  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Plant")?.required, 143);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Fertilizer")?.required, 143);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Seeds")?.missing, 0);
+  assert.equal(plan.totals.missingQuantity, 1_001);
 });
 
 
