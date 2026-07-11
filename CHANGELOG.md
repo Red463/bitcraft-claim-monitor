@@ -9,6 +9,20 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.31] - 2026-07-11
+
+### Added
+
+- Added a browser-local Ocean or Lake fishing preference to Craft Planning so each user can view the remaining Fish Oil requirement through their preferred gathering route.
+
+### Changed
+
+- Craft Planning now accounts for stored Ocean Fish, Lake Fish, Fish Oil, and guaranteed tracked outputs before calculating either personal fishing route.
+
+### Fixed
+
+- Fixed probabilistic Fish Oil outputs being treated as guaranteed when calculating personal gathering requirements.
+
 ## [0.32.0-beta.30] - 2026-07-11
 
 ### Changed
