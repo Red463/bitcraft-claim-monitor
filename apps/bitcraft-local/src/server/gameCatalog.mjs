@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 2;
+export const GAME_CATALOG_NORMALIZATION_VERSION = 3;
 
 export function catalogNormalizationNeedsRefresh(storedVersion) {
   return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
@@ -234,17 +234,24 @@ function coalesceItemListOutputs(outputs) {
   const byPair = new Map();
   for (const output of outputs) {
     const key = `${output.producerKey}\u0000${output.outputKey}`;
-    const existing = byPair.get(key);
-    const expectedYield = Math.max(0, toNumber(output.quantity)) * normalizedProbability(output.chance);
-    if (!existing) {
-      byPair.set(key, { ...output, quantity: expectedYield, chance: 1 });
-      continue;
-    }
-    existing.quantity += expectedYield;
+    const quantity = Math.max(0, toNumber(output.quantity));
+    const chance = normalizedProbability(output.chance);
+    const existing = byPair.get(key) ?? {
+      ...output,
+      quantity: 0,
+      chance: 1,
+      minimumQuantity: Number.POSITIVE_INFINITY,
+      totalChance: 0,
+    };
+    existing.quantity += quantity * chance;
+    existing.minimumQuantity = Math.min(existing.minimumQuantity, quantity);
+    existing.totalChance += chance;
+    byPair.set(key, existing);
   }
-  return [...byPair.values()].map((output) => ({
+  return [...byPair.values()].map(({ minimumQuantity, totalChance, ...output }) => ({
     ...output,
     quantity: Number(output.quantity.toFixed(12)),
+    guaranteedQuantity: totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity : 0,
   }));
 }
 
@@ -392,8 +399,8 @@ export function createGameCatalogRepository(db) {
       VALUES (?, ?, ?, ?, ?, ?)
     `),
     insertItemListOutput: db.prepare(`
-      INSERT INTO game_catalog_item_list_outputs (producer_key, output_key, kind, target_id, quantity, chance)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO game_catalog_item_list_outputs (producer_key, output_key, kind, target_id, quantity, chance, guaranteed_quantity)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `),
     listProducerRecipesForOutput: db.prepare(`
       SELECT DISTINCT recipes.*
@@ -429,6 +436,7 @@ export function createGameCatalogRepository(db) {
         outputs.target_id AS output_target_id,
         outputs.quantity AS output_quantity,
         outputs.chance AS output_chance,
+        outputs.guaranteed_quantity AS output_guaranteed_quantity,
         entities.catalog_key,
         entities.kind,
         entities.target_id,
@@ -733,7 +741,7 @@ export function createGameCatalogRepository(db) {
         }
 
         for (const output of normalized.itemListOutputs) {
-          statements.insertItemListOutput.run(output.producerKey, output.outputKey, output.kind, output.targetId, output.quantity, output.chance);
+          statements.insertItemListOutput.run(output.producerKey, output.outputKey, output.kind, output.targetId, output.quantity, output.chance, output.guaranteedQuantity);
         }
 
         for (const recipeKey of previousRecipeKeys) {
@@ -771,6 +779,7 @@ export function createGameCatalogRepository(db) {
         targetId: row.output_target_id,
         quantity: toNumber(row.output_quantity),
         chance: toNumber(row.output_chance, 1),
+        guaranteedQuantity: Math.max(0, toNumber(row.output_guaranteed_quantity)),
         producer: mapEntityRow(row),
       }));
     },

@@ -246,7 +246,7 @@ function possibilityExpectedOutputs(detail) {
     const kind = possibilityKind(possibility);
     const quantity = Math.max(0, toNumber(possibility.quantity));
     const rawChance = possibility.chance == null ? 1 : toNumber(possibility.chance);
-    const chance = rawChance > 1 ? rawChance / 100 : rawChance;
+    const chance = Math.max(0, Math.min(1, rawChance > 1 ? rawChance / 100 : rawChance));
     const expectedYield = quantity * Math.max(0, Math.min(1, chance || 0));
     if (expectedYield <= 0) continue;
     const key = recipeKey(kind, id);
@@ -260,11 +260,25 @@ function possibilityExpectedOutputs(detail) {
       rarityStr: possibility?.targetItem?.rarityStr ?? possibility?.targetItem?.rarity ?? null,
       iconAssetName: possibility?.targetItem?.iconAssetName ?? null,
       quantity: 0,
+      explicitGuaranteedQuantity: 0,
+      hasExplicitGuarantee: true,
+      minimumQuantity: Number.POSITIVE_INFINITY,
+      totalChance: 0,
     };
     current.quantity += expectedYield;
+    const explicitGuarantee = possibility?.guaranteedQuantity ?? possibility?.guaranteed_quantity;
+    current.hasExplicitGuarantee = current.hasExplicitGuarantee && explicitGuarantee != null && Number.isFinite(Number(explicitGuarantee));
+    current.explicitGuaranteedQuantity += Math.max(0, toNumber(explicitGuarantee));
+    current.minimumQuantity = Math.min(current.minimumQuantity, quantity);
+    current.totalChance += chance;
     outputs.set(key, current);
   }
-  return [...outputs.values()];
+  return [...outputs.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, ...output }) => ({
+    ...output,
+    guaranteedQuantity: hasExplicitGuarantee
+      ? explicitGuaranteedQuantity
+      : totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity : 0,
+  }));
 }
 
 function possibilityRecipesForTarget(target, detailsByKey) {
@@ -285,6 +299,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
       const craftedOutputs = expectedOutputs.map((expectedOutput) => ({
         ...expectedOutput,
         quantity: expectedOutput.quantity * outputPerCraft,
+        guaranteedQuantity: expectedOutput.guaranteedQuantity * outputPerCraft,
       }));
       recipes.push({
         ...recipe,
@@ -294,6 +309,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
           item_id: craftedOutput.id,
           item_type: craftedOutput.kind === "cargo" ? "cargo" : "item",
           quantity: craftedOutput.quantity,
+          guaranteedQuantity: craftedOutput.guaranteedQuantity,
         })),
         craftedItems: craftedOutputs,
         consumedItemStacks: recipeInputs(recipe),
@@ -332,9 +348,10 @@ function fishingRouteFamily(item) {
 }
 
 function guaranteedTargetYield(recipe, target) {
-  if (recipe?.isExpectedYield === true) return 0;
   const output = recipeOutputs(recipe).find((entry) => stackMatches(entry, target));
-  const minimum = toNumber(output?.quantityMin ?? output?.minQuantity ?? output?.quantity);
+  const guaranteed = output?.guaranteedQuantity ?? output?.guaranteed_quantity;
+  if (recipe?.isExpectedYield === true && guaranteed == null) return 0;
+  const minimum = toNumber(guaranteed ?? output?.quantityMin ?? output?.minQuantity ?? output?.quantity);
   return Number.isFinite(minimum) && minimum > 0 ? minimum : 0;
 }
 
@@ -680,6 +697,7 @@ function catalogByproductPossibility(repository, row, warnings) {
     targetItem,
     quantity: toNumber(row.quantity),
     chance: row.chance == null ? 1 : toNumber(row.chance),
+    guaranteedQuantity: Math.max(0, toNumber(row.guaranteedQuantity)),
     isCargo: targetItem.kind === "cargo",
   };
 }
@@ -821,11 +839,14 @@ function normalizeSourceItem(item) {
   const id = String(item?.itemId ?? item?.item_id ?? item?.outputItemId ?? item?.craftedItem?.[0]?.item_id ?? item?.id ?? "").trim();
   if (!id) return null;
   const kind = normalizeKind(item?.kind ?? item?.itemType ?? item?.item_type);
+  const quantity = toNumber(item?.quantity ?? item?.qty ?? item?.amount);
+  const guaranteedQuantity = item?.guaranteedQuantity ?? item?.guaranteed_quantity;
   return {
     key: recipeKey(kind, id),
     id,
     kind,
-    quantity: toNumber(item?.quantity ?? item?.qty ?? item?.amount),
+    quantity,
+    guaranteedQuantity: guaranteedQuantity == null ? quantity : Math.max(0, toNumber(guaranteedQuantity)),
     name: item?.name == null ? `Item #${id}` : String(item.name),
     playerId: item?.playerId == null ? null : String(item.playerId),
     playerName: item?.playerName == null && item?.crafterName == null ? null : String(item.playerName ?? item.crafterName),
@@ -834,7 +855,7 @@ function normalizeSourceItem(item) {
   };
 }
 
-function addSourceTotals(totals, sources, type, unavailable) {
+function addSourceTotals(totals, sources, type, unavailable, quantityField = "quantity") {
   for (const source of sources ?? []) {
     if (source?.unavailable) {
       unavailable.push({ sourceId: String(source.sourceId ?? ""), label: String(source.label ?? type), type, error: String(source.error ?? "Unavailable") });
@@ -842,14 +863,15 @@ function addSourceTotals(totals, sources, type, unavailable) {
     }
     for (const rawItem of source?.items ?? []) {
       const item = normalizeSourceItem(rawItem);
-      if (!item || item.quantity <= 0) continue;
+      const quantity = item?.[quantityField] ?? 0;
+      if (!item || quantity <= 0) continue;
       const current = totals.get(item.key) ?? { total: 0, sources: [] };
-      current.total += item.quantity;
+      current.total += quantity;
       current.sources.push({
         sourceId: String(source.sourceId ?? ""),
         label: String(source.label ?? item.buildingName ?? type),
         type,
-        quantity: item.quantity,
+        quantity,
         playerId: source.playerId == null ? item.playerId : String(source.playerId),
         playerName: source.playerName == null ? item.playerName : String(source.playerName),
         buildingName: source.buildingName == null ? item.buildingName : String(source.buildingName),
@@ -890,7 +912,12 @@ function unavailableFishingRoute() {
   return { available: false, reason: "Verified route unavailable" };
 }
 
-function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotals, activeTotals) {
+function addFishingCatalogWarning(warnings, message) {
+  if (warnings instanceof Set) warnings.add(message);
+  else if (Array.isArray(warnings)) warnings.push(message);
+}
+
+function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotals, guaranteedActiveTotals, warnings) {
   const routes = {
     ocean: unavailableFishingRoute(),
     lake: unavailableFishingRoute(),
@@ -901,26 +928,32 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
     const input = enrichDisplayFromDetails(stackDisplay(inputStack, recipe.consumedItems, 0), detailsByKey);
     const family = fishingRouteFamily(input);
     const guaranteedYield = guaranteedTargetYield(recipe, oil);
-    if (!family || guaranteedYield <= 0 || routes[family].available) continue;
+    if (!family) continue;
+    if (guaranteedYield <= 0) {
+      addFishingCatalogWarning(warnings, `${family === "ocean" ? "Ocean" : "Lake"} Fish route to ${oil.name} has no positive guaranteed yield in the local catalog.`);
+      continue;
+    }
+    if (routes[family].available) continue;
     const route = { input: pickPlannerItem(input) };
     routes[family] = {
       available: true,
       ...route,
       guaranteedYield,
       stockQuantity: routeStock(route, availableTotals),
-      trackedQuantity: routeStock(route, activeTotals),
+      trackedQuantity: routeStock(route, guaranteedActiveTotals),
     };
   }
   return routes;
 }
 
-export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeTotals }) {
+export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, warnings }) {
   const fishOilMaterials = (materials ?? []).filter((item) => String(item?.tag ?? "").toLowerCase().includes("fish oil"));
   return { tiers: fishOilMaterials.map((oil) => {
     const alternatives = recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
-    const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, activeTotals);
+    const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, guaranteedActiveTotals, warnings);
     const verifiedRoutes = Object.values(routes).filter((route) => route.available);
-    const availableOilEquivalent = oil.available + oil.inProgress + verifiedRoutes.reduce((total, route) => (
+    const trackedOil = guaranteedActiveTotals.get(oil.key)?.total ?? 0;
+    const availableOilEquivalent = oil.available + trackedOil + verifiedRoutes.reduce((total, route) => (
       total + (route.stockQuantity + route.trackedQuantity) * route.guaranteedYield
     ), 0);
     const remainingOil = Math.max(0, oil.bufferedRequired - availableOilEquivalent);
@@ -930,7 +963,7 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
       output: pickPlannerItem(oil),
       requiredOil: oil.bufferedRequired,
       availableOil: oil.available,
-      trackedOil: oil.inProgress,
+      trackedOil,
       remainingOil,
       routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => [family, route.available ? {
         ...route,
@@ -967,6 +1000,7 @@ export function computeCraftPlan({
   })));
 
   const activeTotals = new Map();
+  const guaranteedActiveTotals = new Map();
   const craftPlayerIds = new Set(normalized.sourceRules.craftPlayerIds.map(String));
   const activeCraftSources = (activeCrafts ?? [])
     .filter((craft) => craftPlayerIds.has(String(craft?.playerId ?? craft?.playerEntityId ?? "")))
@@ -983,6 +1017,7 @@ export function computeCraftPlan({
       items: [craft],
     }));
   addSourceTotals(activeTotals, activeCraftSources, "Active craft", unavailableSources);
+  addSourceTotals(guaranteedActiveTotals, activeCraftSources, "Active craft", unavailableSources, "guaranteedQuantity");
 
   const effectiveStockTotals = new Map(availableTotals);
   for (const [key, active] of activeTotals.entries()) {
@@ -1043,7 +1078,7 @@ export function computeCraftPlan({
   });
 
   const personalViews = {
-    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeTotals }),
+    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, warnings }),
   };
 
   return {

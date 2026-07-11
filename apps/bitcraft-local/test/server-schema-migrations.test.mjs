@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
@@ -35,7 +36,35 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
     { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
     { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
+    { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
   ]);
+});
+
+test("guaranteed item-list quantity migrates an existing catalog additively", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE game_catalog_item_list_outputs (
+      producer_key TEXT NOT NULL,
+      output_key TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      chance REAL,
+      PRIMARY KEY (producer_key, output_key)
+    );
+    INSERT INTO game_catalog_item_list_outputs (producer_key, output_key, quantity, chance)
+    VALUES ('items:products', 'items:oil', 3.05, 1);
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "game_catalog_item_list_outputs",
+    column: "guaranteed_quantity",
+    definition: "REAL NOT NULL DEFAULT 0",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT quantity, guaranteed_quantity FROM game_catalog_item_list_outputs").get() },
+    { quantity: 3.05, guaranteed_quantity: 0 },
+  );
+  db.close();
 });
 
 test("schemaIndexStatements preserves release-sensitive unique indexes", () => {

@@ -80,6 +80,7 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
 
 test("Craft Planning keeps the preferred fishing route browser-local", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
 
   assert.match(page, /usePersistedState<FishingRoutePreference>\("planning\.fishingRoute", "ocean"\)/);
   assert.match(page, /normalizeFishingRoutePreference\(fishingRoute\)/);
@@ -89,6 +90,10 @@ test("Craft Planning keeps the preferred fishing route browser-local", () => {
   assert.match(page, />Ocean<\/button>/);
   assert.match(page, />Lake<\/button>/);
   assert.match(page, /personalBoard\.reason/);
+  assert.match(page, /role="status"/);
+  assert.match(page, /aria-live="polite"/);
+  assert.match(styles, /\.craft-plan-section-filters\s*>\s*button\s*>\s*span/);
+  assert.doesNotMatch(styles, /\.craft-plan-section-filters span\s*\{/);
   assert.doesNotMatch(page.match(/async function saveRowOverride[\s\S]*?\n  }\n  async function saveRouteOverride/)?.[0] ?? "", /setFishingRoute/);
   assert.doesNotMatch(page.match(/async function saveRouteOverride[\s\S]*?\n  }\n\n  if \(loading/)?.[0] ?? "", /setFishingRoute/);
 });

@@ -258,6 +258,7 @@ export const schemaBootstrapSql = `
     target_id TEXT NOT NULL,
     quantity REAL NOT NULL,
     chance REAL,
+    guaranteed_quantity REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (producer_key, output_key)
   );
   CREATE TABLE IF NOT EXISTS game_catalog_refresh_runs (

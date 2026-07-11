@@ -49,6 +49,12 @@ function craftOutputKey(kind, id) {
   return `${kind}:${String(id)}`;
 }
 
+function normalizedProbability(value) {
+  const raw = Math.max(0, Number(value ?? 1));
+  if (!Number.isFinite(raw)) return 0;
+  return Math.min(1, raw > 1 ? raw / 100 : raw);
+}
+
 function detailPayload(detail) {
   return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
 }
@@ -60,7 +66,9 @@ function expectedPossibilityOutputs(detail, directOutputQuantity) {
     const id = String(possibility?.targetId ?? display.id ?? possibility?.itemId ?? "").trim();
     if (!id) continue;
     const kind = craftOutputKind(possibility?.isCargo === true ? "cargo" : possibility?.itemType ?? possibility?.item_type);
-    const expectedQuantity = directOutputQuantity * Number(possibility?.quantity ?? 0) * Number(possibility?.chance ?? 1);
+    const quantity = Math.max(0, Number(possibility?.quantity ?? 0));
+    const chance = normalizedProbability(possibility?.chance);
+    const expectedQuantity = directOutputQuantity * quantity * chance;
     if (!Number.isFinite(expectedQuantity) || expectedQuantity <= 0) continue;
     const key = craftOutputKey(kind, id);
     const current = grouped.get(key) ?? {
@@ -71,11 +79,26 @@ function expectedPossibilityOutputs(detail, directOutputQuantity) {
       tag: display.tag ?? possibility?.tag ?? null,
       iconAssetName: display.iconAssetName ?? possibility?.iconAssetName ?? null,
       quantity: 0,
+      explicitGuaranteedQuantity: 0,
+      hasExplicitGuarantee: true,
+      minimumQuantity: Number.POSITIVE_INFINITY,
+      totalChance: 0,
     };
     current.quantity += expectedQuantity;
+    const explicitGuarantee = possibility?.guaranteedQuantity ?? possibility?.guaranteed_quantity;
+    current.hasExplicitGuarantee = current.hasExplicitGuarantee && explicitGuarantee != null && Number.isFinite(Number(explicitGuarantee));
+    current.explicitGuaranteedQuantity += Math.max(0, Number(explicitGuarantee) || 0) * directOutputQuantity;
+    current.minimumQuantity = Math.min(current.minimumQuantity, quantity);
+    current.totalChance += chance;
     grouped.set(key, current);
   }
-  return [...grouped.values()].map((output) => ({ ...output, quantity: Math.round(output.quantity * 1_000_000) / 1_000_000 }));
+  return [...grouped.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, ...output }) => ({
+    ...output,
+    quantity: Math.round(output.quantity * 1_000_000) / 1_000_000,
+    guaranteedQuantity: hasExplicitGuarantee
+      ? explicitGuaranteedQuantity
+      : totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity * directOutputQuantity : 0,
+  }));
 }
 
 export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new Map()) {
@@ -120,6 +143,7 @@ export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new M
         itemId,
         kind,
         quantity: directQuantity,
+        guaranteedQuantity: directQuantity,
         name: item.name ?? craftDisplayName(craft, craftsPayload),
         iconAssetName: item.iconAssetName ?? null,
         tier: item.tier ?? null,

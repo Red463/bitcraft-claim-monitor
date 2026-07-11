@@ -258,8 +258,8 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   ]);
 
   assert.deepEqual(normalized.itemListOutputs, [
-    { producerKey: "items:1220019", outputKey: "items:1110012", kind: "items", targetId: "1110012", quantity: 0.1, chance: 1 },
-    { producerKey: "items:1220019", outputKey: "cargo:500100", kind: "cargo", targetId: "500100", quantity: 0.5, chance: 1 },
+    { producerKey: "items:1220019", outputKey: "items:1110012", kind: "items", targetId: "1110012", quantity: 0.1, chance: 1, guaranteedQuantity: 0 },
+    { producerKey: "items:1220019", outputKey: "cargo:500100", kind: "cargo", targetId: "500100", quantity: 0.5, chance: 1, guaranteedQuantity: 0 },
   ]);
 });
 
@@ -289,7 +289,7 @@ test("normalizeGameCatalogDetail sums expected yield across an item-list probabi
   });
 
   assert.deepEqual(normalized.itemListOutputs, [
-    { producerKey: "items:7000", outputKey: "items:7010", kind: "items", targetId: "7010", quantity: 0.45, chance: 1 },
+    { producerKey: "items:7000", outputKey: "items:7010", kind: "items", targetId: "7010", quantity: 0.45, chance: 1, guaranteedQuantity: 0 },
   ]);
 
   const db = createDb();
@@ -336,17 +336,39 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
   });
 
   assert.equal(ocean.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.quantity, 3.05);
+  assert.equal(ocean.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.guaranteedQuantity, 3);
   assert.equal(lake.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.quantity, 1);
+  assert.equal(lake.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.guaranteedQuantity, 1);
 });
 
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 3);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION - 1), false);
   assert.equal(catalogRefreshShouldResume({ status: "completed" }, GAME_CATALOG_NORMALIZATION_VERSION), false);
+});
+
+test("game catalog repository persists expected and guaranteed item-list quantities", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail({
+    item: { id: "1110024", itemType: 0, name: "Briny Linus Products", tag: "Oceanfish Products", tier: 1 },
+    itemListPossibilities: [
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 3, chance: 0.5 },
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 3, chance: 0.45 },
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 4, chance: 0.05 },
+    ],
+  }, { updatedAt: UPDATED_AT });
+
+  assert.deepEqual(repository.listByproductProducersForOutput("items:1110010").map((row) => ({
+    quantity: row.quantity,
+    guaranteedQuantity: row.guaranteedQuantity,
+  })), [{ quantity: 3.05, guaranteedQuantity: 3 }]);
+  db.close();
 });
 
 test("normalizeGameCatalogDetail preserves the full expected yield of farming co-products", () => {
@@ -369,8 +391,8 @@ test("normalizeGameCatalogDetail preserves the full expected yield of farming co
   });
 
   assert.deepEqual(normalized.itemListOutputs, [
-    { producerKey: "items:1220023", outputKey: "items:1100015", kind: "items", targetId: "1100015", quantity: 1.6, chance: 1 },
-    { producerKey: "items:1220023", outputKey: "items:1100017", kind: "items", targetId: "1100017", quantity: 5, chance: 1 },
+    { producerKey: "items:1220023", outputKey: "items:1100015", kind: "items", targetId: "1100015", quantity: 1.6, chance: 1, guaranteedQuantity: 1 },
+    { producerKey: "items:1220023", outputKey: "items:1100017", kind: "items", targetId: "1100017", quantity: 5, chance: 1, guaranteedQuantity: 3 },
   ]);
 });
 

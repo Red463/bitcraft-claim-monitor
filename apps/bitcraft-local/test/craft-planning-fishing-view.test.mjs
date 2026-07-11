@@ -196,6 +196,37 @@ test("rejects a selected canonical row with an unprojected authoritative tier", 
   assert.equal(result.reason, "Verified Ocean Fish route unavailable");
 });
 
+test("rejects an unselected canonical row with an unprojected authoritative tier", () => {
+  const board = makeBoard();
+  const lake = board[0].rows.find((row) => row.apiName === "Lake Fish");
+  lake.cells.set("T2", makeCell("Stale Lake Fish T2", { required: 30, missing: 30 }));
+  const originalBoard = structuredClone(board);
+
+  const result = applyPersonalFishingView(board, makeRouteView(), "ocean");
+
+  assert.strictEqual(result.board, board);
+  assert.deepEqual(board, originalBoard);
+  assert.equal(result.available, false);
+  assert.equal(result.reason, "Verified Ocean Fish route unavailable");
+});
+
+test("keeps the authoritative board when a canonical route has a section override", () => {
+  const board = makeBoard();
+  const fishing = board[0];
+  const lake = fishing.rows.find((row) => row.apiName === "Lake Fish");
+  fishing.rows = fishing.rows.filter((row) => row !== lake);
+  lake.sectionOverride = "Cooking";
+  board.push({ section: "Cooking", rows: [lake], required: 20, covered: 0, completion: 0 });
+  const originalBoard = structuredClone(board);
+
+  const result = applyPersonalFishingView(board, makeRouteView(), "ocean");
+
+  assert.strictEqual(result.board, board);
+  assert.deepEqual(board, originalBoard);
+  assert.equal(result.available, false);
+  assert.equal(result.reason, "Verified Ocean Fish route unavailable");
+});
+
 test("returns the untouched board when any projected tier lacks the selected route", () => {
   const board = makeBoard();
   const originalBoard = structuredClone(board);

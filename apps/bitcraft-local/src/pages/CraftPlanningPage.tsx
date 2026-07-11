@@ -424,7 +424,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 <span>Fishing route</span>
                 <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
                 <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
-                {!personalBoard.available && personalBoard.reason ? <small>{personalBoard.reason}</small> : null}
+                {!personalBoard.available && personalBoard.reason ? <small role="status" aria-live="polite">{personalBoard.reason}</small> : null}
               </div> : null}
               <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
             </div> : null}

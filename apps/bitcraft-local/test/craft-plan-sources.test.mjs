@@ -31,6 +31,7 @@ test("trackedCraftPlanOutputs expands farming product possibilities into expecte
   const filament = outputs.find((output) => output.itemId === "3100017");
 
   assert.equal(filament?.quantity, 2530);
+  assert.equal(filament?.guaranteedQuantity, 1518);
   assert.equal(filament?.playerName, "Oddfawn");
   assert.equal(filament?.buildingName, "Exquisite Farming Station");
   assert.equal(filament?.status, "In progress");
@@ -55,7 +56,34 @@ test("trackedCraftPlanOutputs preserves ordinary direct craft outputs", () => {
   assert.equal(outputs.length, 1);
   assert.equal(outputs[0].itemId, "1020003");
   assert.equal(outputs[0].quantity, 612);
+  assert.equal(outputs[0].guaranteedQuantity, 612);
   assert.equal(outputs[0].status, "Ready to collect");
+});
+
+test("trackedCraftPlanOutputs keeps expected output without guaranteeing a partial distribution", () => {
+  const payload = {
+    craftResults: [{
+      entityId: "craft-fish-products",
+      ownerEntityId: "player-fisher",
+      craftCount: 2,
+      craftedItem: [{ item_id: 1903, quantity: 1, item_type: "item" }],
+    }],
+    items: [{ id: 1903, name: "Ocean Fish Products", tier: 1, tag: "Fish Products" }],
+  };
+  const detailsByKey = new Map([["items:1903", {
+    item: payload.items[0],
+    itemListPossibilities: [{
+      targetId: "1900",
+      targetItem: { id: "1900", name: "Basic Fish Oil", tier: 1, tag: "Fish Oil" },
+      quantity: 4,
+      chance: 0.5,
+    }],
+  }]]);
+
+  const oil = trackedCraftPlanOutputs([payload], detailsByKey).find((output) => output.itemId === "1900");
+
+  assert.equal(oil?.quantity, 4);
+  assert.equal(oil?.guaranteedQuantity, 0);
 });
 
 test("playerInventoryContainerSources reads wrapped BitJita inventories and separates player storage", () => {

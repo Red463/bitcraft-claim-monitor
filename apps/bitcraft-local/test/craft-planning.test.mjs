@@ -218,6 +218,90 @@ test("personal fishing view excludes a positive-chance fish-oil byproduct withou
   assert.equal(tier.routes.ocean.available, false);
   assert.equal(tier.remainingOil, 10);
   assert.equal(tier.routes.lake.needed, 10);
+  assert.equal(plan.warnings.some((warning) => /Ocean Fish.*no positive guaranteed yield/i.test(warning)), true);
+});
+
+test("personal fishing view does not deduct expected tracked oil without a guaranteed output", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["player"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    activeCrafts: [{
+      id: "craft",
+      playerId: "player",
+      itemId: "1900",
+      kind: "items",
+      quantity: 2,
+      guaranteedQuantity: 0,
+      name: "Basic Fish Oil",
+    }],
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(plan.materials.find((material) => material.id === "1900")?.inProgress, 2);
+  assert.equal(tier.trackedOil, 0);
+  assert.equal(tier.remainingOil, 10);
+  assert.equal(tier.routes.ocean.needed, 4);
+});
+
+test("normalized local fishing distributions retain guaranteed route yields end to end", (t) => {
+  const { repository } = createCatalogFixture(t);
+  const oil = { id: "1900", itemType: 0, name: "Basic Fish Oil", tag: "Fish Oil", tier: 1 };
+  const oceanFish = { id: "1901", itemType: 0, name: "Briny Linus", tag: "Ocean Fish", tier: 1 };
+  const lakeFish = { id: "1902", itemType: 0, name: "Briny Argus", tag: "Lake Fish", tier: 1 };
+  upsertCatalogDetails(repository, [
+    { item: oil },
+    {
+      item: { id: "1903", itemType: 0, name: "Briny Linus Products", tag: "Oceanfish Products", tier: 1 },
+      craftingRecipes: [{
+        id: "process-ocean-fish",
+        name: "Process Ocean Fish",
+        craftedItemStacks: [{ item_id: "1903", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [{ item_id: oceanFish.id, item_type: "item", quantity: 1 }],
+        consumedItems: [oceanFish],
+      }],
+      itemListPossibilities: [
+        { targetId: oil.id, targetItem: oil, quantity: 3, chance: 0.5 },
+        { targetId: oil.id, targetItem: oil, quantity: 3, chance: 0.45 },
+        { targetId: oil.id, targetItem: oil, quantity: 4, chance: 0.05 },
+      ],
+    },
+    {
+      item: { id: "1904", itemType: 0, name: "Briny Argus Products", tag: "Lake Fish Products", tier: 1 },
+      craftingRecipes: [{
+        id: "process-lake-fish",
+        name: "Process Lake Fish",
+        craftedItemStacks: [{ item_id: "1904", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [{ item_id: lakeFish.id, item_type: "item", quantity: 1 }],
+        consumedItems: [lakeFish],
+      }],
+      itemListPossibilities: [
+        { targetId: oil.id, targetItem: oil, quantity: 1, chance: 0.5 },
+        { targetId: oil.id, targetItem: oil, quantity: 1, chance: 0.5 },
+      ],
+    },
+    { item: oceanFish },
+    { item: lakeFish },
+  ]);
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ ...oil, kind: "items", quantity: 10 }],
+  });
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+
+  const plan = computeCraftPlan({ config, detailsByKey, catalogWarnings: warnings });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.routes.ocean.available, true);
+  assert.equal(tier.routes.ocean.guaranteedYield, 3);
+  assert.equal(tier.routes.ocean.needed, 4);
+  assert.equal(tier.routes.lake.available, true);
+  assert.equal(tier.routes.lake.guaranteedYield, 1);
+  assert.equal(tier.routes.lake.needed, 10);
+  assert.equal(plan.warnings.some((warning) => /no positive guaranteed yield/i.test(warning)), false);
 });
 
 test("personal fishing view uses completed uncollected fish-oil crafts", () => {

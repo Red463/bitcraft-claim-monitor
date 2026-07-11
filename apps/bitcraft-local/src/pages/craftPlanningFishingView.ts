@@ -129,10 +129,17 @@ export function applyPersonalFishingView(
   const fishing = board[fishingIndex];
   const selectedName = routeName(preference);
   const otherName = routeName(preference === "lake" ? "ocean" : "lake");
-  const existingSelected = fishing.rows.find((row) => isCanonicalFishingRow(row, selectedName));
-  if (existingSelected && [...existingSelected.cells.keys()].some((column) => isPlannerTierColumn(column) && !projections.has(column))) {
+  const canonicalRows = board.flatMap((group, groupIndex) => group.rows
+    .filter((row) => isCanonicalFishingRow(row, selectedName) || isCanonicalFishingRow(row, otherName))
+    .map((row) => ({ row, groupIndex })));
+  if (canonicalRows.some(({ groupIndex }) => groupIndex !== fishingIndex)) {
     return unavailableResult(board, preference);
   }
+  const authoritativeTierColumns = new Set(canonicalRows.flatMap(({ row }) => [...row.cells.keys()].filter(isPlannerTierColumn)));
+  if ([...authoritativeTierColumns].some((column) => !projections.has(column))) {
+    return unavailableResult(board, preference);
+  }
+  const existingSelected = fishing.rows.find((row) => isCanonicalFishingRow(row, selectedName));
   const selectedRow = cloneRow(existingSelected ?? newFishingRow(selectedName));
   selectedRow.cells = new Map(projections);
   selectedRow.maxMissing = rowMaxMissing(selectedRow);
