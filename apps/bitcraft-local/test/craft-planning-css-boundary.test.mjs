@@ -16,6 +16,17 @@ test("Craft planning item details use a fixed viewport modal", () => {
   assert.ok(modalMatch, "detail modal CSS should exist");
   assert.match(modalMatch[1], /max-height:\s*calc\(100vh - 36px\)/);
   assert.match(modalMatch[1], /overflow:\s*hidden/);
+
+  const headerMatch = css.match(/\.craft-plan-need-detail \.modal-header\s*\{([^}]+)\}/);
+  assert.ok(headerMatch, "detail modal header CSS should exist");
+  assert.match(headerMatch[1], /position:\s*relative/);
+  assert.match(headerMatch[1], /padding:\s*16px 58px 16px 18px/);
+
+  const closeMatch = css.match(/\.craft-plan-need-detail \.modal-header \.icon-button\s*\{([^}]+)\}/);
+  assert.ok(closeMatch, "detail modal close-button CSS should exist");
+  assert.match(closeMatch[1], /position:\s*absolute/);
+  assert.match(closeMatch[1], /top:\s*16px/);
+  assert.match(closeMatch[1], /right:\s*18px/);
 });
 
 test("Craft planning needs board cells avoid item icons", () => {
@@ -68,6 +79,18 @@ test("Craft planning item details style grouped stock and usage drilldowns", () 
   assert.match(css, /\.craft-plan-detail-breakdown\s*\{/);
   assert.match(css, /\.craft-plan-detail-row\.subtle\s*\{/);
   assert.match(css, /\.craft-plan-usage-breakdown summary\s*\{/);
+});
+
+test("Craft planning target editor keeps search and row actions visually grouped", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /craft-plan-target-search/);
+  assert.match(page, /craft-plan-target-editor-actions/);
+  assert.match(css, /\.craft-plan-target-search\s*\{[^}]*width:\s*min\(520px, 100%\)/);
+  assert.match(css, /\.craft-plan-target-editor-row\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.craft-plan-target-editor-actions\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /\.craft-plan-target-editor-actions\s*\{[^}]*grid-template-columns:\s*120px auto/);
 });
 
 test("Craft planning needs board row headings are allowed to wrap", () => {

@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.28] - 2026-07-11
+
+### Fixed
+
+- Fixed the Craft Planning item-detail close button appearing below the item summary instead of in the dialog header.
+- Fixed awkward spacing between manual target search, target quantities, and remove actions in Manage Craft Plan.
+
 ## [0.32.0-beta.27] - 2026-07-11
 
 ### Changed

@@ -41,9 +41,12 @@
 .craft-plan-manager-panel h3, .craft-plan-manager-panel h4 { margin: 0; }
 .craft-plan-search-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .craft-plan-search-results button { justify-content: flex-start; }
+.craft-plan-target-search { width: min(520px, 100%); }
+.craft-plan-target-search .search { width: 100%; }
 .craft-plan-target-editor-list { display: grid; gap: 8px; }
-.craft-plan-target-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 14px; align-items: end; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(8, 13, 20, 0.62); }
-.craft-plan-target-editor-row > .toolbar-button.danger { justify-self: end; min-width: 112px; }
+.craft-plan-target-editor-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(8, 13, 20, 0.62); }
+.craft-plan-target-editor-actions { display: grid; grid-template-columns: 120px auto; gap: 8px; align-items: end; flex: 0 0 auto; }
+.craft-plan-target-editor-actions > .toolbar-button.danger { min-width: 112px; }
 .craft-plan-source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
 .craft-plan-source-grid.compact { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .craft-plan-source-card { display: grid; gap: 10px; align-content: start; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 9px; background: rgba(9, 14, 21, 0.72); padding: 12px; min-height: 128px; }
@@ -108,7 +111,9 @@
 @media (max-width: 900px) {
   .craft-plan-manager-backdrop { padding: 10px; }
   .craft-plan-manager { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
-  .craft-plan-manager-actions, .craft-plan-target-editor-row { grid-template-columns: 1fr; }
+  .craft-plan-manager-actions { grid-template-columns: 1fr; }
+  .craft-plan-target-editor-row { align-items: stretch; flex-direction: column; }
+  .craft-plan-target-editor-actions { grid-template-columns: minmax(0, 1fr) auto; }
   .craft-plan-manager-buttons, .craft-plan-tier-presets-header, .craft-plan-catalog-controls { justify-content: start; flex-wrap: wrap; }
   .craft-plan-catalog-summary { flex-direction: column; }
   .craft-plan-catalog-stats { grid-template-columns: repeat(2, minmax(138px, 1fr)); }
@@ -221,9 +226,15 @@
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.58);
 }
 .craft-plan-need-detail .modal-header {
-  padding: 16px 18px;
+  position: relative;
+  padding: 16px 58px 16px 18px;
   border-bottom: 1px solid rgba(139, 159, 184, 0.22);
   background: rgba(14, 21, 30, 0.96);
+}
+.craft-plan-need-detail .modal-header .icon-button {
+  position: absolute;
+  top: 16px;
+  right: 18px;
 }
 .craft-plan-need-detail .modal-header h2 {
   margin: 0;
