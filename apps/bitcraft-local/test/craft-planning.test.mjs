@@ -67,6 +67,33 @@ function fishingPreferenceDetails({ oceanYield = 3, lakeYield = 1 } = {}) {
   }], [recipeKey("items", ocean.id), { item: ocean }], [recipeKey("items", lake.id), { item: lake }]]);
 }
 
+function probabilisticFishingPreferenceDetails() {
+  const oil = { id: "1900", name: "Basic Fish Oil", itemType: 0, tag: "Fish Oil", tier: 1 };
+  const ocean = { id: "1901", name: "Briny Linus", itemType: 0, tag: "Ocean Fish", tier: 1 };
+  const lake = { id: "1902", name: "Briny Argus", itemType: 0, tag: "Lake Fish", tier: 1 };
+  const products = { id: "1903", name: "Ocean Fish Products", itemType: 0, tag: "Fish Products", tier: 1 };
+  return new Map([[recipeKey("items", oil.id), {
+    item: oil,
+    craftingRecipes: [{
+      id: "lake-fish-oil",
+      name: "Press Lake Fish Oil",
+      craftedItemStacks: [{ item_id: oil.id, item_type: "item", quantity: 1, quantityMin: 1 }],
+      consumedItemStacks: [{ item_id: lake.id, item_type: "item", quantity: 1 }],
+      consumedItems: [lake],
+    }],
+  }], [recipeKey("items", products.id), {
+    item: products,
+    craftingRecipes: [{
+      id: "process-ocean-fish",
+      name: "Process Ocean Fish",
+      craftedItemStacks: [{ item_id: products.id, item_type: "item", quantity: 1 }],
+      consumedItemStacks: [{ item_id: ocean.id, item_type: "item", quantity: 1 }],
+      consumedItems: [ocean],
+    }],
+    itemListPossibilities: [{ targetId: oil.id, targetItem: oil, quantity: 4, chance: 0.5 }],
+  }], [recipeKey("items", ocean.id), { item: ocean }], [recipeKey("items", lake.id), { item: lake }]]);
+}
+
 const CATALOG_UPDATED_AT = "2026-07-10T12:00:00.000Z";
 
 function createCatalogFixture(t) {
@@ -174,6 +201,23 @@ test("personal fishing view excludes a route with no positive guaranteed yield",
   assert.equal(tier.routes.ocean.available, false);
   assert.equal(tier.routes.ocean.reason, "Verified route unavailable");
   assert.equal(tier.routes.lake.available, true);
+});
+
+test("personal fishing view excludes a positive-chance fish-oil byproduct without a guaranteed minimum", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { storageContainerIds: ["store"] },
+    }),
+    detailsByKey: probabilisticFishingPreferenceDetails(),
+    storageSources: [{ sourceId: "store", label: "Fishing", items: [{ id: "1901", kind: "items", name: "Briny Linus", quantity: 10 }] }],
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.routes.ocean.available, false);
+  assert.equal(tier.remainingOil, 10);
+  assert.equal(tier.routes.lake.needed, 10);
 });
 
 test("personal fishing view uses completed uncollected fish-oil crafts", () => {

@@ -309,6 +309,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
           buildingName: recipe.buildingName ?? recipe.building_name ?? null,
           skillName: gatheringSkill || null,
         },
+        isExpectedYield: true,
         expectedYield: yieldQuantity * outputPerCraft,
       });
     }
@@ -331,6 +332,7 @@ function fishingRouteFamily(item) {
 }
 
 function guaranteedTargetYield(recipe, target) {
+  if (recipe?.isExpectedYield === true) return 0;
   const output = recipeOutputs(recipe).find((entry) => stackMatches(entry, target));
   const minimum = toNumber(output?.quantityMin ?? output?.minQuantity ?? output?.quantity);
   return Number.isFinite(minimum) && minimum > 0 ? minimum : 0;
