@@ -169,8 +169,29 @@ function recipeLooksTransportRoute(recipe) {
   return inputDisplays.some(stackDisplayLooksTransport) || outputDisplays.some(stackDisplayLooksTransport);
 }
 
-function recipeSortScore(recipe) {
-  return (recipeLooksTransportRoute(recipe) ? 10000 : 0) + (recipe?.isPassive ? 10 : 0) + recipeInputs(recipe).length;
+function farmingRoutePreference(recipe, target, detailsByKey) {
+  const targetTag = String(target?.tag ?? "").trim();
+  const targetTier = normalizedTier(target?.tier);
+  if (!/\bPlant$/i.test(targetTag) || targetTier == null) return 0;
+  const inputs = recipeInputs(recipe).map((input, index) => {
+    const display = stackDisplay(input, recipe?.consumedItems, index);
+    return detailsByKey instanceof Map ? enrichDisplayFromDetails(display, detailsByKey) : display;
+  });
+  const usesLowerTierPlant = inputs.some((input) => String(input.tag ?? "").trim() === targetTag && input.tier != null && input.tier < targetTier);
+  if (usesLowerTierPlant) return 1000;
+  const usesSameTierSeeds = inputs.some((input) => /\bSeeds?$/i.test(String(input.tag ?? input.name ?? "")) && input.tier === targetTier);
+  return usesSameTierSeeds ? -1000 : 0;
+}
+
+function recipeSortScore(recipe, target, detailsByKey) {
+  const targetOutput = recipeOutputs(recipe).find((output) => stackMatches(output, target));
+  const routeCost = (recipeInputs(recipe).reduce((sum, input) => sum + Math.max(0, toNumber(input.quantity)), 0)
+    / Math.max(0.0001, toNumber(targetOutput?.quantity) || 1)) * 100;
+  return (recipeLooksTransportRoute(recipe) ? 10000 : 0)
+    + farmingRoutePreference(recipe, target, detailsByKey)
+    + routeCost
+    + (recipe?.isPassive ? 10 : 0)
+    + recipeInputs(recipe).length;
 }
 
 function directRecipesForTarget(detail, target) {
@@ -261,7 +282,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
 
 function recipesForTarget(detail, target, detailsByKey = null) {
   return [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)]
-    .sort((a, b) => recipeSortScore(a) - recipeSortScore(b));
+    .sort((a, b) => recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey));
 }
 
 function recipeLabel(recipe) {
@@ -370,7 +391,15 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
     })),
     buildingName: selected.buildingName ?? selected.building_name ?? null,
     selectedRecipeId: recipeId(selected),
-    alternatives: visibleRecipes.map((alternative) => ({ id: recipeId(alternative), label: recipeLabel(alternative), buildingName: alternative.buildingName ?? alternative.building_name ?? null })),
+    alternatives: visibleRecipes.map((alternative) => ({
+      id: recipeId(alternative),
+      label: recipeLabel(alternative),
+      buildingName: alternative.buildingName ?? alternative.building_name ?? null,
+      inputs: recipeInputs(alternative).map((input, index) => ({
+        ...enrichDisplayFromDetails(stackDisplay(input, alternative.consumedItems, index), detailsByKey),
+        quantity: toNumber(input.quantity),
+      })),
+    })),
   }];
 }
 
@@ -474,7 +503,15 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
       outputPerCraft,
       section,
       buildingName: selected.buildingName ?? null,
-      alternatives: visibleRecipes.map((recipe) => ({ id: recipeId(recipe), label: recipeLabel(recipe), buildingName: recipe.buildingName ?? recipe.building_name ?? null })),
+      alternatives: visibleRecipes.map((recipe) => ({
+        id: recipeId(recipe),
+        label: recipeLabel(recipe),
+        buildingName: recipe.buildingName ?? recipe.building_name ?? null,
+        inputs: recipeInputs(recipe).map((input, index) => ({
+          ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
+          quantity: toNumber(input.quantity),
+        })),
+      })),
       selectedRecipeId: recipeId(selected),
     });
   }
@@ -752,6 +789,8 @@ function addSourceTotals(totals, sources, type, unavailable) {
         playerName: source.playerName == null ? item.playerName : String(source.playerName),
         buildingName: source.buildingName == null ? item.buildingName : String(source.buildingName),
         craftId: source.craftId == null ? item.craftId : String(source.craftId),
+        status: source.status == null ? item.status : String(source.status),
+        completed: source.completed == null ? item.completed === true : source.completed === true,
       });
       totals.set(item.key, current);
     }
@@ -802,6 +841,8 @@ export function computeCraftPlan({
       playerName: craft.playerName ?? craft.crafterName ?? null,
       buildingName: craft.buildingName ?? null,
       craftId: craft.id ?? craft.craftId ?? null,
+      status: craft.status ?? (craft.completed ? "Ready to collect" : "In progress"),
+      completed: craft.completed === true,
       items: [craft],
     }));
   addSourceTotals(activeTotals, activeCraftSources, "Active craft", unavailableSources);
@@ -824,7 +865,8 @@ export function computeCraftPlan({
     const bufferedRequired = Math.ceil(item.required * multiplier);
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
-    const plannedOutput = plannedOutputs.get(item.key) ?? 0;
+    const rawPlannedOutput = plannedOutputs.get(item.key) ?? 0;
+    const plannedOutput = Math.min(rawPlannedOutput, Math.max(0, bufferedRequired - available - inProgress));
     const apiSection = item.section || sectionForMaterial(enrichedItem, null);
     const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
     const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;

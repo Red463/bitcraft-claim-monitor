@@ -54,6 +54,18 @@ export function groupNeedCellSources(cell: NeedCell): GroupedNeedSource[] {
   return [...grouped.values()].sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label));
 }
 
+export function groupNeedCellActiveCrafts(cell: NeedCell): AnyRecord[] {
+  const crafts = new Map<string, AnyRecord>();
+  for (const item of cell.items ?? []) {
+    for (const source of Array.isArray(item.activeCraftSources) ? item.activeCraftSources : []) {
+      const key = String(source.craftId ?? source.sourceId ?? `${source.playerName}:${source.buildingName}`);
+      const current = crafts.get(key);
+      crafts.set(key, current ? { ...current, quantity: toQuantity(current.quantity) + toQuantity(source.quantity) } : { ...source });
+    }
+  }
+  return [...crafts.values()].sort((a, b) => Number(b.completed === true) - Number(a.completed === true) || String(a.playerName ?? "").localeCompare(String(b.playerName ?? "")));
+}
+
 export function groupNeedCellRecipeUsages(cell: NeedCell): GroupedNeedUsage[] {
   const grouped = new Map<string, GroupedNeedUsage>();
   for (const item of cell.items ?? []) {

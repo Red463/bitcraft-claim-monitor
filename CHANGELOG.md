@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.23] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning recipe choices so alternate routes describe their inputs, output, and crafting station more clearly.
+- Added tracked-player crafts, including completed crafts waiting to be collected, to planner quantities and item details.
+
+### Fixed
+
+- Fixed low-yield probabilistic routes producing extreme Fish Oil and source-fish requirements when a more efficient route was available.
+- Fixed projected byproduct surpluses appearing as enormous available quantities on the Needs Board.
+- Fixed the Covered and More needed legend indicators using unavailable theme colours.
+
 ## [0.32.0-beta.22] - 2026-07-11
 
 ### Changed

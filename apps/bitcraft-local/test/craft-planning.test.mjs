@@ -147,6 +147,51 @@ test("computeCraftPlan route overrides select either lake or ocean fish but neve
   }
 });
 
+test("computeCraftPlan prefers the highest-yield probabilistic producer route", () => {
+  const oil = { item: { id: "9000", name: "Simple Fish Oil", itemType: 0, tag: "Fish Oil", tier: 2 } };
+  const poorFish = {
+    item: { id: "9001", name: "Muddy Auratus Products", itemType: 0, tag: "Lake Fish Products", tier: 2 },
+    craftingRecipes: [{ id: "poor-products", name: "Process Muddy Auratus", craftedItemStacks: [{ item_id: "9001", item_type: "item", quantity: 1 }], consumedItemStacks: [{ item_id: "9002", item_type: "item", quantity: 1 }], consumedItems: [{ id: "9002", name: "Muddy Auratus", itemType: 0, tier: 2 }] }],
+    itemListPossibilities: [{ targetId: "9000", targetItem: oil.item, quantity: 1, chance: 0.005 }],
+  };
+  const goodFish = {
+    item: { id: "9003", name: "Briny Argus Products", itemType: 0, tag: "Lake Fish Products", tier: 2 },
+    craftingRecipes: [{ id: "good-products", name: "Process Briny Argus", craftedItemStacks: [{ item_id: "9003", item_type: "item", quantity: 1 }], consumedItemStacks: [{ item_id: "9004", item_type: "item", quantity: 1 }], consumedItems: [{ id: "9004", name: "Briny Argus", itemType: 0, tier: 2 }] }],
+    itemListPossibilities: [{ targetId: "9000", targetItem: oil.item, quantity: 1, chance: 0.5 }],
+  };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "9000", kind: "items", name: "Simple Fish Oil", quantity: 10, itemType: 0 }] }),
+    detailsByKey: new Map([[recipeKey("items", "9000"), oil], [recipeKey("items", "9001"), poorFish], [recipeKey("items", "9003"), goodFish]]),
+  });
+
+  assert.equal(plan.steps.find((step) => step.output.id === "9000")?.selectedRecipeId, "possibility:good-products:items:9000");
+  assert.equal(plan.materials.find((material) => material.name === "Briny Argus")?.required, 20);
+  assert.equal(plan.materials.some((material) => material.name === "Muddy Auratus"), false);
+});
+
+test("computeCraftPlan keeps tracked craft status and ready-to-collect outputs", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["player-1"] },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
+    activeCrafts: [
+      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 4, status: "In progress", completed: false },
+      { id: "craft-2", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 3, status: "Ready to collect", completed: true },
+      { id: "craft-3", playerId: "player-2", playerName: "Other", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 50, status: "In progress", completed: false },
+    ],
+  });
+
+  const fishOil = plan.materials.find((material) => material.name === "Fish Oil");
+  assert.equal(fishOil.inProgress, 7);
+  assert.deepEqual(fishOil.activeCraftSources.map((source) => [source.craftId, source.status, source.completed]), [
+    ["craft-1", "In progress", false],
+    ["craft-2", "Ready to collect", true],
+  ]);
+});
+
 test("computeCraftPlan credits simultaneous farming co-products without recursive seed inflation", () => {
   const filamentDetail = { item: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 } };
   const productsDetail = {
@@ -200,6 +245,57 @@ test("computeCraftPlan credits simultaneous farming co-products without recursiv
   assert.equal(plan.materials.find((material) => material.name === "Basic Fertilizer")?.required, 143);
   assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Seeds")?.missing, 0);
   assert.equal(plan.totals.missingQuantity, 1_001);
+});
+
+test("computeCraftPlan prefers same-tier seeds over plant tier-up recipes", () => {
+  const simplePlantDetail = {
+    item: { id: "2100016", name: "Simple Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 2 },
+    craftingRecipes: [{
+      id: "210016",
+      name: "Grow Simple Wispweave Plant",
+      craftedItemStacks: [{ item_id: "2100016", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [
+        { item_id: "1100016", item_type: "item", quantity: 5 },
+        { item_id: "2100001", item_type: "item", quantity: 1 },
+      ],
+      consumedItems: [
+        { id: "1100016", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 },
+        { id: "2100001", name: "Simple Fertilizer", itemType: 0, tag: "Fertilizer", tier: 2 },
+      ],
+      levelRequirements: [{ skill: { name: "Farming" }, level: 20 }],
+    }, {
+      id: "210017",
+      name: "Grow Simple Wispweave Plant",
+      craftedItemStacks: [{ item_id: "2100016", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [
+        { item_id: "2100015", item_type: "item", quantity: 1 },
+        { item_id: "2100001", item_type: "item", quantity: 1 },
+        { item_id: "104000", item_type: "item", quantity: 1 },
+      ],
+      consumedItems: [
+        { id: "2100015", name: "Simple Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 2 },
+        { id: "2100001", name: "Simple Fertilizer", itemType: 0, tag: "Fertilizer", tier: 2 },
+        { id: "104000", name: "Water Bucket", itemType: 0, tag: "Water", tier: 1 },
+      ],
+      levelRequirements: [{ skill: { name: "Farming" }, level: 20 }],
+    }],
+  };
+  const detailsByKey = new Map([
+    [recipeKey("items", "2100016"), simplePlantDetail],
+    [recipeKey("items", "1100016"), { item: { id: "1100016", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 } }],
+    [recipeKey("items", "2100015"), { item: { id: "2100015", name: "Simple Wispweave Seeds", itemType: 0, tag: "Filament Seeds", tier: 2 } }],
+    [recipeKey("items", "2100001"), { item: { id: "2100001", name: "Simple Fertilizer", itemType: 0, tag: "Fertilizer", tier: 2 } }],
+    [recipeKey("items", "104000"), { item: { id: "104000", name: "Water Bucket", itemType: 0, tag: "Water", tier: 1 } }],
+  ]);
+
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "2100016", kind: "items", name: "Simple Wispweave Plant", quantity: 10, itemType: 0 }] }),
+    detailsByKey,
+  });
+
+  assert.equal(plan.steps.find((step) => step.output.id === "2100016")?.selectedRecipeId, "210017");
+  assert.equal(plan.materials.find((material) => material.name === "Simple Wispweave Seeds")?.required, 10);
+  assert.equal(plan.materials.some((material) => material.name === "Basic Wispweave Plant"), false);
 });
 
 

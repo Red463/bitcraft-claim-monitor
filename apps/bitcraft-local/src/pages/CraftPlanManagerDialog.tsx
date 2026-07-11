@@ -126,10 +126,12 @@ function presetSummary(preset: AnyRecord) {
   return items.map((item) => `${formatNumber(Number(item.quantity) || 0, 0)} ${String(item.name ?? item.id ?? "item")}`).join(", ");
 }
 
-function routeOptionLabel(recipe: AnyRecord) {
+function routeOptionLabel(recipe: AnyRecord, output?: AnyRecord) {
   const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map((item) => String(item.name ?? item.label ?? item.id ?? "item")).filter(Boolean) : [];
   const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
-  return inputs.length ? `${label} (${inputs.join(", ")})` : label;
+  const station = String(recipe.buildingName ?? "").trim();
+  const outputName = String(output?.name ?? output?.label ?? output?.id ?? "output");
+  return inputs.length && output ? `${inputs.join(" + ")} -> ${outputName}${station ? ` - ${station}` : ""}` : `${label}${station ? ` - ${station}` : ""}`;
 }
 
 function routeOutputKey(step: AnyRecord) {

@@ -9,7 +9,7 @@ import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
-import { groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
+import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
 const LOCAL_API = "/api/local";
 
@@ -42,10 +42,12 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
 }
 
 
-function recipeOptionLabel(recipe: AnyRecord) {
+function recipeOptionLabel(recipe: AnyRecord, output?: AnyRecord) {
   const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
   const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
-  return inputs.length ? label + " (" + inputs.join(", ") + ")" : label;
+  const station = String(recipe.buildingName ?? "").trim();
+  if (inputs.length && output) return `${inputs.join(" + ")} -> ${itemName(output)}${station ? ` - ${station}` : ""}`;
+  return `${label}${station ? ` - ${station}` : ""}`;
 }
 
 function summaryStat(icon: React.ReactNode, label: string, value: unknown, detail: string, tone?: string) {
@@ -124,6 +126,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
   const planSteps = Array.isArray(plan?.steps) ? plan.steps : [];
   const selectedNeedSources = selectedNeed ? groupNeedCellSources(selectedNeed) : [];
+  const selectedNeedCrafts = selectedNeed ? groupNeedCellActiveCrafts(selectedNeed) : [];
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, planSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const sectionOverrideDialog = selectedSectionOverride ? (
@@ -187,6 +190,13 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 ) : null}
               </details>
             )) : <p className="legend">No counted stock found for this item.</p>}
+            {selectedNeedCrafts.length ? <div className="craft-plan-tracked-crafts">
+              <h3><Factory size={16} /> Tracked crafts</h3>
+              {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row" key={String(craft.craftId ?? index)}>
+                <span><strong>{craft.buildingName ?? "Crafting station"}</strong><small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small></span>
+                <strong>{quantity(craft.quantity)}</strong>
+              </div>)}
+            </div> : null}
           </section>
           <div className="craft-plan-need-detail-side">
             <section className="form-card nested-card">
@@ -210,7 +220,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <label className="field compact-field">
                         <span>Recipe route</span>
                         <select value={route.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, route.output)}</option>)}
                         </select>
                       </label>
                     ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
@@ -255,7 +265,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <label className="field compact-field">
                         <span>Recipe route</span>
                         <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.key ?? ""), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe)}</option>)}
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, usage.output)}</option>)}
                         </select>
                       </label>
                     ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}

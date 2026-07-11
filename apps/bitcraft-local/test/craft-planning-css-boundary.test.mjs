@@ -32,6 +32,8 @@ test("Craft planning needs board uses one continuous compact matrix with status 
   assert.match(css, /\.craft-plan-need-cell\.is-blocked/);
   assert.match(css, /\.craft-plan-need-cell\.has-active/);
   assert.match(css, /\.craft-plan-needs-legend/);
+  assert.match(css, /\.craft-plan-needs-legend \.covered \{ color: var\(--good\); \}/);
+  assert.match(css, /\.craft-plan-needs-legend \.short \{ color: var\(--gold\); \}/);
 });
 test("Craft planning section override dialog has a structured viewport modal header", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");

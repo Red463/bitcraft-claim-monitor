@@ -171,10 +171,14 @@
 .craft-plan-needs-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.75rem; }
 .craft-plan-needs-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .craft-plan-needs-legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: currentColor; opacity: 0.8; }
-.craft-plan-needs-legend .covered { color: var(--positive); }
-.craft-plan-needs-legend .short { color: var(--accent); }
+.craft-plan-needs-legend .covered { color: var(--good); }
+.craft-plan-needs-legend .short { color: var(--gold); }
 .craft-plan-needs-legend .active { color: #65b7fa; }
 .craft-plan-needs-legend .blocked { color: #ffb547; }
+.craft-plan-tracked-crafts { display: grid; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.craft-plan-tracked-crafts h3 { margin: 0 0 2px; }
+.craft-plan-tracked-crafts .craft-plan-detail-row > span { display: grid; gap: 2px; }
+.craft-plan-tracked-crafts .craft-plan-detail-row small { color: var(--muted); }
 
 .craft-plan-need-cell {
   width: 100%;

@@ -2013,12 +2013,21 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   }
   return detailsByKey;
 }
-function activeCraftPlanOutputs(craftsPayload = {}) {
-  const catalog = craftPlanCatalogLookup(craftsPayload);
-  return unwrap(craftsPayload, "craftResults", []).flatMap((craft) => {
+function activeCraftPlanOutputs(craftPayloads = []) {
+  const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
+  const catalog = new Map(payloads.flatMap((payload) => [...craftPlanCatalogLookup(payload).entries()]));
+  const crafts = new Map();
+  for (const payload of payloads) {
+    for (const craft of unwrap(payload, "craftResults", [])) {
+      const craftId = String(craft.entityId ?? craft.id ?? craft.craftEntityId ?? "").trim();
+      if (!craftId || !crafts.has(craftId)) crafts.set(craftId || `anonymous:${crafts.size}`, craft);
+    }
+  }
+  return [...crafts.values()].flatMap((craft) => {
     const playerId = String(craft.playerEntityId ?? craft.crafterEntityId ?? craft.crafterId ?? craft.ownerEntityId ?? craft.ownerId ?? craft.characterEntityId ?? "").trim();
     const playerName = String(craft.crafterName ?? craft.crafterUsername ?? craft.ownerUsername ?? craft.playerName ?? craft.userName ?? "").trim();
     const buildingName = String(craft.buildingName ?? craft.stationName ?? craft.craftingStationName ?? "").trim();
+    const completed = isCompletedProductionJob(craft);
     return (craft.craftedItem ?? craft.craftedItems ?? []).map((output, index) => {
       const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "");
       const item = catalog.get(itemId) ?? {};
@@ -2029,6 +2038,8 @@ function activeCraftPlanOutputs(craftsPayload = {}) {
         playerId,
         playerName,
         buildingName,
+        status: completed ? "Ready to collect" : "In progress",
+        completed,
         itemId,
         kind: output.item_type === "cargo" || output.itemType === 1 ? "cargo" : "items",
         quantity: Number(craft.craftCount ?? output.quantity ?? output.qty ?? 0) || 0,
@@ -2044,10 +2055,12 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, config.targets, config.routeOverrides);
-  const [inventoriesPayload, craftsPayload] = await Promise.all([
+  const [inventoriesPayload, publicCraftsPayload, ...playerCraftPayloads] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
+    ...config.sourceRules.craftPlayerIds.map((playerId) => fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: 6000, cache: true }).catch(() => ({ craftResults: [] }))),
   ]);
+  const craftPayloads = [publicCraftsPayload, ...playerCraftPayloads];
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const deployableSources = [];
@@ -2070,7 +2083,7 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     storageSources,
     playerSources,
     deployableSources,
-    activeCrafts: activeCraftPlanOutputs(craftsPayload),
+    activeCrafts: activeCraftPlanOutputs(craftPayloads),
   });
 }
 const bitjitaProxyCache = createBitjitaProxyCache({
