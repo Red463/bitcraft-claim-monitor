@@ -40,6 +40,33 @@ const animalHairDetail = {
   craftingRecipes: [],
 };
 
+function fishingPreferenceDetails({ oceanYield = 3, lakeYield = 1 } = {}) {
+  const oil = { id: "1900", name: "Basic Fish Oil", itemType: 0, tag: "Fish Oil", tier: 1 };
+  const ocean = { id: "1901", name: "Briny Linus", itemType: 0, tag: "Ocean Fish", tier: 1 };
+  const lake = { id: "1902", name: "Briny Argus", itemType: 0, tag: "Lake Fish", tier: 1 };
+  return new Map([[recipeKey("items", oil.id), {
+    item: oil,
+    craftingRecipes: [
+      {
+        id: "ocean-fish-oil",
+        name: "Press Ocean Fish Oil",
+        craftedItemStacks: [{ item_id: oil.id, item_type: "item", quantity: oceanYield * 2, quantityMin: oceanYield }],
+        consumedItemStacks: [{ item_id: ocean.id, item_type: "item", quantity: 1 }],
+        consumedItems: [ocean],
+        levelRequirements: [{ skill: { name: "Fishing" }, level: 1 }],
+      },
+      {
+        id: "lake-fish-oil",
+        name: "Press Lake Fish Oil",
+        craftedItemStacks: [{ item_id: oil.id, item_type: "item", quantity: lakeYield * 2, quantityMin: lakeYield }],
+        consumedItemStacks: [{ item_id: lake.id, item_type: "item", quantity: 1 }],
+        consumedItems: [lake],
+        levelRequirements: [{ skill: { name: "Fishing" }, level: 1 }],
+      },
+    ],
+  }], [recipeKey("items", ocean.id), { item: ocean }], [recipeKey("items", lake.id), { item: lake }]]);
+}
+
 const CATALOG_UPDATED_AT = "2026-07-10T12:00:00.000Z";
 
 function createCatalogFixture(t) {
@@ -86,6 +113,98 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   });
 
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
+});
+
+test("computeCraftPlan exposes ocean and lake personal views from one oil-equivalent deficit", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 100, itemType: 0 }],
+      sourceRules: { storageContainerIds: ["store"], craftPlayerIds: ["player"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    storageSources: [{ sourceId: "store", label: "Fishing", items: [
+      { id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10 },
+      { id: "1901", kind: "items", name: "Briny Linus", quantity: 10 },
+      { id: "1902", kind: "items", name: "Briny Argus", quantity: 10 },
+    ] }],
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", name: "Basic Fish Oil", quantity: 5 }],
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.remainingOil, 45);
+  assert.equal(tier.routes.ocean.needed, 15);
+  assert.equal(tier.routes.lake.needed, 45);
+});
+
+test("personal fishing view rounds preferred fish upward", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }] }),
+    detailsByKey: fishingPreferenceDetails(),
+  });
+
+  assert.equal(plan.personalViews.fishing.tiers[0].routes.ocean.needed, 4);
+  assert.equal(plan.personalViews.fishing.tiers[0].routes.lake.needed, 10);
+});
+
+test("personal fishing view clamps covered demand to zero", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { storageContainerIds: ["store"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    storageSources: [{ sourceId: "store", label: "Fishing", items: [{ id: "1900", kind: "items", quantity: 10, name: "Basic Fish Oil" }] }],
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.remainingOil, 0);
+  assert.equal(tier.routes.ocean.needed, 0);
+  assert.equal(tier.routes.lake.needed, 0);
+});
+
+test("personal fishing view excludes a route with no positive guaranteed yield", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }] }),
+    detailsByKey: fishingPreferenceDetails({ oceanYield: 0 }),
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.routes.ocean.available, false);
+  assert.equal(tier.routes.ocean.reason, "Verified route unavailable");
+  assert.equal(tier.routes.lake.available, true);
+});
+
+test("personal fishing view uses completed uncollected fish-oil crafts", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["player"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 4, name: "Basic Fish Oil", completed: true }],
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.trackedOil, 4);
+  assert.equal(tier.remainingOil, 6);
+  assert.equal(tier.routes.ocean.needed, 2);
+});
+
+test("personal fishing view does not change saved route overrides", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+    routeOverrides: { [recipeKey("items", "1900")]: "lake-fish-oil" },
+  });
+  const plan = computeCraftPlan({ config, detailsByKey: fishingPreferenceDetails() });
+
+  assert.deepEqual(plan.config.routeOverrides, { [recipeKey("items", "1900")]: "lake-fish-oil" });
+  assert.equal(plan.steps.find((step) => step.output.id === "1900")?.selectedRecipeId, "lake-fish-oil");
+  assert.equal(plan.personalViews.fishing.tiers[0].routes.ocean.available, true);
+  assert.equal(plan.personalViews.fishing.tiers[0].routes.lake.available, true);
 });
 
 test("computeCraftPlan applies recipe route overrides and offsets storage, players, deployables, and active crafts", () => {

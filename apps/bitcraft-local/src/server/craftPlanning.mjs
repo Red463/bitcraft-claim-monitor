@@ -323,6 +323,19 @@ function recipesForTarget(detail, target, detailsByKey = null) {
     .sort((a, b) => recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey));
 }
 
+function fishingRouteFamily(item) {
+  const tag = String(item?.tag ?? "").toLowerCase();
+  if (tag.includes("ocean fish")) return "ocean";
+  if (tag.includes("lake fish")) return "lake";
+  return null;
+}
+
+function guaranteedTargetYield(recipe, target) {
+  const output = recipeOutputs(recipe).find((entry) => stackMatches(entry, target));
+  const minimum = toNumber(output?.quantityMin ?? output?.minQuantity ?? output?.quantity);
+  return Number.isFinite(minimum) && minimum > 0 ? minimum : 0;
+}
+
 function recipeLabel(recipe) {
   return String(recipe?.label ?? recipe?.name ?? recipe?.recipeName ?? recipeId(recipe) ?? "Recipe");
 }
@@ -860,6 +873,71 @@ function groupGatherNext(materials) {
     .sort((a, b) => (b.items[0]?.missing ?? 0) - (a.items[0]?.missing ?? 0) || a.section.localeCompare(b.section));
 }
 
+function pickPlannerItem(item) {
+  return Object.fromEntries(["key", "id", "kind", "itemType", "name", "tag", "tier", "iconAssetName"]
+    .filter((key) => item?.[key] != null)
+    .map((key) => [key, item[key]]));
+}
+
+function routeStock(route, totals) {
+  const key = recipeKey(route.input.kind, route.input.id);
+  return totals.get(key)?.total ?? 0;
+}
+
+function unavailableFishingRoute() {
+  return { available: false, reason: "Verified route unavailable" };
+}
+
+function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotals, activeTotals) {
+  const routes = {
+    ocean: unavailableFishingRoute(),
+    lake: unavailableFishingRoute(),
+  };
+  for (const recipe of recipes) {
+    const inputStack = recipeInputs(recipe)[0];
+    if (!inputStack) continue;
+    const input = enrichDisplayFromDetails(stackDisplay(inputStack, recipe.consumedItems, 0), detailsByKey);
+    const family = fishingRouteFamily(input);
+    const guaranteedYield = guaranteedTargetYield(recipe, oil);
+    if (!family || guaranteedYield <= 0 || routes[family].available) continue;
+    const route = { input: pickPlannerItem(input) };
+    routes[family] = {
+      available: true,
+      ...route,
+      guaranteedYield,
+      stockQuantity: routeStock(route, availableTotals),
+      trackedQuantity: routeStock(route, activeTotals),
+    };
+  }
+  return routes;
+}
+
+export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeTotals }) {
+  const fishOilMaterials = (materials ?? []).filter((item) => String(item?.tag ?? "").toLowerCase().includes("fish oil"));
+  return { tiers: fishOilMaterials.map((oil) => {
+    const alternatives = recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
+    const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, activeTotals);
+    const verifiedRoutes = Object.values(routes).filter((route) => route.available);
+    const availableOilEquivalent = oil.available + oil.inProgress + verifiedRoutes.reduce((total, route) => (
+      total + (route.stockQuantity + route.trackedQuantity) * route.guaranteedYield
+    ), 0);
+    const remainingOil = Math.max(0, oil.bufferedRequired - availableOilEquivalent);
+    return {
+      tier: oil.tier,
+      outputKey: oil.key,
+      output: pickPlannerItem(oil),
+      requiredOil: oil.bufferedRequired,
+      availableOil: oil.available,
+      trackedOil: oil.inProgress,
+      remainingOil,
+      routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => [family, route.available ? {
+        ...route,
+        needed: Math.ceil(remainingOil / route.guaranteedYield),
+      } : route])),
+    };
+  }) };
+}
+
 export function computeCraftPlan({
   config,
   detailsByKey = new Map(),
@@ -872,7 +950,7 @@ export function computeCraftPlan({
 } = {}) {
   const normalized = normalizeCraftPlanConfig(config);
   if (!normalized.enabled || normalized.targets.length === 0) {
-    return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [] };
+    return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [], personalViews: { fishing: { tiers: [] } } };
   }
   const availableTotals = new Map();
   const unavailableSources = [];
@@ -962,12 +1040,17 @@ export function computeCraftPlan({
     return { ...target, ...enrichedTarget, quantity: target.quantity, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };
   });
 
+  const personalViews = {
+    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeTotals }),
+  };
+
   return {
     config: normalized,
     enabled: true,
     targets,
     materials,
     steps,
+    personalViews,
     gatherNext: groupGatherNext(materials.filter((item) => !item.isTarget)),
     unavailableSources,
     warnings: [...new Set([...warnings, ...(Array.isArray(catalogWarnings) ? catalogWarnings : [])])],
