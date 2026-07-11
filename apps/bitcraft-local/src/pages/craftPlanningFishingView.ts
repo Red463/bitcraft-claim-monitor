@@ -86,6 +86,10 @@ function isCanonicalFishingRow(row: NeedRow, canonicalName: string) {
   return row.apiName === canonicalName || row.overrideKey === `tag:${canonicalName}`;
 }
 
+function isPlannerTierColumn(column: string) {
+  return /^T(?:[1-9]|10)$/.test(column);
+}
+
 function recalculateFishingGroup(group: NeedGroup, rows: NeedRow[]): NeedGroup {
   const cells = rows.flatMap((row) => [...row.cells.values()]);
   const required = cells.reduce((sum, cell) => sum + cell.required, 0);
@@ -126,8 +130,11 @@ export function applyPersonalFishingView(
   const selectedName = routeName(preference);
   const otherName = routeName(preference === "lake" ? "ocean" : "lake");
   const existingSelected = fishing.rows.find((row) => isCanonicalFishingRow(row, selectedName));
+  if (existingSelected && [...existingSelected.cells.keys()].some((column) => isPlannerTierColumn(column) && !projections.has(column))) {
+    return unavailableResult(board, preference);
+  }
   const selectedRow = cloneRow(existingSelected ?? newFishingRow(selectedName));
-  for (const [column, cell] of projections) selectedRow.cells.set(column, cell);
+  selectedRow.cells = new Map(projections);
   selectedRow.maxMissing = rowMaxMissing(selectedRow);
 
   let rows: NeedRow[];

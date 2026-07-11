@@ -182,6 +182,20 @@ test("transforms every available projected tier without dropping the tier matrix
   assert.equal(result.board[0].rows.filter((row) => row.apiName === "Lake Fish").length, 0);
 });
 
+test("rejects a selected canonical row with an unprojected authoritative tier", () => {
+  const board = makeBoard();
+  const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");
+  ocean.cells.set("T2", makeCell("Stale Ocean Fish T2", { required: 30, missing: 30 }));
+  const originalBoard = structuredClone(board);
+
+  const result = applyPersonalFishingView(board, makeRouteView(), "ocean");
+
+  assert.strictEqual(result.board, board);
+  assert.deepEqual(board, originalBoard);
+  assert.equal(result.available, false);
+  assert.equal(result.reason, "Verified Ocean Fish route unavailable");
+});
+
 test("returns the untouched board when any projected tier lacks the selected route", () => {
   const board = makeBoard();
   const originalBoard = structuredClone(board);
