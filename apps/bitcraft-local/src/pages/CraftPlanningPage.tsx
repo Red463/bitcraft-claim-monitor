@@ -438,11 +438,13 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             </div> : <p className="legend">All planned materials are covered by selected stock sources and tracked crafts.</p>}
           </section>
 
-          {warnings.length ? (
-            <section className="form-card craft-plan-section warning-card">
-              <h3><AlertTriangle size={17} /> Catalog diagnostics</h3>
-              {warnings.map((warning: string) => <p className="legend" key={warning}>{warning}</p>)}
-            </section>
+          {canManage && warnings.length ? (
+            <details className="form-card craft-plan-section warning-card craft-plan-catalog-diagnostics">
+              <summary><span><AlertTriangle size={17} /> Catalog diagnostics</span><small>{warnings.length} item{warnings.length === 1 ? "" : "s"} need review</small></summary>
+              <div className="craft-plan-catalog-diagnostic-list">
+                {warnings.map((warning: string) => <p className="legend" key={warning}>{warning}</p>)}
+              </div>
+            </details>
           ) : null}
           {unavailableSources.length ? (
             <section className="form-card craft-plan-section warning-card">

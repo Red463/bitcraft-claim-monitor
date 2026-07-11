@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.30] - 2026-07-11
+
+### Changed
+
+- Moved technical Craft Planning catalog warnings into a compact admin-only diagnostics panel.
+
+### Fixed
+
+- Fixed incomplete byproduct candidates producing a full-page warning for every possible producer, including when a usable route was already available.
+
 ## [0.32.0-beta.29] - 2026-07-11
 
 ### Changed

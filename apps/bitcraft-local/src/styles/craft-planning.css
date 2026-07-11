@@ -52,6 +52,13 @@
 .craft-plan-target-editor-actions .compact-field { width: 120px; min-width: 0; }
 .craft-plan-target-editor-actions .compact-field input { width: 100%; min-width: 0; box-sizing: border-box; }
 .craft-plan-target-editor-actions > .toolbar-button.danger { min-width: 112px; }
+.craft-plan-catalog-diagnostics { padding: 0; overflow: hidden; }
+.craft-plan-catalog-diagnostics summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; cursor: pointer; list-style: none; }
+.craft-plan-catalog-diagnostics summary::-webkit-details-marker { display: none; }
+.craft-plan-catalog-diagnostics summary span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-weight: 700; }
+.craft-plan-catalog-diagnostics summary small { color: var(--muted); }
+.craft-plan-catalog-diagnostic-list { display: grid; gap: 8px; max-height: 280px; overflow: auto; padding: 0 16px 16px; border-top: 1px solid var(--border); }
+.craft-plan-catalog-diagnostic-list .legend { margin: 0; padding-top: 10px; }
 .craft-plan-source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
 .craft-plan-source-grid.compact { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .craft-plan-source-card { display: grid; gap: 10px; align-content: start; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 9px; background: rgba(9, 14, 21, 0.72); padding: 12px; min-height: 128px; }

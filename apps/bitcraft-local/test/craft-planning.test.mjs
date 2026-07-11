@@ -1486,8 +1486,41 @@ test("collectLocalCatalogCraftPlanDetails reports incomplete byproduct producer 
   });
 
   const { warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
-  assert.match(warnings.join("\n"), /byproduct producer route is incomplete/i);
-  assert.match(warnings.join("\n"), /items:8600/);
+  const byproductWarnings = warnings.filter((warning) => /byproduct routes are incomplete/i.test(warning));
+  assert.equal(byproductWarnings.length, 1);
+  assert.match(byproductWarnings[0], /Rare Sap/);
+  assert.match(byproductWarnings[0], /items:8500/);
+});
+
+test("collectLocalCatalogCraftPlanDetails ignores incomplete byproduct candidates when a usable producer exists", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "8700", itemType: 0, name: "Tree Resin", tag: "Resin", tier: 1 },
+      craftingRecipes: [],
+    },
+    {
+      item: { id: "8701", itemType: 0, name: "Incomplete Tree", tag: "Tree", tier: 1 },
+      craftingRecipes: [],
+      itemListPossibilities: [{ targetId: "8700", targetItem: { id: "8700", itemType: 0, name: "Tree Resin", tag: "Resin", tier: 1 }, quantity: 1, chance: 0.1 }],
+    },
+    {
+      item: { id: "8702", itemType: 0, name: "Gatherable Tree", tag: "Tree", tier: 1 },
+      craftingRecipes: [{
+        id: "gather-tree",
+        name: "Gather Tree",
+        craftedItemStacks: [{ item_id: "8702", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "8702", itemType: 0, name: "Gatherable Tree", tag: "Tree", tier: 1 }],
+        consumedItemStacks: [],
+        consumedItems: [],
+        levelRequirements: [{ skill: { name: "Forestry" }, level: 1 }],
+      }],
+      itemListPossibilities: [{ targetId: "8700", targetItem: { id: "8700", itemType: 0, name: "Tree Resin", tag: "Resin", tier: 1 }, quantity: 1, chance: 0.1 }],
+    },
+  ]);
+
+  const { warnings } = collectLocalCatalogCraftPlanDetails(repository, [{ id: "8700", kind: "items", name: "Tree Resin", quantity: 1, itemType: 0 }]);
+  assert.equal(warnings.some((warning) => /byproduct routes are incomplete/i.test(warning)), false);
 });
 
 test("collectLocalCatalogCraftPlanDetails keeps transport routes available after real local routes and honors override ids", (t) => {

@@ -738,15 +738,17 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
       warnings.add(`Local catalog has no producer recipe or byproduct route for ${key}; planner treated it as a source material.`);
     }
 
+    let usableByproductProducers = 0;
     for (const row of byproductProducers) {
       const producerTarget = catalogEntityDisplay(row.producer, { id: row.producer?.targetId, kind: row.producer?.kind });
       const producerDetail = setDetail(row.producerKey, producerTarget);
       const producerRecipes = producerDetail
         ? directRecipesForTarget(producerDetail, mergeDetailTarget(producerDetail, producerTarget))
         : [];
-      if (producerRecipes.length === 0) {
-        warnings.add(`Local catalog byproduct producer route is incomplete for ${row.producerKey} -> ${key}; planner retained verified direct routes.`);
-      }
+      if (producerRecipes.length > 0) usableByproductProducers += 1;
+    }
+    if (byproductProducers.length > 0 && usableByproductProducers === 0) {
+      warnings.add(`Local catalog byproduct routes are incomplete for ${target.name} (${key}); planner retained verified direct routes. ${byproductProducers.length} producer candidate${byproductProducers.length === 1 ? "" : "s"} require catalog data.`);
     }
 
     const currentDetail = detailsByKey.get(key);

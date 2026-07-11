@@ -72,6 +72,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.doesNotMatch(page, /<DataTable rows=\{materials\}/);
   assert.doesNotMatch(page, /<h3><Route size=\{17\} \/> Recipe Routes<\/h3>/);
   assert.match(page, /Catalog diagnostics/);
+  assert.match(page, /canManage && warnings\.length/);
+  assert.match(page, /<details className="[^"]*craft-plan-catalog-diagnostics[^"]*"/);
   assert.match(page, /Unavailable stock sources/);
   assert.match(page, /CraftPlanManagerDialog/);
 });
