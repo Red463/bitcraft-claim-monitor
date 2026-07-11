@@ -39,7 +39,8 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, craftPlanCatalogTargets, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
+import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
@@ -1835,6 +1836,26 @@ async function craftPlanTierPresets(claimId) {
   }
   return presets.sort((a, b) => a.tier - b.tier);
 }
+
+async function craftPlanWorkstationPresets() {
+  const payload = await fetchBitjita("/buildings", { cache: true });
+  return buildWorkstationPresets(payload);
+}
+
+async function resolveCraftPlanWorkstationPreset(tier) {
+  const cleanTier = Number(tier);
+  if (!Number.isInteger(cleanTier) || cleanTier < 2 || cleanTier > 10) throw new Error("Choose a workstation tier from T2 to T10");
+  const presets = await craftPlanWorkstationPresets();
+  const preset = presets.find((entry) => entry.tier === cleanTier);
+  if (!preset?.workstations?.length) throw new Error(`No T${cleanTier} workstation definitions were returned by BitJita`);
+  const workstations = await mapWithConcurrency(preset.workstations, 4, async (workstation) => {
+    const payload = await fetchBitjita(`/buildings/${encodeURIComponent(workstation.id)}`, { cache: true });
+    const target = normalizeWorkstationTarget(payload, workstation);
+    if (!target.requirements.length) throw new Error(`${target.name} has no construction requirements in BitJita`);
+    return target;
+  });
+  return { ...preset, workstations };
+}
 async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   const [membersPayload, inventoriesPayload] = await Promise.all([
@@ -1856,7 +1877,10 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
   }
-  const computedPlan = await computedCraftPlanResponse(claimId).catch((error) => ({ error: error instanceof Error ? error.message : String(error), steps: [], materials: [], targets: [] }));
+  const [computedPlan, workstationPresets] = await Promise.all([
+    computedCraftPlanResponse(claimId).catch((error) => ({ error: error instanceof Error ? error.message : String(error), steps: [], materials: [], targets: [] })),
+    craftPlanWorkstationPresets().catch(() => []),
+  ]);
   return {
     config,
     plan: computedPlan,
@@ -1865,6 +1889,7 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
       players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),
       deployables: deployableOptions,
       tierPresets: await craftPlanTierPresets(claimId),
+      workstationPresets,
     },
   };
 }
@@ -2062,7 +2087,8 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
-  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, config.targets, config.routeOverrides);
+  const catalogTargets = craftPlanCatalogTargets(config);
+  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides);
   const [inventoriesPayload, publicCraftsPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
@@ -9195,6 +9221,13 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan") {
         return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/workstation-preset") {
+        try {
+          return send(res, 200, await resolveCraftPlanWorkstationPreset(url.searchParams.get("tier")));
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/craft-plan") {
         const body = await readJson(req, BODY_LIMITS.settings);

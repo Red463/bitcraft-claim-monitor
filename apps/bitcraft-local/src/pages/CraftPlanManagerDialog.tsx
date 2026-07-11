@@ -26,7 +26,8 @@ function emptyConfig(): CraftPlanConfig {
 }
 
 function itemKind(item: AnyRecord) {
-  return String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items")) === "cargo" ? "cargo" : "items";
+  const raw = String(item.kind ?? item.itemType ?? item.item_type ?? "items");
+  return raw === "building" || raw === "2" ? "building" : raw === "cargo" || raw === "1" ? "cargo" : "items";
 }
 
 function itemKey(item: AnyRecord) {
@@ -63,7 +64,8 @@ function mergeTargets(existing: AnyRecord[], incoming: AnyRecord[]) {
 }
 
 function itemTypeLabel(item: AnyRecord) {
-  return itemKind(item) === "cargo" ? "Cargo" : "Item";
+  const kind = itemKind(item);
+  return kind === "building" ? "Workstation" : kind === "cargo" ? "Cargo" : "Item";
 }
 
 function itemPreview(items: AnyRecord[] = []) {
@@ -287,6 +289,30 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setStatus(message);
   }
 
+  async function addWorkstationPreset(preset: AnyRecord) {
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const result = await adminApi(`/admin/craft-plan/workstation-preset?tier=${encodeURIComponent(String(preset.tier))}`);
+      const incoming = Array.isArray(result.workstations) ? result.workstations : [];
+      const known = new Set(config.targets.map(itemKey));
+      const additions = incoming.filter((target: AnyRecord) => {
+        if (known.has(itemKey(target))) return false;
+        known.add(itemKey(target));
+        return true;
+      });
+      const added = additions.length;
+      const existing = incoming.length - additions.length;
+      setConfig((current) => ({ ...current, targets: [...current.targets, ...additions] }));
+      setStatus(`Added ${added} T${preset.tier} workstations${existing ? `; ${existing} already tracked` : ""}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function triggerCatalogRefresh() {
     if (busy || catalogBusy || catalogStatus?.scheduledJob?.running) return;
     setCatalogBusy(true);
@@ -330,6 +356,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const deployableSources = state?.sources?.deployables ?? [];
   const deployableGroups = groupDeployablesByPlayer(deployableSources);
   const tierPresets = state?.sources?.tierPresets ?? [];
+  const workstationPresets = state?.sources?.workstationPresets ?? [];
   const routeSteps = Array.isArray(state?.plan?.steps) ? state.plan.steps : [];
   const scheduledJob = catalogStatus?.scheduledJob ?? null;
   const recentRuns = Array.isArray(catalogStatus?.recentRuns) ? catalogStatus.recentRuns : [];
@@ -437,6 +464,15 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               {tierPresets.length ? <div className="craft-plan-preset-grid">
                 {tierPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-card" type="button" key={preset.key} onClick={() => addTargets((preset.items ?? []).map((item: AnyRecord) => withQuantity(item, Number(item.quantity) || 1)), `Added ${preset.label} requirements.`)}><strong>{preset.label}</strong><span>{presetSummary(preset)}</span></button>)}
               </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>BitJita did not return tier upgrade research materials for this settlement.</span></div>}
+            </section>
+            <section className="craft-plan-tier-presets craft-plan-workstation-presets" aria-label="Workstation tier presets">
+              <div className="craft-plan-tier-presets-header">
+                <div><h4><Package size={16} /> Workstation presets</h4><p>Add one of every standard workstation at the selected tier. Construction requirements are loaded from BitJita.</p></div>
+                <small>{workstationPresets.length ? `${workstationPresets.length} tiers loaded` : "No presets loaded"}</small>
+              </div>
+              {workstationPresets.length ? <div className="craft-plan-preset-grid">
+                {workstationPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-card" type="button" disabled={busy} key={preset.key} onClick={() => void addWorkstationPreset(preset)}><strong>{preset.label}</strong><span>{formatNumber(preset.workstations?.length ?? 0, 0)} workstations</span></button>)}
+              </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>BitJita did not return compatible workstation definitions.</span></div>}
             </section>
             <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search BitJita items" /></div></label>
             {searchResults.length ? <div className="craft-plan-search-results">{searchResults.map((item) => <button className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onClick={() => { addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`); setQuery(""); setSearchResults([]); }}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}

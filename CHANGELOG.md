@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.33] - 2026-07-12
+
+### Added
+
+- Added T2-T10 workstation presets to Craft Planning, using BitJita workstation definitions and construction requirements.
+
+### Changed
+
+- Craft Planning now expands workstation goals into their complete material and recipe requirements while keeping each workstation editable as a plan target.
+
 ## [0.32.0-beta.32] - 2026-07-11
 
 ### Changed

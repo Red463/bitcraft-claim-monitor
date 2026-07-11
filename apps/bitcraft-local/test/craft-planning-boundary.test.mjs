@@ -110,6 +110,10 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(admin, /page=planning/);
   assert.match(manager, /\/admin\/craft-plan/);
   assert.match(manager, /Tier upgrade presets/);
+  assert.match(manager, /Workstation presets/);
+  assert.match(manager, /workstationPresets/);
+  assert.match(manager, /addWorkstationPreset/);
+  assert.match(manager, /\/admin\/craft-plan\/workstation-preset\?tier=/);
   assert.match(manager, /Loaded from BitJita claim research/);
   assert.match(manager, /tierPresets/);
   assert.match(server, /nestedKeys = \["input", "inputs"/);
@@ -123,6 +127,8 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /meta=\{itemTypeLabel\(item\)\}/);
   assert.match(manager, /Chance and drop multipliers/);
   assert.match(manager, /mergeTargets/);
+  assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
+  assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
 });
 
 
@@ -190,7 +196,8 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
-  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, config\.targets, config\.routeOverrides\)/);
+  assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
+  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, catalogTargets, config\.routeOverrides\)/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`\)/);

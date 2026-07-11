@@ -18,7 +18,8 @@ const PLAN_SECTIONS = new Set([
 ]);
 
 export function recipeKey(kind, id) {
-  return `${String(kind) === "cargo" ? "cargo" : "items"}:${String(id ?? "").trim()}`;
+  const normalizedKind = String(kind) === "cargo" ? "cargo" : String(kind) === "building" ? "building" : "items";
+  return `${normalizedKind}:${String(id ?? "").trim()}`;
 }
 
 function toNumber(value) {
@@ -35,11 +36,12 @@ function uniqueStrings(values) {
 }
 
 function normalizeKind(value) {
+  if (String(value) === "building" || String(value) === "2") return "building";
   return String(value) === "cargo" || String(value) === "1" ? "cargo" : "items";
 }
 
 function itemTypeFromKind(kind) {
-  return kind === "cargo" ? 1 : 0;
+  return kind === "cargo" ? 1 : kind === "building" ? 2 : 0;
 }
 
 function normalizedTier(value) {
@@ -53,7 +55,7 @@ function normalizeTarget(value) {
   if (!/^\d+$/.test(id)) return null;
   const kind = normalizeKind(value.kind ?? value.itemType ?? value.item_type);
   const quantity = Math.max(1, Math.ceil(toNumber(value.quantity)));
-  return {
+  const target = {
     id,
     kind,
     itemType: itemTypeFromKind(kind),
@@ -64,6 +66,33 @@ function normalizeTarget(value) {
     tag: value.tag == null ? null : String(value.tag),
     iconAssetName: value.iconAssetName == null ? null : String(value.iconAssetName),
   };
+  if (kind === "building") {
+    target.family = value.family == null ? null : String(value.family);
+    target.constructionRecipeId = value.constructionRecipeId == null ? null : String(value.constructionRecipeId);
+    target.requirements = (Array.isArray(value.requirements) ? value.requirements : [])
+      .map((requirement) => normalizeTarget(requirement))
+      .filter((requirement) => requirement && requirement.kind !== "building");
+  }
+  return target;
+}
+
+function expandedPlanTargets(targets) {
+  const merged = new Map();
+  for (const target of targets) {
+    const rows = target.kind === "building"
+      ? (target.requirements ?? []).map((requirement) => ({ ...requirement, quantity: requirement.quantity * target.quantity }))
+      : [target];
+    for (const row of rows) {
+      const key = recipeKey(row.kind, row.id);
+      const current = merged.get(key);
+      merged.set(key, current ? { ...current, quantity: current.quantity + row.quantity } : { ...row });
+    }
+  }
+  return [...merged.values()];
+}
+
+export function craftPlanCatalogTargets(config) {
+  return expandedPlanTargets(normalizeCraftPlanConfig(config).targets).filter((target) => target.kind !== "building");
 }
 
 export function normalizeCraftPlanConfig(input = {}) {
@@ -1024,10 +1053,11 @@ export function computeCraftPlan({
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
-  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(normalized.targets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
+  const calculationTargets = expandedPlanTargets(normalized.targets);
+  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
 
-  const targetKeys = new Set(normalized.targets.map((target) => recipeKey(target.kind, target.id)));
-  for (const target of normalized.targets) {
+  const targetKeys = new Set(normalized.targets.filter((target) => target.kind !== "building").map((target) => recipeKey(target.kind, target.id)));
+  for (const target of calculationTargets) {
     if (!required.has(recipeKey(target.kind, target.id))) addRequired(required, target, target.quantity, sectionForMaterial(target, null));
   }
 
@@ -1072,6 +1102,7 @@ export function computeCraftPlan({
   }).sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));
 
   const targets = normalized.targets.map((target) => {
+    if (target.kind === "building") return { ...target, available: 0, inProgress: 0, missing: target.quantity };
     const material = materials.find((item) => item.key === recipeKey(target.kind, target.id));
     const enrichedTarget = enrichDisplayFromDetails(target, detailsByKey);
     return { ...target, ...enrichedTarget, quantity: target.quantity, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };

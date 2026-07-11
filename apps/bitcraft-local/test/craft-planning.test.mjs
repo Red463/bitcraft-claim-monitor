@@ -6,6 +6,7 @@ import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
   collectLocalCatalogCraftPlanDetails,
   computeCraftPlan,
+  craftPlanCatalogTargets,
   normalizeCraftPlanConfig,
   recipeKey,
 } from "../src/server/craftPlanning.mjs";
@@ -140,6 +141,56 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   });
 
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
+});
+
+test("workstation targets preserve construction requirements and expand them for catalog lookup", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{
+      id: "6020",
+      kind: "building",
+      name: "Peerless Carpentry Station",
+      family: "Carpentry Station",
+      tier: 6,
+      quantity: 2,
+      requirements: [
+        { id: "6010001", kind: "items", name: "Peerless Wood Log", quantity: 20, tier: 6 },
+        { id: "1204", kind: "cargo", name: "Exquisite Timber", quantity: 1, tier: 5 },
+      ],
+    }],
+  });
+
+  assert.equal(config.targets[0].kind, "building");
+  assert.equal(config.targets[0].requirements.length, 2);
+  assert.deepEqual(craftPlanCatalogTargets(config).map((row) => [row.kind, row.id, row.quantity]), [
+    ["items", "6010001", 40],
+    ["cargo", "1204", 2],
+  ]);
+});
+
+test("computeCraftPlan keeps a workstation goal while calculating its construction materials", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{
+        id: "6020",
+        kind: "building",
+        name: "Peerless Carpentry Station",
+        family: "Carpentry Station",
+        tier: 6,
+        quantity: 1,
+        requirements: [{ id: "6010001", kind: "items", name: "Peerless Wood Log", quantity: 20, tier: 6 }],
+      }],
+    }),
+    storageSources: [{ sourceId: "store", label: "Construction", items: [{ id: "6010001", kind: "items", name: "Peerless Wood Log", quantity: 7 }] }],
+  });
+
+  assert.equal(plan.targets[0].name, "Peerless Carpentry Station");
+  assert.equal(plan.targets[0].missing, 1);
+  const material = plan.materials.find((row) => row.id === "6010001");
+  assert.equal(material.required, 20);
+  assert.equal(material.available, 7);
+  assert.equal(material.missing, 13);
 });
 
 test("computeCraftPlan exposes ocean and lake personal views from one oil-equivalent deficit", () => {
