@@ -1,3 +1,5 @@
+import { craftDisplayName, isCompletedProductionJob, mergeCurrentCraftRows } from "./productionActivity.mjs";
+
 const DEPLOYABLE_INVENTORY_NAME = /cart|stash|cache|deploy|housing|wagon|handcart|boat|ship|sled|mount/i;
 const SETTLEMENT_STORAGE_INVENTORY_NAME = /town bank|settlement storage|claim storage|community storage|bank/i;
 const PERSONAL_INVENTORY_NAME = /^(?:inventory|toolbelt|wallet)$/i;
@@ -37,6 +39,97 @@ export function craftPlanCatalogLookup(payload = {}) {
     ...asArray(payload.data?.items),
     ...asArray(payload.data?.cargos),
   ].map((item) => [String(item.id ?? item.itemId ?? ""), item]).filter(([id]) => id));
+}
+
+function craftOutputKind(value) {
+  return value === "cargo" || value === 1 || value === "1" ? "cargo" : "items";
+}
+
+function craftOutputKey(kind, id) {
+  return `${kind}:${String(id)}`;
+}
+
+function detailPayload(detail) {
+  return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
+}
+
+function expectedPossibilityOutputs(detail, directOutputQuantity) {
+  const grouped = new Map();
+  for (const possibility of asArray(detailPayload(detail)?.itemListPossibilities)) {
+    const display = possibility?.targetItem ?? {};
+    const id = String(possibility?.targetId ?? display.id ?? possibility?.itemId ?? "").trim();
+    if (!id) continue;
+    const kind = craftOutputKind(possibility?.isCargo === true ? "cargo" : possibility?.itemType ?? possibility?.item_type);
+    const expectedQuantity = directOutputQuantity * Number(possibility?.quantity ?? 0) * Number(possibility?.chance ?? 1);
+    if (!Number.isFinite(expectedQuantity) || expectedQuantity <= 0) continue;
+    const key = craftOutputKey(kind, id);
+    const current = grouped.get(key) ?? {
+      itemId: id,
+      kind,
+      name: display.name ?? possibility?.name ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`,
+      tier: display.tier ?? possibility?.tier ?? null,
+      tag: display.tag ?? possibility?.tag ?? null,
+      iconAssetName: display.iconAssetName ?? possibility?.iconAssetName ?? null,
+      quantity: 0,
+    };
+    current.quantity += expectedQuantity;
+    grouped.set(key, current);
+  }
+  return [...grouped.values()].map((output) => ({ ...output, quantity: Math.round(output.quantity * 1_000_000) / 1_000_000 }));
+}
+
+export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new Map()) {
+  const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
+  const craftsPayload = {
+    items: payloads.flatMap((payload) => asArray(payload?.items)),
+    cargos: payloads.flatMap((payload) => asArray(payload?.cargos)),
+  };
+  const catalog = new Map([
+    ...craftsPayload.items.map((item) => [craftOutputKey("items", item.id), item]),
+    ...craftsPayload.cargos.map((item) => [craftOutputKey("cargo", item.id), item]),
+  ]);
+  const publicCrafts = asArray(payloads[0]?.craftResults);
+  const playerCrafts = payloads.slice(1).flatMap((payload) => asArray(payload?.craftResults));
+  const crafts = mergeCurrentCraftRows(publicCrafts, playerCrafts);
+
+  return crafts.flatMap((craft) => {
+    const playerId = String(craft.playerEntityId ?? craft.crafterEntityId ?? craft.crafterId ?? craft.ownerEntityId ?? craft.ownerId ?? craft.characterEntityId ?? "").trim();
+    const playerName = String(craft.crafterName ?? craft.crafterUsername ?? craft.ownerUsername ?? craft.playerName ?? craft.userName ?? "").trim();
+    const buildingName = String(craft.buildingName ?? craft.stationName ?? craft.craftingStationName ?? "").trim();
+    const completed = craft.completed === true || isCompletedProductionJob(craft);
+    const craftId = String(craft.entityId ?? craft.id ?? craft.craftEntityId ?? "").trim();
+    return asArray(craft.craftedItem ?? craft.craftedItems).flatMap((output, index) => {
+      const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "").trim();
+      if (!itemId) return [];
+      const kind = craftOutputKind(output.item_type ?? output.itemType);
+      const item = catalog.get(craftOutputKey(kind, itemId)) ?? {};
+      const outputPerCraft = Number(output.quantity ?? output.qty ?? 1) || 1;
+      const craftCount = Number(craft.craftCount ?? 0);
+      const directQuantity = craftCount > 0 ? craftCount * outputPerCraft : outputPerCraft;
+      const base = {
+        id: craftId || `${itemId}:${index}`,
+        craftId: craftId || `${itemId}:${index}`,
+        playerId,
+        playerName,
+        buildingName,
+        status: completed ? "Ready to collect" : "In progress",
+        completed,
+      };
+      const directOutput = {
+        ...base,
+        itemId,
+        kind,
+        quantity: directQuantity,
+        name: item.name ?? craftDisplayName(craft, craftsPayload),
+        iconAssetName: item.iconAssetName ?? null,
+        tier: item.tier ?? null,
+        tag: item.tag ?? null,
+      };
+      const possibilities = expectedPossibilityOutputs(detailsByKey.get(craftOutputKey(kind, itemId)), directQuantity)
+        .map((possibility) => ({ ...base, ...possibility }));
+      return [directOutput, ...possibilities];
+    });
+  }).filter((item) => item.itemId && item.quantity > 0);
 }
 
 export function settlementStorageSourcesFromInventories(inventories = {}, allowedIds = []) {

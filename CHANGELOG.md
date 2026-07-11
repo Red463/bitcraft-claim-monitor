@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.27] - 2026-07-11
+
+### Changed
+
+- Improved Craft Planning catalog refreshes so normalization changes trigger one clean rebuild without breaking automatic pause and retry continuation.
+
+### Fixed
+
+- Fixed Ocean Fish Oil yields being calculated from only one probability outcome instead of the complete BitJita output distribution.
+- Fixed tracked farming and other product crafts not expanding their expected outputs onto the Needs Board.
+
 ## [0.32.0-beta.26] - 2026-07-11
 
 ### Changed

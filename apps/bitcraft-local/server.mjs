@@ -21,9 +21,14 @@ import { publicNotificationActivityEvent } from "./src/server/notificationActivi
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
-import { craftDisplayName, isCompletedProductionJob, mergeCurrentCraftRows, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
-import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
+import {
+  GAME_CATALOG_NORMALIZATION_VERSION,
+  catalogNormalizationNeedsRefresh,
+  catalogRefreshShouldResume,
+  createGameCatalogRepository,
+} from "./src/server/gameCatalog.mjs";
 import { classifyCatalogRefreshError, parseRetryAfterMs } from "./src/server/catalogRefreshRecovery.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
@@ -35,7 +40,7 @@ import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSe
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
-import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots } from "./src/server/craftPlanSources.mjs";
+import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -492,10 +497,15 @@ async function fetchAndStoreGameCatalogDetail(target) {
   return stored;
 }
 
+function storedGameCatalogNormalizationVersion() {
+  return Number(statements.getSetting.get("game_catalog_normalization_version")?.value ?? 0);
+}
+
 async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   const startedAt = new Date().toISOString();
   const previousRun = gameCatalogRepository.getLatestRefreshRun();
-  const resuming = previousRun && previousRun.status !== "completed";
+  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
+  const resuming = catalogRefreshShouldResume(previousRun, storedNormalizationVersion);
   let refreshRun = resuming
     ? gameCatalogRepository.updateRefreshRun(previousRun.id, {
       status: "running",
@@ -510,6 +520,13 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
       startedAt,
       updatedAt: startedAt,
     });
+  if (!resuming) {
+    statements.upsertSetting.run(
+      "game_catalog_normalization_version",
+      String(GAME_CATALOG_NORMALIZATION_VERSION),
+      startedAt,
+    );
+  }
   let queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
   let itemCount = refreshRun.itemCount;
   let cargoCount = refreshRun.cargoCount;
@@ -754,6 +771,7 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
 
   gameCatalogRepository.deleteOrphanRecipes();
   const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
+  const completedAt = new Date().toISOString();
 
   gameCatalogRepository.updateRefreshRun(refreshRun.id, {
     status: "completed",
@@ -768,8 +786,8 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     byproductCount,
     failureCount,
     lastError: null,
-    completedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    completedAt,
+    updatedAt: completedAt,
   });
 
   return {
@@ -961,10 +979,14 @@ function scheduleScheduledJobContinuation(jobKey, delayMs) {
 
 function craftPlanCatalogRefreshStatus() {
   recoverStaleScheduledJobs();
+  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
   return {
     scheduledJob: scheduledJobRow(statements.getScheduledJob.get("recipe_catalog_refresh")),
     latestRun: gameCatalogRepository.getLatestRefreshRun(),
     recentRuns: gameCatalogRepository.listRefreshRuns(10),
+    normalizationVersion: GAME_CATALOG_NORMALIZATION_VERSION,
+    storedNormalizationVersion,
+    normalizationOutdated: catalogNormalizationNeedsRefresh(storedNormalizationVersion),
   };
 }
 
@@ -1026,6 +1048,18 @@ function checkScheduledJobs() {
 }
 
 seedScheduledJobs();
+
+function scheduleGameCatalogNormalizationRefresh() {
+  if (!scheduledJobsEnabled || isTestRuntime) return;
+  if (!catalogNormalizationNeedsRefresh(storedGameCatalogNormalizationVersion())) return;
+  const key = "recipe_catalog_refresh";
+  const row = statements.getScheduledJob.get(key);
+  if (!row || row.enabled === 0 || row.running) return;
+  const now = new Date().toISOString();
+  statements.updateScheduledJobSettings.run(row.schedule, 1, now, now, key);
+}
+
+scheduleGameCatalogNormalizationRefresh();
 
 function publicDiscordYouTubeChannel(row) {
   return row ? {
@@ -2013,44 +2047,6 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   }
   return detailsByKey;
 }
-function activeCraftPlanOutputs(craftPayloads = []) {
-  const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
-  const craftsPayload = {
-    items: payloads.flatMap((payload) => Array.isArray(payload?.items) ? payload.items : []),
-    cargos: payloads.flatMap((payload) => Array.isArray(payload?.cargos) ? payload.cargos : []),
-  };
-  const catalog = new Map(payloads.flatMap((payload) => [...craftPlanCatalogLookup(payload).entries()]));
-  const publicCrafts = unwrap(payloads[0], "craftResults", []);
-  const playerCrafts = payloads.slice(1).flatMap((payload) => unwrap(payload, "craftResults", []));
-  const crafts = mergeCurrentCraftRows(publicCrafts, playerCrafts);
-  return crafts.flatMap((craft) => {
-    const playerId = String(craft.playerEntityId ?? craft.crafterEntityId ?? craft.crafterId ?? craft.ownerEntityId ?? craft.ownerId ?? craft.characterEntityId ?? "").trim();
-    const playerName = String(craft.crafterName ?? craft.crafterUsername ?? craft.ownerUsername ?? craft.playerName ?? craft.userName ?? "").trim();
-    const buildingName = String(craft.buildingName ?? craft.stationName ?? craft.craftingStationName ?? "").trim();
-    const completed = isCompletedProductionJob(craft);
-    return (craft.craftedItem ?? craft.craftedItems ?? []).map((output, index) => {
-      const itemId = String(output.item_id ?? output.itemId ?? output.id ?? "");
-      const item = catalog.get(itemId) ?? {};
-      const craftId = String(craft.entityId ?? craft.id ?? itemId + ":" + index);
-      return {
-        id: craftId,
-        craftId,
-        playerId,
-        playerName,
-        buildingName,
-        status: completed ? "Ready to collect" : "In progress",
-        completed,
-        itemId,
-        kind: output.item_type === "cargo" || output.itemType === 1 ? "cargo" : "items",
-        quantity: Number(craft.craftCount ?? output.quantity ?? output.qty ?? 0) || 0,
-        name: item.name ?? craftDisplayName(craft, craftsPayload),
-        iconAssetName: item.iconAssetName ?? null,
-        tier: item.tier ?? null,
-      };
-    });
-  }).filter((item) => item.itemId && item.quantity > 0);
-}
-
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
@@ -2093,7 +2089,7 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     storageSources,
     playerSources,
     deployableSources,
-    activeCrafts: activeCraftPlanOutputs(craftPayloads),
+    activeCrafts: trackedCraftPlanOutputs(craftPayloads, detailsByKey),
     craftSourceErrors,
   });
 }

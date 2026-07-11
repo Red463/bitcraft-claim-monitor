@@ -1,7 +1,62 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, sourceItemFromContents } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, sourceItemFromContents, trackedCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+
+test("trackedCraftPlanOutputs expands farming product possibilities into expected Needs Board outputs", () => {
+  const payload = {
+    craftResults: [{
+      entityId: "craft-wispweave",
+      ownerEntityId: "player-oddfawn",
+      ownerUsername: "Oddfawn",
+      buildingName: "Exquisite Farming Station",
+      craftCount: 506,
+      completed: false,
+      craftedItem: [{ item_id: 3220023, quantity: 1, item_type: "item" }],
+    }],
+    items: [{ id: 3220023, name: "Infused Wispweave Products", tier: 3, tag: "Wispweave Output" }],
+  };
+  const detailsByKey = new Map([["items:3220023", {
+    item: payload.items[0],
+    itemListPossibilities: [
+      { targetId: "3100017", targetItem: { id: "3100017", name: "Sturdy Wispweave Filament", tier: 3, tag: "Filament" }, quantity: 3, chance: 0.2 },
+      { targetId: "3100017", targetItem: { id: "3100017", name: "Sturdy Wispweave Filament", tier: 3, tag: "Filament" }, quantity: 4, chance: 0.2 },
+      { targetId: "3100017", targetItem: { id: "3100017", name: "Sturdy Wispweave Filament", tier: 3, tag: "Filament" }, quantity: 5, chance: 0.2 },
+      { targetId: "3100017", targetItem: { id: "3100017", name: "Sturdy Wispweave Filament", tier: 3, tag: "Filament" }, quantity: 6, chance: 0.2 },
+      { targetId: "3100017", targetItem: { id: "3100017", name: "Sturdy Wispweave Filament", tier: 3, tag: "Filament" }, quantity: 7, chance: 0.2 },
+    ],
+  }]]);
+
+  const outputs = trackedCraftPlanOutputs([payload], detailsByKey);
+  const filament = outputs.find((output) => output.itemId === "3100017");
+
+  assert.equal(filament?.quantity, 2530);
+  assert.equal(filament?.playerName, "Oddfawn");
+  assert.equal(filament?.buildingName, "Exquisite Farming Station");
+  assert.equal(filament?.status, "In progress");
+});
+
+test("trackedCraftPlanOutputs preserves ordinary direct craft outputs", () => {
+  const payload = {
+    craftResults: [{
+      entityId: "craft-plank",
+      ownerEntityId: "player-modular",
+      ownerUsername: "Modular",
+      buildingName: "Exquisite Carpentry Station",
+      craftCount: 612,
+      completed: true,
+      craftedItem: [{ item_id: 1020003, quantity: 1, item_type: "item" }],
+    }],
+    items: [{ id: 1020003, name: "Rough Plank", tier: 1, tag: "Plank" }],
+  };
+
+  const outputs = trackedCraftPlanOutputs([payload], new Map());
+
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].itemId, "1020003");
+  assert.equal(outputs[0].quantity, 612);
+  assert.equal(outputs[0].status, "Ready to collect");
+});
 
 test("playerInventoryContainerSources reads wrapped BitJita inventories and separates player storage", () => {
   const result = playerInventoryContainerSources("player-1", "Modular", {

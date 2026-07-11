@@ -159,6 +159,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(server, /refreshCraftPlanProducerCatalog/);
   assert.match(server, /GAME_CATALOG_REFRESH_DETAIL_DELAY_MS/);
   assert.match(server, /await delay\(gameCatalogRefreshDetailDelayMs\)/);
+  assert.match(server, /GAME_CATALOG_NORMALIZATION_VERSION/);
+  assert.match(server, /catalogRefreshShouldResume\(previousRun, storedNormalizationVersion\)/);
+  assert.match(server, /game_catalog_normalization_version/);
+  assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
   assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, config\.targets, config\.routeOverrides\)/);
@@ -167,6 +171,6 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`\)/);
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
-  assert.match(computedCraftPlan, /activeCraftPlanOutputs\(craftPayloads\)/);
+  assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });

@@ -4,6 +4,9 @@ import test from "node:test";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
+  GAME_CATALOG_NORMALIZATION_VERSION,
+  catalogNormalizationNeedsRefresh,
+  catalogRefreshShouldResume,
   createGameCatalogRepository,
   gameCatalogKey,
   normalizeGameCatalogDetail,
@@ -313,6 +316,37 @@ test("normalizeGameCatalogDetail sums expected yield across an item-list probabi
     db.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs WHERE producer_key = ? AND output_key = ?").get("items:7000", "items:7010").count,
     1,
   );
+});
+
+test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil distributions", () => {
+  const ocean = normalizeGameCatalogDetail({
+    item: { id: "1110024", itemType: 0, name: "Briny Linus Products", tag: "Oceanfish Products", tier: 1 },
+    itemListPossibilities: [
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 3, chance: 0.5 },
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 3, chance: 0.45 },
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 4, chance: 0.05 },
+    ],
+  });
+  const lake = normalizeGameCatalogDetail({
+    item: { id: "1110023", itemType: 0, name: "Briny Argus Products", tag: "Lake Fish Products", tier: 1 },
+    itemListPossibilities: [
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 1, chance: 0.5 },
+      { targetId: "1110010", targetItem: { id: "1110010", name: "Basic Fish Oil", tier: 1 }, quantity: 1, chance: 0.5 },
+    ],
+  });
+
+  assert.equal(ocean.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.quantity, 3.05);
+  assert.equal(lake.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.quantity, 1);
+});
+
+test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
+  const incompleteRun = { status: "paused" };
+
+  assert.equal(catalogNormalizationNeedsRefresh(null), true);
+  assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
+  assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
+  assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION - 1), false);
+  assert.equal(catalogRefreshShouldResume({ status: "completed" }, GAME_CATALOG_NORMALIZATION_VERSION), false);
 });
 
 test("normalizeGameCatalogDetail preserves the full expected yield of farming co-products", () => {

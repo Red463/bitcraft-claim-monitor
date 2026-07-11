@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
 
+export const GAME_CATALOG_NORMALIZATION_VERSION = 2;
+
+export function catalogNormalizationNeedsRefresh(storedVersion) {
+  return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
+}
+
+export function catalogRefreshShouldResume(previousRun, storedVersion) {
+  return Boolean(previousRun && previousRun.status !== "completed" && !catalogNormalizationNeedsRefresh(storedVersion));
+}
+
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
