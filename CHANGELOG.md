@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.36] - 2026-07-12
+
+### Changed
+
+- Improved the application shell with clearer active navigation, calmer sidebar styling, and more compact page spacing.
+- Replaced the narrow-screen navigation strip with an accessible grouped drawer that preserves route and permission behaviour.
+
 ## [0.32.0-beta.35] - 2026-07-12
 
 ### Added

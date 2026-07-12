@@ -8,11 +8,13 @@ import {
   FileText,
   KeyRound,
   MessageCircle,
+  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
   Settings,
   Shield,
+  X,
 } from "lucide-react";
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
@@ -120,6 +122,18 @@ function accountDisplayName(user: UserAuthState["user"]): string {
 function DashboardApp() {
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
   const mainRef = React.useRef<HTMLElement | null>(null);
+  const navigationRef = React.useRef<HTMLElement | null>(null);
+  const mobileNavigationTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const mobileNavigationWasOpenRef = React.useRef(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = React.useState(false);
+  const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
+  const [collapsedNavTooltip, setCollapsedNavTooltip] = React.useState<{ label: string; left: number; top: number } | null>(null);
+  React.useEffect(() => {
+    const narrowViewport = window.matchMedia("(max-width: 920px)");
+    const updateNarrowViewport = () => setIsNarrowViewport(narrowViewport.matches);
+    narrowViewport.addEventListener("change", updateNarrowViewport);
+    return () => narrowViewport.removeEventListener("change", updateNarrowViewport);
+  }, []);
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
@@ -163,6 +177,42 @@ function DashboardApp() {
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const [accountSettingsHydratedFor, setAccountSettingsHydratedFor] = React.useState("");
+  const showCollapsedNavTooltip = React.useCallback((anchor: HTMLAnchorElement, label: string) => {
+    if (!sidebarCollapsed || mobileNavigationOpen) return;
+    const rect = anchor.getBoundingClientRect();
+    setCollapsedNavTooltip({ label, left: rect.right + 10, top: rect.top + rect.height / 2 });
+  }, [mobileNavigationOpen, sidebarCollapsed]);
+  React.useEffect(() => {
+    setCollapsedNavTooltip(null);
+  }, [active, mobileNavigationOpen, sidebarCollapsed]);
+  React.useEffect(() => {
+    if (!collapsedNavTooltip) return;
+    const navigation = navigationRef.current;
+    const clearCollapsedNavTooltip = () => setCollapsedNavTooltip(null);
+    window.addEventListener("resize", clearCollapsedNavTooltip);
+    navigation?.addEventListener("scroll", clearCollapsedNavTooltip);
+    return () => {
+      window.removeEventListener("resize", clearCollapsedNavTooltip);
+      navigation?.removeEventListener("scroll", clearCollapsedNavTooltip);
+    };
+  }, [collapsedNavTooltip]);
+  React.useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = mobileNavigationOpen ? "hidden" : previousOverflow;
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [mobileNavigationOpen]);
+  React.useEffect(() => {
+    if (!mobileNavigationOpen && mobileNavigationWasOpenRef.current) mobileNavigationTriggerRef.current?.focus();
+    mobileNavigationWasOpenRef.current = mobileNavigationOpen;
+  }, [mobileNavigationOpen]);
+  React.useEffect(() => {
+    if (!mobileNavigationOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavigationOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileNavigationOpen]);
   const state = useBitjitaData(refreshToken, claimId, active);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
@@ -544,9 +594,18 @@ function DashboardApp() {
   const sidebarAccountName = accountDisplayName(userAuth.user);
   const sidebarAccountStatus = accountCharacterStatusLabel(userAuth.user);
   const sidebarAccountInitial = sidebarAccountName.slice(0, 1).toUpperCase();
+  const mobileNavigationUnavailable = isNarrowViewport && !mobileNavigationOpen;
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="app-sidebar">
+      <header className="mobile-shell-bar">
+        <span><strong>Claim Monitor</strong><small>{activePageLabel}</small></span>
+        <button ref={mobileNavigationTriggerRef} type="button" aria-label="Open navigation" aria-controls="mobile-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
+          <Menu size={18} />
+        </button>
+      </header>
+      {mobileNavigationOpen ? <button type="button" className="mobile-navigation-backdrop" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)} /> : null}
+      <aside id="mobile-navigation" aria-label="Mobile navigation" aria-hidden={mobileNavigationUnavailable ? true : undefined} inert={mobileNavigationUnavailable ? true : undefined} className={`app-sidebar ${mobileNavigationOpen ? "mobile-open" : ""}`}>
+        <button type="button" className="mobile-navigation-close" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)}><X size={18} /></button>
         <div className="brand">
           {appSettings.branding.logo ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" /> : <Shield />}
           <div title={data.claim.name ?? "Settlement"}><h1>{data.claim.name ?? "Settlement"}</h1><span>Claim Monitor</span></div>
@@ -573,7 +632,7 @@ function DashboardApp() {
           </section>
           <a className="discord-cta" href={DISCORD_URL} target="_blank" rel="noreferrer"><DiscordIcon size={18} /><span>Join Discord Server</span><ExternalLink size={13} /></a>
         </div>
-        <nav aria-label="Main navigation" data-tour="sidebar-navigation">
+        <nav ref={navigationRef} aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
             const visibleItems = group.items.filter(([id]) => isPageAllowed(id));
             if (!visibleItems.length) return null;
@@ -597,14 +656,21 @@ function DashboardApp() {
                       key={id}
                       className={active === id ? "active" : ""}
                       href={panelHref(id)}
+                      aria-current={active === id ? "page" : undefined}
                       title={label}
+                      onMouseEnter={(event) => showCollapsedNavTooltip(event.currentTarget, label)}
+                      onMouseLeave={() => setCollapsedNavTooltip(null)}
+                      onFocus={(event) => showCollapsedNavTooltip(event.currentTarget, label)}
+                      onBlur={() => setCollapsedNavTooltip(null)}
                       onClick={(event) => {
                         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                         event.preventDefault();
                         navigate(id);
+                        setMobileNavigationOpen(false);
                       }}
                     >
                       <Icon size={16} /><span className="nav-label">{label}</span>
+                      <span className="collapsed-nav-label" aria-hidden="true">{label}</span>
                     </a>
                   ))}
                 </div>
@@ -619,7 +685,8 @@ function DashboardApp() {
           intervalSeconds={appSettings.refreshSeconds}
         />
       </aside>
-      <main ref={mainRef}>
+      {collapsedNavTooltip ? <span className="collapsed-nav-tooltip" aria-hidden="true" style={{ left: collapsedNavTooltip.left, top: collapsedNavTooltip.top }}>{collapsedNavTooltip.label}</span> : null}
+      <main ref={mainRef} tabIndex={-1}>
         <div className={`page-refresh-line ${state.loading ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>

@@ -4,6 +4,79 @@ import test from "node:test";
 
 const setupWorkflowCss = readFileSync(new URL("../src/styles/setup-workflow.css", import.meta.url), "utf8");
 
+test("application shell uses a compact drawer at narrow widths", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const narrow = [...css.matchAll(/@media \(max-width: 920px\)\s*\{(?<body>[\s\S]*?)\n\}/g)]
+    .map((match) => match.groups?.body ?? "")
+    .find((body) => body.includes(".mobile-shell-bar")) ?? "";
+
+  for (const selector of [".mobile-shell-bar", ".mobile-navigation-backdrop", ".mobile-navigation-close"]) {
+    assert.match(css, new RegExp(`\\${selector}[^\\{]*\\{[^}]*display:\\s*none\\b`, "s"));
+  }
+  assert.match(narrow, /\.mobile-shell-bar\s*\{[^}]*position:\s*fixed\b[^}]*height:\s*52px\b/s);
+  assert.match(narrow, /\.mobile-navigation-backdrop\s*\{[^}]*position:\s*fixed\b[^}]*inset:\s*0\b/s);
+  assert.match(narrow, /\.app-sidebar\s*\{[^}]*position:\s*fixed\b[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*44px\)\)/s);
+  assert.match(narrow, /\.app-sidebar\.mobile-open\s*\{[^}]*transform:\s*translateX\(0\)/s);
+  assert.match(narrow, /\.sidebar-section-title[^\{]*\{[^}]*display:\s*flex\b/s);
+  assert.match(narrow, /nav[^\{]*\{[^}]*overflow-y:\s*auto\b/s);
+  assert.match(narrow, /\.mobile-navigation-close\s*\{[^}]*min-width:\s*44px\b[^}]*min-height:\s*44px\b/s);
+  assert.match(narrow, /main\s*\{[^}]*--shell-page-gutter:\s*16px\b[^}]*padding-left:\s*0\b[^}]*padding-right:\s*0\b/s);
+  assert.match(narrow, /\.sidebar-toggle\s*\{[^}]*display:\s*none\b/s);
+  assert.doesNotMatch(narrow, /scroll-snap-type:\s*x|overflow-x:\s*auto|\.sidebar-section-title[^\{]*\{[^}]*display:\s*none/);
+  const collapsedLabels = narrow.match(/\.sidebar-collapsed nav \.nav-label\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.match(collapsedLabels, /width:\s*auto\b/);
+  assert.match(collapsedLabels, /min-width:\s*0\b/);
+  assert.match(collapsedLabels, /max-height:\s*none\b/);
+  const collapsedBrandCopy = narrow.match(/\.brand > div,\s*\.sidebar-collapsed \.brand > div\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.match(collapsedBrandCopy, /max-height:\s*none\b/);
+  assert.match(collapsedBrandCopy, /overflow:\s*visible\b/);
+  const collapsedAccountCopy = narrow.match(/\.sidebar-collapsed \.sidebar-account-copy\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.match(collapsedAccountCopy, /min-width:\s*0\b/);
+});
+
+test("shell owns compact page gutters without stacking main and panel padding", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.app-shell\s*\{[^}]*--shell-page-gutter:\s*20px\b/s);
+  assert.match(css, /\.panel\s*\{[^}]*padding:\s*var\(--shell-page-gutter\)\s*;/s);
+});
+
+test("inline collapsed navigation labels remain hidden in desktop and mobile modes", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.collapsed-nav-label\s*\{[^}]*display:\s*none\b/s);
+  const narrow = [...css.matchAll(/@media \(max-width: 920px\)\s*\{(?<body>[\s\S]*?)\n\}/g)]
+    .map((match) => match.groups?.body ?? "")
+    .find((body) => body.includes(".mobile-shell-bar")) ?? "";
+  assert.match(narrow, /\.collapsed-nav-label,\s*\.collapsed-nav-tooltip\s*\{[^}]*display:\s*none\s*!important/s);
+});
+
+test("collapsed navigation tooltip escapes the vertically scrolling nav", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const navRule = css.match(/nav\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  const tooltipRule = css.match(/\.collapsed-nav-tooltip\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.match(navRule, /overflow-y:\s*auto\b/);
+  assert.match(tooltipRule, /position:\s*fixed\b/);
+  assert.match(tooltipRule, /pointer-events:\s*none\b/);
+});
+
+test("sidebar decoration stays neutral outside active and primary states", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  for (const selector of ["aside", ".brand", ".brand svg", ".brand h1", ".sidebar-account-avatar", ".sidebar-auth-cta", ".discord-cta", ".nav-tools-menu", ".refresh-breakdown", ".app-footer", "button.sidebar-account-main:hover", ".sidebar-toggle:hover", ".sidebar-account-action:hover", ".sidebar-auth-cta:hover"]) {
+    const escaped = selector.replaceAll(".", "\\.").replaceAll(" ", "\\s+");
+    const rule = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`))?.groups?.body ?? "";
+    assert.notEqual(rule, "", `${selector} should have a shell rule`);
+    assert.doesNotMatch(rule, /var\(--gold\)|var\(--active-color\)|var\(--active-bg\)|rgba\(240,198,79/);
+  }
+  const footerHover = css.match(/\.app-footer a:not\(\.footer-bmc\):hover,\s*\.footer-link:hover\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.notEqual(footerHover, "", "ordinary footer hover should have a shell rule");
+  assert.doesNotMatch(footerHover, /var\(--gold\)|var\(--active-color\)|var\(--active-bg\)|rgba\(240,198,79/);
+});
+
+test("reduced motion explicitly disables drawer and backdrop transitions", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const reducedMotion = css.match(/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
+  assert.match(reducedMotion, /\.app-sidebar,\s*\.mobile-navigation-backdrop\s*\{[^}]*transition:\s*none\s*!important/s);
+});
+
 test("setup workflow stylesheet keeps ownership to setup, workflow, and admin-message selectors", () => {
   const forbiddenGlobalSelectors = setupWorkflowCss
     .split(/\r?\n/)
