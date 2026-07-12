@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.38] - 2026-07-12
+
+### Added
+
+- Added an overall quantity-weighted completion indicator to the Craft Planning Needs Board.
+
+### Changed
+
+- Simplified Needs Board shortage and blocked states to use distinct cell colours without persistent inset borders.
+
+### Fixed
+
+- Fixed blocked Needs Board cells changing back to the shortage colour when highlighted.
+- Fixed Gypsite showing its fallback Masonry recipe instead of verified Sand and Clay gathering sources.
+
 ## [0.32.0-beta.37] - 2026-07-12
 
 ### Added

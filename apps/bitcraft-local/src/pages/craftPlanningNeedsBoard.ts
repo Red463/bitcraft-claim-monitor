@@ -35,6 +35,12 @@ export type NeedGroup = {
   completion: number;
 };
 
+export function needsBoardCompletion(board: NeedGroup[]) {
+  const required = board.reduce((sum, group) => sum + group.required, 0);
+  const covered = board.reduce((sum, group) => sum + group.covered, 0);
+  return { required, covered, completion: required > 0 ? Math.round((covered / required) * 1000) / 10 : 100 };
+}
+
 export function filterNeedsBoard(board: NeedGroup[], selectedSections: string[], shortagesOnly: boolean, query: string): NeedGroup[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return board

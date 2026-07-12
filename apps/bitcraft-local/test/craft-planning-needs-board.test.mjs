@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildNeedsBoard, filterNeedsBoard } from "../src/pages/craftPlanningNeedsBoard.ts";
+import { buildNeedsBoard, filterNeedsBoard, needsBoardCompletion } from "../src/pages/craftPlanningNeedsBoard.ts";
 
 test("buildNeedsBoard groups enriched API items by tag and authoritative tier", () => {
   const board = buildNeedsBoard([
@@ -262,6 +262,13 @@ test("buildNeedsBoard calculates section completion from required and covered qu
   assert.equal(board[0].required, 200);
   assert.equal(board[0].covered, 180);
   assert.equal(board[0].completion, 90);
+});
+
+test("needsBoardCompletion weights the full board by required quantities", () => {
+  const board = [{ section: "A", rows: [], required: 100, covered: 50, completion: 50 }, { section: "B", rows: [], required: 300, covered: 300, completion: 100 }];
+  assert.deepEqual(needsBoardCompletion(board), { required: 400, covered: 350, completion: 87.5 });
+  assert.deepEqual(needsBoardCompletion([]), { required: 0, covered: 0, completion: 100 });
+  assert.equal(needsBoardCompletion(board).completion, needsBoardCompletion(board).completion);
 });
 
 test("filterNeedsBoard searches row names while preserving matching section headings", () => {

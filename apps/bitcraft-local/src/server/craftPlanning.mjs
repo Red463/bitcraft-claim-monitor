@@ -223,6 +223,7 @@ function routeMetadata(recipe) {
     dropChance: recipe?.dropChance == null ? null : toNumber(recipe.dropChance),
     dropQuantity: recipe?.dropQuantity == null ? null : toNumber(recipe.dropQuantity),
     guaranteedYield: recipe?.guaranteedYield == null ? null : toNumber(recipe.guaranteedYield),
+    gatheringSource: recipe?.gatheringSource ?? null,
   };
 }
 
@@ -368,6 +369,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
         dropChance: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropChance ?? null,
         dropQuantity: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropQuantity ?? null,
         guaranteedYield: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.guaranteedQuantity ?? 0,
+        gatheringSource: recipe.gatheringSource ?? null,
       });
     }
   }
@@ -491,9 +493,18 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [key]);
   if (!selected) return [];
   const visibleRecipes = routeAlternativesForUi(recipes, selected);
+  const gatheringSources = visibleRecipes
+    .filter(isGatheringByproductRoute)
+    .map((recipe) => ({
+      label: recipe.gatheringSource?.label ?? recipe.producer?.tag ?? recipe.producer?.name ?? "Gathering",
+      tag: recipe.gatheringSource?.tag ?? recipe.producer?.tag ?? null,
+      expectedYield: toNumber(recipe.expectedYield),
+    }))
+    .filter((source, index, sources) => sources.findIndex((candidate) => candidate.label === source.label) === index)
+    .sort((a, b) => (a.label === "Sand" ? -1 : b.label === "Sand" ? 1 : a.label.localeCompare(b.label)));
   return [{
     id: recipeId(selected),
-    recipeName: recipeLabel(selected),
+    recipeName: gatheringSources.length > 1 ? `Gather from ${gatheringSources.map((source) => source.label).join(" or ")}` : recipeLabel(selected),
     ...routeMetadata(selected),
     output: normalizedTarget,
     inputs: recipeInputs(selected).map((input, index) => ({
@@ -513,6 +524,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
         quantity: toNumber(input.quantity),
       })),
     })),
+    gatheringSources,
   }];
 }
 
@@ -743,6 +755,27 @@ function catalogByproductPossibility(repository, row, warnings) {
   };
 }
 
+function catalogGatheringOutputSource(producer) {
+  const tag = String(producer?.tag ?? "").trim();
+  if (tag === "Sand Output") return { tag, label: "Sand", skill: "Mining" };
+  if (tag === "Clay Output") return { tag, label: "Clay", skill: "Mining" };
+  return null;
+}
+
+function catalogGatheringOutputRecipe(row, producerTarget, source) {
+  return {
+    id: `gathering-output:${row.producerKey}`,
+    name: `Gather ${source.label}`,
+    skillName: source.skill,
+    gatheringSource: source,
+    craftedItemStacks: [{ item_id: producerTarget.id, item_type: producerTarget.kind === "cargo" ? "cargo" : "item", quantity: 1 }],
+    craftedItems: [producerTarget],
+    consumedItemStacks: [],
+    consumedItems: [],
+    levelRequirements: [{ skill: { name: source.skill }, level: 0 }],
+  };
+}
+
 function localCatalogDetail(repository, key, fallbackTarget, byproductRows, warnings) {
   const { kind, id } = catalogKeyParts(key);
   const entity = repository.getEntity(key);
@@ -816,9 +849,14 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
     for (const row of byproductProducers) {
       const producerTarget = catalogEntityDisplay(row.producer, { id: row.producer?.targetId, kind: row.producer?.kind });
       const producerDetail = setDetail(row.producerKey, producerTarget);
-      const producerRecipes = producerDetail
+      let producerRecipes = producerDetail
         ? directRecipesForTarget(producerDetail, mergeDetailTarget(producerDetail, producerTarget))
         : [];
+      const gatheringSource = catalogGatheringOutputSource(row.producer);
+      if (producerDetail && producerRecipes.length === 0 && gatheringSource) {
+        producerDetail.craftingRecipes.push(catalogGatheringOutputRecipe(row, producerTarget, gatheringSource));
+        producerRecipes = directRecipesForTarget(producerDetail, mergeDetailTarget(producerDetail, producerTarget));
+      }
       if (producerRecipes.length > 0) usableByproductProducers += 1;
     }
     if (byproductProducers.length > 0 && usableByproductProducers === 0) {

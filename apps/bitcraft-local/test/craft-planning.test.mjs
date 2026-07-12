@@ -1775,6 +1775,25 @@ test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes th
   assert.equal(plan.materials.find((material) => material.name === "Rough Trunk")?.required, 3);
 });
 
+test("collectLocalCatalogCraftPlanDetails treats recipe-less Sand and Clay Output producers as gathering routes", (t) => {
+  const { repository } = createCatalogFixture(t);
+  const gypsite = { id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 };
+  upsertCatalogDetails(repository, [
+    { item: gypsite, craftingRecipes: [{ id: "craft-gypsite", name: "Craft Rough Gypsite", craftedItemStacks: [{ item_id: gypsite.id, item_type: "item", quantity: 1 }], consumedItemStacks: [{ item_id: "4001", item_type: "item", quantity: 10 }], consumedItems: [{ id: "4001", itemType: 0, name: "Rough Brick", tag: "Brick", tier: 1 }], levelRequirements: [{ skill: { name: "Masonry" }, level: 1 }] }] },
+    { item: { id: "5001", itemType: 0, name: "T1 Clay Output", tag: "Clay Output", tier: 1 }, craftingRecipes: [], itemListPossibilities: [{ targetId: gypsite.id, targetItem: gypsite, quantity: 0.02, chance: 1, guaranteedQuantity: 0 }] },
+    { item: { id: "5002", itemType: 0, name: "T1 Sand Output", tag: "Sand Output", tier: 1 }, craftingRecipes: [], itemListPossibilities: [{ targetId: gypsite.id, targetItem: gypsite, quantity: 0.02, chance: 1, guaranteedQuantity: 0 }] },
+  ]);
+  const config = normalizeCraftPlanConfig({ enabled: true, targets: [{ ...gypsite, kind: "items", quantity: 4 }] });
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey, catalogWarnings: warnings });
+  const route = plan.materials.find((material) => material.id === gypsite.id)?.sourceRoutes?.[0];
+  assert.equal(route?.routeType, "gathering-byproduct");
+  assert.equal(route?.recipeName, "Gather from Sand or Clay");
+  assert.deepEqual(route?.gatheringSources.map((source) => source.label), ["Sand", "Clay"]);
+  assert.equal(route?.gatheringSources.every((source) => source.expectedYield === 0.02), true);
+  assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
+});
+
 test("collectLocalCatalogCraftPlanDetails reports missing local rows without inferring identity from names", (t) => {
   const { repository } = createCatalogFixture(t);
   const config = normalizeCraftPlanConfig({

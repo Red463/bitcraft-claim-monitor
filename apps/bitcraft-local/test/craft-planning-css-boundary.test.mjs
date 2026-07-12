@@ -122,10 +122,17 @@ test("Craft planning chance controls and compact targets retain responsive bound
   assert.match(page, /Counted stock exists, but source details are unavailable/);
   assert.match(page, /craft-plan-target-progress/);
   assert.match(css, /\.craft-plan-need-cell\.has-active\s*\{[^}]*padding-top:\s*16px/);
-  assert.match(css, /\.craft-plan-need-cell\.has-active\.is-shortage::before/);
   assert.match(css, /\.craft-plan-target-progress\s*\{/);
   assert.match(css, /\.craft-plan-target-status\s*\{/);
   assert.match(css, /\.craft-plan-manager-pending\s*\{/);
   assert.match(css, /\.craft-plan-need-cell\.is-blocked\s*\{[^}]*rgba\(239, 100, 97/);
   assert.match(css, /\.craft-plan-needs-legend \.blocked\s*\{[^}]*#ef6461/);
+});
+
+test("Needs Board shortage states use fill without persistent borders", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /\.craft-plan-need-cell\.is-shortage::before/);
+  assert.doesNotMatch(css, /\.craft-plan-need-cell\.is-blocked::before/);
+  assert.match(css, /\.craft-plan-need-cell\.is-blocked:hover[\s\S]*background:\s*rgba\(239, 100, 97/);
+  assert.match(css, /\.craft-plan-overall-progress\s*\{/);
 });

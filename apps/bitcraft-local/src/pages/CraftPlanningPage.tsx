@@ -9,7 +9,7 @@ import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
-import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
+import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, needsBoardCompletion, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
 const LOCAL_API = "/api/local";
@@ -133,6 +133,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   );
   const needsBoardRowCount = React.useMemo(() => personalBoard.board.reduce((total, group) => total + group.rows.length, 0), [personalBoard.board]);
   const needsBoardSections = React.useMemo(() => personalBoard.board.map((group) => group.section), [personalBoard.board]);
+  const overallCompletion = React.useMemo(() => needsBoardCompletion(personalBoard.board), [personalBoard.board]);
   const filteredNeedsBoard = React.useMemo(
     () => filterNeedsBoard(personalBoard.board, selectedSections, shortagesOnly, needsSearch),
     [personalBoard.board, selectedSections, shortagesOnly, needsSearch],
@@ -229,13 +230,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   <div className={`craft-plan-route-detail${gatheringByproduct ? " is-gathering-byproduct" : ""}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
                     <div>
                       {gatheringByproduct ? <span className="craft-plan-route-kind">Gathering byproduct</span> : null}
-                      <strong>{gatheringByproduct ? route.producerRecipe?.name ?? route.recipeName : route.recipeName ?? "Selected recipe"}</strong>
+                      <strong>{gatheringByproduct && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? route.recipeName : gatheringByproduct ? route.producerRecipe?.name ?? route.recipeName : route.recipeName ?? "Selected recipe"}</strong>
                       <p className="legend">{gatheringByproduct
                         ? [route.gatheringSkill, route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
                         : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
                     {gatheringByproduct ? (
                       <>
+                        {Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 2 : 1)} expected per action</small></span>)}</div> : null}
                         <p className="craft-plan-byproduct-note">Expected yield: {formatNumber(Number(route.expectedYield) || 0, Number(route.expectedYield) < 1 ? 2 : 1)} {itemName(route.output)} per gathering action{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</p>
                         {route.isProbabilistic ? <div className="craft-plan-chance-summary">
                           <span>Estimated actions <strong>{quantity(Math.ceil(Number(selectedNeed.required) / Math.max(Number(route.expectedYield), 0.0001)))}</strong></span>
@@ -464,7 +466,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           </section>
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
-            <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
+            <div className="split-header craft-plan-needs-header"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${completionTone(overallCompletion.completion)}`}><span><strong>{overallCompletion.completion}%</strong><small>Overall complete</small></span><div><i style={{ width: `${overallCompletion.completion}%` }} /></div><em>{quantity(overallCompletion.covered)} / {quantity(overallCompletion.required)} covered</em></div></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
               <button className={selectedSections.length === 0 ? "active" : ""} type="button" aria-pressed={selectedSections.length === 0} onClick={() => setSelectedSections([])}>All <span>{needsBoardRowCount}</span></button>
