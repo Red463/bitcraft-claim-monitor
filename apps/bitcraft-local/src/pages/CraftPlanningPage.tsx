@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, ClipboardList, Factory, Package, Route, Target, X } from "lucide-react";
+import { AlertTriangle, ClipboardList, Factory, Package, Route, Search, Target, X } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { TierBadge } from "../components/main/Badges";
@@ -10,7 +10,7 @@ import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
-import { buildNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
+import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
 const LOCAL_API = "/api/local";
@@ -82,6 +82,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [managerRefreshToken, setManagerRefreshToken] = React.useState(0);
   const [selectedSections, setSelectedSections] = React.useState<string[]>([]);
   const [shortagesOnly, setShortagesOnly] = React.useState(false);
+  const [needsSearch, setNeedsSearch] = React.useState("");
   const [fishingRoute, setFishingRoute] = usePersistedState<FishingRoutePreference>("planning.fishingRoute", "ocean");
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
@@ -132,11 +133,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   );
   const needsBoardRowCount = React.useMemo(() => personalBoard.board.reduce((total, group) => total + group.rows.length, 0), [personalBoard.board]);
   const needsBoardSections = React.useMemo(() => personalBoard.board.map((group) => group.section), [personalBoard.board]);
-  const filteredNeedsBoard = React.useMemo(() => {
-    const groups = selectedSections.length === 0 ? personalBoard.board : personalBoard.board.filter((group) => selectedSections.includes(group.section));
-    if (!shortagesOnly) return groups;
-    return groups.map((group) => ({ ...group, rows: group.rows.filter((row) => [...row.cells.values()].some((cell) => cell.missing > 0)) })).filter((group) => group.rows.length > 0);
-  }, [personalBoard.board, selectedSections, shortagesOnly]);
+  const filteredNeedsBoard = React.useMemo(
+    () => filterNeedsBoard(personalBoard.board, selectedSections, shortagesOnly, needsSearch),
+    [personalBoard.board, selectedSections, shortagesOnly, needsSearch],
+  );
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
@@ -435,6 +435,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
             <div className="split-header"><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
+              <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
               <button className={selectedSections.length === 0 ? "active" : ""} type="button" aria-pressed={selectedSections.length === 0} onClick={() => setSelectedSections([])}>All <span>{needsBoardRowCount}</span></button>
               {personalBoard.board.map((group) => {
                 const selected = selectedSections.includes(group.section);
@@ -467,7 +468,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   ))}
                 </table>
               </div>
-            </div> : <p className="legend">All planned materials are covered by selected stock sources and tracked crafts.</p>}
+            </div> : <p className="legend">{needsSearch.trim() ? "No matching items in the selected Needs Board filters." : "All planned materials are covered by selected stock sources and tracked crafts."}</p>}
           </section>
 
           {canManage && warnings.length ? (

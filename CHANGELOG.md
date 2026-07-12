@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.35] - 2026-07-12
+
+### Added
+
+- Added a live item search to the Craft Planning Needs Board that works alongside activity and shortage filters.
+
+### Fixed
+
+- Restored downstream Fish Oil recipe context in the item details for personally selected Ocean and Lake fish routes.
+
 ## [0.32.0-beta.34] - 2026-07-12
 
 ### Changed

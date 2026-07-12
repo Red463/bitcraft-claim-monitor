@@ -35,6 +35,21 @@ export type NeedGroup = {
   completion: number;
 };
 
+export function filterNeedsBoard(board: NeedGroup[], selectedSections: string[], shortagesOnly: boolean, query: string): NeedGroup[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return board
+    .filter((group) => selectedSections.length === 0 || selectedSections.includes(group.section))
+    .map((group) => ({
+      ...group,
+      rows: group.rows.filter((row) => {
+        if (shortagesOnly && ![...row.cells.values()].some((cell) => cell.missing > 0)) return false;
+        if (!normalizedQuery) return true;
+        return row.name.toLocaleLowerCase().includes(normalizedQuery) || row.apiName.toLocaleLowerCase().includes(normalizedQuery);
+      }),
+    }))
+    .filter((group) => group.rows.length > 0);
+}
+
 export function itemKey(item: AnyRecord) {
   const id = item.key ?? item.itemKey ?? item.id ?? item.itemId ?? item.entityId ?? item.name ?? item.label;
   const kind = item.kind ?? item.itemKind ?? item.itemType ?? "item";

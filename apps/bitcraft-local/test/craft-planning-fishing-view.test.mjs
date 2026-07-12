@@ -63,8 +63,8 @@ function makeRouteView() {
       trackedOil: 5,
       remainingOil: 45,
       routes: {
-        ocean: { available: true, input: oceanInput, guaranteedYield: 3, stockQuantity: 0, trackedQuantity: 0, needed: 15 },
-        lake: { available: true, input: lakeInput, guaranteedYield: 1, stockQuantity: 0, trackedQuantity: 0, needed: 45 },
+        ocean: { available: true, input: oceanInput, guaranteedYield: 3, stockQuantity: 0, trackedQuantity: 0, needed: 15, usage: { outputKey: "items:oil", output: { key: "items:oil", name: "Basic Fish Oil", quantity: 45 }, recipeName: "Press Ocean Fish Oil", selectedRecipeId: "ocean-route", requiredQuantity: 15, quantityPerCraft: 1, craftCount: 15, alternatives: [] } },
+        lake: { available: true, input: lakeInput, guaranteedYield: 1, stockQuantity: 0, trackedQuantity: 0, needed: 45, usage: { outputKey: "items:oil", output: { key: "items:oil", name: "Basic Fish Oil", quantity: 45 }, recipeName: "Press Lake Fish Oil", selectedRecipeId: "lake-route", requiredQuantity: 45, quantityPerCraft: 1, craftCount: 45, alternatives: [] } },
       },
     }],
   };
@@ -102,6 +102,8 @@ test("applies the lake route without mutating the authoritative board", () => {
   assert.equal(cell?.available, 0);
   assert.equal(cell?.inProgress, 0);
   assert.equal(cell?.plannedOutput, 0);
+  assert.equal(cell?.items[0].recipeUsages[0].output.name, "Basic Fish Oil");
+  assert.equal(cell?.items[0].recipeUsages[0].requiredQuantity, 45);
   assert.equal(fishing.required, 159);
   assert.equal(fishing.covered, 15);
   assert.equal(fishing.completion, 9.4);

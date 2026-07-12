@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildNeedsBoard } from "../src/pages/craftPlanningNeedsBoard.ts";
+import { buildNeedsBoard, filterNeedsBoard } from "../src/pages/craftPlanningNeedsBoard.ts";
 
 test("buildNeedsBoard groups enriched API items by tag and authoritative tier", () => {
   const board = buildNeedsBoard([
@@ -262,4 +262,28 @@ test("buildNeedsBoard calculates section completion from required and covered qu
   assert.equal(board[0].required, 200);
   assert.equal(board[0].covered, 180);
   assert.equal(board[0].completion, 90);
+});
+
+test("filterNeedsBoard searches row names while preserving matching section headings", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, missing: 20 },
+    { key: "items:2", name: "Rough Stripped Wood", tag: "Stripped Wood", tier: 1, section: "Carpentry", required: 50, missing: 10 },
+    { key: "items:3", name: "Rough Brick", tag: "Brick", tier: 1, section: "Masonry", required: 25, missing: 5 },
+  ], []);
+
+  const filtered = filterNeedsBoard(board, [], false, " plank ");
+
+  assert.deepEqual(filtered.map((group) => [group.section, group.rows.map((row) => row.name)]), [["Carpentry", ["Plank"]]]);
+  assert.equal(filtered[0].completion, board[0].completion);
+});
+
+test("filterNeedsBoard matches API names and composes with activity and shortage filters", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Rough Plank", tag: "Plank", rowNameOverride: "Boards", tier: 1, section: "Carpentry", required: 100, missing: 0, recipeUsages: [{}] },
+    { key: "items:2", name: "Simple Plank", tag: "Plank", rowNameOverride: "Boards", tier: 2, section: "Carpentry", required: 100, missing: 10 },
+    { key: "items:3", name: "Basic Ink", tag: "Ink", tier: 1, section: "Scholar", required: 25, missing: 5 },
+  ], []);
+
+  assert.deepEqual(filterNeedsBoard(board, ["Carpentry"], true, "plank").map((group) => group.rows.map((row) => row.name)), [["Boards"]]);
+  assert.deepEqual(filterNeedsBoard(board, ["Scholar"], true, "plank"), []);
 });

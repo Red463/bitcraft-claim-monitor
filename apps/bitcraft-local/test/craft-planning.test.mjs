@@ -213,6 +213,11 @@ test("computeCraftPlan exposes ocean and lake personal views from one oil-equiva
   assert.equal(tier.remainingOil, 45);
   assert.equal(tier.routes.ocean.needed, 15);
   assert.equal(tier.routes.lake.needed, 45);
+  assert.equal(tier.routes.ocean.usage.output.name, "Basic Fish Oil");
+  assert.equal(tier.routes.ocean.usage.output.quantity, 45);
+  assert.equal(tier.routes.ocean.usage.requiredQuantity, 15);
+  assert.equal(tier.routes.ocean.usage.recipeName, "Press Ocean Fish Oil");
+  assert.equal(tier.routes.lake.usage.requiredQuantity, 45);
 });
 
 test("personal fishing view rounds preferred fish upward", () => {

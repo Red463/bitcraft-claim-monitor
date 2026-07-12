@@ -190,6 +190,10 @@
 }
 
 .craft-plan-section-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.craft-plan-needs-search { display: inline-flex; align-items: center; gap: 8px; width: 210px; min-height: 34px; box-sizing: border-box; border: 1px solid rgba(139, 159, 184, 0.32); border-radius: 7px; background: rgba(8, 13, 20, 0.76); color: var(--muted); padding: 0 10px; }
+.craft-plan-needs-search:focus-within { border-color: var(--focus-border); box-shadow: 0 0 0 3px var(--focus-ring); color: var(--text); }
+.craft-plan-needs-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); padding: 0; font: inherit; }
+.craft-plan-needs-search input::placeholder { color: var(--muted); }
 .craft-plan-section-filters button, .craft-plan-fishing-route button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 999px; background: rgba(8, 13, 20, 0.72); color: var(--text); padding: 7px 11px; font-weight: 800; font-size: 0.82rem; cursor: pointer; }
 .craft-plan-section-filters button:hover, .craft-plan-fishing-route button:hover { border-color: rgba(240, 198, 79, 0.45); background: rgba(240, 198, 79, 0.08); }
 .craft-plan-section-filters button.active, .craft-plan-fishing-route button.active { color: var(--accent); border-color: rgba(240, 198, 79, 0.72); background: rgba(240, 198, 79, 0.14); }
@@ -202,6 +206,7 @@
 .craft-plan-list-only { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; margin-left: auto; color: var(--muted); font-size: 0.8rem; font-weight: 700; }
 .craft-plan-list-only input { accent-color: var(--accent); }
 @media (max-width: 760px) {
+  .craft-plan-needs-search { width: 100%; }
   .craft-plan-list-only { margin-left: 0; }
 }
 .craft-plan-needs-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.75rem; }

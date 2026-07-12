@@ -31,6 +31,10 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /quantity\(supplied\).*quantity\(cell\.required\)/s);
   assert.match(page, /craft-plan-needs-board/);
   assert.match(page, /craft-plan-section-filters/);
+  assert.match(page, /craft-plan-needs-search/);
+  assert.match(page, /placeholder="Search items"/);
+  assert.match(page, /filterNeedsBoard\(personalBoard\.board, selectedSections, shortagesOnly, needsSearch\)/);
+  assert.match(page, /No matching items in the selected Needs Board filters/);
   assert.match(page, /Shortages only/);
   assert.match(page, /group\.completion/);
   assert.match(page, /craft-plan-needs-section-row/);

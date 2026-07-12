@@ -965,7 +965,13 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       continue;
     }
     if (routes[family].available) continue;
-    const route = { input: pickPlannerItem(input) };
+    const route = {
+      input: pickPlannerItem(input),
+      inputQuantity: Math.max(1, toNumber(inputStack.quantity) || 1),
+      recipeName: recipeLabel(recipe),
+      buildingName: recipe.buildingName ?? recipe.building_name ?? null,
+      selectedRecipeId: recipeId(recipe),
+    };
     routes[family] = {
       available: true,
       ...route,
@@ -997,10 +1003,25 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
       availableOil: oil.available,
       trackedOil,
       remainingOil,
-      routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => [family, route.available ? {
-        ...route,
-        needed: Math.ceil(remainingOil / route.guaranteedYield),
-      } : route])),
+      routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => {
+        if (!route.available) return [family, route];
+        const needed = Math.ceil(remainingOil / route.guaranteedYield);
+        return [family, {
+          ...route,
+          needed,
+          usage: {
+            outputKey: oil.key,
+            output: { ...pickPlannerItem(oil), quantity: remainingOil },
+            recipeName: route.recipeName,
+            buildingName: route.buildingName,
+            selectedRecipeId: route.selectedRecipeId,
+            alternatives: [],
+            requiredQuantity: needed,
+            quantityPerCraft: route.inputQuantity,
+            craftCount: Math.ceil(needed / route.inputQuantity),
+          },
+        }];
+      })),
     };
   }) };
 }

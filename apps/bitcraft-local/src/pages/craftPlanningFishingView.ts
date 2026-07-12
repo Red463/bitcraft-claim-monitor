@@ -10,6 +10,7 @@ type PersonalFishingRoute = {
   stockQuantity?: number;
   trackedQuantity?: number;
   needed?: number;
+  usage?: AnyRecord;
 };
 
 type PersonalFishingTier = {
@@ -49,9 +50,12 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
   if (needed == null || stockQuantity == null || trackedQuantity == null) return null;
   const name = String(route.input.name ?? route.input.label ?? route.input.key ?? "").trim();
   if (!name) return null;
+  const item = route.usage && typeof route.usage === "object"
+    ? { ...route.input, recipeUsages: [route.usage] }
+    : route.input;
   return {
-    item: route.input,
-    items: [route.input],
+    item,
+    items: [item],
     name,
     missing: needed,
     required: needed + stockQuantity + trackedQuantity,
