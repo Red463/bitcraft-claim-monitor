@@ -113,8 +113,10 @@ cp /opt/bitcraft-claim-monitor/deploy/bitcraft-claim-monitor-worker.service /etc
 install -m 755 /opt/bitcraft-claim-monitor/deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-monitor
 systemctl daemon-reload
 systemctl enable --now bitcraft-claim-monitor bitcraft-claim-monitor-worker
+systemctl enable --now bitcraft-monitor-collector.timer
 systemctl status bitcraft-claim-monitor --no-pager -l
 systemctl status bitcraft-claim-monitor-worker --no-pager -l
+systemctl status bitcraft-monitor-collector.timer --no-pager -l
 curl http://127.0.0.1:18430/api/local/health
 ```
 

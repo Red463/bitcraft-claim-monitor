@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.48] - 2026-07-12
+
+### Added
+
+- Added an owner-only Server Health admin page for VPS performance, service state, process activity, trends, and redacted logs.
+- Added a read-only systemd host collector with seven-day history and critical incident recovery alerts by Discord DM.
+
 ## [0.32.0-beta.47] - 2026-07-12
 
 ### Fixed

@@ -1,0 +1,39 @@
+.server-health-page { gap: 12px; }
+.server-health-command { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 12px 14px; }
+.server-health-command > div:first-child { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.server-health-command strong, .server-health-command small { display: block; }
+.server-health-command small { color: var(--muted); margin-top: 2px; }
+.server-health-command.healthy > div:first-child > svg { color: var(--good); }
+.server-health-command.warning > div:first-child > svg { color: var(--gold); }
+.server-health-command.critical { border-color: rgba(239,100,97,.55); background: rgba(239,100,97,.08); }
+.server-health-command.critical > div:first-child > svg { color: var(--danger); }
+.server-health-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.server-health-metrics article { min-height: 78px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 10px 12px; }
+.server-health-metrics article > span { color: var(--gold); display: flex; }
+.server-health-metrics small, .server-health-metrics strong, .server-health-metrics em { display: block; }
+.server-health-metrics small, .server-health-metrics em { color: var(--muted); font-size: 11px; font-style: normal; }
+.server-health-metrics strong { font-size: 18px; margin: 2px 0; }
+.server-health-services > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+.server-health-services article { flex: 1 1 260px; display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; background: rgba(0,0,0,.12); border-radius: 7px; padding: 9px; }
+.server-health-services article small { display: block; color: var(--muted); }
+.health-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.health-dot.healthy { background: var(--good); }.health-dot.warning { background: var(--gold); }.health-dot.critical { background: var(--danger); }
+.server-health-freshness { color: var(--muted); font-size: 12px; }
+.server-health-charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.server-health-runtime-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.server-health-runtime-grid h3 { margin: 0 0 8px; }
+.server-health-runtime-grid dl { margin: 0; display: grid; gap: 5px; }
+.server-health-runtime-grid dl div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.server-health-runtime-grid dt { color: var(--muted); }.server-health-runtime-grid dd { margin: 0; font-weight: 700; }
+.server-health-incidents { display: grid; gap: 6px; }.server-health-incidents > div { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; }.server-health-incidents small { grid-column: 2; color: var(--muted); }
+.server-health-charts h3 { margin: 0 0 8px; }
+.server-health-sparkline { width: 100%; height: 110px; overflow: visible; }
+.server-health-sparkline polyline { fill: none; stroke: var(--gold); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.server-health-chart-empty { min-height: 110px; display: grid; place-items: center; color: var(--muted); text-align: center; }
+.server-health-page table code { display: block; max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7e4ff; }
+.server-health-log-filters { display: flex; flex-wrap: wrap; gap: 7px; }
+.server-health-log-filters select, .server-health-log-filters input { min-height: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 6px 9px; }
+.server-health-log-list { max-height: 420px; overflow: auto; display: grid; gap: 6px; }
+.server-health-log-list article { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 9px; padding: 8px; background: rgba(0,0,0,.12); border-radius: 7px; }
+.server-health-log-list p { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }.server-health-log-list time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+@media (max-width: 900px) { .server-health-command { align-items: flex-start; flex-direction: column; }.server-health-charts, .server-health-runtime-grid { grid-template-columns: 1fr; }.server-health-log-list article { grid-template-columns: auto minmax(0,1fr); }.server-health-log-list time { grid-column: 2; } }

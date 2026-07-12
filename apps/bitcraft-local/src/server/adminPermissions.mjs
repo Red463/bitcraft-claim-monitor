@@ -46,6 +46,7 @@ export function adminHasPermission(user, permission) {
 export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/me") return "status.view";
   if (pathname === "/api/local/admin/status") return "status.view";
+  if (pathname === "/api/local/admin/server-health") return "server.monitor.view";
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/popups") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/access-control") return method === "GET" ? "settings.view" : "settings.manage";

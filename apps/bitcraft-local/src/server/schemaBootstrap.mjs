@@ -186,6 +186,28 @@ export const schemaBootstrapSql = `
     metadata_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS server_metric_buckets (
+    bucket_at TEXT NOT NULL,
+    process_role TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (bucket_at, process_role)
+  );
+  CREATE INDEX IF NOT EXISTS server_metric_buckets_time_idx ON server_metric_buckets(bucket_at DESC);
+  CREATE TABLE IF NOT EXISTS server_health_incidents (
+    incident_key TEXT PRIMARY KEY,
+    severity TEXT NOT NULL,
+    state TEXT NOT NULL,
+    consecutive_bad INTEGER NOT NULL DEFAULT 0,
+    consecutive_good INTEGER NOT NULL DEFAULT 0,
+    first_observed_at TEXT NOT NULL,
+    last_observed_at TEXT NOT NULL,
+    opened_at TEXT,
+    recovered_at TEXT,
+    opened_notified_at TEXT,
+    recovered_notified_at TEXT,
+    last_delivery_error TEXT
+  );
   CREATE TABLE IF NOT EXISTS recipe_catalog_entries (
     catalog_key TEXT PRIMARY KEY,
     kind TEXT NOT NULL,

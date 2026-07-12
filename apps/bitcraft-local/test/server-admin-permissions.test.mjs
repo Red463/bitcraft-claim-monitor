@@ -54,3 +54,10 @@ test("adminPermissionFor maps admin routes to the existing least-privilege permi
   assert.equal(adminPermissionFor("POST", "/api/local/admin/discord/setup"), "discord.manage");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/unknown"), "status.view");
 });
+
+test("server monitoring requires the owner-only wildcard permission", () => {
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/server-health"), "server.monitor.view");
+  assert.equal(adminHasPermission({ role: "owner" }, "server.monitor.view"), true);
+  assert.equal(adminHasPermission({ role: "admin" }, "server.monitor.view"), false);
+  assert.equal(adminHasPermission({ role: "viewer" }, "server.monitor.view"), false);
+});

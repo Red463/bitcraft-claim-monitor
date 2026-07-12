@@ -64,6 +64,7 @@ import {
 import { Header, TablePanel, ToolbarButton } from "../main/AppChrome";
 import { AdminPopupsSection } from "./AdminPopupsSection";
 import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
+import { ServerHealthSection } from "./ServerHealthSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
 import { DataTable } from "../main/DataTable";
@@ -117,7 +118,7 @@ import { COLLECTOR_PURPOSES, bytesLabel, collectorStatusValue, discordAuditActio
 
 const LOCAL_API = "/api/local";
 
-type AdminTab = "status" | "analytics" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
+type AdminTab = "status" | "server-health" | "analytics" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 type AdminTabMeta = {
   key: AdminTab;
@@ -147,6 +148,7 @@ const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     label: "Operations",
     tabs: [
       { key: "status", label: "Status", description: "Health, collection, jobs, and endpoint checks" },
+      { key: "server-health", label: "Server Health", description: "Owner-only VPS performance, services, trends, and logs" },
       { key: "configuration", label: "Configuration", description: "Settlement defaults, privacy, collectors, and branding" },
       { key: "diagnostics", label: "Diagnostics", description: "Browser and map troubleshooting data" },
     ],
@@ -732,9 +734,12 @@ export function AdminPanel({
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
   }
 
-  const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : ADMIN_TABS, [botOnly]);
+  const canViewServerHealth = Boolean(auth?.user?.permissions?.includes("*"));
+  const visibleTabGroups = React.useMemo(() => ADMIN_TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => item.key !== "server-health" || canViewServerHealth) })).filter((group) => group.tabs.length), [canViewServerHealth]);
+  const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : visibleTabGroups.flatMap((group) => group.tabs), [botOnly, visibleTabGroups]);
   const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
-  const activeTabGroup = activeTabMeta ? ADMIN_TAB_GROUPS.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
+  const activeTabGroup = activeTabMeta ? visibleTabGroups.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
+  React.useEffect(() => { if (tab === "server-health" && !canViewServerHealth) setTab("status"); }, [tab, canViewServerHealth, setTab]);
   const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
   const loginRows: AnyRecord[] = Array.isArray(auditData.logins) ? auditData.logins : [];
   const normalizedAuditFilter = auditFilter.trim().toLowerCase();
@@ -1122,7 +1127,7 @@ export function AdminPanel({
       {tabs.length && activeTabMeta ? (
         <nav className="admin-tab-groups" aria-label="Admin sections">
           <div className="admin-section-tabs" aria-label="Admin section groups">
-            {ADMIN_TAB_GROUPS.map((group) => {
+            {visibleTabGroups.map((group) => {
               const selected = group.label === activeTabGroup?.label;
               return <button key={group.label} className={selected ? "active" : ""} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
             })}
@@ -1143,6 +1148,8 @@ export function AdminPanel({
         </nav>
       ) : null}
       {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
+
+      {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
 
       {tab === "status" ? (
         <div className="admin-section">

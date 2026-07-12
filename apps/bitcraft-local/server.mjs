@@ -4,8 +4,10 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rea
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { inflateRawSync } from "node:zlib";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
@@ -53,6 +55,7 @@ import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedS
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
+import { filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
@@ -81,6 +84,85 @@ import {
 } from "./src/server/oauthState.mjs";
 
 setDefaultResultOrder("ipv4first");
+
+const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
+eventLoopHistogram.enable();
+const requestTelemetry = [];
+const plannerTelemetry = { freshCalculations: 0, cacheHits: 0, inflightReuse: 0, lastDurationMs: 0, lastResponseBytes: 0, lastCompletedAt: null };
+const bitjitaTelemetry = { requests: 0, failures: 0, timeouts: 0, rateLimits: 0, lastFailureAt: null };
+
+function applicationHealthTelemetry() {
+  const recent = requestTelemetry.filter((entry) => Date.now() - entry.at <= 60 * 60 * 1000);
+  const durations = recent.map((entry) => entry.durationMs).sort((a, b) => a - b);
+  const percentile = (ratio) => durations.length ? durations[Math.min(durations.length - 1, Math.floor(durations.length * ratio))] : 0;
+  const status5xx = recent.filter((entry) => entry.status >= 500).length;
+  const slow = Object.values(recent.reduce((groups, entry) => {
+    const current = groups[entry.path] ?? { path: entry.path, count: 0, totalMs: 0, maxMs: 0 };
+    current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
+    return groups;
+  }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry }, bitjita: { ...bitjitaTelemetry } };
+}
+
+async function serverHealthResponse(url) {
+  const files = await readServerHealthFiles(dataDir);
+  const application = applicationHealthTelemetry();
+  const overall = serverHealthState(files.snapshot, application);
+  const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
+  const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  return { ...response, diagnosticBundle: { ...response, logs: { ...logs, entries: logs.entries.slice(0, 50) } } };
+}
+
+function persistApplicationHealthBucket() {
+  const timestamp = new Date();
+  timestamp.setUTCSeconds(0, 0);
+  const bucketAt = timestamp.toISOString();
+  const metrics = applicationHealthTelemetry();
+  db.prepare(`INSERT INTO server_metric_buckets (bucket_at, process_role, metrics_json, created_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(bucket_at, process_role) DO UPDATE SET metrics_json = excluded.metrics_json, created_at = excluded.created_at`).run(bucketAt, processRole, JSON.stringify(metrics), new Date().toISOString());
+  db.prepare("DELETE FROM server_metric_buckets WHERE bucket_at < ?").run(new Date(Date.now() - 7 * 86_400_000).toISOString());
+}
+
+function incidentKey(reason) {
+  return String(reason).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 80);
+}
+
+async function notifyServerHealthOwner(title, description, color) {
+  const ownerId = defaultOwnerDiscordIdFromEnv(process.env);
+  if (!/^\d+$/.test(ownerId)) throw new Error("Configured owner Discord id is unavailable");
+  return sendDiscordDirectMessage(ownerId, { embeds: [discordCommandEmbed(title, description, [{ name: "Server", value: os.hostname?.() ?? "Claim Monitor VPS", inline: true }, { name: "Time", value: new Date().toISOString(), inline: true }], color)] });
+}
+
+async function evaluateServerHealthIncidents() {
+  const files = await readServerHealthFiles(dataDir);
+  const result = serverHealthState(files.snapshot, applicationHealthTelemetry());
+  const bad = new Map(result.state === "critical" ? result.reasons.map((reason) => [incidentKey(reason), reason]) : []);
+  const existing = new Map(db.prepare("SELECT * FROM server_health_incidents").all().map((row) => [row.incident_key, row]));
+  const now = new Date().toISOString();
+  for (const [key, reason] of bad) {
+    const row = existing.get(key);
+    const count = Number(row?.consecutive_bad ?? 0) + 1;
+    const opened = row?.state === "open" || count >= 3;
+    db.prepare(`INSERT INTO server_health_incidents (incident_key,severity,state,consecutive_bad,consecutive_good,first_observed_at,last_observed_at,opened_at)
+      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(incident_key) DO UPDATE SET severity=excluded.severity,state=excluded.state,consecutive_bad=excluded.consecutive_bad,consecutive_good=0,last_observed_at=excluded.last_observed_at,opened_at=COALESCE(server_health_incidents.opened_at,excluded.opened_at)`).run(key, "critical", opened ? "open" : "observing", count, 0, row?.first_observed_at ?? now, now, opened ? now : null);
+    if (opened && !row?.opened_notified_at) {
+      try { await notifyServerHealthOwner("Claim Monitor server incident", reason, 0xef6461); db.prepare("UPDATE server_health_incidents SET opened_notified_at=?, last_delivery_error=NULL WHERE incident_key=?").run(now, key); }
+      catch (error) { db.prepare("UPDATE server_health_incidents SET last_delivery_error=? WHERE incident_key=?").run(redactServerHealthText(error.message), key); }
+    }
+  }
+  for (const [key, row] of existing) {
+    if (bad.has(key)) continue;
+    if (row.state !== "open") { db.prepare("DELETE FROM server_health_incidents WHERE incident_key=?").run(key); continue; }
+    const good = Number(row.consecutive_good ?? 0) + 1;
+    const recovered = good >= 3;
+    db.prepare("UPDATE server_health_incidents SET consecutive_good=?, consecutive_bad=0, last_observed_at=?, state=?, recovered_at=? WHERE incident_key=?").run(good, now, recovered ? "recovered" : "open", recovered ? now : null, key);
+    if (recovered && !row.recovered_notified_at) {
+      try { await notifyServerHealthOwner("Claim Monitor server recovered", String(key).replaceAll("_", " "), 0x4ee28a); db.prepare("UPDATE server_health_incidents SET recovered_notified_at=?, last_delivery_error=NULL WHERE incident_key=?").run(now, key); }
+      catch (error) { db.prepare("UPDATE server_health_incidents SET last_delivery_error=? WHERE incident_key=?").run(redactServerHealthText(error.message), key); }
+    }
+  }
+}
 
 const rateLimit = createRateLimiter({ sendJson: send });
 
@@ -2094,11 +2176,15 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const normalizedClaimId = String(claimId ?? "").trim();
   const now = Date.now();
   const cached = craftPlanResponseCache.get(normalizedClaimId);
-  if (cached && cached.expiresAt > now) return cached.plan;
+  if (cached && cached.expiresAt > now) { plannerTelemetry.cacheHits += 1; return cached.plan; }
   const existing = craftPlanResponseInflight.get(normalizedClaimId);
-  if (existing?.generation === craftPlanResponseGeneration) return existing.promise;
+  if (existing?.generation === craftPlanResponseGeneration) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
   const generation = craftPlanResponseGeneration;
+  const startedAt = Date.now();
+  plannerTelemetry.freshCalculations += 1;
   const promise = computedCraftPlanResponseFresh(normalizedClaimId).then((plan) => {
+    plannerTelemetry.lastDurationMs = Date.now() - startedAt;
+    plannerTelemetry.lastCompletedAt = new Date().toISOString();
     if (generation === craftPlanResponseGeneration) {
       craftPlanResponseCache.set(normalizedClaimId, { plan, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS });
     }
@@ -5027,6 +5113,7 @@ async function fetchBitjita(pathname, options = {}) {
   // prefer adding resilience here instead of duplicating fetch logic in callers.
   const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
   const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
+  bitjitaTelemetry.requests += 1;
   let response;
   try {
     if (options.cache === false) {
@@ -5043,7 +5130,11 @@ async function fetchBitjita(pathname, options = {}) {
     }
     response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs });
   } catch (error) {
+    bitjitaTelemetry.failures += 1;
+    bitjitaTelemetry.lastFailureAt = new Date().toISOString();
+    if (Number(error?.statusCode) === 429) bitjitaTelemetry.rateLimits += 1;
     if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      bitjitaTelemetry.timeouts += 1;
       throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     if (error instanceof TypeError && String(error.message ?? "").toLowerCase().includes("fetch failed")) {
@@ -8674,6 +8765,8 @@ const server = createServer(async (req, res) => {
     res.once("finish", () => {
       requestFinished = true;
       const durationMs = Date.now() - requestStartedAt;
+      requestTelemetry.push({ at: Date.now(), path: url.pathname, status: res.statusCode, durationMs });
+      if (requestTelemetry.length > 10_000) requestTelemetry.splice(0, requestTelemetry.length - 10_000);
       if (!isTestRuntime && durationMs >= SLOW_REQUEST_LOG_MS) {
         console.warn(`Slow request completed: ${req.method} ${url.pathname}${url.search} status=${res.statusCode} durationMs=${durationMs}`);
       }
@@ -8716,7 +8809,9 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan") {
       try {
-        return send(res, 200, compactCraftPlanResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId))));
+        const compactPlan = compactCraftPlanResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)));
+        plannerTelemetry.lastResponseBytes = Buffer.byteLength(JSON.stringify(compactPlan));
+        return send(res, 200, compactPlan);
       } catch (error) {
         return send(res, 502, { error: error instanceof Error ? error.message : "Unable to compute craft plan" });
       }
@@ -8878,6 +8973,7 @@ const server = createServer(async (req, res) => {
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
+      if (req.method === "GET" && url.pathname === "/api/local/admin/server-health") return send(res, 200, await serverHealthResponse(url));
       if (req.method === "GET" && url.pathname === "/api/local/admin/jobs") return send(res, 200, scheduledJobsStatus());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/jobs") {
         const body = await readJson(req, BODY_LIMITS.json);
@@ -9695,6 +9791,15 @@ function startBackgroundTasks() {
     checkScheduledJobs();
     setInterval(checkScheduledJobs, 10 * 1000);
   }
+  if (!isTestRuntime) {
+    void evaluateServerHealthIncidents().catch((error) => console.warn(`Server health evaluation failed: ${redactServerHealthText(error.message)}`));
+    setInterval(() => void evaluateServerHealthIncidents().catch((error) => console.warn(`Server health evaluation failed: ${redactServerHealthText(error.message)}`)), 60_000);
+  }
+}
+
+if (!isTestRuntime) {
+  persistApplicationHealthBucket();
+  setInterval(persistApplicationHealthBucket, 60_000);
 }
 
 if (processRoleConfig.serveHttp) {

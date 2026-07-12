@@ -213,14 +213,19 @@ printf "Build completed in %ss\n" "$BUILD_SECONDS"
 log "Installing service files"
 cp "$APP_DIR/deploy/$WEB_SERVICE.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/$WORKER_SERVICE.service" /etc/systemd/system/
+cp "$APP_DIR/deploy/bitcraft-monitor-collector.service" /etc/systemd/system/
+cp "$APP_DIR/deploy/bitcraft-monitor-collector.timer" /etc/systemd/system/
+install -d -o root -g bitcraft -m 0750 /var/lib/bitcraft-claim-monitor/monitoring
 systemctl daemon-reload
-systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" >>"$LOG_FILE" 2>&1
+systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" bitcraft-monitor-collector.timer >>"$LOG_FILE" 2>&1
 printf "Service files installed ok\n"
 
 log "Starting services"
 systemctl start "$WEB_SERVICE"
 wait_for_service "$WEB_SERVICE" "web service"
 systemctl start "$WORKER_SERVICE"
+systemctl restart bitcraft-monitor-collector.timer
+systemctl start bitcraft-monitor-collector.service
 wait_for_service "$WORKER_SERVICE" "worker service"
 
 log "Health check"
