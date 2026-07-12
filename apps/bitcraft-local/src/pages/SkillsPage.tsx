@@ -17,7 +17,7 @@ import {
   skillTier,
   skillTierLabel,
 } from "../utils/professions";
-import { buildProfessionCapability, prioritizeSettlementNeeds, tierRequiredLevel, type NextTierOutlook } from "./professionCapability";
+import { buildProfessionCapability, prioritizeSettlementNeeds, tierRequiredLevel, type ProfessionCapability } from "./professionCapability";
 
 // The UI calls these "Professions" even though BitJita exposes them as skill
 // rows. This page keeps the profession/adventure split explicit so future skill
@@ -97,7 +97,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       count: citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) === tierNumber).length,
     };
   });
-  const outlookLabel: Record<NextTierOutlook, string> = { ready: "Ready for next tier", developing: "Developing for next tier", "maximum-tier": "Maximum tier", unknown: "Tier unavailable" };
+  const outlookLabel = (capability: ProfessionCapability) => capability.nextOutlook === "ready" ? `T${capability.nextTier} capability ready` : capability.nextOutlook === "developing" ? `Developing for T${capability.nextTier}` : capability.nextOutlook === "maximum-tier" ? "Maximum tier" : "Tier unavailable";
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
@@ -120,34 +120,34 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       </header>
       <div className="summary-grid skills-summary">
         <MiniStat icon={<Target />} label="Settlement Tier" value={settlementTier ? `T${settlementTier}` : "Unavailable"} />
-        <MiniStat icon={<ShieldCheck />} label="Ready Now" value={settlementTier ? `${currentReadyCount}/${capabilities.length}` : "-"} />
+        <MiniStat icon={<ShieldCheck />} label="Current Baseline" value={settlementTier ? `${currentReadyCount}/${capabilities.length}` : "-"} />
         <MiniStat icon={<GraduationCap />} label="Next-Tier Capable" value={nextSettlementTier ? `${nextCapableCount}/${capabilities.length}` : settlementTier === 10 ? "Maximum" : "-"} />
-        <MiniStat icon={<TriangleAlert />} label="Dependency Risks" value={settlementTier ? dependencyRiskCount : "-"} />
+        <MiniStat icon={<TriangleAlert />} label="Next-Tier Dependencies" value={nextSettlementTier ? dependencyRiskCount : "-"} />
       </div>
       <section className="settlement-needs" aria-labelledby="settlement-needs-title">
-        <div className="settlement-needs-heading"><span><TriangleAlert size={16} /></span><div><h3 id="settlement-needs-title">Settlement needs</h3><p>Current-tier gaps and professions that rely on one qualified member.</p></div></div>
+        <div className="settlement-needs-heading"><span><TriangleAlert size={16} /></span><div><h3 id="settlement-needs-title">Settlement needs</h3><p>Next-tier gaps and professions that rely on one next-tier capable member.</p></div></div>
         <div className="settlement-needs-list">
-          {settlementNeeds.length ? settlementNeeds.map((need) => <button key={`${need.kind}-${need.professionId}`} type="button" onClick={() => setFocusSkill(need.professionId)}><span className={`capability-state ${need.kind}`}>{need.kind === "current-gap" ? "Gap" : "Dependency"}</span><strong>{need.professionName}</strong><small>{need.message}</small></button>) : <div className="settlement-needs-clear"><ShieldCheck size={16} /><span><strong>No immediate capability gaps</strong><small>Every profession supports the current settlement tier with more than one qualified member.</small></span></div>}
+          {settlementNeeds.length ? settlementNeeds.map((need) => <button key={`${need.kind}-${need.professionId}`} type="button" onClick={() => setFocusSkill(need.professionId)}><span className={`capability-state ${need.kind}`}>{need.kind === "next-gap" ? `${nextSettlementTier ? `T${nextSettlementTier} gap` : "Gap"}` : "Dependency"}</span><strong>{need.professionName}</strong><small>{need.message}</small></button>) : <div className="settlement-needs-clear"><ShieldCheck size={16} /><span><strong>{nextSettlementTier ? `T${nextSettlementTier} capability is resilient` : "Maximum tier reached"}</strong><small>{nextSettlementTier ? `Every profession has more than one T${nextSettlementTier}-capable member.` : "No next-tier preparation is required."}</small></span></div>}
         </div>
       </section>
       <section className="profession-insights capability-dashboard">
         <div className="profession-insights-bar">
-          <div className="profession-insights-title"><ShieldCheck size={15} /><span><strong>Profession capability</strong><small>Readiness against the settlement tier</small></span></div>
+          <div className="profession-insights-title"><ShieldCheck size={15} /><span><strong>Profession capability</strong><small>{nextSettlementTier ? `Readiness for T${nextSettlementTier}` : "Maximum-tier coverage"}</small></span></div>
           <label className="profession-insights-select"><span>Profession</span><select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
             {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
           </select></label>
           <div className="profession-insights-glance" aria-label={`${skillLabel(focusedProfession)} summary`}>
-            <span><small>Current tier</small><strong>{focusedCapability?.currentStatus === "ready" ? "Ready" : focusedCapability?.currentStatus === "gap" ? "Gap" : "Unknown"}</strong></span>
-            <span><small>Qualified</small><strong>{focusedCapability?.currentCapableCount ?? 0} members</strong></span>
-            <span><small>Dependency risk</small><strong>{focusedCapability?.dependencyRisk === "high" ? "High" : focusedCapability?.dependencyRisk === "covered" ? "Covered" : focusedCapability?.dependencyRisk === "gap" ? "Gap" : "Unknown"}</strong></span>
+            <span><small>{nextSettlementTier ? `T${nextSettlementTier} status` : "Status"}</small><strong>{focusedCapability?.nextOutlook === "ready" ? "Ready" : focusedCapability?.nextOutlook === "developing" ? "Gap" : focusedCapability?.nextOutlook === "maximum-tier" ? "Maximum" : "Unknown"}</strong></span>
+            <span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Qualified"}</small><strong>{focusedCapability?.nextCapableCount ?? 0} members</strong></span>
+            <span><small>Next-tier risk</small><strong>{focusedCapability?.dependencyRisk === "high" ? "High" : focusedCapability?.dependencyRisk === "covered" ? "Covered" : focusedCapability?.dependencyRisk === "gap" ? "Gap" : "Unknown"}</strong></span>
           </div>
           <button className="profession-insights-toggle" type="button" aria-expanded={insightsOpen} aria-controls="profession-insights-content" onClick={() => setInsightsOpen((open) => !open)}>{insightsOpen ? "Hide details" : "Show details"}<ChevronDown size={16} /></button>
         </div>
         <div className="capability-grid" aria-label="Profession readiness overview">
           {capabilities.map((capability) => <button type="button" key={capability.id} className={focusedProfession === capability.id ? "active" : ""} onClick={() => setFocusSkill(capability.id)}>
-            <div className="capability-card-heading"><strong>{capability.name}</strong><span className={`capability-state ${capability.currentStatus}`}>{capability.currentStatus === "ready" ? `T${settlementTier} ready` : capability.currentStatus === "gap" ? `T${settlementTier} gap` : "Tier unknown"}</span></div>
+            <div className="capability-card-heading"><strong>{capability.name}</strong><span className={`capability-state ${capability.nextOutlook === "ready" ? "ready" : capability.nextOutlook === "developing" ? "gap" : capability.nextOutlook}`}>{capability.nextOutlook === "ready" ? `T${capability.nextTier} ready` : capability.nextOutlook === "developing" ? `T${capability.nextTier} gap` : capability.nextOutlook === "maximum-tier" ? "Maximum tier" : "Tier unknown"}</span></div>
             <div className="capability-card-metrics"><span><small>Current capable</small><b>{capability.currentCapableCount}</b></span><span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Next tier"}</small><b>{nextSettlementTier ? capability.nextCapableCount : "-"}</b></span><span><small>Levels to next</small><b>{capability.nextTier ? capability.nextLevelGap : "-"}</b></span></div>
-            <p>{outlookLabel[capability.nextOutlook]}</p><small className="capability-explanation">{capability.explanation}</small>
+            <p>{outlookLabel(capability)}</p><small className="capability-explanation">{capability.explanation}</small>
           </button>)}
         </div>
         {insightsOpen ? <div className="skills-dashboard profession-insights-content" id="profession-insights-content">
@@ -190,7 +190,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <section className="coverage-panel capability-explanation-panel">
           <h3><GraduationCap size={17} /> Why this profession is {focusedCapability?.currentStatus === "ready" ? "strong" : "weak"}</h3>
           <p>{focusedCapability?.explanation}</p>
-          <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel[focusedCapability.nextOutlook] : "Unavailable"}</strong></span><span><small>Next requirement</small><strong>{focusedCapability?.nextTier ? `T${focusedCapability.nextTier} · Lv ${tierRequiredLevel(focusedCapability.nextTier)}` : "Maximum tier reached"}</strong></span></div>
+          <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel(focusedCapability) : "Unavailable"}</strong></span><span><small>Next requirement</small><strong>{focusedCapability?.nextTier ? `T${focusedCapability.nextTier} · Lv ${tierRequiredLevel(focusedCapability.nextTier)}` : "Maximum tier reached"}</strong></span></div>
         </section>
       </div> : null}
       </section>

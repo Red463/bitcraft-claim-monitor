@@ -18,7 +18,7 @@ export type ProfessionCapability = {
   explanation: string;
 };
 
-export type SettlementNeed = { kind: "current-gap" | "dependency-risk"; professionId: number; professionName: string; message: string; priority: number };
+export type SettlementNeed = { kind: "next-gap" | "next-dependency"; professionId: number; professionName: string; message: string; priority: number };
 
 export function tierRequiredLevel(tier: number) {
   const normalized = Math.max(1, Math.min(10, Math.floor(Number(tier) || 1)));
@@ -36,23 +36,25 @@ export function buildProfessionCapability({ id, name, settlementTier, members }:
   const currentCapableCount = sorted.filter((member) => member.level >= currentLevel).length;
   const nextCapableCount = nextTier ? sorted.filter((member) => member.level >= nextLevel).length : currentCapableCount;
   const currentStatus: ProfessionCurrentStatus = currentCapableCount ? "ready" : "gap";
-  const dependencyRisk: DependencyRisk = currentCapableCount === 0 ? "gap" : currentCapableCount === 1 ? "high" : "covered";
+  const dependencyRisk: DependencyRisk = !nextTier ? "covered" : nextCapableCount === 0 ? "gap" : nextCapableCount === 1 ? "high" : "covered";
   let nextOutlook: NextTierOutlook;
   if (!nextTier) nextOutlook = "maximum-tier";
   else if (nextCapableCount) nextOutlook = "ready";
   else nextOutlook = "developing";
   const nextLevelGap = nextTier ? Math.max(0, nextLevel - lead.level) : 0;
-  let explanation = currentCapableCount === 0
-    ? `${lead.name} leads at Lv ${lead.level} and needs ${Math.max(0, currentLevel - lead.level)} levels for T${tier}.`
-    : currentCapableCount === 1
-      ? `Ready for T${tier}, but relies on ${sorted.find((member) => member.level >= currentLevel)?.name ?? lead.name}.`
-      : `Strong T${tier} coverage with ${currentCapableCount} members ready.`;
-  if (nextTier && nextLevelGap > 0) explanation += ` Lead member needs ${nextLevelGap} levels for T${nextTier}.`;
+  let explanation = !nextTier
+    ? `Maximum tier reached. T${tier} is supported by ${currentCapableCount} member${currentCapableCount === 1 ? "" : "s"}.`
+    : nextCapableCount === 0
+      ? `No member supports T${nextTier} yet; ${lead.name} needs ${nextLevelGap} level${nextLevelGap === 1 ? "" : "s"}.`
+      : nextCapableCount === 1
+        ? `T${nextTier} ready, but relies on ${sorted.find((member) => member.level >= nextLevel)?.name ?? lead.name}.`
+        : `T${nextTier} supported by ${nextCapableCount} members.`;
+  if (nextTier) explanation += ` T${tier} baseline is covered by ${currentCapableCount} member${currentCapableCount === 1 ? "" : "s"}.`;
   return { id, name, settlementTier: tier, nextTier, currentStatus, dependencyRisk, nextOutlook, currentCapableCount, nextCapableCount, leadName: lead.name, leadLevel: lead.level, nextLevelGap, explanation };
 }
 
 export function prioritizeSettlementNeeds(rows: ProfessionCapability[]): SettlementNeed[] {
-  const currentGaps = rows.filter((row) => row.currentStatus === "gap").map((row) => ({ kind: "current-gap" as const, professionId: row.id, professionName: row.name, message: row.explanation, priority: 0 }));
-  const dependencies = rows.filter((row) => row.dependencyRisk === "high").map((row) => ({ kind: "dependency-risk" as const, professionId: row.id, professionName: row.name, message: row.explanation, priority: 1 }));
-  return [...currentGaps, ...dependencies].slice(0, 6);
+  const nextGaps = rows.filter((row) => row.nextTier && row.nextCapableCount === 0).map((row) => ({ kind: "next-gap" as const, professionId: row.id, professionName: row.name, message: row.explanation, priority: 0 }));
+  const dependencies = rows.filter((row) => row.nextTier && row.nextCapableCount === 1).map((row) => ({ kind: "next-dependency" as const, professionId: row.id, professionName: row.name, message: row.explanation, priority: 1 }));
+  return [...nextGaps, ...dependencies].slice(0, 6);
 }

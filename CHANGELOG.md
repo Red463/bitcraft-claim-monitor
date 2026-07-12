@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.51] - 2026-07-13
+
+### Changed
+
+- Refocused Settlement Capability cards and needs on readiness for the next settlement tier, with current-tier coverage treated as baseline context.
+
 ## [0.32.0-beta.50] - 2026-07-13
 
 ### Changed
