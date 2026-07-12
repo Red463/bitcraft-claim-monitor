@@ -14,6 +14,7 @@ test("Settlement capability uses live tier readiness without fixed thresholds", 
   assert.match(page, /Dependency risk/);
   assert.doesNotMatch(page, /T3\+|T5\+/);
   assert.doesNotMatch(page, /Top Professional|Highest Profession/);
+  assert.doesNotMatch(page, /craft-plan|Craft Planner|planCompletion|Active plan/i);
 });
 
 test("Capability dashboard keeps controls and expandable member detail", () => {

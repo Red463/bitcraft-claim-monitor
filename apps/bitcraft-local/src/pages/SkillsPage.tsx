@@ -17,7 +17,7 @@ import {
   skillTier,
   skillTierLabel,
 } from "../utils/professions";
-import { buildProfessionCapability, buildProfessionPlanCoverage, prioritizeSettlementNeeds, tierRequiredLevel, type NextTierOutlook } from "./professionCapability";
+import { buildProfessionCapability, prioritizeSettlementNeeds, tierRequiredLevel, type NextTierOutlook } from "./professionCapability";
 
 // The UI calls these "Professions" even though BitJita exposes them as skill
 // rows. This page keeps the profession/adventure split explicit so future skill
@@ -27,8 +27,6 @@ type SortKey = "name" | "total" | "highest" | number;
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
   const [insightsOpen, setInsightsOpen] = React.useState(false);
-  const [craftPlan, setCraftPlan] = React.useState<AnyRecord | null>(null);
-  const [craftPlanError, setCraftPlanError] = React.useState(false);
   const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
@@ -56,17 +54,6 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   React.useEffect(() => {
     if (typeof adventureSortKey === "number" && !adventureSkillIds.includes(adventureSortKey)) setAdventureSortKey("total");
   }, [adventureSkillIds, adventureSortKey, setAdventureSortKey]);
-  React.useEffect(() => {
-    const claimId = String(data.claim.entityId ?? data.claim.id ?? "").trim();
-    if (!claimId) { setCraftPlan(null); setCraftPlanError(false); return; }
-    const controller = new AbortController();
-    setCraftPlanError(false);
-    fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
-      .then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then(setCraftPlan)
-      .catch((error) => { if (error.name !== "AbortError") { setCraftPlan(null); setCraftPlanError(true); } });
-    return () => controller.abort();
-  }, [data.claim.entityId, data.claim.id]);
 
   function toggleSort(key: SortKey, currentKey: SortKey, setKey: (value: SortKey) => void, setDirection: React.Dispatch<React.SetStateAction<"asc" | "desc">>) {
     if (currentKey === key) setDirection((dir) => dir === "desc" ? "asc" : "desc");
@@ -93,10 +80,9 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const settlementTier = Math.max(0, Math.min(10, Math.floor(toNumber(data.claim.tier))));
   const settlementBest = Math.max(...citizens.map(getHighest), 0);
   const nextSettlementTier = settlementTier > 0 && settlementTier < 10 ? settlementTier + 1 : null;
-  const planCoverage = React.useMemo(() => buildProfessionPlanCoverage(craftPlan), [craftPlan]);
   const capabilities = professionIds.map((id) => {
     const name = skillLabel(id);
-    return buildProfessionCapability({ id, name, settlementTier, members: citizens.map((citizen) => ({ name: getName(citizen), level: getSkill(citizen, id) })), planCompletion: planCoverage.get(name) ?? null });
+    return buildProfessionCapability({ id, name, settlementTier, members: citizens.map((citizen) => ({ name: getName(citizen), level: getSkill(citizen, id) })) });
   });
   const focusedCapability = capabilities.find((row) => row.id === focusedProfession) ?? capabilities[0];
   const settlementNeeds = prioritizeSettlementNeeds(capabilities);
@@ -111,7 +97,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       count: citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) === tierNumber).length,
     };
   });
-  const outlookLabel: Record<NextTierOutlook, string> = { ready: "Ready for next tier", "materials-needed": "Skills ready - materials needed", "skills-developing": "Materials ready - skills developing", "skills-and-materials": "Skills and materials developing", "skills-only": "Skill-only estimate", "maximum-tier": "Maximum tier", unknown: "Tier unavailable" };
+  const outlookLabel: Record<NextTierOutlook, string> = { ready: "Ready for next tier", developing: "Developing for next tier", "maximum-tier": "Maximum tier", unknown: "Tier unavailable" };
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
@@ -139,9 +125,9 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<TriangleAlert />} label="Dependency Risks" value={settlementTier ? dependencyRiskCount : "-"} />
       </div>
       <section className="settlement-needs" aria-labelledby="settlement-needs-title">
-        <div className="settlement-needs-heading"><span><TriangleAlert size={16} /></span><div><h3 id="settlement-needs-title">Settlement needs</h3><p>Current-tier gaps, single-member dependencies, then active-plan pressure.</p></div></div>
+        <div className="settlement-needs-heading"><span><TriangleAlert size={16} /></span><div><h3 id="settlement-needs-title">Settlement needs</h3><p>Current-tier gaps and professions that rely on one qualified member.</p></div></div>
         <div className="settlement-needs-list">
-          {settlementNeeds.length ? settlementNeeds.map((need) => <button key={`${need.kind}-${need.professionId}`} type="button" onClick={() => setFocusSkill(need.professionId)}><span className={`capability-state ${need.kind}`}>{need.kind === "current-gap" ? "Gap" : need.kind === "dependency-risk" ? "Dependency" : "Plan"}</span><strong>{need.professionName}</strong><small>{need.message}</small></button>) : <div className="settlement-needs-clear"><ShieldCheck size={16} /><span><strong>No immediate capability gaps</strong><small>{craftPlanError ? "Craft Planner coverage is unavailable; skill readiness is still shown." : craftPlan?.enabled ? "Current-tier coverage is stable and the active plan has no profession bottlenecks." : "Current-tier coverage is stable. Enable a Craft Plan to add material-pressure estimates."}</small></span></div>}
+          {settlementNeeds.length ? settlementNeeds.map((need) => <button key={`${need.kind}-${need.professionId}`} type="button" onClick={() => setFocusSkill(need.professionId)}><span className={`capability-state ${need.kind}`}>{need.kind === "current-gap" ? "Gap" : "Dependency"}</span><strong>{need.professionName}</strong><small>{need.message}</small></button>) : <div className="settlement-needs-clear"><ShieldCheck size={16} /><span><strong>No immediate capability gaps</strong><small>Every profession supports the current settlement tier with more than one qualified member.</small></span></div>}
         </div>
       </section>
       <section className="profession-insights capability-dashboard">
@@ -160,7 +146,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <div className="capability-grid" aria-label="Profession readiness overview">
           {capabilities.map((capability) => <button type="button" key={capability.id} className={focusedProfession === capability.id ? "active" : ""} onClick={() => setFocusSkill(capability.id)}>
             <div className="capability-card-heading"><strong>{capability.name}</strong><span className={`capability-state ${capability.currentStatus}`}>{capability.currentStatus === "ready" ? `T${settlementTier} ready` : capability.currentStatus === "gap" ? `T${settlementTier} gap` : "Tier unknown"}</span></div>
-            <div className="capability-card-metrics"><span><small>Current capable</small><b>{capability.currentCapableCount}</b></span><span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Next tier"}</small><b>{nextSettlementTier ? capability.nextCapableCount : "-"}</b></span><span><small>Active plan</small><b>{capability.planCompletion == null ? "No data" : `${capability.planCompletion}%`}</b></span></div>
+            <div className="capability-card-metrics"><span><small>Current capable</small><b>{capability.currentCapableCount}</b></span><span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Next tier"}</small><b>{nextSettlementTier ? capability.nextCapableCount : "-"}</b></span><span><small>Levels to next</small><b>{capability.nextTier ? capability.nextLevelGap : "-"}</b></span></div>
             <p>{outlookLabel[capability.nextOutlook]}</p><small className="capability-explanation">{capability.explanation}</small>
           </button>)}
         </div>
@@ -204,7 +190,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <section className="coverage-panel capability-explanation-panel">
           <h3><GraduationCap size={17} /> Why this profession is {focusedCapability?.currentStatus === "ready" ? "strong" : "weak"}</h3>
           <p>{focusedCapability?.explanation}</p>
-          <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel[focusedCapability.nextOutlook] : "Unavailable"}</strong></span><span><small>Craft Planner estimate</small><strong>{focusedCapability?.planCompletion == null ? craftPlanError ? "Planner unavailable" : "No active plan data" : `${focusedCapability.planCompletion}% covered`}</strong></span></div>
+          <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel[focusedCapability.nextOutlook] : "Unavailable"}</strong></span><span><small>Next requirement</small><strong>{focusedCapability?.nextTier ? `T${focusedCapability.nextTier} · Lv ${tierRequiredLevel(focusedCapability.nextTier)}` : "Maximum tier reached"}</strong></span></div>
         </section>
       </div> : null}
       </section>

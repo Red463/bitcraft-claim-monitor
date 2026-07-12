@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.50] - 2026-07-13
+
+### Changed
+
+- Simplified Settlement Capability readiness to use only the live settlement tier and member profession levels, without Craft Planner estimates.
+
 ## [0.32.0-beta.49] - 2026-07-13
 
 ### Changed
