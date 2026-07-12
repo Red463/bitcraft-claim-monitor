@@ -528,7 +528,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   }];
 }
 
-function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map(), assumedPlannedOutputs = new Map()) {
+function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map(), assumedPlannedOutputs = new Map()) {
   const required = new Map();
   const steps = [];
   const warnings = [];
@@ -566,7 +566,9 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
     const rawOutputPerCraft = toNumber(output?.quantity ?? selected.outputQuantity) || 1;
     const outputPerCraft = String(selected.id ?? "").startsWith("possibility:") ? Math.max(0.0001, rawOutputPerCraft) : Math.max(1, rawOutputPerCraft);
-    const craftCount = Math.ceil(quantityToCraft / outputPerCraft);
+    const unbufferedCraftCount = Math.ceil(quantityToCraft / outputPerCraft);
+    const multiplier = selected.isProbabilistic === true ? multipliers[key]?.multiplier ?? 1 : 1;
+    const craftCount = Math.ceil(quantityToCraft * multiplier / outputPerCraft);
     const craftedStacks = recipeOutputs(selected);
     const craftedDisplays = Array.isArray(selected.craftedItems) ? selected.craftedItems : [];
     craftedStacks.forEach((craftedStack, index) => {
@@ -612,6 +614,8 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
         requiredQuantity,
         quantityPerCraft: toNumber(input.quantity),
         craftCount,
+        unbufferedCraftCount,
+        multiplier,
         buildingName: selected.buildingName ?? null,
         section,
       });
@@ -626,6 +630,8 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiv
       output: { ...normalizedTarget, quantity: craftCount * outputPerCraft },
       inputs,
       craftCount,
+      unbufferedCraftCount,
+      multiplier,
       outputPerCraft,
       section,
       buildingName: selected.buildingName ?? null,
@@ -655,15 +661,15 @@ function plannedOutputMapsEqual(a, b) {
   return true;
 }
 
-function buildRequirementMap(targets, detailsByKey, routeOverrides, effectiveStockTotals = new Map()) {
+function buildRequirementMap(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map()) {
   let assumedPlannedOutputs = new Map();
   let result = null;
   for (let pass = 0; pass < 8; pass += 1) {
-    result = buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals, assumedPlannedOutputs);
+    result = buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals, assumedPlannedOutputs);
     if (plannedOutputMapsEqual(assumedPlannedOutputs, result.plannedOutputs)) return result;
     assumedPlannedOutputs = result.plannedOutputs;
   }
-  return result ?? buildRequirementMapPass(targets, detailsByKey, routeOverrides, effectiveStockTotals);
+  return result ?? buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals);
 }
 
 
@@ -1027,6 +1033,7 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       ...route,
       guaranteedYield: planningYield,
       estimated: guaranteedYield <= 0,
+      isProbabilistic: recipe.isProbabilistic === true,
       stockQuantity: routeStock(route, availableTotals),
       trackedQuantity: routeStock(route, guaranteedActiveTotals),
     };
@@ -1034,7 +1041,7 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
   return routes;
 }
 
-export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, warnings }) {
+export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, multipliers = {}, warnings }) {
   const fishOilMaterials = (materials ?? []).filter((item) => String(item?.tag ?? "").toLowerCase().includes("fish oil"));
   return { tiers: fishOilMaterials.map((oil) => {
     const alternatives = recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
@@ -1055,9 +1062,13 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
       remainingOil,
       routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => {
         if (!route.available) return [family, route];
-        const needed = Math.ceil(remainingOil / route.guaranteedYield);
+        const unbufferedNeeded = Math.ceil(remainingOil / route.guaranteedYield);
+        const multiplier = route.isProbabilistic === true ? multipliers[oil.key]?.multiplier ?? 1 : 1;
+        const needed = Math.ceil(remainingOil * multiplier / route.guaranteedYield);
         return [family, {
           ...route,
+          unbufferedNeeded,
+          multiplier,
           needed,
           usage: {
             outputKey: oil.key,
@@ -1128,7 +1139,7 @@ export function computeCraftPlan({
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
   const calculationTargets = expandedPlanTargets(normalized.targets);
-  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, effectiveStockTotals);
+  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.filter((target) => target.kind !== "building").map((target) => recipeKey(target.kind, target.id)));
   for (const target of calculationTargets) {
@@ -1140,7 +1151,7 @@ export function computeCraftPlan({
     const sourceRoutes = sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides);
     const probabilistic = sourceRoutes.some((route) => route.isProbabilistic === true);
     const multiplier = probabilistic ? normalized.multipliers[item.key]?.multiplier ?? 1 : 1;
-    const bufferedRequired = Math.ceil(item.required * multiplier);
+    const bufferedRequired = item.required;
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
     const rawPlannedOutput = plannedOutputs.get(item.key) ?? 0;
@@ -1185,7 +1196,7 @@ export function computeCraftPlan({
   });
 
   const personalViews = {
-    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, warnings }),
+    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, multipliers: normalized.multipliers, warnings }),
   };
 
   return {

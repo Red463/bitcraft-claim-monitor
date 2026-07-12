@@ -41,6 +41,33 @@ const animalHairDetail = {
   craftingRecipes: [],
 };
 
+function animalHairSourceDetails() {
+  const hair = { id: "200", name: "Rough Animal Hair", itemType: 0, kind: "items", tag: "Hunting" };
+  const output = { id: "201", name: "Rough Animal Output", itemType: 0, kind: "items", tag: "Hunting" };
+  const sagiBird = { id: "202", name: "Sagi Bird", itemType: 0, kind: "items", tag: "Hunting" };
+  const processingSalt = { id: "203", name: "Processing Salt", itemType: 0, kind: "items", tag: "Hunting" };
+  return { hair, output, sagiBird, processingSalt, detailsByKey: new Map([
+    [recipeKey("items", hair.id), { item: hair }],
+    [recipeKey("items", output.id), {
+      item: output,
+      craftingRecipes: [{
+        id: "process-sagi-bird",
+        name: "Process Sagi Bird",
+        skillName: "Hunting",
+        craftedItemStacks: [{ item_id: output.id, item_type: "item", quantity: 1 }],
+        consumedItemStacks: [
+          { item_id: sagiBird.id, item_type: "item", quantity: 1 },
+          { item_id: processingSalt.id, item_type: "item", quantity: 2 },
+        ],
+        consumedItems: [sagiBird, processingSalt],
+      }],
+      itemListPossibilities: [{ targetId: hair.id, targetItem: hair, quantity: 1, chance: 0.25 }],
+    }],
+    [recipeKey("items", sagiBird.id), { item: sagiBird }],
+    [recipeKey("items", processingSalt.id), { item: processingSalt }],
+  ]) };
+}
+
 function fishingPreferenceDetails({ oceanYield = 3, lakeYield = 1 } = {}) {
   const oil = { id: "1900", name: "Basic Fish Oil", itemType: 0, tag: "Fish Oil", tier: 1 };
   const ocean = { id: "1901", name: "Briny Linus", itemType: 0, tag: "Ocean Fish", tier: 1 };
@@ -307,6 +334,27 @@ test("personal fishing view uses a verified expected yield when a route has no g
   assert.equal(tier.remainingOil, 0);
   assert.equal(tier.routes.lake.needed, 0);
   assert.equal(plan.warnings.some((warning) => /Ocean Fish.*no positive guaranteed yield/i.test(warning)), false);
+});
+
+test("personal fishing view applies chance buffers to probabilistic fish inputs only", () => {
+  const oilKey = recipeKey("items", "1900");
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      multipliers: { [oilKey]: { multiplier: 1.5 } },
+    }),
+    detailsByKey: probabilisticFishingPreferenceDetails(),
+  });
+
+  const tier = plan.personalViews.fishing.tiers[0];
+  assert.equal(tier.requiredOil, 10);
+  assert.equal(tier.routes.ocean.isProbabilistic, true);
+  assert.equal(tier.routes.ocean.unbufferedNeeded, 5);
+  assert.equal(tier.routes.ocean.needed, 8);
+  assert.equal(tier.routes.ocean.multiplier, 1.5);
+  assert.equal(tier.routes.lake.needed, 10);
+  assert.equal(tier.routes.lake.multiplier, 1);
 });
 
 test("personal fishing view does not deduct expected tracked oil without a guaranteed output", () => {
@@ -1141,30 +1189,53 @@ test("computeCraftPlan exposes source locations and recipe alternatives for mate
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
 });
 
-test("computeCraftPlan applies per-item multipliers and records unavailable sources", () => {
-  const output = { id: "201", name: "Animal Output", itemType: 0, kind: "items", tag: "Hunting" };
+test("probabilistic buffers increase producer actions and inputs without inflating the chance output", () => {
+  const { hair, sagiBird, processingSalt, detailsByKey } = animalHairSourceDetails();
   const config = normalizeCraftPlanConfig({
     enabled: true,
-    targets: [{ id: "200", kind: "items", name: "Animal Hair", quantity: 10, itemType: 0 }],
-    sourceRules: { playerIds: ["player-1"] },
-    multipliers: { [recipeKey("items", "200")]: { multiplier: 1.8, note: "Chance drop" } },
+    targets: [{ ...hair, quantity: 368 }],
+    multipliers: { [recipeKey("items", hair.id)]: { multiplier: 1.25, note: "25% extra" } },
   });
 
-  const plan = computeCraftPlan({
-    config,
-    detailsByKey: new Map([[recipeKey("items", "200"), animalHairDetail], [recipeKey("items", output.id), {
-      item: output,
-      craftingRecipes: [{ id: "hunt", name: "Harvest", skillName: "Hunting", craftedItemStacks: [{ item_id: output.id, item_type: "item", quantity: 1 }], consumedItemStacks: [] }],
-      itemListPossibilities: [{ targetId: "200", targetItem: animalHairDetail.item, quantity: 1, chance: 0.25 }],
-    }]]),
-    playerSources: [{ sourceId: "player-1", label: "Modular inventory", unavailable: true, error: "HTTP 403", items: [] }],
+  const plan = computeCraftPlan({ config, detailsByKey });
+
+  const hairMaterial = plan.materials.find((material) => material.id === hair.id);
+  const sagiMaterial = plan.materials.find((material) => material.id === sagiBird.id);
+  const saltMaterial = plan.materials.find((material) => material.id === processingSalt.id);
+  const step = plan.steps.find((candidate) => candidate.output.id === hair.id);
+  assert.equal(hairMaterial.required, 368);
+  assert.equal(hairMaterial.bufferedRequired, 368);
+  assert.equal(sagiMaterial.required, 1840);
+  assert.equal(saltMaterial.required, 3680);
+  assert.equal(step.unbufferedCraftCount, 1472);
+  assert.equal(step.craftCount, 1840);
+  assert.equal(step.multiplier, 1.25);
+});
+
+test("probabilistic buffers use remaining output and producer stock while reset restores base inputs", () => {
+  const { hair, sagiBird, detailsByKey } = animalHairSourceDetails();
+  const sourceRules = { storageContainerIds: ["store"] };
+  const storageSources = [{ sourceId: "store", label: "Hunting stores", items: [
+    { ...hair, quantity: 8 },
+    { ...sagiBird, quantity: 100 },
+  ] }];
+  const target = { ...hair, quantity: 368 };
+  const buffered = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [target], sourceRules, multipliers: { [recipeKey("items", hair.id)]: { multiplier: 1.25 } } }),
+    detailsByKey,
+    storageSources,
+  });
+  const reset = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [target], sourceRules }),
+    detailsByKey,
+    storageSources,
   });
 
-  const hair = plan.materials.find((material) => material.name === "Animal Hair");
-  assert.equal(hair.required, 10);
-  assert.equal(hair.bufferedRequired, 18);
-  assert.equal(hair.missing, 18);
-  assert.equal(plan.unavailableSources[0].sourceId, "player-1");
+  assert.equal(buffered.materials.find((material) => material.id === hair.id).required, 368);
+  assert.equal(buffered.materials.find((material) => material.id === sagiBird.id).required, 1800);
+  assert.equal(buffered.materials.find((material) => material.id === sagiBird.id).missing, 1700);
+  assert.equal(reset.materials.find((material) => material.id === sagiBird.id).required, 1440);
+  assert.equal(reset.materials.find((material) => material.id === sagiBird.id).missing, 1340);
 });
 
 test("computeCraftPlan expands cached recipe-detail wrappers and keeps final targets out of gather next", () => {

@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.40] - 2026-07-12
+
+### Changed
+
+- Improved spacing, hierarchy, source previews, and responsive buffer controls in Craft Planning acquisition details.
+- Changed uncertain-drop safety buffers to increase producer actions and source-item requirements instead of inflating the desired output quantity.
+
+### Fixed
+
+- Fixed active-craft pulse rings rendering slightly off-centre from their status dots.
+
 ## [0.32.0-beta.39] - 2026-07-12
 
 ### Changed

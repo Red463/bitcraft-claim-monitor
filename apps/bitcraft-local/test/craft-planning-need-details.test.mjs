@@ -130,3 +130,26 @@ test("groupNeedCellSourceRoutes also uses item source routes when no craft step 
   assert.equal(routes[0].recipeName, "Basic Wispweave Plant");
   assert.equal(routes[0].inputs[0].name, "Rough Wispweave Plant");
 });
+
+test("groupNeedCellSourceRoutes enriches catalog routes with calculated buffered step metadata", () => {
+  const output = { key: "items:200", id: "200", kind: "items", name: "Rough Animal Hair" };
+  const routes = groupNeedCellSourceRoutes({
+    item: output,
+    items: [{ ...output, sourceRoutes: [{ output, recipeName: "Harvest", selectedRecipeId: "possibility:harvest:items:200", inputs: [] }] }],
+  }, [{
+    output: { ...output, quantity: 460 },
+    recipeName: "Harvest",
+    selectedRecipeId: "possibility:harvest:items:200",
+    unbufferedCraftCount: 1472,
+    craftCount: 1840,
+    multiplier: 1.25,
+    inputs: [{ key: "items:202", id: "202", kind: "items", name: "Sagi Bird", quantity: 1840 }],
+  }]);
+
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].unbufferedCraftCount, 1472);
+  assert.equal(routes[0].craftCount, 1840);
+  assert.equal(routes[0].multiplier, 1.25);
+  assert.equal(routes[0].inputs[0].name, "Sagi Bird");
+  assert.equal(routes[0].inputs[0].quantity, 1840);
+});

@@ -147,5 +147,20 @@ test("Craft planning loading and active craft states communicate ongoing work", 
   assert.match(page, /aria-busy="true"/);
   assert.match(css, /@keyframes craft-plan-active-pulse/);
   assert.match(css, /\.craft-plan-need-cell\.has-active::before/);
+  assert.match(css, /\.craft-plan-need-cell\.has-active::before\s*\{[^}]*box-sizing:\s*border-box/);
   assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\.craft-plan-need-cell\.has-active::before[\s\S]*animation:\s*none/);
+});
+
+test("How to get this separates route headings and producer buffer controls", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /craft-plan-route-heading/);
+  assert.match(page, /craft-plan-buffer-settings/);
+  assert.match(page, /Estimated processing actions/);
+  assert.match(page, /Gather\/process/);
+  assert.match(page, /does not increase the .* goal/);
+  assert.match(css, /\.craft-plan-route-heading\s*\{/);
+  assert.match(css, /\.craft-plan-buffer-settings\s*\{/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-buffer-control/);
 });

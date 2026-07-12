@@ -118,7 +118,16 @@ export function groupNeedCellSourceRoutes(cell: NeedCell, steps: AnyRecord[] = [
   }
 
   for (const item of cell.items ?? []) {
-    for (const route of Array.isArray(item.sourceRoutes) ? item.sourceRoutes : []) addRoute(route, item);
+    for (const route of Array.isArray(item.sourceRoutes) ? item.sourceRoutes : []) {
+      const routeOutput = route.output && typeof route.output === "object" ? route.output : item;
+      const routeOutputKey = itemIdentity(routeOutput);
+      const calculated = steps.find((step) => {
+        const stepOutput = step.output && typeof step.output === "object" ? step.output : {};
+        return itemIdentity(stepOutput) === routeOutputKey
+          && String(step.selectedRecipeId ?? step.id ?? "") === String(route.selectedRecipeId ?? route.id ?? "");
+      });
+      addRoute(calculated ? { ...route, ...calculated, output: calculated.output ?? routeOutput, inputs: calculated.inputs ?? route.inputs } : route, item);
+    }
   }
   for (const step of steps) addRoute(step);
   return routes;
