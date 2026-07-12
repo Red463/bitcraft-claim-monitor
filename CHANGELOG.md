@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.49] - 2026-07-13
+
+### Changed
+
+- Redesigned Professions as a settlement capability dashboard using the live settlement tier, dependency risk, and active Craft Planner coverage.
+
 ## [0.32.0-beta.48] - 2026-07-12
 
 ### Added

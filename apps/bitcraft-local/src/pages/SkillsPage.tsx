@@ -1,8 +1,8 @@
 import React from "react";
-import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, Star, TrendingUp } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, ShieldCheck, Target, TriangleAlert } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { SearchBox } from "../components/main/SearchBox";
-import { Info, MiniStat } from "../components/main/Stats";
+import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
@@ -17,6 +17,7 @@ import {
   skillTier,
   skillTierLabel,
 } from "../utils/professions";
+import { buildProfessionCapability, buildProfessionPlanCoverage, prioritizeSettlementNeeds, tierRequiredLevel, type NextTierOutlook } from "./professionCapability";
 
 // The UI calls these "Professions" even though BitJita exposes them as skill
 // rows. This page keeps the profession/adventure split explicit so future skill
@@ -26,6 +27,8 @@ type SortKey = "name" | "total" | "highest" | number;
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
   const [insightsOpen, setInsightsOpen] = React.useState(false);
+  const [craftPlan, setCraftPlan] = React.useState<AnyRecord | null>(null);
+  const [craftPlanError, setCraftPlanError] = React.useState(false);
   const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
@@ -53,6 +56,17 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   React.useEffect(() => {
     if (typeof adventureSortKey === "number" && !adventureSkillIds.includes(adventureSortKey)) setAdventureSortKey("total");
   }, [adventureSkillIds, adventureSortKey, setAdventureSortKey]);
+  React.useEffect(() => {
+    const claimId = String(data.claim.entityId ?? data.claim.id ?? "").trim();
+    if (!claimId) { setCraftPlan(null); setCraftPlanError(false); return; }
+    const controller = new AbortController();
+    setCraftPlanError(false);
+    fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then(setCraftPlan)
+      .catch((error) => { if (error.name !== "AbortError") { setCraftPlan(null); setCraftPlanError(true); } });
+    return () => controller.abort();
+  }, [data.claim.entityId, data.claim.id]);
 
   function toggleSort(key: SortKey, currentKey: SortKey, setKey: (value: SortKey) => void, setDirection: React.Dispatch<React.SetStateAction<"asc" | "desc">>) {
     if (currentKey === key) setDirection((dir) => dir === "desc" ? "asc" : "desc");
@@ -76,16 +90,20 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const sorted = sortCitizens(filtered, professionIds, sortKey, sortDir);
   const sortedAdventure = sortCitizens(filtered, adventureSkillIds, adventureSortKey, adventureSortDir);
 
-  const settlementTotalLevel = citizens.reduce((sum, c) => sum + getTotal(c), 0);
+  const settlementTier = Math.max(0, Math.min(10, Math.floor(toNumber(data.claim.tier))));
   const settlementBest = Math.max(...citizens.map(getHighest), 0);
-  const averageTotal = citizens.length ? settlementTotalLevel / citizens.length : 0;
-  const topMember = [...citizens].sort((a, b) => getTotal(b) - getTotal(a))[0];
-  const topMemberName = topMember ? getName(topMember) : "-";
-  const focusRows = [...citizens].sort((a, b) => getSkill(b, focusedProfession) - getSkill(a, focusedProfession)).slice(0, 5);
-  const focusAverage = citizens.length ? citizens.reduce((sum, c) => sum + getSkill(c, focusedProfession), 0) / citizens.length : 0;
-  const focusTier = Math.max(...citizens.map((c) => skillTier(getSkill(c, focusedProfession))), 0);
-  const focusT3 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 3).length;
-  const focusT5 = citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) >= 5).length;
+  const nextSettlementTier = settlementTier > 0 && settlementTier < 10 ? settlementTier + 1 : null;
+  const planCoverage = React.useMemo(() => buildProfessionPlanCoverage(craftPlan), [craftPlan]);
+  const capabilities = professionIds.map((id) => {
+    const name = skillLabel(id);
+    return buildProfessionCapability({ id, name, settlementTier, members: citizens.map((citizen) => ({ name: getName(citizen), level: getSkill(citizen, id) })), planCompletion: planCoverage.get(name) ?? null });
+  });
+  const focusedCapability = capabilities.find((row) => row.id === focusedProfession) ?? capabilities[0];
+  const settlementNeeds = prioritizeSettlementNeeds(capabilities);
+  const currentReadyCount = capabilities.filter((row) => row.currentStatus === "ready").length;
+  const nextCapableCount = capabilities.filter((row) => row.nextCapableCount > 0).length;
+  const dependencyRiskCount = capabilities.filter((row) => row.dependencyRisk === "high").length;
+  const focusRows = [...citizens].sort((a, b) => getSkill(b, focusedProfession) - getSkill(a, focusedProfession));
   const focusTierCounts = Object.keys(TIER_COLORS).map((tier) => {
     const tierNumber = Number(tier);
     return {
@@ -93,67 +111,73 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       count: citizens.filter((c) => skillTier(getSkill(c, focusedProfession)) === tierNumber).length,
     };
   });
-  const summarizeCoverage = (ids: number[]) => ids.map((id) => {
-    const levels = citizens.map((c) => getSkill(c, id));
-    const max = Math.max(...levels, 0);
-    const avg = citizens.length ? levels.reduce((sum, level) => sum + level, 0) / citizens.length : 0;
-    const tier = skillTier(max);
-    const specialists = levels.filter((level) => skillTier(level) >= 5).length;
-    return { id, name: skillLabel(id), max, avg, tier, specialists };
-  }).sort((a, b) => b.max - a.max || b.avg - a.avg);
-  const coverage = summarizeCoverage(professionIds);
+  const outlookLabel: Record<NextTierOutlook, string> = { ready: "Ready for next tier", "materials-needed": "Skills ready - materials needed", "skills-developing": "Materials ready - skills developing", "skills-and-materials": "Skills and materials developing", "skills-only": "Skill-only estimate", "maximum-tier": "Maximum tier", unknown: "Tier unavailable" };
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
 
   return (
     <div className="panel skills-page" data-tour="skills-page">
       <header className="skills-topbar">
         <div>
-          <h2>Member Professions</h2>
-          <p>{citizens.length} citizens - {professionIds.length} professions tracked separately from adventure skills</p>
+          <h2>Settlement Capability</h2>
+          <p>Can the settlement support T{settlementTier || "-"} now, and what needs attention before T{nextSettlementTier ?? (settlementTier || "-")}?</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
-            <span><GraduationCap size={14} /> {professionIds.length} professions</span>
-            <span>{adventureSkillIds.length} skills</span>
+            <span><GraduationCap size={14} /> {professionIds.length} professions assessed</span>
+            <span>{citizens.length} citizens</span>
           </div>
           <div className="dashboard-settlement-pill">
-            <TierBadge tier={Math.max(1, skillTier(settlementBest))} />
-            <span>Highest member tier</span>
+            {settlementTier ? <TierBadge tier={settlementTier} /> : <span className="status-pill muted">Tier unavailable</span>}
+            <span>Settlement tier</span>
           </div>
         </div>
       </header>
       <div className="summary-grid skills-summary">
-        <MiniStat icon={<TrendingUp />} label="Profession Levels" value={formatNumber(settlementTotalLevel)} />
-        <MiniStat icon={<Star />} label="Highest Profession" value={settlementBest} />
-        <MiniStat icon={<Activity />} label="Avg Profession Total" value={formatNumber(averageTotal, 1)} />
-        <MiniStat icon={<GraduationCap />} label="Top Professional" value={topMemberName} />
+        <MiniStat icon={<Target />} label="Settlement Tier" value={settlementTier ? `T${settlementTier}` : "Unavailable"} />
+        <MiniStat icon={<ShieldCheck />} label="Ready Now" value={settlementTier ? `${currentReadyCount}/${capabilities.length}` : "-"} />
+        <MiniStat icon={<GraduationCap />} label="Next-Tier Capable" value={nextSettlementTier ? `${nextCapableCount}/${capabilities.length}` : settlementTier === 10 ? "Maximum" : "-"} />
+        <MiniStat icon={<TriangleAlert />} label="Dependency Risks" value={settlementTier ? dependencyRiskCount : "-"} />
       </div>
-      <section className="profession-insights">
+      <section className="settlement-needs" aria-labelledby="settlement-needs-title">
+        <div className="settlement-needs-heading"><span><TriangleAlert size={16} /></span><div><h3 id="settlement-needs-title">Settlement needs</h3><p>Current-tier gaps, single-member dependencies, then active-plan pressure.</p></div></div>
+        <div className="settlement-needs-list">
+          {settlementNeeds.length ? settlementNeeds.map((need) => <button key={`${need.kind}-${need.professionId}`} type="button" onClick={() => setFocusSkill(need.professionId)}><span className={`capability-state ${need.kind}`}>{need.kind === "current-gap" ? "Gap" : need.kind === "dependency-risk" ? "Dependency" : "Plan"}</span><strong>{need.professionName}</strong><small>{need.message}</small></button>) : <div className="settlement-needs-clear"><ShieldCheck size={16} /><span><strong>No immediate capability gaps</strong><small>{craftPlanError ? "Craft Planner coverage is unavailable; skill readiness is still shown." : craftPlan?.enabled ? "Current-tier coverage is stable and the active plan has no profession bottlenecks." : "Current-tier coverage is stable. Enable a Craft Plan to add material-pressure estimates."}</small></span></div>}
+        </div>
+      </section>
+      <section className="profession-insights capability-dashboard">
         <div className="profession-insights-bar">
-          <div className="profession-insights-title"><Star size={15} /><span><strong>Profession insights</strong><small>Focus and settlement coverage</small></span></div>
+          <div className="profession-insights-title"><ShieldCheck size={15} /><span><strong>Profession capability</strong><small>Readiness against the settlement tier</small></span></div>
           <label className="profession-insights-select"><span>Profession</span><select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
             {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
           </select></label>
           <div className="profession-insights-glance" aria-label={`${skillLabel(focusedProfession)} summary`}>
-            <span><small>Average level</small><strong>{formatNumber(focusAverage, 1)}</strong></span>
-            <span><small>Best tier</small><strong>{focusTier ? <TierBadge tier={focusTier} /> : "-"}</strong></span>
-            <span><small>T5+</small><strong>{focusT5} members</strong></span>
+            <span><small>Current tier</small><strong>{focusedCapability?.currentStatus === "ready" ? "Ready" : focusedCapability?.currentStatus === "gap" ? "Gap" : "Unknown"}</strong></span>
+            <span><small>Qualified</small><strong>{focusedCapability?.currentCapableCount ?? 0} members</strong></span>
+            <span><small>Dependency risk</small><strong>{focusedCapability?.dependencyRisk === "high" ? "High" : focusedCapability?.dependencyRisk === "covered" ? "Covered" : focusedCapability?.dependencyRisk === "gap" ? "Gap" : "Unknown"}</strong></span>
           </div>
           <button className="profession-insights-toggle" type="button" aria-expanded={insightsOpen} aria-controls="profession-insights-content" onClick={() => setInsightsOpen((open) => !open)}>{insightsOpen ? "Hide details" : "Show details"}<ChevronDown size={16} /></button>
+        </div>
+        <div className="capability-grid" aria-label="Profession readiness overview">
+          {capabilities.map((capability) => <button type="button" key={capability.id} className={focusedProfession === capability.id ? "active" : ""} onClick={() => setFocusSkill(capability.id)}>
+            <div className="capability-card-heading"><strong>{capability.name}</strong><span className={`capability-state ${capability.currentStatus}`}>{capability.currentStatus === "ready" ? `T${settlementTier} ready` : capability.currentStatus === "gap" ? `T${settlementTier} gap` : "Tier unknown"}</span></div>
+            <div className="capability-card-metrics"><span><small>Current capable</small><b>{capability.currentCapableCount}</b></span><span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Next tier"}</small><b>{nextSettlementTier ? capability.nextCapableCount : "-"}</b></span><span><small>Active plan</small><b>{capability.planCompletion == null ? "No data" : `${capability.planCompletion}%`}</b></span></div>
+            <p>{outlookLabel[capability.nextOutlook]}</p><small className="capability-explanation">{capability.explanation}</small>
+          </button>)}
         </div>
         {insightsOpen ? <div className="skills-dashboard profession-insights-content" id="profession-insights-content">
         <section className="focus-panel">
           <div className="split-header">
-            <h3><Star size={17} /> Profession Focus</h3>
+            <h3><Target size={17} /> Capability Detail</h3>
             <select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
               {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
             </select>
           </div>
           <div className="focus-metrics">
-            <Info label="Average level" value={formatNumber(focusAverage, 1)} />
-            <Info label="Best tier" value={focusTier ? <TierBadge tier={focusTier} /> : "-"} />
-            <Info label="T3+" value={`${focusT3} members`} />
-            <Info label="T5+" value={`${focusT5} members`} />
+            <span><small>Current requirement</small><strong>{settlementTier ? `T${settlementTier} · Lv ${tierRequiredLevel(settlementTier)}` : "Tier unavailable"}</strong></span>
+            <span><small>Lead member</small><strong>{focusedCapability?.leadName ?? "No member"} · Lv {focusedCapability?.leadLevel ?? 0}</strong></span>
+            <span><small>Qualified members</small><strong>{focusedCapability?.currentCapableCount ?? 0}</strong></span>
+            <span><small>Next-tier gap</small><strong>{focusedCapability?.nextTier ? focusedCapability.nextLevelGap ? `${focusedCapability.nextLevelGap} levels` : "Capability ready" : "Maximum tier"}</strong></span>
+            <span><small>Dependency risk</small><strong>{focusedCapability?.dependencyRisk === "high" ? "High - one qualified member" : focusedCapability?.dependencyRisk === "covered" ? "Covered" : "Capability gap"}</strong></span>
           </div>
           <div className="focus-tier-strip" aria-label={`${skillLabel(focusedProfession)} tier distribution`}>
             {focusTierCounts.map(({ tier, count }) => (
@@ -163,7 +187,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
               </div>
             ))}
           </div>
-          <div className="focus-list">
+          <div className="focus-list capability-member-list">
             {focusRows.map((citizen, index) => {
               const level = getSkill(citizen, focusedProfession);
               const tier = skillTier(level);
@@ -177,17 +201,10 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             })}
           </div>
         </section>
-        <section className="coverage-panel">
-          <h3><GraduationCap size={17} /> Profession Coverage</h3>
-          <div className="coverage-list">
-            {coverage.slice(0, 8).map((skill) => (
-              <button key={skill.id} className={focusedProfession === skill.id ? "active" : ""} onClick={() => setFocusSkill(skill.id)}>
-                <span>{skill.name}</span>
-                <b>{skill.tier ? <><TierBadge tier={skill.tier} /> <span>/ Lv {skill.max}</span></> : "-"}</b>
-                <small>Avg {formatNumber(skill.avg, 1)} - {skill.specialists} at T5+</small>
-              </button>
-            ))}
-          </div>
+        <section className="coverage-panel capability-explanation-panel">
+          <h3><GraduationCap size={17} /> Why this profession is {focusedCapability?.currentStatus === "ready" ? "strong" : "weak"}</h3>
+          <p>{focusedCapability?.explanation}</p>
+          <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel[focusedCapability.nextOutlook] : "Unavailable"}</strong></span><span><small>Craft Planner estimate</small><strong>{focusedCapability?.planCompletion == null ? craftPlanError ? "Planner unavailable" : "No active plan data" : `${focusedCapability.planCompletion}% covered`}</strong></span></div>
         </section>
       </div> : null}
       </section>
