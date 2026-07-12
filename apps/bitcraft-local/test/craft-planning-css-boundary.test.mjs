@@ -136,3 +136,16 @@ test("Needs Board shortage states use fill without persistent borders", () => {
   assert.match(css, /\.craft-plan-need-cell\.is-blocked:hover[\s\S]*background:\s*rgba\(239, 100, 97/);
   assert.match(css, /\.craft-plan-overall-progress\s*\{/);
 });
+
+test("Craft planning loading and active craft states communicate ongoing work", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /craft-plan-loading/);
+  assert.match(page, /craft-plan-loading-skeleton/);
+  assert.match(page, /role="status"/);
+  assert.match(page, /aria-busy="true"/);
+  assert.match(css, /@keyframes craft-plan-active-pulse/);
+  assert.match(css, /\.craft-plan-need-cell\.has-active::before/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\.craft-plan-need-cell\.has-active::before[\s\S]*animation:\s*none/);
+});

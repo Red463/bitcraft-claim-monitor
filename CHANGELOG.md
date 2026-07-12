@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.39] - 2026-07-12
+
+### Changed
+
+- Improved the Craft Planning loading screen with a responsive preview of the plan structure.
+- Added a reduced-motion-aware pulse to active craft indicators on the Needs Board.
+
 ## [0.32.0-beta.38] - 2026-07-12
 
 ### Added

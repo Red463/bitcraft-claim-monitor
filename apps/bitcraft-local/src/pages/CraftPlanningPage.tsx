@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, ClipboardList, Factory, Package, Route, Search, Target, X } from "lucide-react";
+import { AlertTriangle, ClipboardList, Factory, LoaderCircle, Package, Route, Search, Target, X } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { TierBadge } from "../components/main/Badges";
@@ -414,7 +414,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   }
 
   if (loading && !plan) {
-    return <div className="panel craft-planning-page"><div className="empty-state"><ClipboardList size={36} /><strong>Loading craft plan</strong><span>Checking targets, sources, active crafts, and materials.</span></div></div>;
+    return <div className="panel craft-planning-page" aria-busy="true"><section className="craft-plan-loading" role="status" aria-live="polite">
+      <header><span className="craft-plan-loading-icon"><ClipboardList size={24} /><LoaderCircle className="is-spinning" size={15} /></span><span><strong>Loading craft plan</strong><small>Checking targets, stock sources, active crafts, and materials.</small></span></header>
+      <div className="craft-plan-loading-skeleton" aria-hidden="true">
+        <div className="craft-plan-loading-stats">{Array.from({ length: 4 }, (_, index) => <span key={index}><i /><b /><em /></span>)}</div>
+        <div className="craft-plan-loading-strip"><i /><span /></div>
+        <div className="craft-plan-loading-board"><i />{Array.from({ length: 4 }, (_, index) => <span key={index} />)}</div>
+      </div>
+    </section></div>;
   }
 
   if (error) {
