@@ -176,3 +176,17 @@ test("Overall Needs Board progress sits on the left and shares section completio
     assert.match(css, new RegExp(`\\.craft-plan-overall-progress\\.is-${tone}[^}]*i`));
   }
 });
+
+test("Needs Board header keeps progress and filters in compact aligned rows", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const searchIndex = page.indexOf("craft-plan-needs-search");
+  const shortagesIndex = page.indexOf("craft-plan-list-only");
+  const allFilterIndex = page.indexOf(">All <span>{needsBoardRowCount}</span>");
+
+  assert.ok(searchIndex < shortagesIndex && shortagesIndex < allFilterIndex);
+  assert.match(css, /\.craft-plan-needs-heading-content\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(css, /\.craft-plan-overall-progress\s*\{[^}]*justify-self:\s*end/);
+  assert.doesNotMatch(css, /\.craft-plan-list-only\s*\{[^}]*margin-left:\s*auto/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-needs-heading-content\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});

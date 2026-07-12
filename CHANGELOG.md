@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.43] - 2026-07-12
+
+### Changed
+
+- Condensed the Needs Board header by aligning overall progress with its heading and grouping the shortage toggle with search.
+
 ## [0.32.0-beta.42] - 2026-07-12
 
 ### Changed

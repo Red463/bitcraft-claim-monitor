@@ -484,12 +484,12 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             <div className="craft-plan-needs-header"><div className="craft-plan-needs-heading-content"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${completionTone(overallCompletion.completion)}`}><span><strong>{overallCompletion.completion}%</strong><small>Overall complete</small></span><div><i style={{ width: `${overallCompletion.completion}%` }} /></div><em>{quantity(overallCompletion.covered)} / {quantity(overallCompletion.required)} covered</em></div></div></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
+              <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
               <button className={selectedSections.length === 0 ? "active" : ""} type="button" aria-pressed={selectedSections.length === 0} onClick={() => setSelectedSections([])}>All <span>{needsBoardRowCount}</span></button>
               {personalBoard.board.map((group) => {
                 const selected = selectedSections.includes(group.section);
                 return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
               })}
-              <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
             </div> : null}
             <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
