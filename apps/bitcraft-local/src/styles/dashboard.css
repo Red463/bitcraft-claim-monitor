@@ -177,12 +177,19 @@
 .dashboard-money-row span { font-size: 14px; font-weight: 800; color: #b6c0ce; }
 .dashboard-money-row span.negative { color: var(--danger); }
 .dashboard-money-row span.positive { color: var(--good); }
-.dashboard-chart { display: grid; gap: 7px; }
+.dashboard-chart { position: relative; display: grid; gap: 7px; }
 .dashboard-chart svg { width: 100%; height: 230px; overflow: visible; }
 .dashboard-chart-grid { stroke: rgba(154,168,190,.12); stroke-width: 1; }
 .dashboard-chart-area { fill: url(#dashboardAreaGold); }
 .dashboard-chart-line { fill: none; stroke: var(--active-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 8px color-mix(in srgb, var(--active-color) 28%, transparent)); }
 .dashboard-chart-dot { fill: var(--active-color); stroke: var(--card-top); stroke-width: 3; }
+.dashboard-chart-guide { stroke: rgba(247,200,54,.45); stroke-width: 1; stroke-dasharray: 4 4; pointer-events: none; }
+.dashboard-chart-active-dot { fill: var(--active-color); stroke: #090d13; stroke-width: 3; pointer-events: none; }
+.dashboard-chart-hit { fill: transparent; cursor: crosshair; outline: none; }
+.dashboard-chart-hit:focus-visible { fill: rgba(247,200,54,.16); stroke: var(--active-color); stroke-width: 2; }
+.dashboard-chart-tooltip { position: absolute; top: 8px; z-index: 2; display: grid; gap: 1px; min-width: 94px; padding: 7px 9px; border: 1px solid rgba(247,200,54,.44); border-radius: 6px; color: #f8fafc; background: rgba(7,11,17,.96); box-shadow: 0 8px 18px rgba(0,0,0,.28); transform: translateX(-50%); pointer-events: none; }
+.dashboard-chart-tooltip span { color: #aab5c4; font-size: 11px; }
+.dashboard-chart-tooltip strong { color: var(--active-color); font-size: 13px; }
 .dashboard-chart-axis {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -243,6 +250,9 @@
 .dashboard-feed-row.market > span { color: #a75cff; background: rgba(167,92,255,.12); }
 .dashboard-feed-row strong { color: #f8fafc; font-size: 14px; }
 .dashboard-feed-row small { color: #aab5c4; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dashboard-feed-item { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.dashboard-feed-item small { min-width: 0; }
+.dashboard-feed-item .tier-badge { flex: 0 0 auto; }
 .dashboard-feed-row time { grid-column: 3; grid-row: 1 / 3; color: #aab5c4; font-size: 12px; }
 .dashboard-member-list { display: grid; gap: 0; }
 .dashboard-member-list button {

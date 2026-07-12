@@ -45,6 +45,7 @@ export function DashboardCardHeader({ title, icon, action, onClick }: { title: s
 }
 
 export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily trend appears after snapshots exist for at least two days.", ariaLabel = "Dashboard trend" }: { points: Array<{ at: string; value: number }>; suffix?: string; emptyMessage?: string; ariaLabel?: string }) {
+  const [activePointIndex, setActivePointIndex] = React.useState<number | null>(null);
   const datedPoints = points
     .map((point) => ({ ...point, ms: timestampMs(point.at) }))
     .filter((point) => point.ms > 0)
@@ -93,9 +94,21 @@ export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily tren
   const latestX = xForDay(latest.dayMs);
   const latestY = yForValue(latest.value);
   const axisDays = Array.from({ length: 7 }, (_, index) => new Date(startMs + index * dayMs));
+  const activePoint = activePointIndex == null ? null : chartPoints[activePointIndex] ?? null;
+  const activeX = activePoint ? xForDay(activePoint.dayMs) : 0;
+  const activeY = activePoint ? yForValue(activePoint.value) : 0;
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (bounds.width <= 0) return;
+    const pointerX = ((event.clientX - bounds.left) / bounds.width) * width;
+    const nearestIndex = chartPoints.reduce((bestIndex, point, index) => (
+      Math.abs(xForDay(point.dayMs) - pointerX) < Math.abs(xForDay(chartPoints[bestIndex].dayMs) - pointerX) ? index : bestIndex
+    ), 0);
+    setActivePointIndex(nearestIndex);
+  };
   return (
     <div className="dashboard-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} aria-label={`${ariaLabel} ending at ${formatNumber(latest.value)}${suffix}`}>
+      <svg viewBox={`0 0 ${width} ${height}`} aria-label={`${ariaLabel} ending at ${formatNumber(latest.value)}${suffix}`} onPointerMove={handlePointerMove} onPointerLeave={() => setActivePointIndex(null)}>
         <defs>
           <linearGradient id="dashboardAreaGold" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgba(247, 200, 54, .46)" />
@@ -106,7 +119,10 @@ export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily tren
         {chartPoints.length >= 3 ? <path d={areaPath} className="dashboard-chart-area" /> : null}
         <path d={path} className="dashboard-chart-line" />
         <circle cx={latestX} cy={latestY} r="5" className="dashboard-chart-dot" />
+        {activePoint ? <><line x1={activeX} x2={activeX} y1={pad} y2={height - pad} className="dashboard-chart-guide" /><circle cx={activeX} cy={activeY} r="6" className="dashboard-chart-active-dot" /></> : null}
+        {chartPoints.map((point, index) => <circle key={point.dayMs} cx={xForDay(point.dayMs)} cy={yForValue(point.value)} r="12" className="dashboard-chart-hit" tabIndex={0} role="button" aria-label={`${shortDateLabel(point.at)}: ${formatNumber(point.value)}${suffix}`} onFocus={() => setActivePointIndex(index)} onBlur={() => setActivePointIndex(null)} />)}
       </svg>
+      {activePoint ? <div className="dashboard-chart-tooltip" style={{ left: `${Math.max(12, Math.min(88, (activeX / width) * 100))}%` }} role="status"><span>{shortDateLabel(activePoint.at)}</span><strong>{formatNumber(activePoint.value)}{suffix}</strong></div> : null}
       <div className="dashboard-chart-axis">{axisDays.map((day) => <span key={day.toISOString()}>{shortDateLabel(day.toISOString())}</span>)}</div>
     </div>
   );

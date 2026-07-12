@@ -188,12 +188,15 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
           <DashboardCardHeader title="Gather Next" icon={<Target size={15} />} action="Open plan" onClick={() => onNavigate("planning")} />
           <div className="dashboard-feed">
             {gatherNextPreview.length ? gatherNextPreview.map((item) => (
-              <button key={item.key ?? `${item.section}-${item.name}`} className="dashboard-feed-row warn" onClick={() => onNavigate("planning")}>
-                <span><ItemIcon item={item} /></span>
-                <strong>{item.section ?? "Other"}</strong>
-                <small>{item.name ?? "Unknown item"}</small>
-                <time>{formatNumber(item.missing, 0)}</time>
-              </button>
+              (() => {
+                const itemTier = item.tier ?? item.itemTier ?? item.tierLevel;
+                return <button key={item.key ?? `${item.section}-${item.name}`} className="dashboard-feed-row warn" onClick={() => onNavigate("planning")}>
+                  <span><ItemIcon item={item} /></span>
+                  <strong>{item.section ?? "Other"}</strong>
+                  <span className="dashboard-feed-item"><small>{item.name ?? "Unknown item"}</small>{itemTier ? <TierBadge tier={itemTier} /> : null}</span>
+                  <time>{formatNumber(item.missing, 0)}</time>
+                </button>;
+              })()
             )) : <div className="dashboard-empty">No craft plan needs are configured yet.</div>}
           </div>
         </article>

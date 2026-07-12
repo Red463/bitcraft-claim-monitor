@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.42] - 2026-07-12
+
+### Changed
+
+- Added date and cumulative-value readouts when hovering or focusing the market income chart.
+- Added known item tiers and tier colours to the dashboard Gather Next list.
+
 ## [0.32.0-beta.41] - 2026-07-12
 
 ### Added
