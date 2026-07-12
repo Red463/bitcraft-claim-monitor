@@ -2089,10 +2089,15 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
   const catalogTargets = craftPlanCatalogTargets(config);
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides);
-  const [inventoriesPayload, publicCraftsPayload] = await Promise.all([
+  const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`).catch(() => ({ members: [] })),
   ]);
+  const memberNames = new Map(unwrap(membersPayload, "members", []).map((member) => {
+    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
+    return [playerId, String(member.userName ?? member.username ?? playerId)];
+  }));
   const playerCraftResults = await Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
     try {
       const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, cache: true });
@@ -2109,7 +2114,7 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
   const playerSources = [];
   const deployableSources = [];
   for (const playerId of config.sourceRules.playerIds) {
-    const label = playerId;
+    const label = memberNames.get(playerId) ?? playerId;
     try {
       const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
       const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);

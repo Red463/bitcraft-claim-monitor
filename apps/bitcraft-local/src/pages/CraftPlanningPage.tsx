@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 
 import { TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
-import { Info } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
@@ -87,6 +86,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
+  const [bufferPercent, setBufferPercent] = React.useState("0");
   const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
 
   React.useEffect(() => {
@@ -145,6 +145,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const selectedNeedCrafts = selectedNeed ? groupNeedCellActiveCrafts(selectedNeed) : [];
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, planSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
+  const selectedNeedKey = selectedNeed?.items?.[0]?.key ?? (selectedNeed ? itemKey(selectedNeed.item) : "");
+  const selectedMultiplier = Number(config.multipliers?.[selectedNeedKey]?.multiplier) || 1;
+  React.useEffect(() => {
+    setBufferPercent(String(Math.max(0, Math.round((selectedMultiplier - 1) * 1000) / 10)));
+  }, [selectedNeedKey, selectedMultiplier]);
   const sectionOverrideDialog = selectedSectionOverride ? (
     <div className="modal-backdrop craft-plan-section-override-backdrop" role="presentation">
       <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board row">
@@ -198,14 +203,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   <div className="craft-plan-detail-breakdown">
                     {source.entries.map((entry: AnyRecord, index: number) => (
                       <div className="craft-plan-detail-row subtle" key={String(entry.sourceId ?? entry.label ?? index) + "-" + index}>
-                        <span>{entry.type ?? "Source stack"}</span>
+                        <span>{[entry.playerName, entry.type ?? "Source stack"].filter(Boolean).join(" — ")}</span>
                         <strong>{quantity(entry.quantity)}</strong>
                       </div>
                     ))}
                   </div>
                 ) : null}
               </details>
-            )) : <p className="legend">No counted stock found for this item.</p>}
+            )) : <p className="legend">{Number(selectedNeed.available) > 0 ? "Counted stock exists, but source details are unavailable." : "No counted stock found for this item."}</p>}
             {selectedNeedCrafts.length ? <div className="craft-plan-tracked-crafts">
               <h3><Factory size={16} /> Tracked crafts</h3>
               {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row" key={String(craft.craftId ?? index)}>
@@ -230,7 +235,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
                     {gatheringByproduct ? (
-                      <p className="craft-plan-byproduct-note">Expected yield: {formatNumber(Number(route.expectedYield) || 0, Number(route.expectedYield) < 1 ? 2 : 1)} {itemName(route.output)} per gathering action.</p>
+                      <>
+                        <p className="craft-plan-byproduct-note">Expected yield: {formatNumber(Number(route.expectedYield) || 0, Number(route.expectedYield) < 1 ? 2 : 1)} {itemName(route.output)} per gathering action{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</p>
+                        {route.isProbabilistic ? <div className="craft-plan-chance-summary">
+                          <span>Estimated actions <strong>{quantity(Math.ceil(Number(selectedNeed.required) / Math.max(Number(route.expectedYield), 0.0001)))}</strong></span>
+                          {selectedMultiplier > 1 ? <span>With safety buffer <strong>{quantity(Math.ceil(Number(selectedNeed.required) * selectedMultiplier / Math.max(Number(route.expectedYield), 0.0001)))}</strong></span> : null}
+                          {canManage ? <label className="field compact-field"><span>Safety buffer (% extra)</span><div className="craft-plan-buffer-control"><input type="number" min="0" max="1900" step="5" value={bufferPercent} onChange={(event) => setBufferPercent(event.target.value)} /><button className="toolbar-button primary" type="button" onClick={() => void saveMultiplier(selectedNeedKey, Number(bufferPercent))}>Save</button>{selectedMultiplier > 1 ? <button className="toolbar-button" type="button" onClick={() => void saveMultiplier(selectedNeedKey, 0)}>Reset</button> : null}</div><small>Increases planned gathering only. It does not change the API drop rate or counted stock.</small></label> : null}
+                        </div> : null}
+                      </>
                     ) : Array.isArray(route.inputs) && route.inputs.length ? (
                       <div className="craft-plan-route-inputs">
                         {route.inputs.map((input: AnyRecord, inputIndex: number) => (
@@ -380,6 +392,24 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       setRouteError(err instanceof Error ? err.message : String(err));
     }
   }
+  async function saveMultiplier(outputKey: string, percent: number) {
+    if (!canManage || !adminAuth?.csrfToken || !outputKey) return;
+    setRouteStatus(null);
+    setRouteError(null);
+    try {
+      const multipliers = { ...(config.multipliers ?? {}) };
+      const safePercent = Math.max(0, Math.min(1900, Number.isFinite(percent) ? percent : 0));
+      if (safePercent > 0) multipliers[outputKey] = { multiplier: 1 + safePercent / 100, note: `${safePercent}% gathering safety buffer` };
+      else delete multipliers[outputKey];
+      const response = await fetch(LOCAL_API + "/admin/craft-plan", { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": String(adminAuth.csrfToken) }, body: JSON.stringify({ ...config, multipliers }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
+      setRouteStatus(safePercent > 0 ? `Safety buffer saved at ${safePercent}%.` : "Safety buffer removed.");
+      setManagerRefreshToken((value) => value + 1);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   if (loading && !plan) {
     return <div className="panel craft-planning-page"><div className="empty-state"><ClipboardList size={36} /><strong>Loading craft plan</strong><span>Checking targets, sources, active crafts, and materials.</span></div></div>;
@@ -424,9 +454,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             <div className="split-header"><h3><Target size={17} /> Targets</h3><p className="legend">Configured goals and current progress against counted sources.</p></div>
             <div className="craft-plan-target-list">
               {targets.map((target: AnyRecord) => (
-                <article className="craft-plan-target" key={target.key ?? `${target.kind}:${target.id}`}>
+                <article className={`craft-plan-target${Number(target.missing) <= 0 ? " is-complete" : ""}`} key={target.key ?? `${target.kind}:${target.id}`}>
                   {itemNode(target)}
-                  <div><Info label="Goal" value={quantity(target.quantity)} /><Info label="Available" value={quantity(target.available)} /><Info label="In progress" value={quantity(target.inProgress)} /><Info label="Still needed" value={quantity(target.missing)} /></div>
+                  <div className="craft-plan-target-progress"><span><i style={{ width: `${Math.min(100, Math.max(0, ((Number(target.quantity) - Number(target.missing)) / Math.max(1, Number(target.quantity))) * 100))}%` }} /></span><small>{quantity(Number(target.quantity) - Number(target.missing))} / {quantity(target.quantity)} covered</small><em>{quantity(target.available)} available{Number(target.inProgress) > 0 ? ` · ${quantity(target.inProgress)} in progress` : ""}</em></div>
+                  <div className="craft-plan-target-status"><strong>{quantity(target.missing)}</strong><span>{Number(target.missing) <= 0 ? "Complete" : "Still needed"}</span></div>
                 </article>
               ))}
             </div>

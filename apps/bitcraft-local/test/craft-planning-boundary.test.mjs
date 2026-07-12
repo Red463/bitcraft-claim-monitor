@@ -134,7 +134,13 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /craft-plan-deployable-group/);
   assert.match(manager, /function itemTypeLabel/);
   assert.match(manager, /meta=\{itemTypeLabel\(item\)\}/);
-  assert.match(manager, /Chance and drop multipliers/);
+  assert.match(manager, /Chance-drop safety buffers/);
+  assert.match(manager, /How to get this/);
+  assert.match(manager, /Loading plan data/);
+  assert.match(manager, /Saving plan/);
+  assert.match(manager, /Refreshing plan data/);
+  assert.match(manager, /aria-live="polite"/);
+  assert.match(manager, /LoaderCircle/);
   assert.match(manager, /mergeTargets/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
   assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
@@ -209,6 +215,8 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, catalogTargets, config\.routeOverrides\)/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
+  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`\)/);
+  assert.match(computedCraftPlan, /memberNames/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`\)/);
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);

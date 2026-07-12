@@ -9,6 +9,24 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.37] - 2026-07-12
+
+### Added
+
+- Added admin-managed safety buffers for uncertain gathering drops, with expected-yield and gathering-action guidance.
+
+### Changed
+
+- Improved Craft Planning targets, item details, shortage states, and loading feedback for faster plan review and editing.
+- Added player names to counted inventory and deployable stock locations.
+
+### Fixed
+
+- Fixed gathering byproducts being presented as ordinary crafting routes when a verified gathering source was available.
+- Fixed personal fishing projections losing their counted stock-location details.
+- Fixed active-craft indicators overlapping shortage borders in the Needs Board.
+- Fixed safety buffers affecting deterministic materials instead of only uncertain gathering routes.
+
 ## [0.32.0-beta.36] - 2026-07-12
 
 ### Changed

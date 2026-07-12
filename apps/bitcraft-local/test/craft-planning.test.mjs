@@ -143,6 +143,35 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
 });
 
+test("chance metadata preserves normalized probability and expected yield", () => {
+  const hair = { id: "200", name: "Rough Animal Hair", itemType: 0, kind: "items", tag: "Hunting" };
+  const output = { id: "201", name: "Rough Animal Output", itemType: 0, kind: "items", tag: "Hunting" };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ ...hair, quantity: 10 }] }),
+    detailsByKey: new Map([[recipeKey("items", hair.id), { item: hair }], [recipeKey("items", output.id), {
+      item: output,
+      craftingRecipes: [{ id: "hunt", name: "Harvest", skillName: "Hunting", craftedItemStacks: [{ item_id: output.id, item_type: "item", quantity: 1 }], consumedItemStacks: [] }],
+      itemListPossibilities: [{ targetId: hair.id, targetItem: hair, quantity: 1, chance: 25 }],
+    }]]),
+  });
+  const route = plan.materials.find((row) => row.id === hair.id).sourceRoutes[0];
+  assert.equal(route.isProbabilistic, true);
+  assert.equal(route.dropQuantity, 1);
+  assert.equal(route.dropChance, 0.25);
+  assert.equal(route.expectedYield, 0.25);
+});
+
+test("multipliers apply only to probabilistic source materials", () => {
+  const item = { id: "300", name: "Rough Brick", itemType: 0, kind: "items", tag: "Masonry" };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ ...item, quantity: 10 }], multipliers: { [recipeKey("items", item.id)]: { multiplier: 1.5 } } }),
+    detailsByKey: new Map([[recipeKey("items", item.id), { item }]]),
+  });
+  const material = plan.materials.find((row) => row.id === item.id);
+  assert.equal(material.multiplier, 1);
+  assert.equal(material.bufferedRequired, 10);
+});
+
 test("workstation targets preserve construction requirements and expand them for catalog lookup", () => {
   const config = normalizeCraftPlanConfig({
     enabled: true,
@@ -1113,6 +1142,7 @@ test("computeCraftPlan exposes source locations and recipe alternatives for mate
 });
 
 test("computeCraftPlan applies per-item multipliers and records unavailable sources", () => {
+  const output = { id: "201", name: "Animal Output", itemType: 0, kind: "items", tag: "Hunting" };
   const config = normalizeCraftPlanConfig({
     enabled: true,
     targets: [{ id: "200", kind: "items", name: "Animal Hair", quantity: 10, itemType: 0 }],
@@ -1122,7 +1152,11 @@ test("computeCraftPlan applies per-item multipliers and records unavailable sour
 
   const plan = computeCraftPlan({
     config,
-    detailsByKey: new Map([[recipeKey("items", "200"), animalHairDetail]]),
+    detailsByKey: new Map([[recipeKey("items", "200"), animalHairDetail], [recipeKey("items", output.id), {
+      item: output,
+      craftingRecipes: [{ id: "hunt", name: "Harvest", skillName: "Hunting", craftedItemStacks: [{ item_id: output.id, item_type: "item", quantity: 1 }], consumedItemStacks: [] }],
+      itemListPossibilities: [{ targetId: "200", targetItem: animalHairDetail.item, quantity: 1, chance: 0.25 }],
+    }]]),
     playerSources: [{ sourceId: "player-1", label: "Modular inventory", unavailable: true, error: "HTTP 403", items: [] }],
   });
 

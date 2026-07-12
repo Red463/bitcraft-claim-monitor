@@ -118,6 +118,8 @@ test("playerInventoryContainerSources reads wrapped BitJita inventories and sepa
   });
 
   assert.deepEqual(result.inventory.items.map((item) => item.name), ["Simple Wood Log"]);
+  assert.equal(result.inventory.playerName, "Modular");
+  assert.equal(result.inventory.label, "Modular inventory");
   assert.equal(result.deployableOptions.length, 2);
   assert.equal(result.deployableOptions.some((source) => source.sourceId === "player-1:cart" && source.label === "Cart"), true);
   const cache = result.deployableOptions.find((source) => source.sourceId === "player-1:personal-cache-1");

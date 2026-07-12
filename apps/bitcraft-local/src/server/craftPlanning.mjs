@@ -219,6 +219,10 @@ function routeMetadata(recipe) {
     producer: recipe?.producer ?? null,
     producerRecipe: recipe?.producerRecipe ?? null,
     expectedYield: recipe?.expectedYield == null ? null : toNumber(recipe.expectedYield),
+    isProbabilistic: recipe?.isProbabilistic === true,
+    dropChance: recipe?.dropChance == null ? null : toNumber(recipe.dropChance),
+    dropQuantity: recipe?.dropQuantity == null ? null : toNumber(recipe.dropQuantity),
+    guaranteedYield: recipe?.guaranteedYield == null ? null : toNumber(recipe.guaranteedYield),
   };
 }
 
@@ -293,6 +297,7 @@ function possibilityExpectedOutputs(detail) {
       hasExplicitGuarantee: true,
       minimumQuantity: Number.POSITIVE_INFINITY,
       totalChance: 0,
+      weightedDropQuantity: 0,
     };
     current.quantity += expectedYield;
     const explicitGuarantee = possibility?.guaranteedQuantity ?? possibility?.guaranteed_quantity;
@@ -300,10 +305,13 @@ function possibilityExpectedOutputs(detail) {
     current.explicitGuaranteedQuantity += Math.max(0, toNumber(explicitGuarantee));
     current.minimumQuantity = Math.min(current.minimumQuantity, quantity);
     current.totalChance += chance;
+    current.weightedDropQuantity += quantity * chance;
     outputs.set(key, current);
   }
-  return [...outputs.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, ...output }) => ({
+  return [...outputs.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, weightedDropQuantity, ...output }) => ({
     ...output,
+    dropChance: Math.min(1, totalChance),
+    dropQuantity: totalChance > 0 ? weightedDropQuantity / totalChance : 0,
     guaranteedQuantity: hasExplicitGuarantee
       ? explicitGuaranteedQuantity
       : totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity : 0,
@@ -355,7 +363,11 @@ function possibilityRecipesForTarget(target, detailsByKey) {
           skillName: gatheringSkill || null,
         },
         isExpectedYield: true,
+        isProbabilistic: craftedOutputs.some((craftedOutput) => craftedOutput.guaranteedQuantity < craftedOutput.quantity),
         expectedYield: yieldQuantity * outputPerCraft,
+        dropChance: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropChance ?? null,
+        dropQuantity: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropQuantity ?? null,
+        guaranteedYield: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.guaranteedQuantity ?? 0,
       });
     }
   }
@@ -1087,7 +1099,9 @@ export function computeCraftPlan({
 
   const materials = [...required.values()].map((item) => {
     const enrichedItem = enrichDisplayFromDetails(item, detailsByKey);
-    const multiplier = normalized.multipliers[item.key]?.multiplier ?? 1;
+    const sourceRoutes = sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides);
+    const probabilistic = sourceRoutes.some((route) => route.isProbabilistic === true);
+    const multiplier = probabilistic ? normalized.multipliers[item.key]?.multiplier ?? 1 : 1;
     const bufferedRequired = Math.ceil(item.required * multiplier);
     const available = availableTotals.get(item.key)?.total ?? 0;
     const inProgress = activeTotals.get(item.key)?.total ?? 0;
@@ -1120,7 +1134,7 @@ export function computeCraftPlan({
       missing: Math.max(0, bufferedRequired - available - inProgress - plannedOutput),
       sources: availableTotals.get(item.key)?.sources ?? [],
       activeCraftSources: activeTotals.get(item.key)?.sources ?? [],
-      sourceRoutes: sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides),
+      sourceRoutes,
       recipeUsages: usages.get(item.key) ?? [],
     };
   }).sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));

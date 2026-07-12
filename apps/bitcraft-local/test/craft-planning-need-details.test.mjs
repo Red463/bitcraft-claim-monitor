@@ -68,6 +68,17 @@ test("groupNeedCellSources combines duplicate stock labels while retaining drill
   ]);
 });
 
+test("groupNeedCellSources keeps same-named player deployables separate by owner", () => {
+  const groups = groupNeedCellSources({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], sources: [
+      { sourceId: "one:cart", label: "Cart", type: "Player deployable", playerName: "Oddfawn", quantity: 5 },
+      { sourceId: "two:cart", label: "Cart", type: "Player deployable", playerName: "Modular", quantity: 7 },
+    ] }],
+  });
+  assert.deepEqual(groups.map((group) => [group.label, group.quantity]), [["Modular — Cart", 7], ["Oddfawn — Cart", 5]]);
+});
+
 test("groupNeedCellRecipeUsages groups repeated usages by output item", () => {
   const groups = groupNeedCellRecipeUsages(roughLogCell);
   assert.equal(groups.length, 2);

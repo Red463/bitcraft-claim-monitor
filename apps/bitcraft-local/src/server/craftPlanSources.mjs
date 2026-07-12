@@ -275,7 +275,7 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
     deployables.unshift(emptyCartDeployableSource(playerId, label));
   }
   return {
-    inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", items: personalItems },
+    inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", playerId: String(playerId), playerName: String(label), items: personalItems },
     deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId) || source.legacySourceIds?.some((id) => allowedDeployables.has(id))),
     deployableOptions: deployables.map((source) => ({ ...source, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };

@@ -144,6 +144,21 @@ export function applyPersonalFishingView(
     return unavailableResult(board, preference);
   }
   const existingSelected = fishing.rows.find((row) => isCanonicalFishingRow(row, selectedName));
+  if (existingSelected) {
+    for (const [column, projected] of projections) {
+      const authoritative = existingSelected.cells.get(column);
+      if (!authoritative) continue;
+      const authoritativeItem = authoritative.items.find((item) => item.key === projected.item.key) ?? (authoritative.items.length === 1 ? authoritative.items[0] : null);
+      if (!authoritativeItem) continue;
+      projected.item = {
+        ...projected.item,
+        sources: Array.isArray(authoritativeItem.sources) ? authoritativeItem.sources : [],
+        activeCraftSources: Array.isArray(authoritativeItem.activeCraftSources) ? authoritativeItem.activeCraftSources : [],
+        recipeUsages: projected.item.recipeUsages,
+      };
+      projected.items = [projected.item];
+    }
+  }
   const selectedRow = cloneRow(existingSelected ?? newFishingRow(selectedName));
   selectedRow.cells = new Map(projections);
   selectedRow.maxMissing = rowMaxMissing(selectedRow);

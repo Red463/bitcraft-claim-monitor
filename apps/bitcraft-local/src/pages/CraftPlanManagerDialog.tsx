@@ -1,5 +1,5 @@
 import React from "react";
-import { ClipboardList, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
+import { ClipboardList, LoaderCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import type { AnyRecord } from "../main-app-data";
@@ -9,6 +9,7 @@ const LOCAL_API = "/api/local";
 const BITJITA_API = "/api/bitjita";
 const TABS = ["targets", "sources", "players", "routes", "buffers"] as const;
 type ManagerTab = typeof TABS[number];
+type ManagerOperation = "loading" | "refreshing" | "saving" | "preset" | null;
 
 type CraftPlanConfig = {
   enabled: boolean;
@@ -192,10 +193,10 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [status, setStatus] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [operation, setOperation] = React.useState<ManagerOperation>(null);
   const [catalogStatus, setCatalogStatus] = React.useState<CatalogRefreshStatus | null>(null);
   const [catalogError, setCatalogError] = React.useState<string | null>(null);
   const [catalogBusy, setCatalogBusy] = React.useState(false);
-  const [multiplierDraft, setMultiplierDraft] = React.useState({ key: "", multiplier: "1.5", note: "" });
   const catalogPollingActive = Boolean(
     catalogStatus?.scheduledJob?.running
     || catalogStatus?.scheduledJob?.metadata?.complete === false
@@ -213,8 +214,9 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     return body;
   }
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (mode: "loading" | "refreshing" = "loading") => {
     setBusy(true);
+    setOperation(mode);
     setError(null);
     try {
       const result = await adminApi("/admin/craft-plan");
@@ -224,6 +226,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setOperation(null);
     }
   }, [csrfToken]);
 
@@ -291,6 +294,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
   async function addWorkstationPreset(preset: AnyRecord) {
     setBusy(true);
+    setOperation("preset");
     setError(null);
     setStatus(null);
     try {
@@ -310,6 +314,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setOperation(null);
     }
   }
 
@@ -334,6 +339,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
   async function save() {
     setBusy(true);
+    setOperation("saving");
     setError(null);
     setStatus(null);
     try {
@@ -346,6 +352,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setOperation(null);
     }
   }
 
@@ -398,6 +405,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const lastCompleted = formatCatalogMoment(lastCompletedAt);
   const lastProgress = formatCatalogMoment(firstText(latestRun?.updatedAt, scheduledJob?.updatedAt));
   const catalogPillClass = catalogActive ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
+  const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : catalogBusy ? "Refreshing catalog status…" : null;
 
   return (
     <div className="modal-backdrop craft-plan-manager-backdrop" role="presentation">
@@ -413,8 +421,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
           <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
           <div className="craft-plan-manager-buttons">
-            <button className="toolbar-button" type="button" onClick={load} disabled={busy || catalogBusy}><RefreshCw size={14} /> Refresh</button>
-            <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}><Save size={14} /> Save Plan</button>
+            <button className="toolbar-button" type="button" onClick={() => void load("refreshing")} disabled={busy || catalogBusy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
+            <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}>{operation === "saving" ? <LoaderCircle className="is-spinning" size={14} /> : <Save size={14} />} {operation === "saving" ? "Saving…" : "Save Plan"}</button>
           </div>
           <section className="craft-plan-catalog-band" aria-label="Planner catalog diagnostics">
             <div className="craft-plan-catalog-summary">
@@ -425,7 +433,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               </div>
               <div className="craft-plan-catalog-controls">
                 <span className={catalogPillClass}>{catalogStatusLabel}</span>
-                <button className="toolbar-button" type="button" onClick={triggerCatalogRefresh} disabled={catalogActionBusy}><RefreshCw size={14} /> Refresh planner catalog</button>
+                <button className="toolbar-button" type="button" onClick={triggerCatalogRefresh} disabled={catalogActionBusy}>{catalogBusy || catalogActive ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {catalogBusy ? "Starting refresh…" : catalogActive ? "Refresh running…" : "Refresh planner catalog"}</button>
               </div>
             </div>
             {catalogError ? <p className="craft-plan-catalog-error">{catalogError}</p> : null}
@@ -442,6 +450,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </div>
           </section>
         </div>
+        {pendingLabel ? <div className="craft-plan-manager-pending" role="status" aria-live="polite"><LoaderCircle className="is-spinning" size={16} /><span>{pendingLabel}</span></div> : null}
         {error ? <div className="alert error">{error}</div> : null}
         {status ? <div className="alert success">{status}</div> : null}
         <nav className="craft-plan-manager-tabs" aria-label="Craft plan editor sections">
@@ -453,7 +462,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             ["buffers", <SlidersHorizontal size={15} />, "Buffers"],
           ].map(([id, icon, label]) => <button key={String(id)} type="button" className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id as ManagerTab)}>{icon}{label}</button>)}
         </nav>
-        <div className="craft-plan-manager-body">
+        <div className="craft-plan-manager-body" aria-busy={busy || catalogBusy}>
+          {operation === "loading" && !state ? <div className="craft-plan-manager-loading"><LoaderCircle className="is-spinning" size={28} /><strong>Loading craft plan</strong><span>Fetching targets, inventories, players, deployables, routes, and presets.</span></div> : null}
           {activeTab === "targets" ? <section className="craft-plan-manager-panel">
             <div className="split-header"><div><h3>Target items</h3><p className="legend">Preset buttons add normal target rows. You can change quantities or remove them at any time.</p></div></div>
             <section className="craft-plan-tier-presets" aria-label="Tier upgrade presets">
@@ -493,7 +503,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><div className="split-header"><div><h3>Recipe routes in use</h3><p className="legend">These are the recipes currently pulled into the plan from your targets. Change a dropdown, then save the plan to recalculate needed materials.</p></div><small>{routeSteps.length ? `${routeSteps.length} recipe steps` : "No recipe steps"}</small></div>{routeSteps.length ? <div className="craft-plan-route-overview-list">{routeSteps.map((step: AnyRecord, index: number) => { const outputKey = routeOutputKey(step); const alternatives = Array.isArray(step.alternatives) ? step.alternatives : []; const selectedRecipeId = String(config.routeOverrides[outputKey] ?? step.selectedRecipeId ?? ""); return <article className="craft-plan-route-overview-card" key={`${outputKey}:${step.id ?? index}`}><div><strong><ItemLabel item={step.output ?? step} /></strong><small>{step.recipeName ?? "Selected recipe"}{step.buildingName ? ` - ${step.buildingName}` : ""}</small></div><label className="field compact-field"><span>Recipe</span><select value={selectedRecipeId} disabled={alternatives.length <= 1} onChange={(event) => setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [outputKey]: event.target.value } }))}>{alternatives.length ? alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{routeOptionLabel(recipe)}</option>) : <option value={selectedRecipeId}>{step.recipeName ?? "Default recipe"}</option>}</select></label>{config.routeOverrides[outputKey] ? <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[outputKey]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Reset</button> : <span className="legend">Default</span>}</article>; })}</div> : <p className="legend">Add targets and save the plan to see the recipe chain used for the current goals.</p>}</section> : null}
 
-          {activeTab === "buffers" ? <section className="craft-plan-manager-panel"><h3>Chance and drop multipliers</h3><p className="legend">Use item keys such as <code>items:106000</code>. Multipliers overestimate uncertain drops after recipe expansion.</p><div className="admin-craft-plan-multiplier-row"><label className="field compact-field"><span>Item key</span><input value={multiplierDraft.key} onChange={(event) => setMultiplierDraft((current) => ({ ...current, key: event.target.value }))} placeholder="items:..." /></label><label className="field compact-field"><span>Multiplier</span><input type="number" min={1} max={20} step={0.1} value={multiplierDraft.multiplier} onChange={(event) => setMultiplierDraft((current) => ({ ...current, multiplier: event.target.value }))} /></label><label className="field compact-field"><span>Note</span><input value={multiplierDraft.note} onChange={(event) => setMultiplierDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Chance drop buffer" /></label><button className="toolbar-button" type="button" onClick={() => { const key = multiplierDraft.key.trim(); const multiplier = Math.max(1, Number(multiplierDraft.multiplier) || 1); if (!key || multiplier <= 1) return; setConfig((current) => ({ ...current, multipliers: { ...current.multipliers, [key]: { multiplier, note: multiplierDraft.note.trim() } } })); setMultiplierDraft({ key: "", multiplier: "1.5", note: "" }); }}><Plus size={14} /> Add</button></div>{Object.entries(config.multipliers).map(([key, value]) => <div className="admin-craft-plan-row" key={key}><strong>{key}</strong><span>x{value.multiplier} {value.note ? `- ${value.note}` : ""}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.multipliers }; delete next[key]; return { ...current, multipliers: next }; })}><Trash2 size={14} /> Remove</button></div>)}</section> : null}
+          {activeTab === "buffers" ? <section className="craft-plan-manager-panel"><h3>Chance-drop safety buffers</h3><p className="legend">Add or edit a buffer from an item’s “How to get this” panel. Buffers increase planned gathering only; they do not change API drop rates or counted stock.</p>{Object.entries(config.multipliers).length ? Object.entries(config.multipliers).map(([key, value]) => { const item = [...config.targets, ...(Array.isArray(state?.plan?.materials) ? state.plan.materials : [])].find((candidate) => itemKey(candidate) === key); return <div className="admin-craft-plan-row" key={key}><strong>{item?.name ?? key}</strong><span>{formatNumber((value.multiplier - 1) * 100, 1)}% extra{value.note ? ` - ${value.note}` : ""}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.multipliers }; delete next[key]; return { ...current, multipliers: next }; })}><Trash2 size={14} /> Remove</button></div>; }) : <p className="legend">No chance-drop safety buffers are configured.</p>}</section> : null}
         </div>
       </section>
     </div>

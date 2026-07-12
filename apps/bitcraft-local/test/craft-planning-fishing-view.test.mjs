@@ -123,6 +123,21 @@ test("applies the ocean route and replaces only the interchangeable fish row", (
   assert.equal(fishing.rows.find((row) => row.name === "Crushed Shells")?.cells.get("T1")?.missing, 6);
 });
 
+test("personal fishing projection preserves authoritative stock source metadata", () => {
+  const board = makeBoard();
+  const oceanCell = board[0].rows.find((row) => row.apiName === "Ocean Fish").cells.get("T1");
+  oceanCell.item.sources = [{ sourceId: "store-1", label: "Fishing chest", type: "Settlement storage", quantity: 5 }];
+  oceanCell.items = [oceanCell.item];
+  const view = makeRouteView();
+  view.tiers[0].routes.ocean.stockQuantity = 5;
+
+  const result = applyPersonalFishingView(board, view, "ocean");
+  const projected = result.board[0].rows.find((row) => row.apiName === "Ocean Fish").cells.get("T1");
+
+  assert.equal(projected.available, 5);
+  assert.deepEqual(projected.items[0].sources, [{ sourceId: "store-1", label: "Fishing chest", type: "Settlement storage", quantity: 5 }]);
+});
+
 test("matches canonical fishing rows by stable API identity when display names are overridden", () => {
   const board = makeBoard();
   const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");

@@ -42,9 +42,11 @@ export function groupNeedCellSources(cell: NeedCell): GroupedNeedSource[] {
   for (const item of cell.items ?? []) {
     const sources = Array.isArray(item.sources) ? item.sources : [];
     for (const source of sources) {
-      const label = String(source.label ?? source.type ?? "Source");
+      const rawLabel = String(source.label ?? source.type ?? "Source");
       const type = String(source.type ?? "Source");
-      const key = `${type}|${label}`;
+      const playerName = String(source.playerName ?? "").trim();
+      const label = playerName && !rawLabel.toLocaleLowerCase().includes(playerName.toLocaleLowerCase()) ? `${playerName} — ${rawLabel}` : rawLabel;
+      const key = `${type}|${playerName}|${rawLabel}`;
       const current: GroupedNeedSource = grouped.get(key) ?? { key, label, type, quantity: 0, entries: [] };
       current.quantity += toQuantity(source.quantity);
       current.entries.push(source);
