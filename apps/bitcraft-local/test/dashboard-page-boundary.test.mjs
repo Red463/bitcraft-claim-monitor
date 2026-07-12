@@ -24,10 +24,14 @@ test("Dashboard shows the craft planning Gather Next overview", () => {
 
 test("Dashboard Gather Next shows known item tiers", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/dashboard.css", import.meta.url), "utf8");
 
   assert.match(dashboard, /item\.tier\s*\?\?\s*item\.itemTier\s*\?\?\s*item\.tierLevel/);
   assert.match(dashboard, /dashboard-feed-item/);
   assert.match(dashboard, /<TierBadge tier=\{itemTier\}/);
+  assert.doesNotMatch(css, /\.dashboard-feed-row\s*>\s*span\s*\{/);
+  assert.match(css, /\.dashboard-feed-row\s*>\s*span:first-child\s*\{/);
+  assert.match(css, /\.dashboard-feed-item\s*\{[^}]*grid-column:\s*2/);
 });
 
 test("Dashboard market trend exposes nearest-point pointer and keyboard readouts", () => {

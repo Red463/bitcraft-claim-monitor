@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.44] - 2026-07-12
+
+### Fixed
+
+- Fixed Gather Next item names and tier badges overlapping their icons and rows.
+
 ## [0.32.0-beta.43] - 2026-07-12
 
 ### Changed
