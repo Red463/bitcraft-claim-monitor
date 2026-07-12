@@ -466,18 +466,22 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <section className="form-card craft-plan-section craft-plan-targets-strip">
             <div className="split-header"><h3><Target size={17} /> Targets</h3><p className="legend">Configured goals and current progress against counted sources.</p></div>
             <div className="craft-plan-target-list">
-              {targets.map((target: AnyRecord) => (
+              {targets.map((target: AnyRecord) => {
+                const buildingTarget = String(target.kind) === "building";
+                const covered = Math.max(0, Number(target.quantity) - Number(target.missing));
+                return (
                 <article className={`craft-plan-target${Number(target.missing) <= 0 ? " is-complete" : ""}`} key={target.key ?? `${target.kind}:${target.id}`}>
                   {itemNode(target)}
-                  <div className="craft-plan-target-progress"><span><i style={{ width: `${Math.min(100, Math.max(0, ((Number(target.quantity) - Number(target.missing)) / Math.max(1, Number(target.quantity))) * 100))}%` }} /></span><small>{quantity(Number(target.quantity) - Number(target.missing))} / {quantity(target.quantity)} covered</small><em>{quantity(target.available)} available{Number(target.inProgress) > 0 ? ` · ${quantity(target.inProgress)} in progress` : ""}</em></div>
+                  <div className="craft-plan-target-progress"><span><i style={{ width: `${Math.min(100, Math.max(0, (covered / Math.max(1, Number(target.quantity))) * 100))}%` }} /></span><small>{quantity(covered)} / {quantity(target.quantity)} {buildingTarget ? "newly built" : "covered"}</small><em>{buildingTarget ? target.progressInitialized ? `${quantity(target.available)} completed stations detected` : "Tracking pending until claim buildings are available" : `${quantity(target.available)} available${Number(target.inProgress) > 0 ? ` · ${quantity(target.inProgress)} in progress` : ""}`}</em></div>
                   <div className="craft-plan-target-status"><strong>{quantity(target.missing)}</strong><span>{Number(target.missing) <= 0 ? "Complete" : "Still needed"}</span></div>
                 </article>
-              ))}
+              );
+              })}
             </div>
           </section>
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
-            <div className="split-header craft-plan-needs-header"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${completionTone(overallCompletion.completion)}`}><span><strong>{overallCompletion.completion}%</strong><small>Overall complete</small></span><div><i style={{ width: `${overallCompletion.completion}%` }} /></div><em>{quantity(overallCompletion.covered)} / {quantity(overallCompletion.required)} covered</em></div></div>
+            <div className="craft-plan-needs-header"><div className="craft-plan-needs-heading-content"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${completionTone(overallCompletion.completion)}`}><span><strong>{overallCompletion.completion}%</strong><small>Overall complete</small></span><div><i style={{ width: `${overallCompletion.completion}%` }} /></div><em>{quantity(overallCompletion.covered)} / {quantity(overallCompletion.required)} covered</em></div></div></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
               <button className={selectedSections.length === 0 ? "active" : ""} type="button" aria-pressed={selectedSections.length === 0} onClick={() => setSelectedSections([])}>All <span>{needsBoardRowCount}</span></button>

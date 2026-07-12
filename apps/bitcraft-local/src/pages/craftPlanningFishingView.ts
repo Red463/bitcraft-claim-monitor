@@ -11,6 +11,8 @@ type PersonalFishingRoute = {
   trackedQuantity?: number;
   needed?: number;
   usage?: AnyRecord;
+  sources?: AnyRecord[];
+  activeCraftSources?: AnyRecord[];
 };
 
 type PersonalFishingTier = {
@@ -50,9 +52,12 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
   if (needed == null || stockQuantity == null || trackedQuantity == null) return null;
   const name = String(route.input.name ?? route.input.label ?? route.input.key ?? "").trim();
   if (!name) return null;
-  const item = route.usage && typeof route.usage === "object"
-    ? { ...route.input, recipeUsages: [route.usage] }
-    : route.input;
+  const item = {
+    ...route.input,
+    sources: Array.isArray(route.sources) ? route.sources : [],
+    activeCraftSources: Array.isArray(route.activeCraftSources) ? route.activeCraftSources : [],
+    ...(route.usage && typeof route.usage === "object" ? { recipeUsages: [route.usage] } : {}),
+  };
   return {
     item,
     items: [item],
@@ -152,8 +157,8 @@ export function applyPersonalFishingView(
       if (!authoritativeItem) continue;
       projected.item = {
         ...projected.item,
-        sources: Array.isArray(authoritativeItem.sources) ? authoritativeItem.sources : [],
-        activeCraftSources: Array.isArray(authoritativeItem.activeCraftSources) ? authoritativeItem.activeCraftSources : [],
+        sources: projected.item.sources.length ? projected.item.sources : Array.isArray(authoritativeItem.sources) ? authoritativeItem.sources : [],
+        activeCraftSources: projected.item.activeCraftSources.length ? projected.item.activeCraftSources : Array.isArray(authoritativeItem.activeCraftSources) ? authoritativeItem.activeCraftSources : [],
         recipeUsages: projected.item.recipeUsages,
       };
       projected.items = [projected.item];

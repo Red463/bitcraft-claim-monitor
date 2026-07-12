@@ -8,6 +8,7 @@ import {
   computeCraftPlan,
   craftPlanCatalogTargets,
   normalizeCraftPlanConfig,
+  reconcileCraftPlanBuildingProgress,
   recipeKey,
 } from "../src/server/craftPlanning.mjs";
 import { createGameCatalogRepository } from "../src/server/gameCatalog.mjs";
@@ -224,6 +225,54 @@ test("workstation targets preserve construction requirements and expand them for
   ]);
 });
 
+test("workstation progress snapshots existing entities and permanently records exact new builds", () => {
+  const target = { id: "6020", kind: "building", name: "Peerless Carpentry Station", quantity: 1, requirements: [] };
+  const initial = reconcileCraftPlanBuildingProgress(normalizeCraftPlanConfig({ enabled: true, targets: [target] }), [
+    { entityId: "existing", buildingDescriptionId: 6020, buildingName: "Peerless Carpentry Station" },
+    { entityId: "wrong-id", buildingDescriptionId: 9999, buildingName: "Peerless Carpentry Station" },
+  ]);
+  assert.equal(initial.changed, true);
+  assert.deepEqual(initial.config.buildingProgress["building:6020"], { baselineEntityIds: ["existing"], completedEntityIds: [] });
+
+  const detected = reconcileCraftPlanBuildingProgress(initial.config, [
+    { entityId: "existing", buildingDescriptionId: 6020 },
+    { entityId: "new", buildingDescriptionId: 6020 },
+  ]);
+  assert.deepEqual(detected.config.buildingProgress["building:6020"].completedEntityIds, ["new"]);
+
+  const removed = reconcileCraftPlanBuildingProgress(detected.config, []);
+  assert.deepEqual(removed.config.buildingProgress["building:6020"].completedEntityIds, ["new"]);
+});
+
+test("workstation completion expands materials only for remaining new stations", () => {
+  const target = {
+    id: "6020",
+    kind: "building",
+    name: "Peerless Carpentry Station",
+    quantity: 2,
+    requirements: [{ id: "6010001", kind: "items", name: "Peerless Wood Log", quantity: 20, tier: 6 }],
+  };
+  const plan = computeCraftPlan({ config: normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [target],
+    buildingProgress: { "building:6020": { baselineEntityIds: ["old"], completedEntityIds: ["new"] } },
+  }) });
+
+  assert.equal(plan.targets[0].available, 1);
+  assert.equal(plan.targets[0].missing, 1);
+  assert.equal(plan.targets[0].progressInitialized, true);
+  assert.equal(plan.materials.find((row) => row.id === "6010001").required, 20);
+  assert.deepEqual(craftPlanCatalogTargets(plan.config).map((row) => [row.id, row.quantity]), [["6010001", 20]]);
+
+  const complete = computeCraftPlan({ config: normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ ...target, quantity: 1 }],
+    buildingProgress: { "building:6020": { baselineEntityIds: ["old"], completedEntityIds: ["new"] } },
+  }) });
+  assert.equal(complete.targets[0].missing, 0);
+  assert.equal(complete.materials.some((row) => row.id === "6010001"), false);
+});
+
 test("computeCraftPlan keeps a workstation goal while calculating its construction materials", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -273,6 +322,11 @@ test("computeCraftPlan exposes ocean and lake personal views from one oil-equiva
   assert.equal(tier.routes.ocean.usage.output.quantity, 45);
   assert.equal(tier.routes.ocean.usage.requiredQuantity, 15);
   assert.equal(tier.routes.ocean.usage.recipeName, "Press Ocean Fish Oil");
+  assert.equal(tier.routes.ocean.sources[0].label, "Fishing");
+  assert.equal(tier.routes.ocean.sources[0].quantity, 10);
+  assert.equal(tier.routes.ocean.usage.alternatives[0].id, "ocean-fish-oil");
+  assert.equal(tier.routes.ocean.usage.alternatives[0].inputs[0].name, "Briny Linus");
+  assert.equal(tier.routes.ocean.usage.alternatives[0].buildingName, null);
   assert.equal(tier.routes.lake.usage.requiredQuantity, 45);
 });
 

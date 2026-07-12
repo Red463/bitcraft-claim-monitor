@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.41] - 2026-07-12
+
+### Added
+
+- Added permanent workstation-target progress that credits newly built claim stations and removes their completed material requirements.
+
+### Changed
+
+- Improved personalized Ocean and Lake Fish details with counted stock locations and richer Fish Oil usage routes.
+- Moved overall Needs Board progress beside the heading and aligned its colours with section completion states.
+- Condensed tier and workstation presets into compact tier-only controls.
+
 ## [0.32.0-beta.40] - 2026-07-12
 
 ### Changed

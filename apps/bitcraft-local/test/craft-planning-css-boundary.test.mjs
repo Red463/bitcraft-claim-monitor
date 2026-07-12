@@ -164,3 +164,15 @@ test("How to get this separates route headings and producer buffer controls", ()
   assert.match(css, /\.craft-plan-buffer-settings\s*\{/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-buffer-control/);
 });
+
+test("Overall Needs Board progress sits on the left and shares section completion tones", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /craft-plan-needs-heading-content[\s\S]*craft-plan-overall-progress/);
+  assert.match(css, /\.craft-plan-needs-heading-content\s*\{/);
+  for (const tone of ["critical", "low", "mid", "high", "complete"]) {
+    assert.match(css, new RegExp(`\\.craft-plan-overall-progress\\.is-${tone}[^}]*strong`));
+    assert.match(css, new RegExp(`\\.craft-plan-overall-progress\\.is-${tone}[^}]*i`));
+  }
+});

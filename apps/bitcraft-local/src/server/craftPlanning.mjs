@@ -76,11 +76,13 @@ function normalizeTarget(value) {
   return target;
 }
 
-function expandedPlanTargets(targets) {
+function expandedPlanTargets(targets, buildingProgress = {}) {
   const merged = new Map();
   for (const target of targets) {
+    const completed = target.kind === "building" ? buildingProgress[recipeKey(target.kind, target.id)]?.completedEntityIds?.length ?? 0 : 0;
+    const remainingQuantity = target.kind === "building" ? Math.max(0, target.quantity - completed) : target.quantity;
     const rows = target.kind === "building"
-      ? (target.requirements ?? []).map((requirement) => ({ ...requirement, quantity: requirement.quantity * target.quantity }))
+      ? (target.requirements ?? []).map((requirement) => ({ ...requirement, quantity: requirement.quantity * remainingQuantity }))
       : [target];
     for (const row of rows) {
       const key = recipeKey(row.kind, row.id);
@@ -88,11 +90,12 @@ function expandedPlanTargets(targets) {
       merged.set(key, current ? { ...current, quantity: current.quantity + row.quantity } : { ...row });
     }
   }
-  return [...merged.values()];
+  return [...merged.values()].filter((target) => target.quantity > 0);
 }
 
 export function craftPlanCatalogTargets(config) {
-  return expandedPlanTargets(normalizeCraftPlanConfig(config).targets).filter((target) => target.kind !== "building");
+  const normalized = normalizeCraftPlanConfig(config);
+  return expandedPlanTargets(normalized.targets, normalized.buildingProgress).filter((target) => target.kind !== "building" && target.quantity > 0);
 }
 
 export function normalizeCraftPlanConfig(input = {}) {
@@ -129,10 +132,20 @@ export function normalizeCraftPlanConfig(input = {}) {
   }
   const playerIds = uniqueStrings(raw.sourceRules?.playerIds);
   const craftPlayerIds = Array.isArray(raw.sourceRules?.craftPlayerIds) ? uniqueStrings(raw.sourceRules.craftPlayerIds) : playerIds;
+  const targets = (Array.isArray(raw.targets) ? raw.targets : []).map(normalizeTarget).filter(Boolean).slice(0, 50);
+  const buildingTargetKeys = new Set(targets.filter((target) => target.kind === "building").map((target) => recipeKey(target.kind, target.id)));
+  const buildingProgress = {};
+  for (const [key, value] of Object.entries(raw.buildingProgress ?? {})) {
+    if (!buildingTargetKeys.has(key) || !value || typeof value !== "object") continue;
+    buildingProgress[key] = {
+      baselineEntityIds: uniqueStrings(value.baselineEntityIds),
+      completedEntityIds: uniqueStrings(value.completedEntityIds),
+    };
+  }
   return {
     enabled: raw.enabled !== false,
     name: String(raw.name ?? DEFAULT_PLAN_NAME).trim().slice(0, 120) || DEFAULT_PLAN_NAME,
-    targets: (Array.isArray(raw.targets) ? raw.targets : []).map(normalizeTarget).filter(Boolean).slice(0, 50),
+    targets,
     sourceRules: {
       storageContainerIds: uniqueStrings(raw.sourceRules?.storageContainerIds),
       playerIds,
@@ -143,7 +156,39 @@ export function normalizeCraftPlanConfig(input = {}) {
     sectionOverrides,
     rowNameOverrides,
     multipliers,
+    buildingProgress,
   };
+}
+
+function claimBuildingRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.buildings)) return payload.buildings;
+  if (Array.isArray(payload?.data?.buildings)) return payload.data.buildings;
+  return [];
+}
+
+export function reconcileCraftPlanBuildingProgress(config, claimBuildingsPayload) {
+  const normalized = normalizeCraftPlanConfig(config);
+  const rows = claimBuildingRows(claimBuildingsPayload);
+  const nextProgress = {};
+  for (const target of normalized.targets.filter((entry) => entry.kind === "building")) {
+    const key = recipeKey(target.kind, target.id);
+    const currentIds = uniqueStrings(rows
+      .filter((building) => String(building?.buildingDescriptionId ?? building?.building_description_id ?? "") === String(target.id))
+      .map((building) => building?.entityId ?? building?.entity_id));
+    const existing = normalized.buildingProgress[key];
+    if (!existing) {
+      nextProgress[key] = { baselineEntityIds: currentIds, completedEntityIds: [] };
+      continue;
+    }
+    const baseline = new Set(existing.baselineEntityIds);
+    nextProgress[key] = {
+      baselineEntityIds: existing.baselineEntityIds,
+      completedEntityIds: uniqueStrings([...existing.completedEntityIds, ...currentIds.filter((id) => !baseline.has(id))]),
+    };
+  }
+  const changed = JSON.stringify(nextProgress) !== JSON.stringify(normalized.buildingProgress);
+  return { config: { ...normalized, buildingProgress: nextProgress }, changed };
 }
 
 function stackKind(stack) {
@@ -993,6 +1038,11 @@ function routeStock(route, totals) {
   return totals.get(key)?.total ?? 0;
 }
 
+function routeStockSources(route, totals) {
+  const key = recipeKey(route.input.kind, route.input.id);
+  return totals.get(key)?.sources ?? [];
+}
+
 function unavailableFishingRoute() {
   return { available: false, reason: "Verified route unavailable" };
 }
@@ -1028,6 +1078,22 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       buildingName: recipe.buildingName ?? recipe.building_name ?? null,
       selectedRecipeId: recipeId(recipe),
     };
+    const routeAlternatives = recipes.filter((alternative) => {
+      const alternativeInput = recipeInputs(alternative)[0];
+      if (!alternativeInput) return false;
+      const display = enrichDisplayFromDetails(stackDisplay(alternativeInput, alternative.consumedItems, 0), detailsByKey);
+      return fishingRouteFamily(display) === family;
+    }).map((alternative) => ({
+      id: recipeId(alternative),
+      label: recipeLabel(alternative),
+      ...routeMetadata(alternative),
+      buildingName: alternative.buildingName ?? alternative.building_name ?? null,
+      inputs: recipeInputs(alternative).map((stack, index) => ({
+        ...enrichDisplayFromDetails(stackDisplay(stack, alternative.consumedItems, index), detailsByKey),
+        quantity: toNumber(stack.quantity),
+        quantityPerCraft: toNumber(stack.quantity),
+      })),
+    }));
     routes[family] = {
       available: true,
       ...route,
@@ -1036,6 +1102,9 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       isProbabilistic: recipe.isProbabilistic === true,
       stockQuantity: routeStock(route, availableTotals),
       trackedQuantity: routeStock(route, guaranteedActiveTotals),
+      sources: routeStockSources(route, availableTotals),
+      activeCraftSources: routeStockSources(route, guaranteedActiveTotals),
+      alternatives: routeAlternatives,
     };
   }
   return routes;
@@ -1076,7 +1145,7 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
             recipeName: route.recipeName,
             buildingName: route.buildingName,
             selectedRecipeId: route.selectedRecipeId,
-            alternatives: [],
+            alternatives: route.alternatives,
             requiredQuantity: needed,
             quantityPerCraft: route.inputQuantity,
             craftCount: Math.ceil(needed / route.inputQuantity),
@@ -1138,7 +1207,7 @@ export function computeCraftPlan({
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
-  const calculationTargets = expandedPlanTargets(normalized.targets);
+  const calculationTargets = expandedPlanTargets(normalized.targets, normalized.buildingProgress);
   const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.filter((target) => target.kind !== "building").map((target) => recipeKey(target.kind, target.id)));
@@ -1189,7 +1258,11 @@ export function computeCraftPlan({
   }).sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));
 
   const targets = normalized.targets.map((target) => {
-    if (target.kind === "building") return { ...target, available: 0, inProgress: 0, missing: target.quantity };
+    if (target.kind === "building") {
+      const progress = normalized.buildingProgress[recipeKey(target.kind, target.id)];
+      const available = Math.min(target.quantity, progress?.completedEntityIds?.length ?? 0);
+      return { ...target, available, inProgress: 0, missing: Math.max(0, target.quantity - available), progressInitialized: Boolean(progress) };
+    }
     const material = materials.find((item) => item.key === recipeKey(target.kind, target.id));
     const enrichedTarget = enrichDisplayFromDetails(target, detailsByKey);
     return { ...target, ...enrichedTarget, quantity: target.quantity, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };

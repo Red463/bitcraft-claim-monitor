@@ -138,6 +138,39 @@ test("personal fishing projection preserves authoritative stock source metadata"
   assert.deepEqual(projected.items[0].sources, [{ sourceId: "store-1", label: "Fishing chest", type: "Settlement storage", quantity: 5 }]);
 });
 
+test("personal fishing projection carries route stock, tracked crafts, and rich usage metadata", () => {
+  const board = makeBoard();
+  const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");
+  ocean.cells.set("T1", {
+    ...ocean.cells.get("T1"),
+    items: [makeCell("Other Ocean Fish", { required: 1, missing: 1 }).item, ocean.cells.get("T1").item],
+  });
+  const view = makeRouteView();
+  const route = view.tiers[0].routes.ocean;
+  route.stockQuantity = 7;
+  route.trackedQuantity = 2;
+  route.sources = [{ sourceId: "store-1", label: "Fishing chest", type: "Settlement storage", quantity: 7 }];
+  route.activeCraftSources = [{ sourceId: "craft-1", buildingName: "Fishing Station", quantity: 2 }];
+  route.usage.buildingName = "Fine Fishing Station";
+  route.usage.alternatives = [{
+    id: "ocean-route",
+    label: "Press Ocean Fish Oil",
+    buildingName: "Fine Fishing Station",
+    inputs: [{ ...route.input, quantity: 1 }],
+  }];
+
+  const result = applyPersonalFishingView(board, view, "ocean");
+  const projected = result.board[0].rows.find((row) => row.apiName === "Ocean Fish").cells.get("T1");
+  const item = projected.items[0];
+
+  assert.equal(projected.available, 7);
+  assert.equal(projected.inProgress, 2);
+  assert.deepEqual(item.sources, route.sources);
+  assert.deepEqual(item.activeCraftSources, route.activeCraftSources);
+  assert.equal(item.recipeUsages[0].buildingName, "Fine Fishing Station");
+  assert.equal(item.recipeUsages[0].alternatives[0].inputs[0].name, "Briny Linus");
+});
+
 test("matches canonical fishing rows by stable API identity when display names are overridden", () => {
   const board = makeBoard();
   const ocean = board[0].rows.find((row) => row.apiName === "Ocean Fish");

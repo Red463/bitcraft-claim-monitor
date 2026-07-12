@@ -39,7 +39,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, craftPlanCatalogTargets, normalizeCraftPlanConfig } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, craftPlanCatalogTargets, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -1882,7 +1882,7 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
     craftPlanWorkstationPresets().catch(() => []),
   ]);
   return {
-    config,
+    config: storedCraftPlanConfig(),
     plan: computedPlan,
     sources: {
       storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
@@ -2085,8 +2085,15 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   return detailsByKey;
 }
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
-  const config = storedCraftPlanConfig();
+  let config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
+  try {
+    const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`);
+    const reconciled = reconcileCraftPlanBuildingProgress(config, buildingsPayload);
+    config = reconciled.changed ? saveCraftPlanConfig(reconciled.config) : reconciled.config;
+  } catch {
+    // Keep prior baselines and observed completions when BitJita building discovery is unavailable.
+  }
   const catalogTargets = craftPlanCatalogTargets(config);
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides);
   const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
@@ -2126,7 +2133,7 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId) {
     }
   }
   return computeCraftPlan({
-    config,
+    config: storedCraftPlanConfig(),
     detailsByKey,
     catalogWarnings,
     storageSources,
@@ -9236,7 +9243,14 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/craft-plan") {
         const body = await readJson(req, BODY_LIMITS.settings);
-        const config = saveCraftPlanConfig(body);
+        let submittedConfig = normalizeCraftPlanConfig(body);
+        try {
+          const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(getSettings().claimId)}/buildings`);
+          submittedConfig = reconcileCraftPlanBuildingProgress(submittedConfig, buildingsPayload).config;
+        } catch {
+          // Leave newly added building targets pending until a successful building discovery request.
+        }
+        const config = saveCraftPlanConfig(submittedConfig);
         audit(user, "craft_plan.update", { targets: config.targets.length, players: config.sourceRules.playerIds.length, deployables: config.sourceRules.deployableContainerIds.length });
         return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
       }

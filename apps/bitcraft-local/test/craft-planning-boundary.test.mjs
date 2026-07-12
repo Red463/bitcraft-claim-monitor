@@ -27,6 +27,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /<ItemIcon item=\{item\} \/>/);
   assert.doesNotMatch(page, /craft-plan-item-icon"><ItemIcon item=\{item\} \/>/);
   assert.match(page, /Needs Board/);
+  assert.match(page, /newly built/);
+  assert.match(page, /Tracking pending/);
   assert.match(page, /needed/);
   assert.match(page, /quantity\(supplied\).*quantity\(cell\.required\)/s);
   assert.match(page, /craft-plan-needs-board/);
@@ -142,8 +144,25 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /aria-live="polite"/);
   assert.match(manager, /LoaderCircle/);
   assert.match(manager, /mergeTargets/);
+  assert.match(manager, /buildingProgress/);
+  assert.match(manager, /delete nextProgress\[itemKey\(target\)\]/);
+  assert.match(server, /reconcileCraftPlanBuildingProgress/);
+  assert.match(server, /\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
   assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
+});
+
+test("Craft Planning manager renders presets as compact tier-only controls", () => {
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(manager, /className="craft-plan-preset-tier"/);
+  assert.match(manager, /aria-label={`Add upgrade materials for \${preset\.label}`}/);
+  assert.match(manager, /aria-label={`Add workstation targets for \${preset\.label}`}/);
+  assert.doesNotMatch(manager, /\{presetSummary\(preset\)\}/);
+  assert.doesNotMatch(manager, /\{formatNumber\(preset\.workstations\?\.length \?\? 0, 0\)\} workstations/);
+  assert.match(styles, /\.craft-plan-preset-grid\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(styles, /\.craft-plan-preset-tier\s*\{[^}]*min-height:\s*38px;/s);
 });
 
 
