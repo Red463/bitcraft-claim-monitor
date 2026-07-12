@@ -66,26 +66,26 @@
   gap: 12px;
 }
 .skills-page .mini-stat {
-  min-height: 112px;
+  min-height: 76px;
   border: 1px solid rgba(108,123,145,.24);
   border-radius: 7px;
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
-  padding: 18px;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 4px 14px;
+  padding: 12px 16px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 2px 12px;
 }
 .skills-page .mini-stat div {
-  width: 42px;
-  height: 42px;
+  width: 32px;
+  height: 32px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
-.skills-page .mini-stat svg { width: 20px; height: 20px; }
+.skills-page .mini-stat svg { width: 17px; height: 17px; }
 .skills-page .mini-stat > span {
   color: #aab5c4;
   font-size: 11px;
@@ -95,10 +95,27 @@
 .skills-page .mini-stat strong {
   color: #fff;
   font-family: Outfit, system-ui, sans-serif;
-  font-size: 28px;
+  font-size: 22px;
   line-height: 1;
   font-weight: 800;
 }
+.profession-insights { border: 1px solid rgba(108,123,145,.24); border-radius: 7px; background: linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99)); overflow: hidden; }
+.profession-insights-bar { min-height: 64px; padding: 8px 16px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 220px) auto auto; align-items: center; gap: 12px; }
+.profession-insights-title { min-width: 0; display: flex; align-items: center; gap: 8px; color: #f0c64f; }
+.profession-insights-title > span { display: grid; gap: 2px; }
+.profession-insights-title strong { color: #f4f7fb; font-size: 13px; }
+.profession-insights-title small, .profession-insights-select > span, .profession-insights-glance small { color: #8f9aaa; font-size: 11px; }
+.profession-insights-select { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.profession-insights-select .select-control { width: 100%; min-width: 0; }
+.profession-insights-glance { display: flex; align-items: center; gap: 16px; }
+.profession-insights-glance > span { display: grid; gap: 2px; min-width: 72px; }
+.profession-insights-glance strong { min-height: 22px; display: flex; align-items: center; color: #f4f7fb; font-size: 13px; white-space: nowrap; }
+.profession-insights-toggle { min-height: 34px; border: 1px solid rgba(154,168,190,.28); border-radius: 7px; background: #080d14; color: #cbd4df; padding: 0 10px; display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; }
+.profession-insights-toggle:hover { border-color: rgba(240,198,79,.45); color: #fff; }
+.profession-insights-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.profession-insights-toggle svg { transition: transform .16s ease; }
+.profession-insights-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.profession-insights-content { grid-template-columns: minmax(360px, .95fr) minmax(440px, 1.05fr); border-top: 1px solid rgba(108,123,145,.2); padding: 16px; }
 .skills-page .skills-dashboard {
   grid-template-columns: minmax(360px, .95fr) minmax(440px, 1.05fr);
   gap: 12px;
@@ -309,6 +326,9 @@
   .skills-page .summary-grid.skills-summary,
   .skills-page .adventure-skill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skills-page .skills-dashboard { grid-template-columns: 1fr; }
+  .profession-insights-content { grid-template-columns: 1fr; }
+  .profession-insights-bar { grid-template-columns: minmax(180px, 1fr) minmax(180px, 220px) auto; }
+  .profession-insights-glance { grid-column: 1 / 3; }
 }
 
 @media (max-width: 900px) {
@@ -317,4 +337,15 @@
   .coverage-list,
   .adventure-skill-grid { grid-template-columns: 1fr; }
   .skills-topbar { grid-template-columns: 1fr; }
+  .profession-insights-bar { grid-template-columns: 1fr auto; }
+  .profession-insights-select, .profession-insights-glance { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+  .profession-insights-bar { padding: 12px; }
+  .profession-insights-title, .profession-insights-select, .profession-insights-glance, .profession-insights-toggle { grid-column: 1 / -1; }
+  .profession-insights-glance { justify-content: space-between; gap: 8px; }
+  .profession-insights-toggle { justify-content: center; }
+  .profession-insights-content { padding: 12px; }
+  .skills-page .focus-tier-strip { grid-template-columns: repeat(5, minmax(42px, 1fr)); }
 }

@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.45] - 2026-07-12
+
+### Changed
+
+- Condensed the Professions summary and moved detailed profession focus and coverage into an expandable insights panel.
+
 ## [0.32.0-beta.44] - 2026-07-12
 
 ### Fixed

@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, ArrowDown, ArrowUp, ArrowUpDown, GraduationCap, Star, TrendingUp } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, Star, TrendingUp } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { SearchBox } from "../components/main/SearchBox";
 import { Info, MiniStat } from "../components/main/Stats";
@@ -25,6 +25,7 @@ type SortKey = "name" | "total" | "highest" | number;
 
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [insightsOpen, setInsightsOpen] = React.useState(false);
   const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
@@ -127,7 +128,20 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<Activity />} label="Avg Profession Total" value={formatNumber(averageTotal, 1)} />
         <MiniStat icon={<GraduationCap />} label="Top Professional" value={topMemberName} />
       </div>
-      <div className="skills-dashboard">
+      <section className="profession-insights">
+        <div className="profession-insights-bar">
+          <div className="profession-insights-title"><Star size={15} /><span><strong>Profession insights</strong><small>Focus and settlement coverage</small></span></div>
+          <label className="profession-insights-select"><span>Profession</span><select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
+            {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
+          </select></label>
+          <div className="profession-insights-glance" aria-label={`${skillLabel(focusedProfession)} summary`}>
+            <span><small>Average level</small><strong>{formatNumber(focusAverage, 1)}</strong></span>
+            <span><small>Best tier</small><strong>{focusTier ? <TierBadge tier={focusTier} /> : "-"}</strong></span>
+            <span><small>T5+</small><strong>{focusT5} members</strong></span>
+          </div>
+          <button className="profession-insights-toggle" type="button" aria-expanded={insightsOpen} aria-controls="profession-insights-content" onClick={() => setInsightsOpen((open) => !open)}>{insightsOpen ? "Hide details" : "Show details"}<ChevronDown size={16} /></button>
+        </div>
+        {insightsOpen ? <div className="skills-dashboard profession-insights-content" id="profession-insights-content">
         <section className="focus-panel">
           <div className="split-header">
             <h3><Star size={17} /> Profession Focus</h3>
@@ -175,7 +189,8 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             ))}
           </div>
         </section>
-      </div>
+      </div> : null}
+      </section>
       <div className="toolbar-row skills-toolbar">
         <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
