@@ -3,7 +3,7 @@
 .craft-plan-section { display: flex; flex-direction: column; gap: 14px; }
 .craft-plan-item-label { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .craft-plan-item-label > span:last-child { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-.craft-plan-item-icon { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: rgba(6, 10, 16, 0.52); flex: 0 0 auto; }
+.craft-plan-item-label > .item-thumb { width: 34px; height: 34px; flex: 0 0 auto; }
 .craft-plan-gather-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .craft-plan-gather-card { border: 1px solid var(--border); border-radius: 8px; background: rgba(6, 10, 16, 0.36); padding: 12px; display: grid; gap: 10px; }
 .craft-plan-gather-card h4 { margin: 0; color: var(--accent); font-size: 0.88rem; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -147,22 +147,24 @@
 .craft-plan-target-list .craft-plan-target { min-height: 0; }
 .craft-plan-needs-board { overflow: hidden; }
 .craft-plan-needs-scroll { overflow-x: auto; padding-bottom: 4px; scrollbar-gutter: stable; }
-.craft-plan-needs-matrix { min-width: 1048px; overflow: hidden; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(6, 10, 16, 0.34); }
+.craft-plan-needs-matrix { min-width: 1120px; overflow: hidden; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(6, 10, 16, 0.34); }
 .craft-plan-needs-group { min-width: 980px; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; overflow: hidden; background: rgba(6, 10, 16, 0.34); }
 .craft-plan-needs-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.craft-plan-needs-row-column { width: 190px; }
+.craft-plan-needs-row-column { width: 250px; }
 .craft-plan-needs-data-column { width: 78px; }
 .craft-plan-needs-table th, .craft-plan-needs-table td { border-right: 1px solid rgba(139, 159, 184, 0.18); border-bottom: 1px solid rgba(139, 159, 184, 0.18); padding: 8px; vertical-align: middle; }
 .craft-plan-needs-table thead th { color: var(--text); background: rgba(255, 255, 255, 0.04); font-size: 0.8rem; text-align: center; }
 .craft-plan-needs-table thead th:first-child { text-align: left; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
 .craft-plan-needs-section-row th { position: sticky; top: 0; z-index: 1; color: var(--text); background: rgb(20, 28, 38); font-size: 0.8rem; font-weight: 800; text-align: center; text-transform: uppercase; }
 .craft-plan-needs-section-row th:first-child { text-align: left; color: var(--text); }
-.craft-plan-needs-section-row th:first-child span { margin-left: 6px; font-size: 0.74rem; font-weight: 800; }
-.craft-plan-needs-section-row th:first-child span.is-critical { color: #ff7c82; }
-.craft-plan-needs-section-row th:first-child span.is-low { color: #ffb547; }
-.craft-plan-needs-section-row th:first-child span.is-mid { color: #f0c64f; }
-.craft-plan-needs-section-row th:first-child span.is-high { color: #8fd47c; }
-.craft-plan-needs-section-row th:first-child span.is-complete { color: var(--positive); }
+.craft-plan-needs-section-heading { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.craft-plan-needs-section-label { white-space: nowrap; }
+.craft-plan-needs-section-label > span { margin-left: 6px; font-size: 0.74rem; font-weight: 800; }
+.craft-plan-needs-section-label > span.is-critical { color: #ff7c82; }
+.craft-plan-needs-section-label > span.is-low { color: #ffb547; }
+.craft-plan-needs-section-label > span.is-mid { color: #f0c64f; }
+.craft-plan-needs-section-label > span.is-high { color: #8fd47c; }
+.craft-plan-needs-section-label > span.is-complete { color: var(--positive); }
 .craft-plan-needs-table tbody th { color: var(--text); font-size: 0.96rem; line-height: 1.15; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .craft-plan-needs-table td { height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
 .craft-plan-need-cell { position: relative; display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
@@ -191,18 +193,16 @@
 .craft-plan-section-filters button, .craft-plan-fishing-route button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid rgba(139, 159, 184, 0.28); border-radius: 999px; background: rgba(8, 13, 20, 0.72); color: var(--text); padding: 7px 11px; font-weight: 800; font-size: 0.82rem; cursor: pointer; }
 .craft-plan-section-filters button:hover, .craft-plan-fishing-route button:hover { border-color: rgba(240, 198, 79, 0.45); background: rgba(240, 198, 79, 0.08); }
 .craft-plan-section-filters button.active, .craft-plan-fishing-route button.active { color: var(--accent); border-color: rgba(240, 198, 79, 0.72); background: rgba(240, 198, 79, 0.14); }
-.craft-plan-fishing-route { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-left: auto; min-height: 34px; }
-.craft-plan-fishing-route > span, .craft-plan-fishing-route small { color: var(--muted); font-size: 0.75rem; }
-.craft-plan-fishing-route button { justify-content: center; min-width: 64px; min-height: 30px; padding: 5px 9px; }
+.craft-plan-fishing-route { display: inline-flex; align-items: center; gap: 2px; min-height: 26px; padding: 2px; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 999px; background: rgba(6, 10, 16, 0.6); text-transform: none; }
+.craft-plan-fishing-route small { position: absolute; left: 8px; top: 100%; color: #ffb547; font-size: 0.7rem; white-space: nowrap; text-transform: none; }
+.craft-plan-fishing-route button { justify-content: center; min-width: 52px; min-height: 24px; padding: 3px 8px; border: 0; font-size: 0.74rem; }
 .craft-plan-fishing-route button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.craft-plan-fishing-route small { flex-basis: 100%; }
 .craft-plan-section-filters > button > span { min-width: 20px; border-radius: 999px; background: rgba(139, 159, 184, 0.14); color: var(--muted); padding: 1px 6px; font-size: 0.72rem; text-align: center; }
 .craft-plan-section-filters > button.active > span { background: rgba(240, 198, 79, 0.18); color: var(--accent); }
 .craft-plan-list-only { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; margin-left: auto; color: var(--muted); font-size: 0.8rem; font-weight: 700; }
 .craft-plan-list-only input { accent-color: var(--accent); }
 @media (max-width: 760px) {
-  .craft-plan-list-only, .craft-plan-fishing-route { margin-left: 0; }
-  .craft-plan-fishing-route { flex-basis: 100%; }
+  .craft-plan-list-only { margin-left: 0; }
 }
 .craft-plan-needs-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.75rem; }
 .craft-plan-needs-legend span { display: inline-flex; align-items: center; gap: 6px; }

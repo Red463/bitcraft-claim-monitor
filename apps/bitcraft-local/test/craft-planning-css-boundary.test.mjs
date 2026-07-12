@@ -43,7 +43,7 @@ test("Craft planning needs board uses one continuous compact matrix with status 
   assert.match(page, /<colgroup>/);
   assert.match(page, /craft-plan-needs-row-column/);
   assert.match(page, /craft-plan-needs-data-column/);
-  assert.match(css, /\.craft-plan-needs-row-column\s*\{[^}]*width:\s*190px/);
+  assert.match(css, /\.craft-plan-needs-row-column\s*\{[^}]*width:\s*250px/);
   assert.match(css, /\.craft-plan-needs-data-column\s*\{[^}]*width:\s*78px/);
   assert.match(css, /\.craft-plan-needs-section-row\s+th/);
   assert.match(page, /is-shortage/);

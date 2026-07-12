@@ -478,7 +478,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             {searchResults.length ? <div className="craft-plan-search-results">{searchResults.map((item) => <button className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onClick={() => { addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`); setQuery(""); setSearchResults([]); }}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}>
-                <span className="craft-plan-item-label"><span className="craft-plan-item-icon"><ItemIcon item={target} /></span><ItemLabel item={target} /></span>
+                <ItemLabel item={target} />
                 <div className="craft-plan-target-editor-actions">
                   <label className="field compact-field"><span>Quantity</span><input type="number" min={1} value={target.quantity ?? 1} onChange={(event) => setConfig((current) => ({ ...current, targets: current.targets.map((row, i) => i === index ? { ...row, quantity: Math.max(1, Math.ceil(Number(event.target.value) || 1)) } : row) }))} /></label>
                   <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => ({ ...current, targets: current.targets.filter((_, i) => i !== index) }))}><Trash2 size={14} /> Remove</button>

@@ -957,9 +957,11 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
     const input = enrichDisplayFromDetails(stackDisplay(inputStack, recipe.consumedItems, 0), detailsByKey);
     const family = fishingRouteFamily(input);
     const guaranteedYield = guaranteedTargetYield(recipe, oil);
+    const expectedYield = Math.max(0, toNumber(recipe?.expectedYield));
+    const planningYield = guaranteedYield > 0 ? guaranteedYield : expectedYield;
     if (!family) continue;
-    if (guaranteedYield <= 0) {
-      addFishingCatalogWarning(warnings, `${family === "ocean" ? "Ocean" : "Lake"} Fish route to ${oil.name} has no positive guaranteed yield in the local catalog.`);
+    if (planningYield <= 0) {
+      addFishingCatalogWarning(warnings, `${family === "ocean" ? "Ocean" : "Lake"} Fish route to ${oil.name} has no positive yield in the local catalog.`);
       continue;
     }
     if (routes[family].available) continue;
@@ -967,7 +969,8 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
     routes[family] = {
       available: true,
       ...route,
-      guaranteedYield,
+      guaranteedYield: planningYield,
+      estimated: guaranteedYield <= 0,
       stockQuantity: routeStock(route, availableTotals),
       trackedQuantity: routeStock(route, guaranteedActiveTotals),
     };

@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.34] - 2026-07-12
+
+### Changed
+
+- Moved the personal Ocean or Lake fishing selector into the Fishing section of the Craft Planning Needs Board.
+
+### Fixed
+
+- Fixed verified probabilistic fishing routes being reported as unavailable when the catalog contained an expected yield without a guaranteed minimum.
+- Fixed target items displaying duplicate images in Craft Planning and Manage Plan.
+
 ## [0.32.0-beta.33] - 2026-07-12
 
 ### Added

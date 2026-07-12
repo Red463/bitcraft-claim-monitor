@@ -18,7 +18,7 @@ const LOCAL_API = "/api/local";
 function itemNode(item: AnyRecord) {
   return (
     <span className="craft-plan-item-label">
-      <span className="craft-plan-item-icon"><ItemIcon item={item} /></span>
+      <ItemIcon item={item} />
       <span><strong>{itemName(item)}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}</span>
     </span>
   );
@@ -440,12 +440,6 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 const selected = selectedSections.includes(group.section);
                 return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
               })}
-              {personalBoard.board.some((group) => group.section === "Fishing") ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
-                <span>Fishing route</span>
-                <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
-                <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
-                {!personalBoard.available && personalBoard.reason ? <small role="status" aria-live="polite">{personalBoard.reason}</small> : null}
-              </div> : null}
               <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
             </div> : null}
             <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
@@ -458,7 +452,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   </colgroup>
                   {filteredNeedsBoard.map((group) => (
                     <tbody key={group.section}>
-                      <tr className="craft-plan-needs-section-row"><th>{group.section} <span className={completionTone(group.completion)}>{group.completion}%</span></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
+                      <tr className="craft-plan-needs-section-row"><th><div className="craft-plan-needs-section-heading"><span className="craft-plan-needs-section-label">{group.section} <span className={completionTone(group.completion)}>{group.completion}%</span></span>{group.section === "Fishing" ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
+                        <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
+                        <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
+                        {!personalBoard.available && personalBoard.reason ? <small role="status" aria-live="polite">{personalBoard.reason}</small> : null}
+                      </div> : null}</div></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
                             <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>

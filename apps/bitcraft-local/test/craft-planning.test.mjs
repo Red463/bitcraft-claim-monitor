@@ -254,7 +254,7 @@ test("personal fishing view excludes a route with no positive guaranteed yield",
   assert.equal(tier.routes.lake.available, true);
 });
 
-test("personal fishing view excludes a positive-chance fish-oil byproduct without a guaranteed minimum", () => {
+test("personal fishing view uses a verified expected yield when a route has no guaranteed minimum", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
       enabled: true,
@@ -266,10 +266,13 @@ test("personal fishing view excludes a positive-chance fish-oil byproduct withou
   });
 
   const tier = plan.personalViews.fishing.tiers[0];
-  assert.equal(tier.routes.ocean.available, false);
-  assert.equal(tier.remainingOil, 10);
-  assert.equal(tier.routes.lake.needed, 10);
-  assert.equal(plan.warnings.some((warning) => /Ocean Fish.*no positive guaranteed yield/i.test(warning)), true);
+  assert.equal(tier.routes.ocean.available, true);
+  assert.equal(tier.routes.ocean.estimated, true);
+  assert.equal(tier.routes.ocean.guaranteedYield, 2);
+  assert.equal(tier.routes.ocean.needed, 0);
+  assert.equal(tier.remainingOil, 0);
+  assert.equal(tier.routes.lake.needed, 0);
+  assert.equal(plan.warnings.some((warning) => /Ocean Fish.*no positive guaranteed yield/i.test(warning)), false);
 });
 
 test("personal fishing view does not deduct expected tracked oil without a guaranteed output", () => {

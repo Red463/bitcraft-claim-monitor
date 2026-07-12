@@ -24,6 +24,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /className="dashboard-top-meta"/);
   assert.doesNotMatch(page, /className="top-meta"/);
   assert.match(page, /<h3><Target size=\{17\} \/> Targets<\/h3>/);
+  assert.match(page, /<ItemIcon item=\{item\} \/>/);
+  assert.doesNotMatch(page, /craft-plan-item-icon"><ItemIcon item=\{item\} \/>/);
   assert.match(page, /Needs Board/);
   assert.match(page, /needed/);
   assert.match(page, /quantity\(supplied\).*quantity\(cell\.required\)/s);
@@ -92,6 +94,8 @@ test("Craft Planning keeps the preferred fishing route browser-local", () => {
   assert.match(page, /aria-label="Preferred fishing route"/);
   assert.match(page, />Ocean<\/button>/);
   assert.match(page, />Lake<\/button>/);
+  assert.match(page, /group\.section === "Fishing" \? <div className="craft-plan-fishing-route"/);
+  assert.doesNotMatch(page, /craft-plan-section-filters[\s\S]{0,1800}aria-label="Preferred fishing route"/);
   assert.match(page, /personalBoard\.reason/);
   assert.match(page, /role="status"/);
   assert.match(page, /aria-live="polite"/);
@@ -119,6 +123,7 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(server, /nestedKeys = \["input", "inputs"/);
   assert.match(server, /techType === "settlement"/);
   assert.match(manager, /Target items/);
+  assert.doesNotMatch(manager, /craft-plan-item-icon"><ItemIcon item=\{target\} \/><\/span><ItemLabel item=\{target\} \/>/);
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);
   assert.match(manager, /groupDeployablesByPlayer/);
