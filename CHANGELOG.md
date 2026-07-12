@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.46] - 2026-07-12
+
+### Fixed
+
+- Merged duplicate Tailor and Tailoring Needs Board sections into the canonical Tailoring section.
+
 ## [0.32.0-beta.45] - 2026-07-12
 
 ### Changed

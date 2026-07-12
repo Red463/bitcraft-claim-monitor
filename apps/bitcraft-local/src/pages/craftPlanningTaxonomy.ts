@@ -14,7 +14,7 @@ export const PLANNER_SECTION_ORDER = [
   "Mining",
   "Scholar",
   "Smithing",
-  "Tailor",
+  "Tailoring",
   "Taming",
   "Others",
 ] as const;
@@ -33,7 +33,7 @@ const ROWS: Record<string, string[]> = {
   Mining: ["Chunk", "Braxite", "Pebbles", "Ore Chunk", "Ore"],
   Scholar: ["Ancient Hieroglyphs", "Firesand", "Leather Solvent", "Metal Solvent", "Parchment", "Pigment", "Ink", "Journal", "Cloth Research", "Leather Research", "Metal Research", "Stone Research", "Wood Research", "Codex", "Wood Polish"],
   Smithing: ["Crushed Ore", "Metalworking Flux", "Ore Concentrate", "Molten Ingot", "Ingot", "Refined Ingot"],
-  Tailor: ["Clothmaker's Mordant", "Spool of Thread", "Cloth Strip", "Cloth", "Refined Cloth"],
+  Tailoring: ["Clothmaker's Mordant", "Spool of Thread", "Cloth Strip", "Cloth", "Refined Cloth"],
   Taming: ["Animal Swill", "Animal Food", "Tamed Animal", "Animal Trap", "Domesticated Animal Materials"],
   Others: [],
 };

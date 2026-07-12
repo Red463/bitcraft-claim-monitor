@@ -248,9 +248,20 @@ test("buildNeedsBoard follows Sync ordering for operational rows and sections", 
   assert.deepEqual(board.map((group) => [group.section, group.rows.map((row) => row.name)]), [
     ["Foraging", ["Berry", "Citric Berry"]],
     ["Leatherwork", ["Leather"]],
-    ["Tailor", ["Cloth"]],
+    ["Tailoring", ["Cloth"]],
     ["Taming", ["Animal Food"]],
   ]);
+});
+
+test("buildNeedsBoard merges known cloth rows and Tailoring API fallbacks into one section", () => {
+  const board = buildNeedsBoard([
+    { key: "items:1", name: "Peerless Cloth", tag: "Cloth", tier: 5, section: "Tailoring", required: 125, missing: 125 },
+    { key: "items:2", name: "Thread", tag: "Thread", tier: 5, section: "Tailoring", required: 150, available: 177, missing: 0, recipeUsages: [{}] },
+  ], []);
+
+  assert.equal(board.filter((group) => group.section === "Tailoring").length, 1);
+  assert.deepEqual(board.map((group) => group.section), ["Tailoring"]);
+  assert.deepEqual(board[0].rows.map((row) => row.name), ["Cloth", "Thread"]);
 });
 
 test("buildNeedsBoard calculates section completion from required and covered quantities", () => {
