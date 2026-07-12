@@ -39,7 +39,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, craftPlanCatalogTargets, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, compactCraftPlanResponse, computeCraftPlan, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -1666,6 +1666,10 @@ const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 
 const CRAFT_PLAN_KEY = "active";
+const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(5000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 20_000));
+const craftPlanResponseCache = new Map();
+const craftPlanResponseInflight = new Map();
+let craftPlanResponseGeneration = 0;
 
 function storedCraftPlanConfig() {
   const row = statements.getCraftPlan?.get(CRAFT_PLAN_KEY);
@@ -1676,6 +1680,8 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   const normalized = normalizeCraftPlanConfig(config);
   const existing = statements.getCraftPlan?.get(CRAFT_PLAN_KEY);
   statements.upsertCraftPlan.run(CRAFT_PLAN_KEY, JSON.stringify(normalized), existing?.created_at ?? timestamp, timestamp);
+  craftPlanResponseGeneration += 1;
+  craftPlanResponseCache.clear();
   return normalized;
 }
 
@@ -2085,6 +2091,26 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   return detailsByKey;
 }
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
+  const normalizedClaimId = String(claimId ?? "").trim();
+  const now = Date.now();
+  const cached = craftPlanResponseCache.get(normalizedClaimId);
+  if (cached && cached.expiresAt > now) return cached.plan;
+  const existing = craftPlanResponseInflight.get(normalizedClaimId);
+  if (existing?.generation === craftPlanResponseGeneration) return existing.promise;
+  const generation = craftPlanResponseGeneration;
+  const promise = computedCraftPlanResponseFresh(normalizedClaimId).then((plan) => {
+    if (generation === craftPlanResponseGeneration) {
+      craftPlanResponseCache.set(normalizedClaimId, { plan, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS });
+    }
+    return plan;
+  }).finally(() => {
+    if (craftPlanResponseInflight.get(normalizedClaimId)?.promise === promise) craftPlanResponseInflight.delete(normalizedClaimId);
+  });
+  craftPlanResponseInflight.set(normalizedClaimId, { generation, promise });
+  return promise;
+}
+
+async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
   let config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
   try {
@@ -8679,9 +8705,18 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
+    if (req.method === "GET" && url.pathname === "/api/local/craft-plan/detail") {
+      try {
+        const keys = String(url.searchParams.get("keys") ?? "").split(",").map((key) => key.trim()).filter(Boolean).slice(0, 20);
+        if (!keys.length) return send(res, 400, { error: "At least one craft plan item key is required" });
+        return send(res, 200, craftPlanDetailResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)), keys));
+      } catch (error) {
+        return send(res, 502, { error: error instanceof Error ? error.message : "Unable to load craft plan details" });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan") {
       try {
-        return send(res, 200, await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)));
+        return send(res, 200, compactCraftPlanResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId))));
       } catch (error) {
         return send(res, 502, { error: error instanceof Error ? error.message : "Unable to compute craft plan" });
       }

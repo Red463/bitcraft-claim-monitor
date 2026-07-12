@@ -242,3 +242,19 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
+
+test("Craft Planning serves a compact live board and lazy item drilldowns", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const bitjita = readFileSync(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
+
+  assert.match(server, /compactCraftPlanResponse\(await computedCraftPlanResponse/);
+  assert.match(server, /\/api\/local\/craft-plan\/detail/);
+  assert.match(server, /craftPlanDetailResponse\(await computedCraftPlanResponse/);
+  assert.match(server, /craftPlanResponseCache/);
+  assert.match(server, /craftPlanResponseInflight/);
+  assert.match(page, /\/craft-plan\/detail\?claimId=/);
+  assert.match(page, /detailLoading/);
+  assert.match(page, /groupNeedCellSourceRoutes\(selectedNeed, detailSteps\)/);
+  assert.match(bitjita, /activePanel === "planning"/);
+});

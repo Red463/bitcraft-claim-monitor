@@ -84,6 +84,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [needsSearch, setNeedsSearch] = React.useState("");
   const [fishingRoute, setFishingRoute] = usePersistedState<FishingRoutePreference>("planning.fishingRoute", "ocean");
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
+  const [detailSteps, setDetailSteps] = React.useState<AnyRecord[]>([]);
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailError, setDetailError] = React.useState<string | null>(null);
+  const detailRequestRef = React.useRef(0);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
   const [bufferPercent, setBufferPercent] = React.useState("0");
@@ -119,6 +123,37 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     };
   }, [claimId, refreshToken, managerRefreshToken]);
 
+  async function openNeedDetail(cell: NeedCell) {
+    const requestId = ++detailRequestRef.current;
+    setSelectedNeed(cell);
+    setDetailSteps([]);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const keys = [...new Set(cell.items.map(itemKey).filter(Boolean))];
+      const response = await fetch(`${LOCAL_API}/craft-plan/detail?claimId=${encodeURIComponent(claimId)}&keys=${encodeURIComponent(keys.join(","))}`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      if (requestId !== detailRequestRef.current) return;
+      const detailedItems = new Map((Array.isArray(body.materials) ? body.materials : []).map((item: AnyRecord) => [itemKey(item), item]));
+      const items = cell.items.map((item) => detailedItems.get(itemKey(item)) ?? item);
+      setSelectedNeed({ ...cell, item: items[0] ?? cell.item, items });
+      setDetailSteps(Array.isArray(body.steps) ? body.steps : []);
+    } catch (detailFetchError) {
+      if (requestId === detailRequestRef.current) setDetailError(detailFetchError instanceof Error ? detailFetchError.message : String(detailFetchError));
+    } finally {
+      if (requestId === detailRequestRef.current) setDetailLoading(false);
+    }
+  }
+
+  function closeNeedDetail() {
+    detailRequestRef.current += 1;
+    setSelectedNeed(null);
+    setDetailSteps([]);
+    setDetailError(null);
+    setDetailLoading(false);
+  }
+
   const config = plan?.config ?? {};
   const totals = plan?.totals ?? {};
   const targets = Array.isArray(plan?.targets) ? plan.targets : [];
@@ -141,10 +176,9 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const canManage = Boolean(adminAuth?.authenticated && adminAuth?.csrfToken);
   const currentSectionOverrides = config.sectionOverrides ?? {};
   const currentRowNameOverrides = config.rowNameOverrides ?? {};
-  const planSteps = Array.isArray(plan?.steps) ? plan.steps : [];
   const selectedNeedSources = selectedNeed ? groupNeedCellSources(selectedNeed) : [];
   const selectedNeedCrafts = selectedNeed ? groupNeedCellActiveCrafts(selectedNeed) : [];
-  const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, planSteps) : [];
+  const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, detailSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const selectedNeedKey = selectedNeed?.items?.[0]?.key ?? (selectedNeed ? itemKey(selectedNeed.item) : "");
   const selectedMultiplier = Number(config.multipliers?.[selectedNeedKey]?.multiplier) || 1;
@@ -189,8 +223,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             <h2>{itemNode(selectedNeed.item)}</h2>
             <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.inProgress)} in tracked crafts.</p>
           </div>
-          <button className="icon-button" type="button" onClick={() => setSelectedNeed(null)} aria-label="Close item details"><X size={18} /></button>
+          <button className="icon-button" type="button" onClick={closeNeedDetail} aria-label="Close item details"><X size={18} /></button>
         </header>
+        {detailLoading ? <p className="craft-plan-detail-loading" role="status"><LoaderCircle size={16} className="spin" /> Loading current item details...</p> : null}
+        {detailError ? <p className="alert error" role="alert">Item details could not be loaded: {detailError}</p> : null}
         <div className="craft-plan-need-detail-grid">
           <section className="form-card nested-card craft-plan-stock-card">
             <h3><Package size={16} /> Stock locations</h3>
@@ -509,7 +545,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         {group.rows.map((row) => (
                           <tr key={row.name}>
                             <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
-                            {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), setSelectedNeed)}</td>)}
+                            {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), (cell) => void openNeedDetail(cell))}</td>)}
                           </tr>
                         ))}
                     </tbody>

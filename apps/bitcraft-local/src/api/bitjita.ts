@@ -79,7 +79,7 @@ function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string,
     skills: `/skills`,
   } as const;
   if (!activePanel) return endpoints;
-  if (activePanel === "activity" || activePanel === "admin") return {};
+  if (activePanel === "activity" || activePanel === "admin" || activePanel === "planning") return {};
 
   const keys = new Set<keyof typeof endpoints>(["claim", "members"]);
   const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));

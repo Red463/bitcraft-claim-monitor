@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.47] - 2026-07-12
+
+### Fixed
+
+- Improved Craft Planning stability by shrinking live refresh payloads, caching repeated calculations, and loading item drilldown details only when opened.
+
 ## [0.32.0-beta.46] - 2026-07-12
 
 ### Fixed

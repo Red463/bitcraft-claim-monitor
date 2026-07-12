@@ -1291,4 +1291,35 @@ export function computeCraftPlan({
   };
 }
 
+function compactCraftPlanItem(item = {}) {
+  const { sources, activeCraftSources, sourceRoutes, recipeUsages, ...summary } = item;
+  return summary;
+}
+
+function craftPlanItemKey(item = {}) {
+  if (item.key) return String(item.key);
+  const id = String(item.id ?? item.itemId ?? item.entityId ?? "").trim();
+  return id ? recipeKey(item.kind ?? "items", id) : "";
+}
+
+export function compactCraftPlanResponse(plan = {}) {
+  return {
+    ...plan,
+    materials: Array.isArray(plan.materials) ? plan.materials.map(compactCraftPlanItem) : [],
+    steps: [],
+    gatherNext: Array.isArray(plan.gatherNext) ? plan.gatherNext.map((group) => ({
+      ...group,
+      items: Array.isArray(group.items) ? group.items.map(compactCraftPlanItem) : [],
+    })) : [],
+  };
+}
+
+export function craftPlanDetailResponse(plan = {}, requestedKeys = []) {
+  const keys = new Set(requestedKeys.map(String).filter(Boolean));
+  return {
+    materials: Array.isArray(plan.materials) ? plan.materials.filter((item) => keys.has(craftPlanItemKey(item))) : [],
+    steps: Array.isArray(plan.steps) ? plan.steps.filter((step) => keys.has(craftPlanItemKey(step.output))) : [],
+  };
+}
+
 

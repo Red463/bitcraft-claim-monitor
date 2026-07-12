@@ -5,7 +5,9 @@ import test from "node:test";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
   collectLocalCatalogCraftPlanDetails,
+  compactCraftPlanResponse,
   computeCraftPlan,
+  craftPlanDetailResponse,
   craftPlanCatalogTargets,
   normalizeCraftPlanConfig,
   reconcileCraftPlanBuildingProgress,
@@ -41,6 +43,26 @@ const animalHairDetail = {
   item: { id: "200", name: "Animal Hair", itemType: 0, tag: "Hunting" },
   craftingRecipes: [],
 };
+
+test("compactCraftPlanResponse keeps live board values without nested drilldown payloads", () => {
+  const material = { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, plannedOutput: 10, missing: 40, sources: [{ quantity: 30 }], activeCraftSources: [{ quantity: 20 }], sourceRoutes: [{ id: "route" }], recipeUsages: [{ outputKey: "items:2" }] };
+  const compact = compactCraftPlanResponse({ enabled: true, materials: [material], steps: [{ output: material }], gatherNext: [{ section: "Tailoring", items: [material] }], totals: { missingItems: 1 } });
+
+  assert.deepEqual(compact.materials[0], { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, plannedOutput: 10, missing: 40 });
+  assert.deepEqual(compact.steps, []);
+  assert.deepEqual(compact.gatherNext[0].items[0], compact.materials[0]);
+  assert.equal(compact.totals.missingItems, 1);
+});
+
+test("craftPlanDetailResponse returns drilldown data only for requested material keys", () => {
+  const cloth = { key: "items:1", name: "Cloth", sources: [{ quantity: 30 }], sourceRoutes: [{ id: "route" }], recipeUsages: [{ outputKey: "items:2" }] };
+  const thread = { key: "items:2", name: "Thread", sources: [{ quantity: 10 }] };
+  const plan = { materials: [cloth, thread], steps: [{ id: "route", output: { key: "items:1" } }, { id: "other", output: { key: "items:2" } }] };
+  const detail = craftPlanDetailResponse(plan, ["items:1"]);
+
+  assert.deepEqual(detail.materials, [cloth]);
+  assert.deepEqual(detail.steps, [plan.steps[0]]);
+});
 
 function animalHairSourceDetails() {
   const hair = { id: "200", name: "Rough Animal Hair", itemType: 0, kind: "items", tag: "Hunting" };

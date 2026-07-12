@@ -403,6 +403,14 @@
   background: rgba(6, 10, 16, 0.36);
   padding: 14px;
 }
+
+.craft-plan-detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+  color: var(--text-muted);
+}
 .craft-plan-route-detail + .craft-plan-route-detail {
   margin-top: 10px;
 }
