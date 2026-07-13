@@ -42,7 +42,8 @@ import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSe
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, compactCraftPlanResponse, computeCraftPlan, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
-import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, discordCraftPlanCommandAllowed, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
+import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
+import { deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -8469,20 +8470,13 @@ async function handleDiscordInteraction(req) {
   if (interaction.type === 3) return { status: 200, body: await handleDiscordComponent(interaction) };
   if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
   if (interaction.data?.name === "craft-plan") {
-    const command = runDiscordCommand(interaction);
-    const immediate = await Promise.race([command, new Promise((resolve) => setTimeout(() => resolve(null), 2200))]);
-    if (immediate) return { status: 200, body: immediate };
-    void command.then(async (response) => {
-      try {
-        await discordApiRequest(`/webhooks/${encodeURIComponent(interaction.application_id)}/${encodeURIComponent(interaction.token)}/messages/@original`, {
-          method: "PATCH",
-          body: JSON.stringify(response.data),
-        });
-      } catch (error) {
-        console.warn(`Deferred Craft Planner report command failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    });
-    return { status: 200, body: { type: 5, data: { allowed_mentions: { parse: [] } } } };
+    const roleId = getDiscordSettingsRaw().craftPlanReports.commandRoleId;
+    const preflight = preflightCraftPlanInteraction(interaction, roleId);
+    if (!preflight.ok) return { status: 200, body: discordResponse(preflight.error, { ephemeral: true }) };
+    return {
+      status: 200,
+      ...deferredDiscordInteractionResult(() => deliverDeferredCraftPlanInteraction(interaction, preflight.profession)),
+    };
   }
   return { status: 200, body: await runDiscordCommand(interaction) };
 }
@@ -8515,17 +8509,43 @@ function discordHelpCommand() {
 }
 
 async function discordCraftPlanCommand(interaction) {
-  const settings = getDiscordSettingsRaw();
-  const roleId = settings.craftPlanReports.commandRoleId;
-  if (!discordCraftPlanCommandAllowed(interaction.member ?? {}, roleId)) {
-    return discordResponse(roleId ? "You need the configured Craft Planner report role to use this command." : "Craft Planner report command access has not been configured yet.", { ephemeral: true });
-  }
-  const requested = String(discordOption(interaction, "profession") ?? "");
-  const profession = requested ? normalizeCraftPlanReportProfession(requested) : "";
-  if (requested && !profession) return discordResponse("That profession is not available.", { ephemeral: true });
-  const report = await craftPlanDiscordReport(profession);
+  const roleId = getDiscordSettingsRaw().craftPlanReports.commandRoleId;
+  const preflight = preflightCraftPlanInteraction(interaction, roleId);
+  if (!preflight.ok) return discordResponse(preflight.error, { ephemeral: true });
+  const report = await craftPlanDiscordReport(preflight.profession);
   const payload = buildCraftPlanDiscordEmbed(report);
   return discordResponse("", { embeds: payload.embeds });
+}
+
+async function deliverDeferredCraftPlanInteraction(interaction, profession = "") {
+  const startedAt = Date.now();
+  try {
+    const report = await craftPlanDiscordReport(profession);
+    const payload = buildCraftPlanDiscordEmbed(report);
+    const response = await editDiscordInteractionOriginal({
+      applicationId: interaction.application_id,
+      interactionToken: interaction.token,
+      data: { embeds: payload.embeds },
+    });
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "craft_plan_command",
+      summary: report.title,
+      reason: "On-demand Craft Planner report",
+      metadata: { profession: profession || "overview", durationMs: Date.now() - startedAt },
+      response: { id: response?.id, channel_id: response?.channel_id },
+    });
+  } catch (error) {
+    const message = redactServerHealthText(error instanceof Error ? error.message : String(error)).slice(0, 500);
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: "craft_plan_command",
+      summary: "On-demand Craft Planner report",
+      error: message,
+      metadata: { profession: profession || "overview", durationMs: Date.now() - startedAt },
+    });
+    console.warn(`Craft Planner interaction delivery failed: ${message}`);
+  }
 }
 
 async function runDiscordCommand(interaction) {
@@ -9043,6 +9063,13 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
       const result = await handleDiscordInteraction(req);
+      if (typeof result.afterResponse === "function") {
+        res.once("finish", () => {
+          void Promise.resolve(result.afterResponse()).catch((error) => {
+            console.warn(`Discord post-response task failed: ${redactServerHealthText(error instanceof Error ? error.message : String(error))}`);
+          });
+        });
+      }
       return send(res, result.status, result.body);
     }
     if (req.method === "POST" && url.pathname === "/api/local/analytics/event") {
