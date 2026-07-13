@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.55] - 2026-07-13
+
+### Added
+
+- Added scheduled and on-demand Discord Craft Planner reports with overview and profession views, role-controlled `/craft-plan` access, reliable delivery retries, and Bot dashboard scheduling controls.
+
 ## [0.32.0-beta.54] - 2026-07-13
 
 ### Fixed
