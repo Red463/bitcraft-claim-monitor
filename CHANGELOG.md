@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.58] - 2026-07-13
+
+### Added
+
+- Added a future ideas and plans library with a reusable template and the deferred VPS efficiency plan.
+
 ## [0.32.0-beta.57] - 2026-07-13
 
 ### Changed
