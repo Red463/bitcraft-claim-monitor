@@ -127,3 +127,40 @@ test("discord settings normalize craft profession emoji overrides", () => {
     smithing: "<a:smithing:223456789012345678>",
   });
 });
+
+test("discord settings normalize craft planner report configuration", () => {
+  const settings = normalizeDiscordSettings({
+    craftPlanReports: {
+      scheduledEnabled: true,
+      commandRoleId: " role-1 ",
+      timezone: "Europe/London",
+      rules: [
+        { id: "daily-overview", enabled: true, reportType: "overview", channelId: " channel-1 ", frequency: "daily", time: "07:30" },
+        { id: "bad", reportType: "profession", profession: "Unknown", frequency: "monthly", time: "99:00" },
+      ],
+    },
+  });
+
+  assert.equal(settings.craftPlanReports.scheduledEnabled, true);
+  assert.equal(settings.craftPlanReports.commandRoleId, "role-1");
+  assert.equal(settings.craftPlanReports.timezone, "Europe/London");
+  assert.deepEqual(settings.craftPlanReports.rules, [{
+    id: "daily-overview",
+    enabled: true,
+    reportType: "overview",
+    profession: "",
+    channelId: "channel-1",
+    frequency: "daily",
+    time: "07:30",
+    dayOfWeek: 1,
+  }, {
+    id: "bad",
+    enabled: false,
+    reportType: "profession",
+    profession: "",
+    channelId: "",
+    frequency: "daily",
+    time: "09:00",
+    dayOfWeek: 1,
+  }]);
+});

@@ -499,6 +499,17 @@ export const schemaBootstrapSql = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS discord_craft_plan_report_occurrences (
+    rule_id TEXT NOT NULL,
+    occurrence_key TEXT NOT NULL,
+    scheduled_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'claimed',
+    discord_message_id TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (rule_id, occurrence_key)
+  );
   CREATE TABLE IF NOT EXISTS discord_youtube_channels (
     channel_id TEXT PRIMARY KEY,
     input TEXT NOT NULL,
@@ -614,6 +625,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status ON discord_notification_outbox (status, next_attempt_at, id);
+  CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time ON discord_craft_plan_report_occurrences (scheduled_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_youtube_videos_channel ON discord_youtube_videos (channel_id, published_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_watches_profession ON discord_craft_watches (guild_id, profession_key, mode);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_cases_time ON discord_mod_cases (guild_id, occurred_at DESC);

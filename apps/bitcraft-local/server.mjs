@@ -42,6 +42,7 @@ import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSe
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, compactCraftPlanResponse, computeCraftPlan, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, discordCraftPlanCommandAllowed, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -1434,8 +1435,24 @@ function getDiscordSettingsRaw() {
 function publicDiscordSettings() {
   const settings = getDiscordSettingsRaw();
   const { botToken, ...publicSettings } = settings;
+  const recentOccurrences = statements.recentDiscordCraftPlanReportOccurrences.all(100);
+  const latestByRule = new Map();
+  for (const occurrence of recentOccurrences) if (!latestByRule.has(occurrence.rule_id)) latestByRule.set(occurrence.rule_id, occurrence);
+  const craftPlanReports = {
+    ...publicSettings.craftPlanReports,
+    rules: publicSettings.craftPlanReports.rules.map((rule) => ({
+      ...rule,
+      nextOccurrenceAt: nextCraftPlanReportOccurrenceIso(rule, publicSettings.craftPlanReports.timezone),
+      lastOccurrence: latestByRule.has(rule.id) ? {
+        scheduledAt: latestByRule.get(rule.id).scheduled_at,
+        status: latestByRule.get(rule.id).status,
+        error: latestByRule.get(rule.id).last_error,
+      } : null,
+    })),
+  };
   return {
     ...publicSettings,
+    craftPlanReports,
     botTokenConfigured: Boolean(botToken),
     botTokenSource: settings.botTokenSource || null,
     interactionUrl: "/api/discord/interactions",
@@ -2254,6 +2271,84 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     activeCrafts: trackedCraftPlanOutputs(craftPayloads, detailsByKey),
     craftSourceErrors,
   });
+}
+
+async function craftPlanDiscordReport(profession = "") {
+  try {
+    const plan = await computedCraftPlanResponse(getSettings().claimId);
+    return buildCraftPlanDiscordReport(plan, profession);
+  } catch {
+    return buildUnavailableCraftPlanDiscordReport();
+  }
+}
+
+async function sendCraftPlanDiscordReport({ profession = "", channelId } = {}) {
+  const settings = getDiscordSettingsRaw();
+  const targetChannelId = String(channelId ?? "").trim();
+  if (!settings.enabled || !settings.botToken) throw new Error("Discord notifications are not fully configured.");
+  if (!validDiscordId(targetChannelId)) throw new Error("Choose a valid Discord channel.");
+  const report = await craftPlanDiscordReport(profession);
+  const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(report), settings, targetChannelId);
+  recordDiscordDeliverySafe({
+    status: "sent",
+    eventType: "craft_plan_report",
+    channelId: targetChannelId,
+    channelKey: "craftPlanReports",
+    summary: report.title,
+    metadata: { profession: report.profession || "overview", test: true },
+    response: { id: response?.id, channel_id: response?.channel_id },
+  });
+  return { report, response: { id: response?.id, channel_id: response?.channel_id } };
+}
+
+let craftPlanReportDispatcherRunning = false;
+let craftPlanReportLastCheckedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+async function dispatchScheduledCraftPlanReports() {
+  if (craftPlanReportDispatcherRunning || !scheduledJobsEnabled || isTestRuntime) return { skipped: true };
+  const settings = getDiscordSettingsRaw();
+  const reportSettings = settings.craftPlanReports;
+  if (!reportSettings.scheduledEnabled) return { skipped: true, reason: "Scheduled Craft Planner reports are disabled" };
+  craftPlanReportDispatcherRunning = true;
+  let queued = 0;
+  try {
+    const now = new Date();
+    let plan = null;
+    let planUnavailable = false;
+    for (const rule of reportSettings.rules) {
+      const occurrence = dueCraftPlanReportOccurrence(rule, reportSettings.timezone, now, craftPlanReportLastCheckedAt);
+      if (!occurrence.due || !validDiscordId(rule.channelId)) continue;
+      const claimedAt = now.toISOString();
+      const claim = statements.claimDiscordCraftPlanReportOccurrence.run(rule.id, occurrence.key, occurrence.scheduledAt, claimedAt, claimedAt);
+      if (!claim.changes) continue;
+      try {
+        if (!plan && !planUnavailable) {
+          try { plan = await computedCraftPlanResponse(getSettings().claimId); }
+          catch { planUnavailable = true; }
+        }
+        const report = planUnavailable
+          ? buildUnavailableCraftPlanDiscordReport()
+          : buildCraftPlanDiscordReport(plan, rule.reportType === "profession" ? rule.profession : "");
+        await enqueueDiscordActivity("craft_plan_report", report.title, occurrence.scheduledAt, {
+          sourceKey: `craft-plan-report:${rule.id}:${occurrence.key}`,
+          ruleId: rule.id,
+          occurrenceKey: occurrence.key,
+          channelId: rule.channelId,
+          report,
+        }, { sourceKey: `craft-plan-report:${rule.id}:${occurrence.key}` });
+        statements.updateDiscordCraftPlanReportOccurrence.run("queued", null, null, new Date().toISOString(), rule.id, occurrence.key);
+        queued += 1;
+      } catch (error) {
+        const message = redactServerHealthText(error instanceof Error ? error.message : String(error)).slice(0, 500);
+        statements.deleteDiscordCraftPlanReportOccurrence.run(rule.id, occurrence.key);
+        recordDiscordDeliverySafe({ status: "failed", eventType: "craft_plan_report", channelId: rule.channelId, channelKey: "craftPlanReports", summary: "Scheduled Craft Planner report", error: message, metadata: { ruleId: rule.id, occurrenceKey: occurrence.key } });
+      }
+    }
+    craftPlanReportLastCheckedAt = now;
+    statements.pruneDiscordCraftPlanReportOccurrences.run(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    return { checked: reportSettings.rules.length, queued };
+  } finally {
+    craftPlanReportDispatcherRunning = false;
+  }
 }
 const bitjitaProxyCache = createBitjitaProxyCache({
   appIdentifier,
@@ -3243,6 +3338,7 @@ function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
 
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken) return false;
+  if (eventType === "craft_plan_report") return settings.craftPlanReports.scheduledEnabled && Boolean(String(metadata?.channelId ?? "").trim());
   if (eventType === "market_new_listing") return false;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
     return settings.notify.marketSales && toNumber(metadata?.totalValue ?? metadata?.totalPrice ?? toNumber(metadata?.quantity) * toNumber(metadata?.price)) >= settings.minSaleValue;
@@ -3303,6 +3399,7 @@ function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "craft_plan_report") return String(metadata.channelId ?? "").trim();
   if (eventType === "market_new_listing") return "";
   if ((eventType === "market_sale" || eventType === "market_sale_confirmed") && settings.marketSalesDelivery === "dm") return "";
   if (eventType === "youtube_video") {
@@ -3324,6 +3421,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
 }
 
 function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "craft_plan_report") return "craftPlanReports";
   if (eventType === "production_started" || eventType === "production_completed") {
     const selectionKey = eventType === "production_started" ? "productionStarted" : "productionCompleted";
     const selection = settings.notificationChannels?.[selectionKey] ?? "profession";
@@ -3538,6 +3636,11 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
+    if (eventType === "craft_plan_report") {
+      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
+      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+      return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
       return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
     }
@@ -3591,9 +3694,15 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
         const finishedAt = new Date().toISOString();
         if (result?.skipped) {
           statements.markDiscordNotificationSkipped.run(finishedAt, result.reason ?? "Notification skipped by sender", finishedAt, row.id);
+          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+            statements.updateDiscordCraftPlanReportOccurrence.run("skipped", null, redactServerHealthText(result.reason ?? "Notification skipped").slice(0, 500), finishedAt, metadata.ruleId, metadata.occurrenceKey);
+          }
           skipped += 1;
         } else {
           statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
+          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+            statements.updateDiscordCraftPlanReportOccurrence.run("sent", String(result?.response?.id ?? ""), null, finishedAt, metadata.ruleId, metadata.occurrenceKey);
+          }
           if (row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
           sent += 1;
         }
@@ -3601,6 +3710,9 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
         statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+        if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
+        }
         failed += 1;
       }
     }
@@ -8160,6 +8272,17 @@ const discordCommands = [
       { type: 1, name: "clear", description: "Remove all of your craft notification roles." },
     ],
   },
+  {
+    name: "craft-plan",
+    description: "Show current Craft Planner progress and shortages.",
+    options: [{
+      type: 3,
+      name: "profession",
+      description: "Optional profession; omit for the settlement overview",
+      required: false,
+      choices: craftPlanReportProfessions.map((name) => ({ name, value: name.toLowerCase() })),
+    }],
+  },
 ];
 
 function registeredDiscordCommands() {
@@ -8345,6 +8468,22 @@ async function handleDiscordInteraction(req) {
   if (interaction.type === 4) return { status: 200, body: await discordAutocomplete(interaction) };
   if (interaction.type === 3) return { status: 200, body: await handleDiscordComponent(interaction) };
   if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
+  if (interaction.data?.name === "craft-plan") {
+    const command = runDiscordCommand(interaction);
+    const immediate = await Promise.race([command, new Promise((resolve) => setTimeout(() => resolve(null), 2200))]);
+    if (immediate) return { status: 200, body: immediate };
+    void command.then(async (response) => {
+      try {
+        await discordApiRequest(`/webhooks/${encodeURIComponent(interaction.application_id)}/${encodeURIComponent(interaction.token)}/messages/@original`, {
+          method: "PATCH",
+          body: JSON.stringify(response.data),
+        });
+      } catch (error) {
+        console.warn(`Deferred Craft Planner report command failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+    return { status: 200, body: { type: 5, data: { allowed_mentions: { parse: [] } } } };
+  }
   return { status: 200, body: await runDiscordCommand(interaction) };
 }
 
@@ -8370,8 +8509,23 @@ function discordHelpCommand() {
     { name: "/crafts", value: "Lists current settlement crafts. Optional skill filter supported.", inline: false },
     { name: "/price", value: "Looks up recent BitJita sale prices for an item.", inline: false },
     { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
+    { name: "/craft-plan", value: "Shows Craft Planner progress. Choose a profession for a focused report.", inline: false },
     { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
   ], 0x5865f2);
+}
+
+async function discordCraftPlanCommand(interaction) {
+  const settings = getDiscordSettingsRaw();
+  const roleId = settings.craftPlanReports.commandRoleId;
+  if (!discordCraftPlanCommandAllowed(interaction.member ?? {}, roleId)) {
+    return discordResponse(roleId ? "You need the configured Craft Planner report role to use this command." : "Craft Planner report command access has not been configured yet.", { ephemeral: true });
+  }
+  const requested = String(discordOption(interaction, "profession") ?? "");
+  const profession = requested ? normalizeCraftPlanReportProfession(requested) : "";
+  if (requested && !profession) return discordResponse("That profession is not available.", { ephemeral: true });
+  const report = await craftPlanDiscordReport(profession);
+  const payload = buildCraftPlanDiscordEmbed(report);
+  return discordResponse("", { embeds: payload.embeds });
 }
 
 async function runDiscordCommand(interaction) {
@@ -8383,6 +8537,7 @@ async function runDiscordCommand(interaction) {
     if (command === "crafts") return discordEmbedResponse(await discordCraftsCommand(String(discordOption(interaction, "skill") ?? "")));
     if (command === "price") return discordEmbedResponse(await discordPriceCommand(String(discordOption(interaction, "item") ?? ""), discordOption(interaction, "region")));
     if (command === "craftwatch") return await discordCraftWatchCommand(interaction);
+    if (command === "craft-plan") return await discordCraftPlanCommand(interaction);
     const custom = statements.getDiscordCustomCommand.get(command);
     if (custom) return discordResponse(custom.response, { ephemeral: false });
     return discordResponse("Unknown command.", { ephemeral: true });
@@ -9077,6 +9232,14 @@ const server = createServer(async (req, res) => {
         audit(user, "discord.test_message", { kind, status: result?.skipped ? "skipped" : "sent" });
         return send(res, 200, { ok: true, result });
       }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/discord/craft-plan-report/test") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        const profession = body.reportType === "profession" ? normalizeCraftPlanReportProfession(body.profession) : "";
+        if (body.reportType === "profession" && !profession) return send(res, 400, { error: "Choose a valid profession." });
+        const result = await sendCraftPlanDiscordReport({ profession, channelId: body.channelId });
+        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: body.channelId, messageId: result.response?.id });
+        return send(res, 200, { ok: true, result });
+      }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {
         const response = await postDiscordColourSelector();
         audit(user, "discord.colour_roles_post", { messageId: response?.id });
@@ -9277,6 +9440,8 @@ const server = createServer(async (req, res) => {
           production: body.toastSettings?.production !== false,
         };
         const marketDealWatch = normalizeMarketDealWatchSettings(body.marketDealWatch ?? {});
+        const craftPlanReportErrors = validateCraftPlanReportSettings(body.discord?.craftPlanReports ?? {});
+        if (craftPlanReportErrors.length) return send(res, 400, { error: craftPlanReportErrors[0], errors: craftPlanReportErrors });
         const discordSettings = normalizeDiscordSettings(body.discord ?? {});
         const discordToken = String(body.discord?.botToken ?? "").trim();
         if (discordSettings.enabled) {
@@ -9792,6 +9957,8 @@ function startBackgroundTasks() {
     console.log("Scheduled jobs enabled; checking every 10 seconds");
     checkScheduledJobs();
     setInterval(checkScheduledJobs, 10 * 1000);
+    void dispatchScheduledCraftPlanReports().catch((error) => console.warn(`Craft Planner report dispatcher failed: ${error instanceof Error ? error.message : String(error)}`));
+    setInterval(dispatchScheduledCraftPlanReports, 60 * 1000);
   }
   if (!isTestRuntime) {
     void evaluateServerHealthIncidents().catch((error) => console.warn(`Server health evaluation failed: ${redactServerHealthText(error.message)}`));

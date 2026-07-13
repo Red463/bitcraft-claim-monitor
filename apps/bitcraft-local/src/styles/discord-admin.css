@@ -106,6 +106,42 @@
 .discord-rule-card .field span { margin-bottom: 0; line-height: 1.25; }
 .discord-rule-card .field input, .discord-rule-card .field select { width: 100%; min-width: 0; }
 .discord-rule-crafts .field, .discord-rule-crafts .toggle-line { min-height: 40px; }
+.discord-craft-plan-reports { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
+.discord-craft-plan-heading { align-items: center; gap: 12px; }
+.discord-craft-plan-heading h4 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--gold); font-size: 15px; }
+.discord-craft-plan-heading .legend { margin: 3px 0 0; max-width: 75ch; }
+.discord-craft-plan-controls { display: grid; grid-template-columns: minmax(180px,.65fr) minmax(240px,1.2fr) minmax(220px,1fr); gap: 9px; align-items: end; }
+.discord-craft-plan-controls .toggle-line { min-height: var(--control-height-compact); }
+.discord-craft-plan-rule-list { display: grid; gap: 8px; }
+.discord-craft-plan-rule { display: grid; grid-template-columns: minmax(120px,.55fr) minmax(0,3fr) minmax(190px,1fr) auto; gap: 10px; align-items: center; padding: 9px; border: 1px solid rgba(147,160,186,.18); border-radius: 8px; background: rgba(0,0,0,.12); }
+.discord-craft-plan-rule:hover { border-color: rgba(240,198,79,.3); }
+.discord-craft-plan-rule-head { display: grid; gap: 6px; align-content: center; }
+.discord-craft-plan-rule-head .toggle-line { min-height: 32px; padding: 4px 7px; background: transparent; }
+.discord-craft-plan-rule-head .status-pill { justify-self: start; }
+.discord-craft-plan-rule-fields { display: flex; flex-wrap: wrap; gap: 7px; align-items: end; }
+.discord-craft-plan-rule-fields .field { flex: 1 1 120px; min-width: 110px; }
+.discord-craft-plan-rule-fields .field:has(select[value="overview"]) { flex-basis: 115px; }
+.discord-craft-plan-rule-status { display: grid; gap: 3px; min-width: 0; }
+.discord-craft-plan-rule-status > span { color: var(--text); font-size: 12px; font-weight: 700; }
+.discord-craft-plan-rule-status small { color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }
+.discord-craft-plan-rule-status .error-text { color: #ff8c89; }
+.discord-craft-plan-rule-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.discord-craft-plan-rule-actions .toolbar-button { min-height: 30px; padding: 5px 8px; font-size: 11px; }
+.discord-craft-plan-empty { display: flex; flex-wrap: wrap; gap: 5px 10px; align-items: baseline; padding: 12px; border: 1px dashed rgba(147,160,186,.26); border-radius: 8px; color: var(--muted); }
+.discord-craft-plan-empty strong { color: var(--text); }
+@media (max-width: 1100px) {
+  .discord-craft-plan-rule { grid-template-columns: minmax(120px,.55fr) minmax(0,2.5fr) minmax(180px,1fr); }
+  .discord-craft-plan-rule-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 760px) {
+  .discord-craft-plan-controls, .discord-craft-plan-rule { grid-template-columns: 1fr; align-items: stretch; }
+  .discord-craft-plan-rule-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .discord-craft-plan-rule-actions { grid-column: auto; justify-content: flex-start; }
+  .discord-craft-plan-heading { align-items: stretch; }
+}
+@media (max-width: 480px) {
+  .discord-craft-plan-rule-fields { grid-template-columns: 1fr; }
+}
 .discord-channel-card summary { min-height: 42px; border-bottom: 1px solid rgba(255,255,255,.07); padding-bottom: 9px; justify-content: flex-start; }
 .discord-channel-card summary small { margin-left: 10px; }
 .discord-channel-card summary::after { margin-left: auto; }

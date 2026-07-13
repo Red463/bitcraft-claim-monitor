@@ -1,5 +1,6 @@
 import React from "react";
 import { Bell } from "lucide-react";
+import { DiscordCraftPlanReportsSection } from "./DiscordCraftPlanReportsSection";
 
 type DiscordSettings = Record<string, any>;
 
@@ -18,12 +19,18 @@ export function DiscordNotificationsSection({
   discordDeliveryLabel,
   updateDiscord,
   updateDiscordNotify,
+  channelIdSelect,
+  roleIdSelect,
+  onTestCraftPlanReport,
 }: {
   channelSelect: (key: string, value: string, professionChannel?: boolean) => React.ReactNode;
   discord: DiscordSettings;
   discordDeliveryLabel: string;
   updateDiscord: (patch: Partial<DiscordSettings>) => void;
   updateDiscordNotify: (key: string, value: boolean) => void;
+  channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
+  roleIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
+  onTestCraftPlanReport: (rule: Record<string, any>) => Promise<void> | void;
 }) {
   return (
     <section className="form-card discord-preview-card">
@@ -193,12 +200,19 @@ export function DiscordNotificationsSection({
           </label>
         </div>
       </div>
+      <DiscordCraftPlanReportsSection
+        settings={discord.craftPlanReports}
+        channelIdSelect={channelIdSelect}
+        roleIdSelect={roleIdSelect}
+        onChange={(craftPlanReports) => updateDiscord({ craftPlanReports })}
+        onTest={onTestCraftPlanReport}
+      />
       <div className="status-detail discord-notification-status">
         <StatusInfo
           label="Interaction endpoint"
           value={discord.interactionUrl ? `${window.location.origin}${discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`}
         />
-        <StatusInfo label="Slash commands" value="/help, /supplies, /online, /crafts, /price, /craftwatch" />
+        <StatusInfo label="Slash commands" value="/help, /supplies, /online, /crafts, /price, /craftwatch, /craft-plan" />
         <StatusInfo
           label="Token status"
           value={discord.botTokenConfigured ? `Configured via ${discord.botTokenSource ?? "server"}` : "Not configured"}

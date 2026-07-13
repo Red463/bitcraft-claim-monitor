@@ -2099,8 +2099,13 @@ export function AdminPanel({
           {(!botOnly || botSection === "notifications") ? (
             <DiscordNotificationsSection
               channelSelect={channelSelect}
+              channelIdSelect={channelIdSelect}
               discord={draft.discord}
               discordDeliveryLabel={discordDeliveryLabel}
+              roleIdSelect={roleIdSelect}
+              onTestCraftPlanReport={(rule) => run(async () => {
+                await api("/admin/discord/craft-plan-report/test", { method: "POST", body: JSON.stringify(rule) });
+              }, "Craft Planner report sent.")}
               updateDiscord={updateDiscord}
               updateDiscordNotify={updateDiscordNotify}
             />

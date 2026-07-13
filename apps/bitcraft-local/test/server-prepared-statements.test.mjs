@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { createPreparedStatements } from "../src/server/preparedStatements.mjs";
+import { schemaBootstrapSql } from "../src/server/schemaBootstrap.mjs";
+import { applyAdditiveColumnMigrations } from "../src/server/schemaMigrations.mjs";
 
 test("createPreparedStatements prepares critical server statement keys", () => {
   const sqlByKey = [];
@@ -28,6 +31,10 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     "pendingDiscordNotifications",
     "markDiscordNotificationSent",
     "markDiscordNotificationFailed",
+    "claimDiscordCraftPlanReportOccurrence",
+    "getDiscordCraftPlanReportOccurrence",
+    "deleteDiscordCraftPlanReportOccurrence",
+    "pruneDiscordCraftPlanReportOccurrences",
     "setDiscordYouTubeChannelDiscordChannel",
     "insertUserSession",
     "upsertDiscordCraftWatch",
@@ -44,4 +51,18 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   assert.match(statements.insertDiscordYouTubeVideo.sql, /INSERT INTO discord_youtube_videos/);
   assert.match(statements.enqueueDiscordNotification.sql, /INSERT INTO discord_notification_outbox/);
   assert.ok(sqlByKey.length > 70, "expected the server statement bundle to be prepared together");
+});
+
+test("Craft Planner occurrence claims can be released before outbox enqueue and reclaimed", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaBootstrapSql);
+  applyAdditiveColumnMigrations(db);
+  const statements = createPreparedStatements(db);
+  const args = ["daily-overview", "2026-07-13@09:00", "2026-07-13T08:00:00.000Z", "2026-07-13T08:01:00.000Z", "2026-07-13T08:01:00.000Z"];
+
+  assert.equal(statements.claimDiscordCraftPlanReportOccurrence.run(...args).changes, 1);
+  assert.equal(statements.claimDiscordCraftPlanReportOccurrence.run(...args).changes, 0);
+  assert.equal(statements.deleteDiscordCraftPlanReportOccurrence.run(args[0], args[1]).changes, 1);
+  assert.equal(statements.claimDiscordCraftPlanReportOccurrence.run(...args).changes, 1);
+  db.close();
 });

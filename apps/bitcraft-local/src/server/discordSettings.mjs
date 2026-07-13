@@ -1,3 +1,5 @@
+import { normalizeCraftPlanReportSettings } from "./craftPlanDiscordReports.mjs";
+
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -152,6 +154,12 @@ export const defaultDiscordSettings = {
   rolePanels: defaultRolePanels,
   welcomeFlow: defaultWelcomeFlow,
   presence: defaultDiscordPresence,
+  craftPlanReports: {
+    scheduledEnabled: false,
+    commandRoleId: "",
+    timezone: "Europe/London",
+    rules: [],
+  },
   notify: {
     marketListings: false,
     marketSales: true,
@@ -281,6 +289,7 @@ export function normalizeDiscordSettings(value = {}) {
     rolePanels: rolePanelSource.map((panel, index) => normalizeDiscordRolePanel(panel, defaultRolePanels[index], index)),
     welcomeFlow: normalizeDiscordWelcomeFlow(value.welcomeFlow ?? {}),
     presence: normalizeDiscordPresence(value.presence ?? {}),
+    craftPlanReports: normalizeCraftPlanReportSettings(value.craftPlanReports ?? {}),
     notify: {
       marketListings: false,
       marketSales: notify.marketSales !== false,

@@ -316,6 +316,16 @@ export function createPreparedStatements(db) {
   discordNotificationOutboxCounts: db.prepare("SELECT status, COUNT(*) AS count FROM discord_notification_outbox GROUP BY status"),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
   pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
+  claimDiscordCraftPlanReportOccurrence: db.prepare(`
+    INSERT OR IGNORE INTO discord_craft_plan_report_occurrences
+      (rule_id, occurrence_key, scheduled_at, status, created_at, updated_at)
+    VALUES (?, ?, ?, 'claimed', ?, ?)
+  `),
+  getDiscordCraftPlanReportOccurrence: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ?"),
+  deleteDiscordCraftPlanReportOccurrence: db.prepare("DELETE FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ? AND status = 'claimed'"),
+  updateDiscordCraftPlanReportOccurrence: db.prepare("UPDATE discord_craft_plan_report_occurrences SET status = ?, discord_message_id = ?, last_error = ?, updated_at = ? WHERE rule_id = ? AND occurrence_key = ?"),
+  recentDiscordCraftPlanReportOccurrences: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences ORDER BY scheduled_at DESC LIMIT ?"),
+  pruneDiscordCraftPlanReportOccurrences: db.prepare("DELETE FROM discord_craft_plan_report_occurrences WHERE scheduled_at < ? OR rowid NOT IN (SELECT rowid FROM discord_craft_plan_report_occurrences ORDER BY scheduled_at DESC LIMIT 1000)"),
   listDiscordYouTubeChannels: db.prepare("SELECT * FROM discord_youtube_channels ORDER BY title COLLATE NOCASE, channel_id"),
   getDiscordYouTubeChannel: db.prepare("SELECT * FROM discord_youtube_channels WHERE channel_id = ?"),
   upsertDiscordYouTubeChannel: db.prepare(`
