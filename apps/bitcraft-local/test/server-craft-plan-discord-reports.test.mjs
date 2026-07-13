@@ -14,10 +14,10 @@ import {
 } from "../src/server/craftPlanDiscordReports.mjs";
 
 const materials = [
-  { name: "Rough Wood Log", section: "Forestry", required: 100, available: 40, inProgress: 10, plannedOutput: 0, missing: 50 },
-  { name: "Fine Wood Log", section: "Forestry", required: 20, available: 20, inProgress: 0, plannedOutput: 0, missing: 0, hasRecipeUsages: true },
-  { name: "Simple Plank", section: "Carpentry", required: 50, available: 10, inProgress: 5, plannedOutput: 0, missing: 35 },
-  { name: "Thread", section: "Tailor", sectionOverride: "Tailoring", required: 10, available: 0, inProgress: 0, plannedOutput: 0, missing: 10 },
+  { name: "Rough Wood Log", section: "Forestry", required: 100, available: 40, inProgress: 10, missing: 50 },
+  { name: "Fine Wood Log", section: "Forestry", required: 20, available: 20, inProgress: 0, missing: 0, hasRecipeUsages: true },
+  { name: "Simple Plank", section: "Carpentry", required: 50, available: 10, inProgress: 5, missing: 35 },
+  { name: "Thread", section: "Tailor", sectionOverride: "Tailoring", required: 10, available: 0, inProgress: 0, missing: 10 },
 ];
 
 test("craft planner Discord overview reports weighted progress and largest shortages", () => {

@@ -286,8 +286,8 @@ test("buildNeedsBoard merges known cloth rows and Tailoring API fallbacks into o
 
 test("buildNeedsBoard calculates section completion from required and covered quantities", () => {
   const board = buildNeedsBoard([
-    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, available: 75, inProgress: 5, plannedOutput: 0, missing: 20 },
-    { key: "items:2", name: "Simple Plank", tag: "Plank", tier: 2, section: "Carpentry", required: 100, available: 100, inProgress: 0, plannedOutput: 0, missing: 0, recipeUsages: [{}] },
+    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, available: 75, inProgress: 5, missing: 20 },
+    { key: "items:2", name: "Simple Plank", tag: "Plank", tier: 2, section: "Carpentry", required: 100, available: 100, inProgress: 0, missing: 0, recipeUsages: [{}] },
   ], []);
 
   assert.equal(board[0].required, 200);
