@@ -48,7 +48,7 @@ test("compactCraftPlanResponse keeps live board values without nested drilldown 
   const material = { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, plannedOutput: 10, missing: 40, sources: [{ quantity: 30 }], activeCraftSources: [{ quantity: 20 }], sourceRoutes: [{ id: "route" }], recipeUsages: [{ outputKey: "items:2" }] };
   const compact = compactCraftPlanResponse({ enabled: true, materials: [material], steps: [{ output: material }], gatherNext: [{ section: "Tailoring", items: [material] }], totals: { missingItems: 1 } });
 
-  assert.deepEqual(compact.materials[0], { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, plannedOutput: 10, missing: 40 });
+  assert.deepEqual(compact.materials[0], { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, plannedOutput: 10, missing: 40, hasSourceRoutes: true, hasRecipeUsages: true });
   assert.deepEqual(compact.steps, []);
   assert.deepEqual(compact.gatherNext[0].items[0], compact.materials[0]);
   assert.equal(compact.totals.missingItems, 1);

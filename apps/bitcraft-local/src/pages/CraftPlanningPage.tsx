@@ -40,7 +40,7 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   const satisfied = cell.missing <= 0;
   const hasActive = cell.inProgress > 0;
   const supplied = cell.available + cell.inProgress + cell.plannedOutput;
-  const blocked = !satisfied && cell.items.some((item) => Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0) && supplied <= 0;
+  const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && supplied <= 0;
   return (
     <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active, ${quantity(cell.plannedOutput)} from planned secondary outputs, ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
       <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>

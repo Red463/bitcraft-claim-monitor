@@ -108,9 +108,9 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     if (taxonomy.hidden) continue;
     const missing = Number(material.missing) || 0;
     const required = Number(material.bufferedRequired ?? material.required) || 0;
-    const recipeUsages = Array.isArray(material.recipeUsages) ? material.recipeUsages : [];
+    const hasRecipeUsages = Boolean(material.hasRecipeUsages || (Array.isArray(material.recipeUsages) && material.recipeUsages.length > 0));
     if (material.isTarget || targetKeys.has(itemKey(material))) continue;
-    if (required <= 0 || (missing <= 0 && recipeUsages.length === 0)) continue;
+    if (required <= 0 || (missing <= 0 && !hasRecipeUsages)) continue;
     const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
     const section = sectionOverride || taxonomy.section || String(material.section ?? "Other");
     const apiName = rowNameForNeed(material);

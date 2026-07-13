@@ -256,5 +256,6 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /\/craft-plan\/detail\?claimId=/);
   assert.match(page, /detailLoading/);
   assert.match(page, /groupNeedCellSourceRoutes\(selectedNeed, detailSteps\)/);
+  assert.match(page, /item\.hasSourceRoutes/);
   assert.match(bitjita, /activePanel === "planning"/);
 });

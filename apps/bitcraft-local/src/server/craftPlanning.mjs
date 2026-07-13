@@ -1293,7 +1293,11 @@ export function computeCraftPlan({
 
 function compactCraftPlanItem(item = {}) {
   const { sources, activeCraftSources, sourceRoutes, recipeUsages, ...summary } = item;
-  return summary;
+  return {
+    ...summary,
+    hasSourceRoutes: Boolean(item.hasSourceRoutes || sourceRoutes?.length),
+    hasRecipeUsages: Boolean(item.hasRecipeUsages || recipeUsages?.length),
+  };
 }
 
 function craftPlanItemKey(item = {}) {

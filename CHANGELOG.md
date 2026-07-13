@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.52] - 2026-07-13
+
+### Fixed
+
+- Restored completed prerequisite quantities and blocked-recipe indicators on the Craft Planning Needs Board while retaining compact live refreshes.
+
 ## [0.32.0-beta.51] - 2026-07-13
 
 ### Changed

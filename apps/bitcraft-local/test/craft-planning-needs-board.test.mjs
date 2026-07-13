@@ -201,6 +201,26 @@ test("buildNeedsBoard uses row name overrides without changing the stable row ke
   assert.equal(board[0].rows[0].cells.get("T2")?.name, "Refined Simple Plank");
 });
 
+test("buildNeedsBoard keeps satisfied prerequisites represented by a compact usage flag", () => {
+  const board = buildNeedsBoard([{
+    key: "items:102001",
+    id: "102001",
+    kind: "items",
+    name: "Simple Plank",
+    tag: "Plank",
+    tier: 1,
+    section: "Carpentry",
+    required: 1880,
+    available: 2500,
+    inProgress: 0,
+    missing: 0,
+    hasRecipeUsages: true,
+  }], []);
+
+  assert.equal(board.length, 1);
+  assert.equal(board[0].rows[0].cells.get("T1")?.available, 2500);
+});
+
 test("buildNeedsBoard applies canonical operational rows and hides internal cycle intermediates", () => {
   const board = buildNeedsBoard([
     { key: "items:1", name: "Basic Wispweave Filament", tag: "Wispweave Filament", tier: 1, section: "Farming", required: 20, missing: 10 },
