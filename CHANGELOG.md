@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.56] - 2026-07-13
+
+### Changed
+
+- Changed Craft Planner coverage to count conservatively rounded estimates only from active crafts, including predictable crafting byproducts such as Straw, with estimated quantities labelled in the Needs Board, item details, and Discord reports.
+
+### Fixed
+
+- Stopped speculative gathering byproducts such as Gypsite and Resin from appearing as available or planned stock before they exist.
+
 ## [0.32.0-beta.55] - 2026-07-13
 
 ### Added
