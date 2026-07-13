@@ -970,6 +970,8 @@ function addSourceTotals(totals, sources, type, unavailable, quantityField = "qu
         label: String(source.label ?? item.buildingName ?? type),
         type,
         quantity,
+        expectedQuantity: item.quantity,
+        guaranteedQuantity: item.guaranteedQuantity,
         playerId: source.playerId == null ? item.playerId : String(source.playerId),
         playerName: source.playerName == null ? item.playerName : String(source.playerName),
         buildingName: source.buildingName == null ? item.buildingName : String(source.buildingName),
@@ -980,6 +982,23 @@ function addSourceTotals(totals, sources, type, unavailable, quantityField = "qu
       totals.set(item.key, current);
     }
   }
+}
+
+function countedActiveCraftTotals(expectedTotals, guaranteedTotals) {
+  const totals = new Map();
+  const keys = new Set([...expectedTotals.keys(), ...guaranteedTotals.keys()]);
+  for (const key of keys) {
+    const expected = Math.max(0, toNumber(expectedTotals.get(key)?.total));
+    const guaranteed = Math.max(0, toNumber(guaranteedTotals.get(key)?.total));
+    const total = Math.max(guaranteed, Math.floor(expected + 1e-9));
+    totals.set(key, {
+      total,
+      guaranteedTotal: guaranteed,
+      estimatedTotal: Math.max(0, total - guaranteed),
+      sources: expectedTotals.get(key)?.sources ?? guaranteedTotals.get(key)?.sources ?? [],
+    });
+  }
+  return totals;
 }
 
 function groupGatherNext(materials) {
@@ -1020,7 +1039,7 @@ function addFishingCatalogWarning(warnings, message) {
   else if (Array.isArray(warnings)) warnings.push(message);
 }
 
-function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotals, guaranteedActiveTotals, warnings) {
+function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotals, activeCraftTotals, warnings) {
   const routes = {
     ocean: unavailableFishingRoute(),
     lake: unavailableFishingRoute(),
@@ -1046,6 +1065,7 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       buildingName: recipe.buildingName ?? recipe.building_name ?? null,
       selectedRecipeId: recipeId(recipe),
     };
+    const active = activeCraftTotals.get(recipeKey(route.input.kind, route.input.id));
     const routeAlternatives = recipes.filter((alternative) => {
       const alternativeInput = recipeInputs(alternative)[0];
       if (!alternativeInput) return false;
@@ -1069,22 +1089,25 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
       estimated: guaranteedYield <= 0,
       isProbabilistic: recipe.isProbabilistic === true,
       stockQuantity: routeStock(route, availableTotals),
-      trackedQuantity: routeStock(route, guaranteedActiveTotals),
+      trackedQuantity: active?.total ?? 0,
+      guaranteedTrackedQuantity: active?.guaranteedTotal ?? 0,
+      estimatedTrackedQuantity: active?.estimatedTotal ?? 0,
       sources: routeStockSources(route, availableTotals),
-      activeCraftSources: routeStockSources(route, guaranteedActiveTotals),
+      activeCraftSources: active?.sources ?? [],
       alternatives: routeAlternatives,
     };
   }
   return routes;
 }
 
-export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, multipliers = {}, warnings }) {
+export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals, multipliers = {}, warnings }) {
   const fishOilMaterials = (materials ?? []).filter((item) => String(item?.tag ?? "").toLowerCase().includes("fish oil"));
   return { tiers: fishOilMaterials.map((oil) => {
     const alternatives = recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
-    const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, guaranteedActiveTotals, warnings);
+    const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, activeCraftTotals, warnings);
     const verifiedRoutes = Object.values(routes).filter((route) => route.available);
-    const trackedOil = guaranteedActiveTotals.get(oil.key)?.total ?? 0;
+    const activeOil = activeCraftTotals.get(oil.key);
+    const trackedOil = activeOil?.total ?? 0;
     const availableOilEquivalent = oil.available + trackedOil + verifiedRoutes.reduce((total, route) => (
       total + (route.stockQuantity + route.trackedQuantity) * route.guaranteedYield
     ), 0);
@@ -1096,6 +1119,8 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
       requiredOil: oil.bufferedRequired,
       availableOil: oil.available,
       trackedOil,
+      guaranteedTrackedOil: activeOil?.guaranteedTotal ?? 0,
+      estimatedTrackedOil: activeOil?.estimatedTotal ?? 0,
       remainingOil,
       routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => {
         if (!route.available) return [family, route];
@@ -1150,6 +1175,7 @@ export function computeCraftPlan({
     error: String(source?.error ?? "Unable to load tracked crafts"),
   })));
 
+  const expectedActiveTotals = new Map();
   const guaranteedActiveTotals = new Map();
   const craftPlayerIds = new Set(normalized.sourceRules.craftPlayerIds.map(String));
   const activeCraftSources = (activeCrafts ?? [])
@@ -1166,10 +1192,12 @@ export function computeCraftPlan({
       completed: craft.completed === true,
       items: [craft],
     }));
+  addSourceTotals(expectedActiveTotals, activeCraftSources, "Active craft", unavailableSources, "quantity");
   addSourceTotals(guaranteedActiveTotals, activeCraftSources, "Active craft", unavailableSources, "guaranteedQuantity");
+  const countedActiveTotals = countedActiveCraftTotals(expectedActiveTotals, guaranteedActiveTotals);
 
   const effectiveStockTotals = new Map(availableTotals);
-  for (const [key, active] of guaranteedActiveTotals.entries()) {
+  for (const [key, active] of countedActiveTotals.entries()) {
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
@@ -1188,7 +1216,10 @@ export function computeCraftPlan({
     const multiplier = probabilistic ? normalized.multipliers[item.key]?.multiplier ?? 1 : 1;
     const bufferedRequired = item.required;
     const available = availableTotals.get(item.key)?.total ?? 0;
-    const inProgress = guaranteedActiveTotals.get(item.key)?.total ?? 0;
+    const active = countedActiveTotals.get(item.key);
+    const inProgress = active?.total ?? 0;
+    const guaranteedInProgress = active?.guaranteedTotal ?? 0;
+    const estimatedInProgress = active?.estimatedTotal ?? 0;
     const apiSection = item.section || sectionForMaterial(enrichedItem, null);
     const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
     const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;
@@ -1212,9 +1243,11 @@ export function computeCraftPlan({
       bufferedRequired,
       available,
       inProgress,
+      guaranteedInProgress,
+      estimatedInProgress,
       missing: Math.max(0, bufferedRequired - available - inProgress),
       sources: availableTotals.get(item.key)?.sources ?? [],
-      activeCraftSources: guaranteedActiveTotals.get(item.key)?.sources ?? [],
+      activeCraftSources: active?.sources ?? [],
       sourceRoutes,
       recipeUsages: usages.get(item.key) ?? [],
     };
@@ -1224,15 +1257,24 @@ export function computeCraftPlan({
     if (target.kind === "building") {
       const progress = normalized.buildingProgress[recipeKey(target.kind, target.id)];
       const available = Math.min(target.quantity, progress?.completedEntityIds?.length ?? 0);
-      return { ...target, available, inProgress: 0, missing: Math.max(0, target.quantity - available), progressInitialized: Boolean(progress) };
+      return { ...target, available, inProgress: 0, guaranteedInProgress: 0, estimatedInProgress: 0, missing: Math.max(0, target.quantity - available), progressInitialized: Boolean(progress) };
     }
     const material = materials.find((item) => item.key === recipeKey(target.kind, target.id));
     const enrichedTarget = enrichDisplayFromDetails(target, detailsByKey);
-    return { ...target, ...enrichedTarget, quantity: target.quantity, missing: material?.missing ?? 0, available: material?.available ?? 0, inProgress: material?.inProgress ?? 0 };
+    return {
+      ...target,
+      ...enrichedTarget,
+      quantity: target.quantity,
+      missing: material?.missing ?? 0,
+      available: material?.available ?? 0,
+      inProgress: material?.inProgress ?? 0,
+      guaranteedInProgress: material?.guaranteedInProgress ?? 0,
+      estimatedInProgress: material?.estimatedInProgress ?? 0,
+    };
   });
 
   const personalViews = {
-    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, guaranteedActiveTotals, multipliers: normalized.multipliers, warnings }),
+    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals: countedActiveTotals, multipliers: normalized.multipliers, warnings }),
   };
 
   return {

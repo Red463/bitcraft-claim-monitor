@@ -434,7 +434,7 @@ test("personal fishing view applies chance buffers to probabilistic fish inputs 
   assert.equal(tier.routes.lake.multiplier, 1);
 });
 
-test("personal fishing view does not deduct expected tracked oil without a guaranteed output", () => {
+test("personal fishing view counts expected output from a real tracked craft", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
       enabled: true,
@@ -454,10 +454,12 @@ test("personal fishing view does not deduct expected tracked oil without a guara
   });
 
   const tier = plan.personalViews.fishing.tiers[0];
-  assert.equal(plan.materials.find((material) => material.id === "1900")?.inProgress, 0);
-  assert.equal(tier.trackedOil, 0);
-  assert.equal(tier.remainingOil, 10);
-  assert.equal(tier.routes.ocean.needed, 4);
+  assert.equal(plan.materials.find((material) => material.id === "1900")?.inProgress, 5);
+  assert.equal(plan.materials.find((material) => material.id === "1900")?.guaranteedInProgress, 0);
+  assert.equal(plan.materials.find((material) => material.id === "1900")?.estimatedInProgress, 5);
+  assert.equal(tier.trackedOil, 5);
+  assert.equal(tier.remainingOil, 5);
+  assert.equal(tier.routes.ocean.needed, 2);
 
   const guaranteedPlan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -468,11 +470,13 @@ test("personal fishing view does not deduct expected tracked oil without a guara
     detailsByKey: fishingPreferenceDetails(),
     activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 5, guaranteedQuantity: 2, name: "Basic Fish Oil" }],
   });
-  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.inProgress, 2);
-  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 8);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.inProgress, 5);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.guaranteedInProgress, 2);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.estimatedInProgress, 3);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 5);
 });
 
-test("active crafts without guaranteed quantity do not count expected output as authoritative coverage", () => {
+test("active crafts without guaranteed quantity count conservatively rounded expected output", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
       enabled: true,
@@ -484,8 +488,52 @@ test("active crafts without guaranteed quantity do not count expected output as 
   });
 
   const oil = plan.materials.find((material) => material.id === "1900");
-  assert.equal(oil?.inProgress, 0);
-  assert.equal(oil?.missing, 10);
+  assert.equal(oil?.inProgress, 5);
+  assert.equal(oil?.guaranteedInProgress, 0);
+  assert.equal(oil?.estimatedInProgress, 5);
+  assert.equal(oil?.missing, 5);
+});
+
+test("computeCraftPlan combines expected active-craft output before rounding down", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "9100", kind: "items", name: "Rough Straw", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["farmer"] },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "9100"), {
+      item: { id: "9100", name: "Rough Straw", itemType: 0, tag: "Straw", tier: 1 },
+    }]]),
+    activeCrafts: [
+      { id: "craft-a", playerId: "farmer", itemId: "9100", kind: "items", quantity: 0.6, guaranteedQuantity: 0, name: "Rough Straw" },
+      { id: "craft-b", playerId: "farmer", itemId: "9100", kind: "items", quantity: 0.6, guaranteedQuantity: 0, name: "Rough Straw" },
+    ],
+  });
+
+  const straw = plan.materials.find((material) => material.id === "9100");
+  assert.equal(straw?.inProgress, 1);
+  assert.equal(straw?.guaranteedInProgress, 0);
+  assert.equal(straw?.estimatedInProgress, 1);
+  assert.equal(straw?.missing, 9);
+});
+
+test("computeCraftPlan never counts less than guaranteed active output", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "9200", kind: "items", name: "Basic Embergrain", quantity: 50, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["farmer"] },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "9200"), {
+      item: { id: "9200", name: "Basic Embergrain", itemType: 0, tag: "Grain Plant", tier: 1 },
+    }]]),
+    activeCrafts: [{ id: "craft", playerId: "farmer", itemId: "9200", kind: "items", quantity: 29.8, guaranteedQuantity: 30, name: "Basic Embergrain" }],
+  });
+
+  const grain = plan.materials.find((material) => material.id === "9200");
+  assert.equal(grain?.inProgress, 30);
+  assert.equal(grain?.guaranteedInProgress, 30);
+  assert.equal(grain?.estimatedInProgress, 0);
 });
 
 test("normalized local fishing distributions retain guaranteed route yields end to end", (t) => {

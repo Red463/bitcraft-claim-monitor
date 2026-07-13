@@ -86,6 +86,36 @@ test("trackedCraftPlanOutputs keeps expected output without guaranteeing a parti
   assert.equal(oil?.guaranteedQuantity, 0);
 });
 
+test("trackedCraftPlanOutputs estimates Straw from active Embergrain processing", () => {
+  const payload = {
+    craftResults: [{
+      entityId: "craft-embergrain",
+      ownerEntityId: "player-farmer",
+      ownerUsername: "Farmer",
+      buildingName: "Basic Farming Station",
+      craftCount: 10,
+      craftedItem: [{ item_id: 3200001, quantity: 1, item_type: "item" }],
+    }],
+    items: [{ id: 3200001, name: "Basic Embergrain Products", tier: 1, tag: "Grain Output" }],
+  };
+  const detailsByKey = new Map([["items:3200001", {
+    item: payload.items[0],
+    itemListPossibilities: [{
+      targetId: "straw",
+      targetItem: { id: "straw", name: "Rough Straw", tier: 1, tag: "Straw" },
+      quantity: 0.2,
+      chance: 1,
+      guaranteedQuantity: 0,
+    }],
+  }]]);
+
+  const straw = trackedCraftPlanOutputs([payload], detailsByKey).find((output) => output.itemId === "straw");
+
+  assert.equal(straw?.quantity, 2);
+  assert.equal(straw?.guaranteedQuantity, 0);
+  assert.equal(straw?.buildingName, "Basic Farming Station");
+});
+
 test("playerInventoryContainerSources reads wrapped BitJita inventories and separates player storage", () => {
   const result = playerInventoryContainerSources("player-1", "Modular", {
     data: {
