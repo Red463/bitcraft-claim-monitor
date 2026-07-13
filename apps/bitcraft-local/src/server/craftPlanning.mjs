@@ -1255,7 +1255,7 @@ export function computeCraftPlan({
 }
 
 function compactCraftPlanItem(item = {}) {
-  const { sources, activeCraftSources, sourceRoutes, recipeUsages, ...summary } = item;
+  const { sources, activeCraftSources, sourceRoutes, recipeUsages, plannedOutput, ...summary } = item;
   return {
     ...summary,
     hasSourceRoutes: Boolean(item.hasSourceRoutes || sourceRoutes?.length),

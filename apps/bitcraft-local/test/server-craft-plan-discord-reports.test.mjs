@@ -65,6 +65,16 @@ test("craft planner Discord reports use the same gathered-input taxonomy as the 
   assert.equal(report.shortages[0].name, "Rough Wood Log");
 });
 
+test("craft planner Discord reports ignore legacy planned output coverage", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: [{ name: "Sturdy Gypsite", tag: "Gypsite", tier: 3, required: 78, available: 0, inProgress: 0, plannedOutput: 25.52, missing: 78, recipeUsages: [{}] }],
+  });
+
+  assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0 });
+});
+
 test("craft planner Discord reports expose disabled, empty, complete, and unknown profession states", () => {
   assert.equal(buildCraftPlanDiscordReport({ enabled: false }).state, "disabled");
   assert.equal(buildCraftPlanDiscordReport({ enabled: true, materials: [], targets: [] }).state, "empty");

@@ -35,7 +35,7 @@ function summarize(materials) {
   const required = materials.reduce((sum, item) => sum + Math.max(0, number(item.bufferedRequired ?? item.required)), 0);
   const covered = materials.reduce((sum, item) => {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
-    return sum + Math.min(itemRequired, Math.max(0, number(item.available) + number(item.inProgress) + number(item.plannedOutput)));
+    return sum + Math.min(itemRequired, Math.max(0, number(item.available) + number(item.inProgress)));
   }, 0);
   return { required, covered, completion: required > 0 ? roundPercent((covered / required) * 100) : 100 };
 }
