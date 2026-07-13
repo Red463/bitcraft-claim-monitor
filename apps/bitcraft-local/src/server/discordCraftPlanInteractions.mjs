@@ -32,6 +32,31 @@ export function deferredDiscordInteractionResult(afterResponse) {
   };
 }
 
+export function runDiscordTaskAfterResponse(response, task) {
+  return new Promise((resolve, reject) => {
+    response.once("finish", () => {
+      void Promise.resolve().then(task).then(resolve, reject);
+    });
+  });
+}
+
+export function craftPlanInteractionDiagnostic({ report = {}, profession = "", durationMs = 0, response } = {}) {
+  const calculationFailed = Boolean(report.calculationError);
+  return {
+    status: calculationFailed ? "failed" : "sent",
+    eventType: "craft_plan_command",
+    summary: report.title || "On-demand Craft Planner report",
+    reason: "On-demand Craft Planner report",
+    ...(calculationFailed ? { error: report.calculationError } : {}),
+    metadata: {
+      profession: profession || "overview",
+      durationMs,
+      deliveryOutcome: calculationFailed ? "unavailable_report_sent" : "report_sent",
+    },
+    response: { id: response?.id, channel_id: response?.channel_id },
+  };
+}
+
 export async function editDiscordInteractionOriginal({
   applicationId,
   interactionToken,

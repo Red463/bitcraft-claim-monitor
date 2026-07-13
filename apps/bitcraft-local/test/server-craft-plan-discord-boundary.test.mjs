@@ -18,7 +18,7 @@ test("Craft Planner commands acknowledge before calculating and run after the re
   assert.match(server, /preflightCraftPlanInteraction/);
   assert.match(server, /deferredDiscordInteractionResult/);
   assert.match(server, /editDiscordInteractionOriginal/);
-  assert.match(server, /res\.once\("finish",/);
+  assert.match(server, /runDiscordTaskAfterResponse\(res, result\.afterResponse\)/);
   assert.match(server, /eventType: "craft_plan_command"/);
   assert.doesNotMatch(server, /Promise\.race\(\[command/);
   assert.doesNotMatch(server, /Deferred Craft Planner report command failed/);

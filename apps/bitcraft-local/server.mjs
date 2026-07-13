@@ -43,7 +43,7 @@ import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, compactCraftPlanResponse, computeCraftPlan, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
-import { deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction } from "./src/server/discordCraftPlanInteractions.mjs";
+import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
@@ -2278,8 +2278,11 @@ async function craftPlanDiscordReport(profession = "") {
   try {
     const plan = await computedCraftPlanResponse(getSettings().claimId);
     return buildCraftPlanDiscordReport(plan, profession);
-  } catch {
-    return buildUnavailableCraftPlanDiscordReport();
+  } catch (error) {
+    return {
+      ...buildUnavailableCraftPlanDiscordReport(),
+      calculationError: redactServerHealthText(error instanceof Error ? error.message : String(error)).slice(0, 500),
+    };
   }
 }
 
@@ -8527,14 +8530,12 @@ async function deliverDeferredCraftPlanInteraction(interaction, profession = "")
       interactionToken: interaction.token,
       data: { embeds: payload.embeds },
     });
-    recordDiscordDeliverySafe({
-      status: "sent",
-      eventType: "craft_plan_command",
-      summary: report.title,
-      reason: "On-demand Craft Planner report",
-      metadata: { profession: profession || "overview", durationMs: Date.now() - startedAt },
-      response: { id: response?.id, channel_id: response?.channel_id },
-    });
+    recordDiscordDeliverySafe(craftPlanInteractionDiagnostic({
+      report,
+      profession,
+      durationMs: Date.now() - startedAt,
+      response,
+    }));
   } catch (error) {
     const message = redactServerHealthText(error instanceof Error ? error.message : String(error)).slice(0, 500);
     recordDiscordDeliverySafe({
@@ -9064,10 +9065,8 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
       const result = await handleDiscordInteraction(req);
       if (typeof result.afterResponse === "function") {
-        res.once("finish", () => {
-          void Promise.resolve(result.afterResponse()).catch((error) => {
-            console.warn(`Discord post-response task failed: ${redactServerHealthText(error instanceof Error ? error.message : String(error))}`);
-          });
+        void runDiscordTaskAfterResponse(res, result.afterResponse).catch((error) => {
+          console.warn(`Discord post-response task failed: ${redactServerHealthText(error instanceof Error ? error.message : String(error))}`);
         });
       }
       return send(res, result.status, result.body);

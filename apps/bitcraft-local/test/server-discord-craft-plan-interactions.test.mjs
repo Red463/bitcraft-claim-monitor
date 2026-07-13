@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 let interactions = {};
@@ -32,10 +33,16 @@ test("authorized Craft Planner commands defer before slow report work starts", a
   });
   assert.equal(workStarted, false);
 
-  const afterResponse = result.afterResponse();
+  assert.equal(typeof interactions.runDiscordTaskAfterResponse, "function");
+  const response = new EventEmitter();
+  const completed = interactions.runDiscordTaskAfterResponse(response, result.afterResponse);
+  await Promise.resolve();
+  assert.equal(workStarted, false);
+  response.emit("finish");
+  await Promise.resolve();
   assert.equal(workStarted, true);
   releaseWork();
-  await afterResponse;
+  await completed;
 });
 
 test("Craft Planner command preflight allows administrators and rejects unauthorized members", () => {
@@ -121,4 +128,29 @@ test("interaction webhook network failures are replaced with a token-safe error"
       return true;
     },
   );
+});
+
+test("calculation failures remain user-safe while diagnostics record the failure", () => {
+  assert.equal(typeof interactions.craftPlanInteractionDiagnostic, "function");
+  assert.deepEqual(interactions.craftPlanInteractionDiagnostic({
+    report: {
+      title: "Crafting Progress",
+      calculationError: "BitJita request failed",
+    },
+    profession: "Farming",
+    durationMs: 3210,
+    response: { id: "message-1", channel_id: "channel-1" },
+  }), {
+    status: "failed",
+    eventType: "craft_plan_command",
+    summary: "Crafting Progress",
+    reason: "On-demand Craft Planner report",
+    error: "BitJita request failed",
+    metadata: {
+      profession: "Farming",
+      durationMs: 3210,
+      deliveryOutcome: "unavailable_report_sent",
+    },
+    response: { id: "message-1", channel_id: "channel-1" },
+  });
 });
