@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.53] - 2026-07-13
+
+### Fixed
+
+- Restored contribution leaderboard updates by persisting live craft contribution rows during background collection.
+
 ## [0.32.0-beta.52] - 2026-07-13
 
 ### Fixed

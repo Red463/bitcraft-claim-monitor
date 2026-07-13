@@ -65,6 +65,8 @@ test("production activity rows are not gated by contribution sync cadence", () =
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
   assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
   assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
+  assert.match(contributionFunction, /currentData\.contributions/);
+  assert.match(source, /Live craft contributions were available but none could be persisted/);
   assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
 

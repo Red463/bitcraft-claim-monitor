@@ -4895,13 +4895,16 @@ function craftContributionRecord(claimId, craft, contribution, catalog, observed
   };
 }
 
-async function collectProductionContributionRecords(claimId, craftsPayload, observedAt) {
+async function collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, observedAt) {
   const crafts = unwrap(craftsPayload, "craftResults", []).filter((craft) => craft?.entityId);
   const catalog = craftOutputCatalog(craftsPayload);
   const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
     try {
-      const contributions = await fetchCachedCraftContributions(craft.entityId);
-      return contributions
+      const craftId = String(craft.entityId);
+      const contributions = Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)
+        ? contributionsByCraft[craftId]
+        : await fetchCachedCraftContributions(craftId);
+      return (Array.isArray(contributions) ? contributions : [])
         .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
         .filter(Boolean);
     } catch {
@@ -5085,9 +5088,13 @@ async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now)
   }
 }
 
-async function syncProductionContributionsForSnapshot(claimId, craftsPayload, now) {
+async function syncProductionContributionsForSnapshot(claimId, craftsPayload, contributionsByCraft, now) {
   if (!craftsPayload) return;
-  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, now);
+  const liveContributionCount = Object.values(contributionsByCraft ?? {}).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
+  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, now);
+  if (liveContributionCount > 0 && productionContributionRecords.length === 0) {
+    throw new Error("Live craft contributions were available but none could be persisted");
+  }
   db.exec("BEGIN");
   try {
     persistProductionContributions(productionContributionRecords);
@@ -7372,7 +7379,7 @@ async function runProductionContributionCollector(claimId, currentData, force = 
   if (!sideEffectCollectorDue("productionContributions", force)) return;
   const startedAt = collectorAttempt("productionContributions");
   try {
-    await syncProductionContributionsForSnapshot(claimId, currentData.crafts, new Date().toISOString());
+    await syncProductionContributionsForSnapshot(claimId, currentData.crafts, currentData.contributions, new Date().toISOString());
     collectorSuccess("productionContributions", startedAt);
   } catch (error) {
     collectorFailure("productionContributions", startedAt, error);
