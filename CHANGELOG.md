@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.57] - 2026-07-13
+
+### Changed
+
+- Improved Discord Craft Planner reports with quantity-weighted progress, completed requirement counts, a three-column profession overview, and clearer shortage summaries.
+
+### Fixed
+
+- Fixed `/craft-plan` timing out during slower calculations by acknowledging the command before loading live planner data.
+
 ## [0.32.0-beta.56] - 2026-07-13
 
 ### Changed
