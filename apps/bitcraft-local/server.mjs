@@ -23,7 +23,7 @@ import { publicNotificationActivityEvent } from "./src/server/notificationActivi
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
-import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey } from "./src/server/productionActivity.mjs";
+import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
 import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
 import {
   GAME_CATALOG_NORMALIZATION_VERSION,
@@ -4853,8 +4853,7 @@ function craftOutputCatalog(craftsPayload) {
 }
 
 function craftPrimarySkill(craft) {
-  const skillId = toNumber(craft.levelRequirements?.[0]?.skill_id ?? craft.experiencePerProgress?.[0]?.skill_id);
-  return skillId ? skillNames[skillId] ?? `Profession ${skillId}` : "";
+  return productionMetrics(craft).skillName;
 }
 
 function craftExperiencePerProgress(craft) {
@@ -4899,17 +4898,13 @@ async function collectProductionContributionRecords(claimId, craftsPayload, cont
   const crafts = unwrap(craftsPayload, "craftResults", []).filter((craft) => craft?.entityId);
   const catalog = craftOutputCatalog(craftsPayload);
   const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
-    try {
-      const craftId = String(craft.entityId);
-      const contributions = Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)
-        ? contributionsByCraft[craftId]
-        : await fetchCachedCraftContributions(craftId);
-      return (Array.isArray(contributions) ? contributions : [])
-        .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
+    const craftId = String(craft.entityId);
+    const contributions = Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)
+      ? contributionsByCraft[craftId]
+      : await fetchCachedCraftContributions(craftId);
+    return (Array.isArray(contributions) ? contributions : [])
+      .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
+      .filter(Boolean);
   });
   return entries.flat();
 }

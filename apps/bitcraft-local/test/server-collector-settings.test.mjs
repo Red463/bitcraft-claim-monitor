@@ -67,6 +67,10 @@ test("production activity rows are not gated by contribution sync cadence", () =
   assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
   assert.match(contributionFunction, /currentData\.contributions/);
   assert.match(source, /Live craft contributions were available but none could be persisted/);
+  assert.match(source, /import \{[^}]*productionMetrics[^}]*\} from "\.\/src\/server\/productionActivity\.mjs"/);
+  assert.match(source, /function craftPrimarySkill\(craft\) \{\s*return productionMetrics\(craft\)\.skillName;/);
+  assert.doesNotMatch(source, /return skillId \? skillNames\[skillId\]/);
+  assert.doesNotMatch(source, /catch \{\s*return \[\];\s*\}/);
   assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
 

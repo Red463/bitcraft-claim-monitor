@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.54] - 2026-07-13
+
+### Fixed
+
+- Fixed contribution profession mapping so live contribution records persist to the leaderboard instead of being silently discarded.
+
 ## [0.32.0-beta.53] - 2026-07-13
 
 ### Fixed
