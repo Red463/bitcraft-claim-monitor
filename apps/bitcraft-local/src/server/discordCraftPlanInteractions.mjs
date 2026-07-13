@@ -41,14 +41,19 @@ export async function editDiscordInteractionOriginal({
   const appId = String(applicationId ?? "").trim();
   const token = String(interactionToken ?? "").trim();
   if (!appId || !token) throw new Error("Discord interaction webhook context is unavailable");
-  const response = await fetchImpl(
-    `https://discord.com/api/v10/webhooks/${encodeURIComponent(appId)}/${encodeURIComponent(token)}/messages/@original`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...(data ?? {}), allowed_mentions: { parse: [] } }),
-    },
-  );
+  let response;
+  try {
+    response = await fetchImpl(
+      `https://discord.com/api/v10/webhooks/${encodeURIComponent(appId)}/${encodeURIComponent(token)}/messages/@original`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...(data ?? {}), allowed_mentions: { parse: [] } }),
+      },
+    );
+  } catch {
+    throw new Error("Discord interaction webhook request failed");
+  }
   if (!response.ok) throw new Error(`Discord interaction webhook HTTP ${response.status}`);
   const text = await response.text();
   return text ? JSON.parse(text) : null;

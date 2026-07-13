@@ -106,3 +106,19 @@ test("interaction webhook errors never expose interaction tokens", async () => {
     },
   );
 });
+
+test("interaction webhook network failures are replaced with a token-safe error", async () => {
+  await assert.rejects(
+    interactions.editDiscordInteractionOriginal({
+      applicationId: "123456789012345678",
+      interactionToken: "interaction-secret",
+      data: {},
+      fetchImpl: async () => { throw new Error("fetch interaction-secret failed"); },
+    }),
+    (error) => {
+      assert.equal(error.message, "Discord interaction webhook request failed");
+      assert.doesNotMatch(error.message, /interaction-secret/);
+      return true;
+    },
+  );
+});

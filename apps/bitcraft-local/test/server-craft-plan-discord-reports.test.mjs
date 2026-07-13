@@ -24,11 +24,11 @@ test("craft planner Discord overview reports weighted progress and largest short
   const report = buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{ name: "Township" }], totals: { calculatedAt: "2026-07-13T12:00:00.000Z" } });
 
   assert.equal(report.state, "ready");
-  assert.deepEqual(report.overall, { required: 180, covered: 85, completion: 47.2 });
-  assert.deepEqual(report.professions.map(({ name, completion }) => [name, completion]), [
-    ["Carpentry", 30],
-    ["Forestry", 58.3],
-    ["Tailoring", 0],
+  assert.deepEqual(report.overall, { required: 180, covered: 85, completion: 47.2, completedItems: 1, totalItems: 4 });
+  assert.deepEqual(report.professions.map(({ name, completion, completedItems, totalItems }) => [name, completion, completedItems, totalItems]), [
+    ["Carpentry", 30, 0, 1],
+    ["Forestry", 58.3, 1, 2],
+    ["Tailoring", 0, 0, 1],
   ]);
   assert.deepEqual(report.shortages.map(({ name, missing }) => [name, missing]), [
     ["Rough Wood Log", 50],
@@ -61,7 +61,7 @@ test("craft planner Discord reports use the same gathered-input taxonomy as the 
   }, "forestry");
 
   assert.equal(report.profession, "Forestry");
-  assert.deepEqual(report.overall, { required: 100, covered: 25, completion: 25 });
+  assert.deepEqual(report.overall, { required: 100, covered: 25, completion: 25, completedItems: 0, totalItems: 1 });
   assert.equal(report.shortages[0].name, "Rough Wood Log");
 });
 
@@ -72,7 +72,7 @@ test("craft planner Discord reports ignore legacy planned output coverage", () =
     materials: [{ name: "Sturdy Gypsite", tag: "Gypsite", tier: 3, required: 78, available: 0, inProgress: 0, plannedOutput: 25.52, missing: 78, recipeUsages: [{}] }],
   });
 
-  assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0 });
+  assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0, completedItems: 0, totalItems: 1 });
 });
 
 test("craft planner Discord reports disclose estimated active craft coverage", () => {
@@ -92,7 +92,7 @@ test("craft planner Discord reports disclose estimated active craft coverage", (
     }],
   });
 
-  assert.deepEqual(report.overall, { required: 10, covered: 5, completion: 50, estimatedCraftOutput: 2 });
+  assert.deepEqual(report.overall, { required: 10, covered: 5, completion: 50, completedItems: 0, totalItems: 1, estimatedCraftOutput: 2 });
   const payload = buildCraftPlanDiscordEmbed(report);
   assert.match(payload.embeds[0].description, /Includes \*\*2\*\* estimated items from active crafts\./);
 });
@@ -158,10 +158,32 @@ test("craft planner Discord embeds stay bounded and suppress mentions", () => {
 
   assert.equal(payload.allowed_mentions.parse.length, 0);
   assert.equal(payload.embeds.length, 1);
+  assert.equal(payload.embeds[0].title, "Crafting Progress");
   assert.match(payload.embeds[0].description, /47\.2%/);
-  assert.match(payload.embeds[0].description, /Carpentry/);
-  assert.match(payload.embeds[0].fields[0].value, /Rough Wood Log.*50/);
+  assert.match(payload.embeds[0].description, /85 of 180 units covered/);
+  assert.match(payload.embeds[0].description, /1 of 4 requirements complete/);
+  assert.match(payload.embeds[0].description, /Open Craft Planner/);
+  const professionFields = payload.embeds[0].fields.filter((field) => field.inline);
+  assert.deepEqual(professionFields.map((field) => field.name), ["Carpentry", "Forestry", "Tailoring"]);
+  assert.match(professionFields[0].value, /30\.0%[\s\S]*0\/1 requirements/);
+  assert.match(professionFields[1].value, /58\.3%[\s\S]*1\/2 requirements/);
+  const shortages = payload.embeds[0].fields.find((field) => field.name === "Most needed");
+  assert.equal(shortages.inline, false);
+  assert.match(shortages.value, /Rough Wood Log.*50/);
   assert.ok(JSON.stringify(payload).length < 6000);
+});
+
+test("profession Craft Planner embeds keep one focused summary without the overview grid", () => {
+  const report = buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{}] }, "forestry");
+  const payload = buildCraftPlanDiscordEmbed(report);
+  const embed = payload.embeds[0];
+
+  assert.equal(embed.title, "Forestry Progress");
+  assert.match(embed.description, /58\.3%/);
+  assert.match(embed.description, /1 of 2 requirements complete/);
+  assert.equal(embed.fields.some((field) => field.inline), false);
+  assert.equal(embed.fields[0].name, "Most needed");
+  assert.match(embed.fields[0].value, /Rough Wood Log/);
 });
 
 test("craft planner command allows the configured role or Discord administrators", () => {

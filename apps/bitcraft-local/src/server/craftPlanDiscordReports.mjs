@@ -37,6 +37,11 @@ function summarize(materials) {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
     return sum + Math.min(itemRequired, Math.max(0, number(item.available) + number(item.inProgress)));
   }, 0);
+  const completedItems = materials.filter((item) => {
+    const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
+    const itemCovered = Math.max(0, number(item.available) + number(item.inProgress));
+    return itemRequired > 0 && itemCovered >= itemRequired;
+  }).length;
   const estimatedCraftOutput = materials.reduce((sum, item) => {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
     const confirmedCoverage = Math.max(0, number(item.available) + number(item.guaranteedInProgress));
@@ -47,6 +52,8 @@ function summarize(materials) {
     required,
     covered,
     completion: required > 0 ? roundPercent((covered / required) * 100) : 100,
+    completedItems,
+    totalItems: materials.length,
     ...(estimatedCraftOutput > 0 ? { estimatedCraftOutput } : {}),
   };
 }
@@ -60,10 +67,10 @@ function relevantMaterials(plan = {}) {
 }
 
 export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "") {
-  if (!plan.enabled) return { state: "disabled", title: "Craft Planner Progress", message: "Craft Planner is disabled." };
-  if (!Array.isArray(plan.targets) || plan.targets.length === 0) return { state: "empty", title: "Craft Planner Progress", message: "Craft Planner has no configured targets." };
+  if (!plan.enabled) return { state: "disabled", title: "Crafting Progress", message: "Craft Planner is disabled." };
+  if (!Array.isArray(plan.targets) || plan.targets.length === 0) return { state: "empty", title: "Crafting Progress", message: "Craft Planner has no configured targets." };
   const profession = requestedProfession ? normalizeCraftPlanReportProfession(requestedProfession) : "";
-  if (requestedProfession && !profession) return { state: "unknown_profession", title: "Craft Planner Progress", message: "That profession is not available." };
+  if (requestedProfession && !profession) return { state: "unknown_profession", title: "Crafting Progress", message: "That profession is not available." };
 
   const all = relevantMaterials(plan);
   const selected = profession ? all.filter((material) => materialProfession(material) === profession) : all;
@@ -88,7 +95,7 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
 
   return {
     state: shortages.length === 0 ? "complete" : "ready",
-    title: profession ? `${profession} Progress` : "Craft Planner Progress",
+    title: profession ? `${profession} Progress` : "Crafting Progress",
     profession,
     overall,
     professions: profession ? professions.filter((entry) => entry.name === profession) : professions,
@@ -100,7 +107,7 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
 export function buildUnavailableCraftPlanDiscordReport() {
   return {
     state: "unavailable",
-    title: "Craft Planner Progress",
+    title: "Crafting Progress",
     message: "Craft Planner data is temporarily unavailable. Please try again shortly.",
   };
 }
@@ -208,33 +215,46 @@ function safeDiscordText(value, max = 100) {
   return String(value ?? "").replaceAll("@", "@\u200b").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max);
 }
 
-function progressBar(completion) {
-  const filled = Math.min(10, Math.max(0, Math.round(number(completion) / 10)));
-  return `${"█".repeat(filled)}${"░".repeat(10 - filled)}`;
+function progressBar(completion, segments = 10) {
+  const filled = Math.min(segments, Math.max(0, Math.round((number(completion) / 100) * segments)));
+  return `${"\u2588".repeat(filled)}${"\u2591".repeat(segments - filled)}`;
+}
+
+function progressSummary(summary, segments = 10) {
+  return `\`${progressBar(summary.completion, segments)}\` **${number(summary.completion).toFixed(1)}%**`;
 }
 
 export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https://app.timbersteeltrade.com/?page=planning" } = {}) {
   if (!report.overall) {
     return {
-      embeds: [{ title: safeDiscordText(report.title || "Craft Planner Progress", 256), description: safeDiscordText(report.message || "Craft Planner data is unavailable.", 4000), color: 0xf0c64f }],
+      embeds: [{ title: safeDiscordText(report.title || "Crafting Progress", 256), description: safeDiscordText(report.message || "Craft Planner data is unavailable.", 4000), color: 0xf0c64f }],
       allowed_mentions: { parse: [] },
     };
   }
-  const summary = `${progressBar(report.overall.completion)} **${report.overall.completion.toFixed(1)}%** (${Math.round(report.overall.covered).toLocaleString()}/${Math.round(report.overall.required).toLocaleString()})`;
-  const professionLines = report.profession ? [] : (report.professions ?? []).map((entry) => `${safeDiscordText(entry.name)} · ${progressBar(entry.completion)} **${entry.completion.toFixed(1)}%**`);
-  const shortages = (report.shortages ?? []).map((item) => `• **${safeDiscordText(item.name)}** — ${Math.ceil(item.missing).toLocaleString()} still needed`);
+  const summary = progressSummary(report.overall);
+  const coverage = `${Math.round(number(report.overall.covered)).toLocaleString()} of ${Math.round(number(report.overall.required)).toLocaleString()} units covered`;
+  const requirements = `${Math.round(number(report.overall.completedItems)).toLocaleString()} of ${Math.round(number(report.overall.totalItems)).toLocaleString()} requirements complete`;
+  const professionFields = report.profession ? [] : (report.professions ?? []).map((entry) => ({
+    name: safeDiscordText(entry.name),
+    value: `${progressSummary(entry, 8)}\n${Math.round(number(entry.completedItems)).toLocaleString()}/${Math.round(number(entry.totalItems)).toLocaleString()} requirements`.slice(0, 1024),
+    inline: true,
+  }));
+  const shortages = (report.shortages ?? []).map((item) => `\u2022 **${safeDiscordText(item.name)}** \u2014 **${Math.ceil(item.missing).toLocaleString()}** needed`);
   const estimateNote = number(report.overall.estimatedCraftOutput) > 0
-    ? `Includes **${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()}** estimated items from active crafts.`
+    ? `*Includes **${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()}** estimated items from active crafts.*`
     : "";
-  const description = [summary, estimateNote, professionLines.length ? `\n${professionLines.join("\n")}` : "", `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
+  const description = [summary, coverage, requirements, estimateNote, `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
   return {
     embeds: [{
-      title: safeDiscordText(report.title || "Craft Planner Progress", 256),
+      title: safeDiscordText(report.title || "Crafting Progress", 256),
       description,
       color: report.state === "complete" ? 0x4ee28a : 0xf0c64f,
-      fields: [{ name: shortages.length ? "Most needed" : "Status", value: (shortages.length ? shortages.join("\n") : "All tracked requirements are covered.").slice(0, 1024), inline: false }],
+      fields: [
+        ...professionFields,
+        { name: shortages.length ? "Most needed" : "Status", value: (shortages.length ? shortages.join("\n") : "All tracked requirements are covered.").slice(0, 1024), inline: false },
+      ],
       timestamp: report.calculatedAt || new Date().toISOString(),
-      footer: { text: "Timbersteel Trade · Craft Planner" },
+      footer: { text: "Timbersteel Trade \u00b7 Craft Planner" },
     }],
     allowed_mentions: { parse: [] },
   };
