@@ -75,6 +75,28 @@ test("craft planner Discord reports ignore legacy planned output coverage", () =
   assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0 });
 });
 
+test("craft planner Discord reports disclose estimated active craft coverage", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: [{
+      name: "Straw",
+      section: "Farming",
+      required: 10,
+      available: 2,
+      inProgress: 3,
+      guaranteedInProgress: 1,
+      estimatedInProgress: 2,
+      missing: 5,
+      recipeUsages: [{}],
+    }],
+  });
+
+  assert.deepEqual(report.overall, { required: 10, covered: 5, completion: 50, estimatedCraftOutput: 2 });
+  const payload = buildCraftPlanDiscordEmbed(report);
+  assert.match(payload.embeds[0].description, /Includes \*\*2\*\* estimated items from active crafts\./);
+});
+
 test("craft planner Discord reports expose disabled, empty, complete, and unknown profession states", () => {
   assert.equal(buildCraftPlanDiscordReport({ enabled: false }).state, "disabled");
   assert.equal(buildCraftPlanDiscordReport({ enabled: true, materials: [], targets: [] }).state, "empty");

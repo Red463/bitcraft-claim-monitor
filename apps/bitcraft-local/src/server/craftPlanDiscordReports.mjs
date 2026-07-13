@@ -37,7 +37,18 @@ function summarize(materials) {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
     return sum + Math.min(itemRequired, Math.max(0, number(item.available) + number(item.inProgress)));
   }, 0);
-  return { required, covered, completion: required > 0 ? roundPercent((covered / required) * 100) : 100 };
+  const estimatedCraftOutput = materials.reduce((sum, item) => {
+    const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
+    const confirmedCoverage = Math.max(0, number(item.available) + number(item.guaranteedInProgress));
+    const remainingAfterConfirmed = Math.max(0, itemRequired - confirmedCoverage);
+    return sum + Math.min(remainingAfterConfirmed, Math.max(0, number(item.estimatedInProgress)));
+  }, 0);
+  return {
+    required,
+    covered,
+    completion: required > 0 ? roundPercent((covered / required) * 100) : 100,
+    ...(estimatedCraftOutput > 0 ? { estimatedCraftOutput } : {}),
+  };
 }
 
 function relevantMaterials(plan = {}) {
@@ -212,7 +223,10 @@ export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https:
   const summary = `${progressBar(report.overall.completion)} **${report.overall.completion.toFixed(1)}%** (${Math.round(report.overall.covered).toLocaleString()}/${Math.round(report.overall.required).toLocaleString()})`;
   const professionLines = report.profession ? [] : (report.professions ?? []).map((entry) => `${safeDiscordText(entry.name)} · ${progressBar(entry.completion)} **${entry.completion.toFixed(1)}%**`);
   const shortages = (report.shortages ?? []).map((item) => `• **${safeDiscordText(item.name)}** — ${Math.ceil(item.missing).toLocaleString()} still needed`);
-  const description = [summary, professionLines.length ? `\n${professionLines.join("\n")}` : "", `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
+  const estimateNote = number(report.overall.estimatedCraftOutput) > 0
+    ? `Includes **${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()}** estimated items from active crafts.`
+    : "";
+  const description = [summary, estimateNote, professionLines.length ? `\n${professionLines.join("\n")}` : "", `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
   return {
     embeds: [{
       title: safeDiscordText(report.title || "Craft Planner Progress", 256),
