@@ -446,17 +446,29 @@ test("personal fishing view does not deduct expected tracked oil without a guara
       playerId: "player",
       itemId: "1900",
       kind: "items",
-      quantity: 2,
+      quantity: 5,
       guaranteedQuantity: 0,
       name: "Basic Fish Oil",
     }],
   });
 
   const tier = plan.personalViews.fishing.tiers[0];
-  assert.equal(plan.materials.find((material) => material.id === "1900")?.inProgress, 2);
+  assert.equal(plan.materials.find((material) => material.id === "1900")?.inProgress, 0);
   assert.equal(tier.trackedOil, 0);
   assert.equal(tier.remainingOil, 10);
   assert.equal(tier.routes.ocean.needed, 4);
+
+  const guaranteedPlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["player"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 5, guaranteedQuantity: 2, name: "Basic Fish Oil" }],
+  });
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.inProgress, 2);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 8);
 });
 
 test("normalized local fishing distributions retain guaranteed route yields end to end", (t) => {
@@ -686,7 +698,7 @@ test("computeCraftPlan counts completed uncollected Rough Plank and transitions 
   assert.equal(collectedPlank.missing, 0);
 });
 
-test("computeCraftPlan credits simultaneous farming co-products without recursive seed inflation", () => {
+test("computeCraftPlan does not credit unstarted farming co-products", () => {
   const filamentDetail = { item: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 } };
   const productsDetail = {
     item: { id: "1220023", name: "Basic Wispweave Products", itemType: 0, tag: "Wispweave Products", tier: 1 },
@@ -737,8 +749,8 @@ test("computeCraftPlan credits simultaneous farming co-products without recursiv
 
   assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Plant")?.required, 143);
   assert.equal(plan.materials.find((material) => material.name === "Basic Fertilizer")?.required, 143);
-  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Seeds")?.missing, 0);
-  assert.equal(plan.totals.missingQuantity, 1_001);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Wispweave Seeds")?.missing, 143);
+  assert.equal(plan.totals.missingQuantity, 1_144);
 });
 
 test("computeCraftPlan prefers same-tier seeds over plant tier-up recipes", () => {
@@ -964,7 +976,7 @@ test("computeCraftPlan stops cyclic production routes at the nearest source item
   assert.equal(plan.steps.length, 1);
 });
 
-test("computeCraftPlan credits planned secondary outputs before expanding their demand", () => {
+test("computeCraftPlan does not credit secondary outputs from recipes that have not started", () => {
   const assemblyDetail = {
     item: { id: "1000", name: "Assembly", itemType: 0, tag: "Assembly", tier: 1 },
     craftingRecipes: [{
@@ -1020,14 +1032,14 @@ test("computeCraftPlan credits planned secondary outputs before expanding their 
     ]),
   });
 
-  assert.equal(plan.materials.find((item) => item.name === "Binding")?.required, 5);
-  assert.equal(plan.materials.find((item) => item.name === "Binding")?.plannedOutput, 5);
-  assert.equal(plan.materials.find((item) => item.name === "Binding")?.missing, 0);
-  assert.equal(plan.materials.some((item) => item.name === "Binding Fibre"), false);
+  const binding = plan.materials.find((item) => item.name === "Binding");
+  assert.equal("plannedOutput" in binding, false);
+  assert.equal(binding?.missing, 5);
+  assert.equal(plan.materials.find((item) => item.name === "Binding Fibre")?.missing, 50);
   assert.equal(plan.materials.find((item) => item.name === "Raw Material")?.missing, 5);
 });
 
-test("computeCraftPlan nets planned secondary outputs across target branches regardless of target order", () => {
+test("computeCraftPlan does not net unstarted secondary outputs across target branches", () => {
   const bindingDetail = {
     item: { id: "1102", name: "Binding", itemType: 0, tag: "Binding", tier: 1 },
     craftingRecipes: [{
@@ -1080,9 +1092,10 @@ test("computeCraftPlan nets planned secondary outputs across target branches reg
     ]),
   });
 
-  assert.equal(plan.materials.find((item) => item.name === "Binding")?.plannedOutput, 5);
-  assert.equal(plan.materials.find((item) => item.name === "Binding")?.missing, 0);
-  assert.equal(plan.materials.some((item) => item.name === "Binding Fibre"), false);
+  const binding = plan.materials.find((item) => item.name === "Binding");
+  assert.equal("plannedOutput" in binding, false);
+  assert.equal(binding?.missing, 5);
+  assert.equal(plan.materials.find((item) => item.name === "Binding Fibre")?.missing, 50);
 });
 test("computeCraftPlan prefers loose-material routes over packaged transport routes", () => {
   const mixDetail = {

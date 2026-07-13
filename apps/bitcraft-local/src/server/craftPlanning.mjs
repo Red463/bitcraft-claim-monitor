@@ -573,22 +573,12 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   }];
 }
 
-function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map(), assumedPlannedOutputs = new Map()) {
+function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map()) {
   const required = new Map();
   const steps = [];
   const warnings = [];
   const usages = new Map();
-  const plannedOutputs = new Map();
   const remainingSupply = new Map([...effectiveStockTotals.entries()].map(([key, value]) => [key, Math.max(0, toNumber(value?.total))]));
-  for (const [key, quantity] of assumedPlannedOutputs.entries()) {
-    remainingSupply.set(key, (remainingSupply.get(key) ?? 0) + Math.max(0, toNumber(quantity)));
-  }
-
-  function creditPlannedOutput(output, quantity) {
-    if (!output?.id || quantity <= 0) return;
-    const key = recipeKey(output.kind, output.id);
-    plannedOutputs.set(key, (plannedOutputs.get(key) ?? 0) + quantity);
-  }
 
   function resolve(target, quantity, stack, parentRecipe) {
     const key = recipeKey(target.kind, target.id);
@@ -614,13 +604,6 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipli
     const unbufferedCraftCount = Math.ceil(quantityToCraft / outputPerCraft);
     const multiplier = selected.isProbabilistic === true ? multipliers[key]?.multiplier ?? 1 : 1;
     const craftCount = Math.ceil(quantityToCraft * multiplier / outputPerCraft);
-    const craftedStacks = recipeOutputs(selected);
-    const craftedDisplays = Array.isArray(selected.craftedItems) ? selected.craftedItems : [];
-    craftedStacks.forEach((craftedStack, index) => {
-      const crafted = enrichDisplayFromDetails(stackDisplay(craftedStack, craftedDisplays, index), detailsByKey);
-      if (recipeKey(crafted.kind, crafted.id) === key) return;
-      creditPlannedOutput(crafted, toNumber(craftedStack.quantity) * craftCount);
-    });
     const section = sectionForMaterial(normalizedTarget, selected);
     const visibleRecipes = routeAlternativesForUi(recipes, selected);
     const alternatives = visibleRecipes.map((recipe) => ({
@@ -695,26 +678,11 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipli
   }
 
   for (const target of targets) resolve(target, target.quantity, [], null);
-  return { required, steps, usages, plannedOutputs, warnings: [...new Set(warnings)] };
-}
-
-function plannedOutputMapsEqual(a, b) {
-  const keys = new Set([...a.keys(), ...b.keys()]);
-  for (const key of keys) {
-    if (Math.abs((a.get(key) ?? 0) - (b.get(key) ?? 0)) > 0.0001) return false;
-  }
-  return true;
+  return { required, steps, usages, warnings: [...new Set(warnings)] };
 }
 
 function buildRequirementMap(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map()) {
-  let assumedPlannedOutputs = new Map();
-  let result = null;
-  for (let pass = 0; pass < 8; pass += 1) {
-    result = buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals, assumedPlannedOutputs);
-    if (plannedOutputMapsEqual(assumedPlannedOutputs, result.plannedOutputs)) return result;
-    assumedPlannedOutputs = result.plannedOutputs;
-  }
-  return result ?? buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals);
+  return buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals);
 }
 
 
@@ -1182,7 +1150,6 @@ export function computeCraftPlan({
     error: String(source?.error ?? "Unable to load tracked crafts"),
   })));
 
-  const activeTotals = new Map();
   const guaranteedActiveTotals = new Map();
   const craftPlayerIds = new Set(normalized.sourceRules.craftPlayerIds.map(String));
   const activeCraftSources = (activeCrafts ?? [])
@@ -1199,16 +1166,15 @@ export function computeCraftPlan({
       completed: craft.completed === true,
       items: [craft],
     }));
-  addSourceTotals(activeTotals, activeCraftSources, "Active craft", unavailableSources);
   addSourceTotals(guaranteedActiveTotals, activeCraftSources, "Active craft", unavailableSources, "guaranteedQuantity");
 
   const effectiveStockTotals = new Map(availableTotals);
-  for (const [key, active] of activeTotals.entries()) {
+  for (const [key, active] of guaranteedActiveTotals.entries()) {
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
   }
   const calculationTargets = expandedPlanTargets(normalized.targets, normalized.buildingProgress);
-  const { required, steps, usages, plannedOutputs, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
+  const { required, steps, usages, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.filter((target) => target.kind !== "building").map((target) => recipeKey(target.kind, target.id)));
   for (const target of calculationTargets) {
@@ -1222,9 +1188,7 @@ export function computeCraftPlan({
     const multiplier = probabilistic ? normalized.multipliers[item.key]?.multiplier ?? 1 : 1;
     const bufferedRequired = item.required;
     const available = availableTotals.get(item.key)?.total ?? 0;
-    const inProgress = activeTotals.get(item.key)?.total ?? 0;
-    const rawPlannedOutput = plannedOutputs.get(item.key) ?? 0;
-    const plannedOutput = Math.min(rawPlannedOutput, Math.max(0, bufferedRequired - available - inProgress));
+    const inProgress = guaranteedActiveTotals.get(item.key)?.total ?? 0;
     const apiSection = item.section || sectionForMaterial(enrichedItem, null);
     const sectionOverrideKey = sectionOverrideKeyForItem({ ...item, ...enrichedItem });
     const sectionOverride = normalized.sectionOverrides[sectionOverrideKey] ?? null;
@@ -1248,10 +1212,9 @@ export function computeCraftPlan({
       bufferedRequired,
       available,
       inProgress,
-      plannedOutput,
-      missing: Math.max(0, bufferedRequired - available - inProgress - plannedOutput),
+      missing: Math.max(0, bufferedRequired - available - inProgress),
       sources: availableTotals.get(item.key)?.sources ?? [],
-      activeCraftSources: activeTotals.get(item.key)?.sources ?? [],
+      activeCraftSources: guaranteedActiveTotals.get(item.key)?.sources ?? [],
       sourceRoutes,
       recipeUsages: usages.get(item.key) ?? [],
     };
