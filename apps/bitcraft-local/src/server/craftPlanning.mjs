@@ -944,7 +944,7 @@ function normalizeSourceItem(item) {
     id,
     kind,
     quantity,
-    guaranteedQuantity: guaranteedQuantity == null ? quantity : Math.max(0, toNumber(guaranteedQuantity)),
+    guaranteedQuantity: guaranteedQuantity == null ? 0 : Math.max(0, toNumber(guaranteedQuantity)),
     name: item?.name == null ? `Item #${id}` : String(item.name),
     playerId: item?.playerId == null ? null : String(item.playerId),
     playerName: item?.playerName == null && item?.crafterName == null ? null : String(item.playerName ?? item.crafterName),

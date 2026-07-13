@@ -333,7 +333,7 @@ test("computeCraftPlan exposes ocean and lake personal views from one oil-equiva
       { id: "1901", kind: "items", name: "Briny Linus", quantity: 10 },
       { id: "1902", kind: "items", name: "Briny Argus", quantity: 10 },
     ] }],
-    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", name: "Basic Fish Oil", quantity: 5 }],
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", name: "Basic Fish Oil", quantity: 5, guaranteedQuantity: 5 }],
   });
 
   const tier = plan.personalViews.fishing.tiers[0];
@@ -471,6 +471,22 @@ test("personal fishing view does not deduct expected tracked oil without a guara
   assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 8);
 });
 
+test("active crafts without guaranteed quantity do not count expected output as authoritative coverage", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", name: "Basic Fish Oil", quantity: 10, itemType: 0 }],
+      sourceRules: { craftPlayerIds: ["player"] },
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 5, name: "Basic Fish Oil" }],
+  });
+
+  const oil = plan.materials.find((material) => material.id === "1900");
+  assert.equal(oil?.inProgress, 0);
+  assert.equal(oil?.missing, 10);
+});
+
 test("normalized local fishing distributions retain guaranteed route yields end to end", (t) => {
   const { repository } = createCatalogFixture(t);
   const oil = { id: "1900", itemType: 0, name: "Basic Fish Oil", tag: "Fish Oil", tier: 1 };
@@ -536,7 +552,7 @@ test("personal fishing view uses completed uncollected fish-oil crafts", () => {
       sourceRules: { craftPlayerIds: ["player"] },
     }),
     detailsByKey: fishingPreferenceDetails(),
-    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 4, name: "Basic Fish Oil", completed: true }],
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 4, guaranteedQuantity: 4, name: "Basic Fish Oil", completed: true }],
   });
 
   const tier = plan.personalViews.fishing.tiers[0];
@@ -577,7 +593,7 @@ test("computeCraftPlan applies recipe route overrides and offsets storage, playe
     storageSources: [{ sourceId: "store-1", label: "Pantry", items: [{ id: "101", kind: "items", quantity: 4, name: "Lake Fish" }] }],
     playerSources: [{ sourceId: "player-1", label: "Modular inventory", items: [{ id: "101", kind: "items", quantity: 6, name: "Lake Fish" }] }],
     deployableSources: [{ sourceId: "player-1:cart-1", label: "Modular cart", items: [{ id: "101", kind: "items", quantity: 5, name: "Lake Fish" }] }],
-    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, name: "Lake Fish" }],
+    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, guaranteedQuantity: 3, name: "Lake Fish" }],
   });
 
   const lakeFish = plan.materials.find((material) => material.name === "Lake Fish");
@@ -649,9 +665,9 @@ test("computeCraftPlan keeps tracked craft status and ready-to-collect outputs",
     }),
     detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
     activeCrafts: [
-      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 4, status: "In progress", completed: false },
-      { id: "craft-2", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 3, status: "Ready to collect", completed: true },
-      { id: "craft-3", playerId: "player-2", playerName: "Other", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 50, status: "In progress", completed: false },
+      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 4, guaranteedQuantity: 4, status: "In progress", completed: false },
+      { id: "craft-2", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 3, guaranteedQuantity: 3, status: "Ready to collect", completed: true },
+      { id: "craft-3", playerId: "player-2", playerName: "Other", buildingName: "Fishing Station", itemId: "900", kind: "items", name: "Fish Oil", quantity: 50, guaranteedQuantity: 50, status: "In progress", completed: false },
     ],
   });
 
@@ -677,7 +693,7 @@ test("computeCraftPlan counts completed uncollected Rough Plank and transitions 
     config,
     detailsByKey,
     storageSources: [{ sourceId: "woodworking", label: "Woodworking", items: [{ id: "1020003", kind: "items", quantity: 1296, name: "Rough Plank" }] }],
-    activeCrafts: [{ id: "craft-rough-plank", playerId: "player-1", playerName: "Modular", buildingName: "Exquisite Carpentry Station", itemId: "1020003", kind: "items", quantity: 612, name: "Rough Plank", status: "Ready to collect", completed: true }],
+    activeCrafts: [{ id: "craft-rough-plank", playerId: "player-1", playerName: "Modular", buildingName: "Exquisite Carpentry Station", itemId: "1020003", kind: "items", quantity: 612, guaranteedQuantity: 612, name: "Rough Plank", status: "Ready to collect", completed: true }],
   });
   const waitingPlank = waitingCollection.materials.find((material) => material.name === "Rough Plank");
   assert.equal(waitingPlank.available, 1296);
@@ -820,8 +836,8 @@ test("computeCraftPlan counts active crafts only for craft-tracked players", () 
     config,
     detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
     activeCrafts: [
-      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, name: "Lake Fish" },
-      { id: "craft-2", playerId: "player-2", playerName: "Mosswick", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 8, name: "Lake Fish" },
+      { id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 3, guaranteedQuantity: 3, name: "Lake Fish" },
+      { id: "craft-2", playerId: "player-2", playerName: "Mosswick", buildingName: "Fishing Station", itemId: "101", kind: "items", quantity: 8, guaranteedQuantity: 8, name: "Lake Fish" },
     ],
   });
 
@@ -853,7 +869,7 @@ test("computeCraftPlan only expands the missing quantity of stocked intermediate
       [recipeKey("items", "301"), logDetail],
     ]),
     storageSources: [{ sourceId: "store-1", label: "Carpentry chest", items: [{ id: "300", kind: "items", quantity: 6, name: "Simple Plank" }] }],
-    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Carpentry Station", itemId: "300", kind: "items", quantity: 1, name: "Simple Plank" }],
+    activeCrafts: [{ id: "craft-1", playerId: "player-1", playerName: "Modular", buildingName: "Carpentry Station", itemId: "300", kind: "items", quantity: 1, guaranteedQuantity: 1, name: "Simple Plank" }],
   });
 
   const plank = plan.materials.find((material) => material.name === "Simple Plank");
@@ -1715,7 +1731,7 @@ test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from norm
     detailsByKey,
     catalogWarnings: warnings,
     storageSources: [{ sourceId: "store-1", label: "Pantry", items: [{ id: "6130004", kind: "items", quantity: 1, name: "Peerless Berry" }] }],
-    activeCrafts: [{ id: "craft-berry", playerId: "player-1", playerName: "Tester", buildingName: "Foraging Basket", itemId: "6130004", kind: "items", quantity: 2, name: "Peerless Berry" }],
+    activeCrafts: [{ id: "craft-berry", playerId: "player-1", playerName: "Tester", buildingName: "Foraging Basket", itemId: "6130004", kind: "items", quantity: 2, guaranteedQuantity: 2, name: "Peerless Berry" }],
   });
 
   assert.equal(detailsByKey.has(recipeKey("items", "700")), true);
