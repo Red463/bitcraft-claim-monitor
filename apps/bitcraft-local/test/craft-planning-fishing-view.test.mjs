@@ -6,7 +6,7 @@ import {
   normalizeFishingRoutePreference,
 } from "../src/pages/craftPlanningFishingView.ts";
 
-function makeCell(name, { required, missing, available = 0, inProgress = 0, plannedOutput = 0 } = {}) {
+function makeCell(name, { required, missing, available = 0, inProgress = 0 } = {}) {
   const item = { key: `items:${name.toLowerCase().replaceAll(" ", "-")}`, name, kind: "items" };
   return {
     item,
@@ -16,7 +16,6 @@ function makeCell(name, { required, missing, available = 0, inProgress = 0, plan
     required,
     available,
     inProgress,
-    plannedOutput,
   };
 }
 
@@ -101,7 +100,7 @@ test("applies the lake route without mutating the authoritative board", () => {
   assert.equal(cell?.required, 45);
   assert.equal(cell?.available, 0);
   assert.equal(cell?.inProgress, 0);
-  assert.equal(cell?.plannedOutput, 0);
+  assert.equal("plannedOutput" in cell, false);
   assert.equal(cell?.items[0].recipeUsages[0].output.name, "Basic Fish Oil");
   assert.equal(cell?.items[0].recipeUsages[0].requiredQuantity, 45);
   assert.equal(fishing.required, 159);

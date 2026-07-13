@@ -41,7 +41,9 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /group\.completion/);
   assert.match(page, /craft-plan-needs-section-row/);
   assert.match(page, /craft-plan-needs-legend/);
-  assert.match(page, /plannedOutput/);
+  assert.doesNotMatch(page, /planned secondary outputs|plannedOutput/);
+  assert.match(page, /in stock/);
+  assert.match(page, /active guaranteed output/);
   assert.match(page, /craft-plan-row-section-button/);
   assert.match(page, /sectionOverrides/);
   assert.match(page, /rowNameOverrides/);

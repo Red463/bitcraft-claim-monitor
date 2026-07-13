@@ -66,7 +66,6 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
     required: needed + stockQuantity + trackedQuantity,
     available: stockQuantity,
     inProgress: trackedQuantity,
-    plannedOutput: 0,
   };
 }
 
@@ -102,7 +101,7 @@ function isPlannerTierColumn(column: string) {
 function recalculateFishingGroup(group: NeedGroup, rows: NeedRow[]): NeedGroup {
   const cells = rows.flatMap((row) => [...row.cells.values()]);
   const required = cells.reduce((sum, cell) => sum + cell.required, 0);
-  const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress + cell.plannedOutput), 0);
+  const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress), 0);
   return {
     ...group,
     rows,

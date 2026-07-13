@@ -295,6 +295,28 @@ test("buildNeedsBoard calculates section completion from required and covered qu
   assert.equal(board[0].completion, 90);
 });
 
+test("buildNeedsBoard ignores legacy forecast output when calculating coverage", () => {
+  const board = buildNeedsBoard([{
+    key: "items:gypsite",
+    name: "Sturdy Gypsite",
+    tag: "Gypsite",
+    tier: 3,
+    section: "Foraging",
+    required: 78,
+    available: 0,
+    inProgress: 0,
+    plannedOutput: 25.52,
+    missing: 78,
+    recipeUsages: [{}],
+  }], []);
+  const cell = board[0].rows[0].cells.get("T3");
+
+  assert.equal(cell?.available, 0);
+  assert.equal(cell?.inProgress, 0);
+  assert.equal("plannedOutput" in cell, false);
+  assert.deepEqual(needsBoardCompletion(board), { required: 78, covered: 0, completion: 0 });
+});
+
 test("needsBoardCompletion weights the full board by required quantities", () => {
   const board = [{ section: "A", rows: [], required: 100, covered: 50, completion: 50 }, { section: "B", rows: [], required: 300, covered: 300, completion: 100 }];
   assert.deepEqual(needsBoardCompletion(board), { required: 400, covered: 350, completion: 87.5 });

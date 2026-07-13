@@ -13,7 +13,6 @@ export type NeedCell = {
   required: number;
   available: number;
   inProgress: number;
-  plannedOutput: number;
 };
 
 export type NeedRow = {
@@ -126,16 +125,14 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
-    const plannedOutput = Number(material.plannedOutput) || 0;
     if (existing) {
       existing.items.push(material);
       existing.missing += missing;
       existing.required += required;
       existing.available += available;
       existing.inProgress += inProgress;
-      existing.plannedOutput += plannedOutput;
     } else {
-      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress, plannedOutput });
+      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress });
     }
     row.maxMissing = Math.max(row.maxMissing, missing > 0 ? missing : required);
   }
@@ -146,7 +143,7 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
       const sortedRows = [...rows.values()].sort((a, b) => plannerRowOrder(section, a.name) - plannerRowOrder(section, b.name) || a.name.localeCompare(b.name));
       const cells = sortedRows.flatMap((row) => [...row.cells.values()]);
       const required = cells.reduce((sum, cell) => sum + cell.required, 0);
-      const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress + cell.plannedOutput), 0);
+      const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress), 0);
       return { section, rows: sortedRows, required, covered, completion: required > 0 ? Math.round((covered / required) * 1000) / 10 : 100 };
     });
 }
