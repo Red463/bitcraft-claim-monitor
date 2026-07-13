@@ -9,6 +9,8 @@ type PersonalFishingRoute = {
   guaranteedYield?: number;
   stockQuantity?: number;
   trackedQuantity?: number;
+  guaranteedTrackedQuantity?: number;
+  estimatedTrackedQuantity?: number;
   needed?: number;
   usage?: AnyRecord;
   sources?: AnyRecord[];
@@ -50,6 +52,10 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
   const stockQuantity = finiteNonNegative(route.stockQuantity);
   const trackedQuantity = finiteNonNegative(route.trackedQuantity);
   if (needed == null || stockQuantity == null || trackedQuantity == null) return null;
+  const hasBreakdown = route.guaranteedTrackedQuantity != null || route.estimatedTrackedQuantity != null;
+  const guaranteedInProgress = hasBreakdown ? finiteNonNegative(route.guaranteedTrackedQuantity) : trackedQuantity;
+  const estimatedInProgress = hasBreakdown ? finiteNonNegative(route.estimatedTrackedQuantity) : 0;
+  if (guaranteedInProgress == null || estimatedInProgress == null) return null;
   const name = String(route.input.name ?? route.input.label ?? route.input.key ?? "").trim();
   if (!name) return null;
   const item = {
@@ -66,6 +72,8 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
     required: needed + stockQuantity + trackedQuantity,
     available: stockQuantity,
     inProgress: trackedQuantity,
+    guaranteedInProgress,
+    estimatedInProgress,
   };
 }
 

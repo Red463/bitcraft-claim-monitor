@@ -286,13 +286,36 @@ test("buildNeedsBoard merges known cloth rows and Tailoring API fallbacks into o
 
 test("buildNeedsBoard calculates section completion from required and covered quantities", () => {
   const board = buildNeedsBoard([
-    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, available: 75, inProgress: 5, missing: 20 },
+    { key: "items:1", name: "Rough Plank", tag: "Plank", tier: 1, section: "Carpentry", required: 100, available: 75, inProgress: 5, guaranteedInProgress: 2, estimatedInProgress: 3, missing: 20 },
     { key: "items:2", name: "Simple Plank", tag: "Plank", tier: 2, section: "Carpentry", required: 100, available: 100, inProgress: 0, missing: 0, recipeUsages: [{}] },
   ], []);
 
   assert.equal(board[0].required, 200);
   assert.equal(board[0].covered, 180);
   assert.equal(board[0].completion, 90);
+  assert.equal(board[0].rows[0].cells.get("T1")?.guaranteedInProgress, 2);
+  assert.equal(board[0].rows[0].cells.get("T1")?.estimatedInProgress, 3);
+  assert.equal(board[0].rows[0].cells.get("T2")?.guaranteedInProgress, 0);
+  assert.equal(board[0].rows[0].cells.get("T2")?.estimatedInProgress, 0);
+});
+
+test("buildNeedsBoard treats legacy in-progress coverage as guaranteed", () => {
+  const board = buildNeedsBoard([{
+    key: "items:legacy",
+    name: "Legacy Plank",
+    tag: "Plank",
+    tier: 1,
+    section: "Carpentry",
+    required: 10,
+    available: 0,
+    inProgress: 5,
+    missing: 5,
+    recipeUsages: [{}],
+  }], []);
+  const cell = board[0].rows[0].cells.get("T1");
+
+  assert.equal(cell?.guaranteedInProgress, 5);
+  assert.equal(cell?.estimatedInProgress, 0);
 });
 
 test("buildNeedsBoard ignores legacy forecast output when calculating coverage", () => {

@@ -42,7 +42,7 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   const supplied = cell.available + cell.inProgress;
   const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && supplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active guaranteed output, ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active craft output (${quantity(cell.guaranteedInProgress)} guaranteed, ${quantity(cell.estimatedInProgress)} estimated), ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
       <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
       <small>{quantity(supplied)} / {quantity(cell.required)}</small>
       {hasActive ? <Factory size={11} aria-label="Actively being crafted" /> : null}
@@ -221,7 +221,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <header className="modal-header">
           <div>
             <h2>{itemNode(selectedNeed.item)}</h2>
-            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.inProgress)} in tracked crafts.</p>
+            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.guaranteedInProgress)} guaranteed active output, {quantity(selectedNeed.estimatedInProgress)} estimated active output.</p>
           </div>
           <button className="icon-button" type="button" onClick={closeNeedDetail} aria-label="Close item details"><X size={18} /></button>
         </header>
@@ -252,7 +252,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
               <h3><Factory size={16} /> Tracked crafts</h3>
               {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row" key={String(craft.craftId ?? index)}>
                 <span><strong>{craft.buildingName ?? "Crafting station"}</strong><small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small></span>
-                <strong>{quantity(craft.quantity)}</strong>
+                <span><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
               </div>)}
             </div> : null}
           </section>
@@ -505,10 +505,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
               {targets.map((target: AnyRecord) => {
                 const buildingTarget = String(target.kind) === "building";
                 const covered = Math.max(0, Number(target.quantity) - Number(target.missing));
+                const estimatedActive = Math.max(0, Number(target.estimatedInProgress) || 0);
                 return (
                 <article className={`craft-plan-target${Number(target.missing) <= 0 ? " is-complete" : ""}`} key={target.key ?? `${target.kind}:${target.id}`}>
                   {itemNode(target)}
-                  <div className="craft-plan-target-progress"><span><i style={{ width: `${Math.min(100, Math.max(0, (covered / Math.max(1, Number(target.quantity))) * 100))}%` }} /></span><small>{quantity(covered)} / {quantity(target.quantity)} {buildingTarget ? "newly built" : "covered"}</small><em>{buildingTarget ? target.progressInitialized ? `${quantity(target.available)} completed stations detected` : "Tracking pending until claim buildings are available" : `${quantity(target.available)} available${Number(target.inProgress) > 0 ? ` · ${quantity(target.inProgress)} in progress` : ""}`}</em></div>
+                  <div className="craft-plan-target-progress"><span><i style={{ width: `${Math.min(100, Math.max(0, (covered / Math.max(1, Number(target.quantity))) * 100))}%` }} /></span><small>{quantity(covered)} / {quantity(target.quantity)} {buildingTarget ? "newly built" : "covered"}</small><em>{buildingTarget ? target.progressInitialized ? `${quantity(target.available)} completed stations detected` : "Tracking pending until claim buildings are available" : `${quantity(target.available)} available${Number(target.inProgress) > 0 ? ` · ${quantity(target.inProgress)} active output${estimatedActive > 0 ? ` (${quantity(estimatedActive)} estimated)` : ""}` : ""}`}</em></div>
                   <div className="craft-plan-target-status"><strong>{quantity(target.missing)}</strong><span>{Number(target.missing) <= 0 ? "Complete" : "Still needed"}</span></div>
                 </article>
               );

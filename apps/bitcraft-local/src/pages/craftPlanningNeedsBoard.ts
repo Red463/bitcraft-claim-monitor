@@ -13,6 +13,8 @@ export type NeedCell = {
   required: number;
   available: number;
   inProgress: number;
+  guaranteedInProgress: number;
+  estimatedInProgress: number;
 };
 
 export type NeedRow = {
@@ -125,14 +127,19 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
+    const hasBreakdown = material.guaranteedInProgress != null || material.estimatedInProgress != null;
+    const guaranteedInProgress = hasBreakdown ? Number(material.guaranteedInProgress) || 0 : inProgress;
+    const estimatedInProgress = hasBreakdown ? Number(material.estimatedInProgress) || 0 : 0;
     if (existing) {
       existing.items.push(material);
       existing.missing += missing;
       existing.required += required;
       existing.available += available;
       existing.inProgress += inProgress;
+      existing.guaranteedInProgress += guaranteedInProgress;
+      existing.estimatedInProgress += estimatedInProgress;
     } else {
-      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress });
+      row.cells.set(column, { item: material, items: [material], name: itemName(material), missing, required, available, inProgress, guaranteedInProgress, estimatedInProgress });
     }
     row.maxMissing = Math.max(row.maxMissing, missing > 0 ? missing : required);
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "../src/pages/craftPlanningNeedDetails.ts";
+import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "../src/pages/craftPlanningNeedDetails.ts";
 
 const roughLogCell = {
   item: { key: "item:100", id: "100", kind: "item", name: "Rough Wood Log", tier: 1 },
@@ -77,6 +77,21 @@ test("groupNeedCellSources keeps same-named player deployables separate by owner
     ] }],
   });
   assert.deepEqual(groups.map((group) => [group.label, group.quantity]), [["Modular — Cart", 7], ["Oddfawn — Cart", 5]]);
+});
+
+test("groupNeedCellActiveCrafts combines expected and guaranteed quantities independently", () => {
+  const crafts = groupNeedCellActiveCrafts({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], activeCraftSources: [
+      { craftId: "craft-1", playerName: "Farmer", quantity: 0.6, expectedQuantity: 0.6, guaranteedQuantity: 0 },
+      { craftId: "craft-1", playerName: "Farmer", quantity: 1.4, expectedQuantity: 1.4, guaranteedQuantity: 1 },
+    ] }],
+  });
+
+  assert.equal(crafts.length, 1);
+  assert.equal(crafts[0].quantity, 2);
+  assert.equal(crafts[0].expectedQuantity, 2);
+  assert.equal(crafts[0].guaranteedQuantity, 1);
 });
 
 test("groupNeedCellRecipeUsages groups repeated usages by output item", () => {

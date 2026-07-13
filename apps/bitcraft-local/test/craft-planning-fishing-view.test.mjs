@@ -6,7 +6,7 @@ import {
   normalizeFishingRoutePreference,
 } from "../src/pages/craftPlanningFishingView.ts";
 
-function makeCell(name, { required, missing, available = 0, inProgress = 0 } = {}) {
+function makeCell(name, { required, missing, available = 0, inProgress = 0, guaranteedInProgress = inProgress, estimatedInProgress = 0 } = {}) {
   const item = { key: `items:${name.toLowerCase().replaceAll(" ", "-")}`, name, kind: "items" };
   return {
     item,
@@ -16,6 +16,8 @@ function makeCell(name, { required, missing, available = 0, inProgress = 0 } = {
     required,
     available,
     inProgress,
+    guaranteedInProgress,
+    estimatedInProgress,
   };
 }
 
@@ -147,7 +149,9 @@ test("personal fishing projection carries route stock, tracked crafts, and rich 
   const view = makeRouteView();
   const route = view.tiers[0].routes.ocean;
   route.stockQuantity = 7;
-  route.trackedQuantity = 2;
+  route.trackedQuantity = 3;
+  route.guaranteedTrackedQuantity = 1;
+  route.estimatedTrackedQuantity = 2;
   route.sources = [{ sourceId: "store-1", label: "Fishing chest", type: "Settlement storage", quantity: 7 }];
   route.activeCraftSources = [{ sourceId: "craft-1", buildingName: "Fishing Station", quantity: 2 }];
   route.usage.buildingName = "Fine Fishing Station";
@@ -163,7 +167,9 @@ test("personal fishing projection carries route stock, tracked crafts, and rich 
   const item = projected.items[0];
 
   assert.equal(projected.available, 7);
-  assert.equal(projected.inProgress, 2);
+  assert.equal(projected.inProgress, 3);
+  assert.equal(projected.guaranteedInProgress, 1);
+  assert.equal(projected.estimatedInProgress, 2);
   assert.deepEqual(item.sources, route.sources);
   assert.deepEqual(item.activeCraftSources, route.activeCraftSources);
   assert.equal(item.recipeUsages[0].buildingName, "Fine Fishing Station");
