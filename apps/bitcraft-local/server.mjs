@@ -7560,7 +7560,7 @@ async function collectServerSnapshot(force = false) {
     pollStatus.lastError = null;
   } catch (error) {
     pollStatus.lastError = error instanceof Error ? error.message : String(error);
-    console.error(`BitCraft snapshot poll failed: ${pollStatus.lastError}`);
+    console.error(`BitCraft settlement collection failed: ${pollStatus.lastError}`);
   } finally {
     pollStatus.running = false;
   }
@@ -9925,7 +9925,7 @@ function scheduleServerPolling(delayMs = 0) {
       const message = error instanceof Error ? error.message : String(error);
       pollStatus.lastAttemptAt = new Date().toISOString();
       pollStatus.lastError = message;
-      if (!isTestRuntime) console.warn(`Server snapshot polling failed: ${message}`);
+      if (!isTestRuntime) console.warn(`Server settlement collection failed: ${message}`);
     } finally {
       scheduleServerPolling(serverRefreshIntervalMs());
     }
@@ -9940,7 +9940,7 @@ function startBackgroundTasks() {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);
   if (serverPollingEnabled) {
-    console.log(`Server snapshot polling enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
+    console.log(`Server settlement collection enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
     scheduleServerPolling(0);
   }
   if (scheduledJobsEnabled && !isTestRuntime) {

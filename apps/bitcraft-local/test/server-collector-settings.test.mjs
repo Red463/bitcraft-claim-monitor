@@ -110,3 +110,13 @@ test("collector status resolves the claim once without rebuilding all public set
   assert.match(implementation, /statements\.domainPayload\.get\(claimId, domain\)/);
   assert.doesNotMatch(implementation, /getSettings\(\)\.claimId/);
 });
+
+test("settlement collection operator copy no longer describes snapshot history", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  for (const legacy of [
+    "BitCraft snapshot poll failed",
+    "Server snapshot polling failed",
+    "Server snapshot polling enabled",
+  ]) assert.doesNotMatch(source, new RegExp(legacy));
+});
