@@ -105,7 +105,7 @@ function playerSourceCard(
   onBanksChange: (checked: boolean) => void,
 ) {
   return (
-    <article className={`craft-plan-source-card${inventoryChecked || craftsChecked || banksChecked ? " is-included" : ""}`} key={source.playerId}>
+    <article className={`craft-plan-source-card craft-plan-player-source-card${inventoryChecked || craftsChecked || banksChecked ? " is-included" : ""}`} key={source.playerId}>
       <header>
         <div>
           <strong>{source.label}</strong>

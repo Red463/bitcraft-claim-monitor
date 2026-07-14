@@ -37,7 +37,7 @@ test("effort view preserves valid empty progress as complete", () => {
   assert.equal(selected.overall.completion, 100);
 });
 
-test("effort view makes Fishing unavailable when the selected route has no aggregate", () => {
+test("effort view falls back to root progress when the selected Fishing route has no aggregate", () => {
   const selected = selectCraftPlanningEffortView({
     state: "ready",
     overall: { state: "ready", baselineEffort: 100, remainingEffort: 40, completion: 60 },
@@ -48,11 +48,15 @@ test("effort view makes Fishing unavailable when the selected route has no aggre
     } },
     warnings: ["Root warning"],
   }, "lake");
-  assert.equal(selected.overall.completion, null);
-  assert.equal(selected.sections.Fishing.completion, null);
+  assert.equal(selected.overall.completion, 60);
+  assert.equal(selected.sections.Fishing.completion, 60);
+  assert.deepEqual(selected.warnings, [
+    "The selected lake Fishing route has no specialised effort estimate; showing the general Fishing estimate.",
+    "Root warning",
+  ]);
 });
 
-test("effort view prefers selected Fishing route warnings", () => {
+test("effort view preserves selected Fishing route and root warnings", () => {
   const selected = selectCraftPlanningEffortView({
     state: "partial",
     sections: { Fishing: { state: "unavailable", completion: null } },
@@ -63,5 +67,5 @@ test("effort view prefers selected Fishing route warnings", () => {
     } },
     warnings: ["Root warning"],
   }, "lake");
-  assert.deepEqual(selected.warnings, ["Lake route weight is unavailable"]);
+  assert.deepEqual(selected.warnings, ["Lake route weight is unavailable", "Root warning"]);
 });

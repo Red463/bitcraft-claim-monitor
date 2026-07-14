@@ -254,15 +254,16 @@ export function calculateCraftPlanEffortProgress({
     let weightedRequiredMaterials = 0;
 
     for (const row of baseline) {
-      const weight = positive(weights instanceof Map ? weights.get(row.key)?.effortWeight ?? weights.get(row.key) : null);
-      if (!weight) {
+      const verifiedWeight = positive(weights instanceof Map ? weights.get(row.key)?.effortWeight ?? weights.get(row.key) : null);
+      const weight = verifiedWeight ?? 1;
+      if (!verifiedWeight) {
         missingWeights.add(row.key);
         const sectionMissing = missingBySection.get(row.section) ?? new Set();
         sectionMissing.add(row.key);
         missingBySection.set(row.section, sectionMissing);
-        continue;
+      } else {
+        weightedRequiredMaterials += 1;
       }
-      weightedRequiredMaterials += 1;
       const liveMissing = Math.min(row.required, nonNegative(currentByKey.get(row.key)?.missing ?? 0));
       const entries = sectionRows.get(row.section) ?? [];
       entries.push({ baselineEffort: row.required * weight, remainingEffort: liveMissing * weight });
@@ -272,12 +273,10 @@ export function calculateCraftPlanEffortProgress({
     const sectionNames = new Set([...sectionRows.keys(), ...missingBySection.keys()]);
     const sections = {};
     for (const section of sectionNames) {
-      sections[section] = missingBySection.get(section)?.size
-        ? unavailableAggregate()
-        : readyAggregate(sectionRows.get(section) ?? []);
+      sections[section] = readyAggregate(sectionRows.get(section) ?? []);
     }
-    const overall = missingWeights.size ? unavailableAggregate() : readyAggregate([...sectionRows.values()].flat());
-    const state = missingWeights.size ? weightedRequiredMaterials > 0 ? "partial" : "unavailable" : "ready";
+    const overall = readyAggregate([...sectionRows.values()].flat());
+    const state = missingWeights.size ? "partial" : "ready";
     const missingWeightKeys = [...missingWeights].sort();
     return {
       state,
@@ -290,7 +289,7 @@ export function calculateCraftPlanEffortProgress({
         missingWeightKeys: missingWeightKeys.slice(0, MAX_MISSING_WEIGHT_KEYS),
       },
       warnings: missingWeightKeys.length
-        ? [`Effort progress is missing verified catalog weights for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"}.`]
+        ? [`Effort progress uses a neutral one-action estimate for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"} because BitJita does not expose verified gathering yields for them.`]
         : [],
     };
   };

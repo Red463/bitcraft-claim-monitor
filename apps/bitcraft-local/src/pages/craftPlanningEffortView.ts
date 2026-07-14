@@ -62,23 +62,22 @@ export function selectCraftPlanningEffortView(summary: unknown, route: FishingRo
   const hasSelectedVariant = Object.keys(variant).length > 0;
   const hasFishing = Object.prototype.hasOwnProperty.call(baseSections, "Fishing");
   const selectedSections = { ...baseSections, ...variantSections };
-  if (hasFishing && !hasSelectedVariant) selectedSections.Fishing = null;
   const sectionEntries = Object.entries(selectedSections)
     .map(([name, value]) => [name, aggregate(value)]);
   const validStates = new Set<EffortState>(["ready", "partial", "unavailable", "empty"]);
   const state = validStates.has(String(root.state) as EffortState)
     ? String(root.state) as EffortState
     : "unavailable";
-  const warnings = Array.isArray(variant.warnings)
-    ? variant.warnings.map(String).slice(0, 25)
-    : Array.isArray(root.warnings) ? root.warnings.map(String).slice(0, 25) : [];
+  const variantWarnings = Array.isArray(variant.warnings) ? variant.warnings.map(String) : [];
+  const rootWarnings = Array.isArray(root.warnings) ? root.warnings.map(String) : [];
+  const warnings = [...new Set([...variantWarnings, ...rootWarnings])];
   if (hasFishing && !hasSelectedVariant) {
-    warnings.unshift(`Effort progress is unavailable for the selected ${route} Fishing route.`);
+    warnings.unshift(`The selected ${route} Fishing route has no specialised effort estimate; showing the general Fishing estimate.`);
   }
   return {
     state,
     route,
-    overall: aggregate(hasSelectedVariant ? variant.overall : hasFishing ? null : root.overall),
+    overall: aggregate(hasSelectedVariant ? variant.overall : root.overall),
     sections: Object.fromEntries(sectionEntries),
     warnings: warnings.slice(0, 25),
   };

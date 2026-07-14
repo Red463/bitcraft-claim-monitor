@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.34.1-beta.1] - 2026-07-14
+
+### Fixed
+
+- Fixed completed Craft Planner catalog scans still leaving effort progress unavailable when BitJita does not provide verified gathering yields.
+- Fixed Fishing route selection hiding otherwise valid general effort progress and estimation notices.
+- Fixed player inventory, craft, and bank tracking controls overflowing their cards in the Craft Planner manager.
+
 ## [0.34.0-beta.1] - 2026-07-14
 
 ### Added

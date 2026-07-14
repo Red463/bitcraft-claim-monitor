@@ -39,6 +39,9 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /No matching items in the selected Needs Board filters/);
   assert.match(page, /Shortages only/);
   assert.match(page, /effortView\.sections\[group\.section\]/);
+  assert.match(page, /effortView\.warnings\.join\(" "\)/);
+  assert.doesNotMatch(page, /effortView\.warnings\[0\]/);
+  assert.doesNotMatch(page, /effortView\.overall\.completion == null && effortView\.warnings\[0\]/);
   assert.match(page, /craft-plan-needs-section-row/);
   assert.match(page, /craft-plan-needs-legend/);
   assert.doesNotMatch(page, /planned secondary outputs|plannedOutput/);
@@ -140,8 +143,11 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /bankPlayerIds/);
   assert.match(manager, />Banks<\/span>/);
   assert.match(manager, /all BitJita-visible settlement banks/i);
-  assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-  assert.match(styles, /@media[^}]*max-width[^}]*\{[\s\S]*?\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(manager, /craft-plan-player-source-card/);
+  assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(100px,\s*1fr\)\)/s);
+  assert.match(styles, /\.craft-plan-player-source-card\s+header\s*\{[^}]*display:\s*grid/s);
+  assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*width:\s*100%/s);
+  assert.match(styles, /@media[^}]*max-width:\s*640px[^}]*\{[\s\S]*?\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(manager, /groupDeployablesByPlayer/);
   assert.match(manager, /craft-plan-deployable-group/);
   assert.match(manager, /function itemTypeLabel/);

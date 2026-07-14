@@ -83,7 +83,7 @@ test("materials removed from the live requirement graph count as completed effor
   assert.equal(result.sections.Carpentry.completion, 100);
 });
 
-test("a missing weight disables only its section and overall", () => {
+test("missing gathering weights use a neutral estimate without hiding progress", () => {
   const baselinePlan = { materials: [
     { key: "items:known", section: "Carpentry", bufferedRequired: 10, missing: 10 },
     { key: "items:unknown", section: "Fishing", bufferedRequired: 5, missing: 5 },
@@ -95,9 +95,23 @@ test("a missing weight disables only its section and overall", () => {
   const result = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan, weights: new Map([["items:known", { effortWeight: 2 }]]) });
   assert.equal(result.state, "partial");
   assert.equal(result.sections.Carpentry.completion, 100);
-  assert.equal(result.sections.Fishing.state, "unavailable");
-  assert.equal(result.overall.state, "unavailable");
+  assert.deepEqual(result.sections.Fishing, { state: "ready", baselineEffort: 5, remainingEffort: 5, completion: 0 });
+  assert.deepEqual(result.overall, { state: "ready", baselineEffort: 25, remainingEffort: 5, completion: 80 });
   assert.deepEqual(result.coverage.missingWeightKeys, ["items:unknown"]);
+  assert.match(result.warnings[0], /neutral one-action estimate/i);
+});
+
+test("a section containing only unweighted gathered materials still has progress", () => {
+  const baselinePlan = { materials: [
+    { key: "items:berry", section: "Foraging", bufferedRequired: 10, missing: 10 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const currentPlan = { materials: [
+    { key: "items:berry", section: "Foraging", bufferedRequired: 10, missing: 4 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const result = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan, weights: new Map() });
+  assert.equal(result.state, "partial");
+  assert.deepEqual(result.sections.Foraging, { state: "ready", baselineEffort: 10, remainingEffort: 4, completion: 60 });
+  assert.deepEqual(result.overall, { state: "ready", baselineEffort: 10, remainingEffort: 4, completion: 60 });
 });
 
 test("empty plans are complete without requiring catalog weights", () => {
