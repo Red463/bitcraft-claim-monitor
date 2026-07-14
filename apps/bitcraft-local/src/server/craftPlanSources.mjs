@@ -2,6 +2,7 @@ import { craftDisplayName, isCompletedProductionJob, mergeCurrentCraftRows } fro
 
 const DEPLOYABLE_INVENTORY_NAME = /cart|stash|cache|deploy|housing|wagon|handcart|boat|ship|sled|mount/i;
 const SETTLEMENT_STORAGE_INVENTORY_NAME = /town bank|settlement storage|claim storage|community storage|bank/i;
+const PLAYER_BANK_INVENTORY_NAME = /town bank|settlement bank|claim bank|community bank|\bbank\b/i;
 const PERSONAL_INVENTORY_NAME = /^(?:inventory|toolbelt|wallet)$/i;
 
 export function sourceItemFromContents(contents, lookup = new Map()) {
@@ -180,9 +181,21 @@ export function playerInventoryRows(payload = {}) {
   return [];
 }
 
+export function selectedPlayerInventoryIds(sourceRules = {}) {
+  return [...new Set([
+    ...(Array.isArray(sourceRules.playerIds) ? sourceRules.playerIds : []),
+    ...(Array.isArray(sourceRules.bankPlayerIds) ? sourceRules.bankPlayerIds : []),
+  ].map(String).map((value) => value.trim()).filter(Boolean))];
+}
+
 export function isSettlementStorageInventory(inventory = {}, inventoryName = "") {
   const name = String(inventoryName || inventory.inventoryName || inventory.name || inventory.type || "Inventory").trim();
   return SETTLEMENT_STORAGE_INVENTORY_NAME.test(name);
+}
+
+export function isPlayerBankInventory(inventory = {}, inventoryName = "") {
+  const name = String(inventoryName || inventory.inventoryName || inventory.name || inventory.type || "").trim();
+  return PLAYER_BANK_INVENTORY_NAME.test(name);
 }
 
 export function isPlayerDeployableInventory(inventory = {}, inventoryName = "") {
@@ -225,6 +238,12 @@ function deployableLabel(inventoryName, claimName) {
   return `${kind}${suffix}${claim ? ` - ${claim}` : ""}`;
 }
 
+function playerBankLabel(inventoryName, claimName) {
+  const bank = String(inventoryName ?? "Town Bank").trim() || "Town Bank";
+  const claim = String(claimName ?? "").trim();
+  return claim ? `${bank} — ${claim}` : bank;
+}
+
 function emptyCartDeployableSource(playerId, label) {
   return {
     sourceId: `${playerId}:cart`,
@@ -244,13 +263,30 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
   const allowedDeployables = new Set(allowedDeployableIds.map(String));
   const lookup = craftPlanCatalogLookup(payload);
   const personalItems = [];
+  const banksById = new Map();
   const deployables = [];
   for (const inventory of playerInventoryRows(payload)) {
     const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory").trim() || "Inventory";
     const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
     const rawSourceId = `${playerId}:${rawId}`;
-    if (isSettlementStorageInventory(inventory, inventoryName)) continue;
     const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup);
+    if (isPlayerBankInventory(inventory, inventoryName)) {
+      if (!banksById.has(rawSourceId)) {
+        const claimName = String(inventory.claimName ?? inventory.claim?.name ?? "").trim();
+        banksById.set(rawSourceId, {
+          sourceId: rawSourceId,
+          label: playerBankLabel(inventoryName, claimName),
+          type: "Player bank",
+          playerId: String(playerId),
+          playerName: String(label),
+          containerName: inventoryName,
+          claimName: claimName || null,
+          items,
+        });
+      }
+      continue;
+    }
+    if (isSettlementStorageInventory(inventory, inventoryName)) continue;
     if (isPlayerDeployableInventory(inventory, inventoryName)) {
       const claimName = String(inventory.claimName ?? "").trim();
       const containerKind = deployableKind(inventoryName);
@@ -276,6 +312,7 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
   }
   return {
     inventory: { sourceId: playerId, label: `${label} inventory`, type: "Player inventory", playerId: String(playerId), playerName: String(label), items: personalItems },
+    banks: [...banksById.values()],
     deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId) || source.legacySourceIds?.some((id) => allowedDeployables.has(id))),
     deployableOptions: deployables.map((source) => ({ ...source, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };

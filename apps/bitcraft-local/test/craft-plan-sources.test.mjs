@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, sourceItemFromContents, trackedCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
 test("trackedCraftPlanOutputs expands farming product possibilities into expected Needs Board outputs", () => {
   const payload = {
@@ -143,6 +143,20 @@ test("playerInventoryContainerSources reads wrapped BitJita inventories and sepa
           claimName: "Timbersteel Trade",
           pockets: [{ contents: { itemId: 300, itemType: 0, quantity: 99 } }],
         },
+        {
+          entityId: "town-bank-2",
+          playerOwnerEntityId: "player-1",
+          inventoryName: "Town Bank",
+          claimName: "Remote Settlement",
+          pockets: [{ contents: { itemId: 200, itemType: 0, quantity: 8 } }],
+        },
+        {
+          entityId: "town-bank-2",
+          playerOwnerEntityId: "player-1",
+          inventoryName: "Town Bank",
+          claimName: "Remote Settlement",
+          pockets: [{ contents: { itemId: 200, itemType: 0, quantity: 8 } }],
+        },
       ],
     },
   });
@@ -158,6 +172,37 @@ test("playerInventoryContainerSources reads wrapped BitJita inventories and sepa
   assert.equal(cache?.containerKind, "Personal Cache");
   assert.equal(cache?.items[0].name, "Fine Plank");
   assert.equal(result.deployableOptions.some((source) => /Town Bank/.test(source.label)), false);
+  assert.deepEqual(result.banks.map((source) => source.sourceId), ["player-1:town-bank-1", "player-1:town-bank-2"]);
+  assert.deepEqual(result.banks.map((source) => source.label), ["Town Bank — Timbersteel Trade", "Town Bank — Remote Settlement"]);
+  assert.equal(result.banks[0].playerName, "Modular");
+  assert.equal(result.banks[0].type, "Player bank");
+  assert.deepEqual(result.banks[0].items.map((item) => item.name), ["Honey"]);
+});
+
+test("selectedPlayerInventoryIds shares inventory requests across source families", () => {
+  assert.deepEqual(selectedPlayerInventoryIds({
+    playerIds: ["player-1", "player-2"],
+    bankPlayerIds: ["player-1", "player-3"],
+  }), ["player-1", "player-2", "player-3"]);
+});
+
+test("player banks preserve item and cargo identity", () => {
+  const result = playerInventoryContainerSources("player-1", "Modular", {
+    inventories: [{
+      entityId: "bank-1",
+      inventoryName: "Town Bank",
+      claimName: "Remote Settlement",
+      pockets: [
+        { contents: { itemId: 700, itemType: 0, quantity: 4 } },
+        { contents: { itemId: 700, itemType: 1, quantity: 6 } },
+      ],
+    }],
+  });
+
+  assert.deepEqual(result.banks[0].items.map((item) => [item.kind, item.id, item.quantity]), [
+    ["items", "700", 4],
+    ["cargo", "700", 6],
+  ]);
 });
 
 test("playerInventoryContainerSources applies deployable allow-list only to counted sources", () => {
