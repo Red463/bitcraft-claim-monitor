@@ -30,9 +30,61 @@ export const schemaIndexStatements = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
-  "CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured ON snapshots (claim_id, captured_at DESC, id DESC);",
-  "CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON snapshots (captured_at);",
 ];
+
+export function applySettlementStateMigration(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settlement_state_current (
+      claim_id TEXT PRIMARY KEY,
+      captured_at TEXT NOT NULL,
+      supplies REAL,
+      treasury REAL,
+      members_count INTEGER,
+      buildings_count INTEGER,
+      market_count INTEGER,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  const hasLegacySnapshots = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'snapshots'").get();
+  if (!hasLegacySnapshots) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      INSERT INTO settlement_state_current (
+        claim_id, captured_at, supplies, treasury, members_count,
+        buildings_count, market_count, updated_at
+      )
+      SELECT
+        s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count,
+        s.buildings_count, s.market_count, s.captured_at
+      FROM snapshots s
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM snapshots newer
+        WHERE newer.claim_id = s.claim_id
+          AND (
+            newer.captured_at > s.captured_at
+            OR (newer.captured_at = s.captured_at AND newer.id > s.id)
+          )
+      )
+      ON CONFLICT(claim_id) DO UPDATE SET
+        captured_at = excluded.captured_at,
+        supplies = excluded.supplies,
+        treasury = excluded.treasury,
+        members_count = excluded.members_count,
+        buildings_count = excluded.buildings_count,
+        market_count = excluded.market_count,
+        updated_at = excluded.updated_at;
+      DROP TABLE snapshots;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
 
 export function applyAdditiveColumnMigrations(db, migrations = additiveColumnMigrations) {
   for (const migration of migrations) {

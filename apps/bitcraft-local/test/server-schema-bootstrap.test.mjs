@@ -5,7 +5,7 @@ import { applySchemaBootstrap, schemaBootstrapSql } from "../src/server/schemaBo
 
 test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   for (const fragment of [
-    "CREATE TABLE IF NOT EXISTS snapshots",
+    "CREATE TABLE IF NOT EXISTS settlement_state_current",
     "CREATE TABLE IF NOT EXISTS app_settings",
     "CREATE TABLE IF NOT EXISTS admin_users",
     "CREATE TABLE IF NOT EXISTS user_accounts",
@@ -24,11 +24,11 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time",
     "CREATE INDEX IF NOT EXISTS idx_domain_payload_claim",
     "CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated",
-    "CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured",
-    "CREATE INDEX IF NOT EXISTS idx_snapshots_captured",
   ]) {
     assert.match(schemaBootstrapSql, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS snapshots/);
+  assert.doesNotMatch(schemaBootstrapSql, /idx_snapshots_/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {

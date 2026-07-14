@@ -1,15 +1,14 @@
 export const schemaBootstrapSql = `
   PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id TEXT NOT NULL,
+  CREATE TABLE IF NOT EXISTS settlement_state_current (
+    claim_id TEXT PRIMARY KEY,
     captured_at TEXT NOT NULL,
     supplies REAL,
     treasury REAL,
     members_count INTEGER,
     buildings_count INTEGER,
     market_count INTEGER,
-    raw_json TEXT NOT NULL
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS market_listings (
     listing_key TEXT PRIMARY KEY,
@@ -644,8 +643,6 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_updated_at ON game_catalog_refresh_runs (updated_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_targets_queue ON game_catalog_refresh_targets (run_id, state, sequence);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
-  CREATE INDEX IF NOT EXISTS idx_snapshots_claim_captured ON snapshots (claim_id, captured_at DESC, id DESC);
-  CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON snapshots (captured_at);
 `;
 
 export function applySchemaBootstrap(db) {
