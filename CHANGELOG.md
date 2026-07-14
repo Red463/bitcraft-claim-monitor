@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.63] - 2026-07-14
+
+### Changed
+
+- Replaced settlement snapshot history with one current settlement baseline while preserving Activity history.
+
+### Removed
+
+- Removed unused snapshot history APIs, retention controls, and Dashboard loading.
+
 ## [0.32.0-beta.62] - 2026-07-14
 
 ### Changed
