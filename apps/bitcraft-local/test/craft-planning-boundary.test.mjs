@@ -246,6 +246,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /memberNames/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`\)/);
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
+  assert.match(computedCraftPlan, /selectedPlayerInventoryIds\(config\.sourceRules\)/);
+  assert.match(computedCraftPlan, /config\.sourceRules\.bankPlayerIds/);
+  assert.match(computedCraftPlan, /sources\.banks/);
+  assert.match(computedCraftPlan, /bankSources/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
   assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineKey/);
@@ -253,6 +257,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /compactCraftPlanEffortInput\(computeCraftPlan/);
   assert.match(computedCraftPlan, /calculateCraftPlanEffortProgress/);
   assert.match(computedCraftPlan, /effortProgress/);
+  const playerInventoryLoop = computedCraftPlan.match(/for \(const playerId of selectedPlayerInventoryIds\(config\.sourceRules\)\)[\s\S]*?const livePlan/)?.[0] ?? "";
+  assert.equal((playerInventoryLoop.match(/\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/g) ?? []).length, 1);
+  assert.match(playerInventoryLoop, /inventoryPlayerIds\.has\(playerId\)/);
+  assert.match(playerInventoryLoop, /bankPlayerIds\.has\(playerId\)/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
 
