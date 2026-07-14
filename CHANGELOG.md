@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.34.0-beta.1] - 2026-07-14
+
+### Added
+
+- Added independent per-player Craft Planner bank tracking for all BitJita-visible settlement banks, including banks at other settlements.
+
+### Fixed
+
+- Fixed item and cargo metadata with the same numeric ID being mixed when reading planner stock sources.
+- Prevented malformed or ambiguous player-bank inventory rows from being counted as confirmed stock.
+
 ## [0.33.0-beta.1] - 2026-07-14
 
 ### Added
