@@ -64,7 +64,7 @@ export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/visitor-security") return "analytics.view";
   if (pathname === "/api/local/admin/tables" || pathname === "/api/local/admin/table") return "data.view";
   if (pathname === "/api/local/admin/export") return "data.export";
-  if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup" || pathname === "/api/local/admin/maintenance/prune") return "data.manage";
+  if (pathname === "/api/local/admin/backups" || pathname === "/api/local/admin/backup") return "data.manage";
   if (pathname.startsWith("/api/local/admin/discord/moderation/")) return "discord.moderate";
   if (pathname.startsWith("/api/local/admin/discord/") && method === "GET") return "discord.view";
   if (pathname.startsWith("/api/local/admin/discord/")) return "discord.manage";

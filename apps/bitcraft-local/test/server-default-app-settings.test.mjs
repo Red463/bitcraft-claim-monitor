@@ -16,7 +16,7 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     updatedAt: "2026-06-29T12:00:00.000Z",
   });
 
-  assert.equal(rows.length, 20);
+  assert.equal(rows.length, 19);
   assert.deepEqual(rows.map((row) => row.key), [
     "claim_id",
     "bitcraft_sync_url",
@@ -31,7 +31,6 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     "market_deal_watch_json",
     "branding_json",
     "app_popups_json",
-    "snapshot_retention_days",
     "visitor_security_json",
     "discord_json",
     "discord_last_announced_version",
@@ -124,7 +123,7 @@ test("applyDefaultAppSettings derives default rows when rows are not supplied", 
     updatedAt: "2026-06-29T12:45:00.000Z",
   });
 
-  assert.equal(inserted.length, 20);
+  assert.equal(inserted.length, 19);
   assert.deepEqual(inserted.find(([key]) => key === "server_refresh_seconds"), ["server_refresh_seconds", "75", "2026-06-29T12:45:00.000Z"]);
   assert.deepEqual(deleted, [["analytics_json"]]);
 });

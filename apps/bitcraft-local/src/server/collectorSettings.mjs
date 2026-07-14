@@ -4,7 +4,7 @@ function toNumber(value) {
 }
 
 export const domainCollectorDefaults = {
-  claim: { label: "Claim", intervalSeconds: 30 },
+  claim: { label: "Current settlement", intervalSeconds: 30 },
   members: { label: "Members", intervalSeconds: 30 },
   players: { label: "Player details", intervalSeconds: 60 },
   professions: { label: "Professions", intervalSeconds: 30 },
@@ -16,7 +16,6 @@ export const domainCollectorDefaults = {
   buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
   marketListings: { label: "Market listing sync", intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
   storageActivity: { label: "Storage activity", intervalSeconds: 60 },
@@ -71,7 +70,6 @@ export const collectorCurrentTables = {
   market: ["market_listings", "market_trades"],
   buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
   mapCatalog: ["domain_payload_current"],
-  snapshotHistory: ["settlement_state_current"],
   marketListings: ["market_listings", "market_events", "market_trades"],
   productionContributions: ["production_jobs", "production_contributions"],
   storageActivity: ["activity_events"],

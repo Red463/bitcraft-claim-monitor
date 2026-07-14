@@ -49,6 +49,7 @@ test("adminPermissionFor maps admin routes to the existing least-privilege permi
   assert.equal(adminPermissionFor("GET", "/api/local/admin/tables"), "data.view");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/export"), "data.export");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/backups"), "data.manage");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/maintenance/prune"), "status.view");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/discord/moderation/timeout"), "discord.moderate");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/discord/status"), "discord.view");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/discord/setup"), "discord.manage");

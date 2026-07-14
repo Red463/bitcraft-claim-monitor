@@ -54,7 +54,7 @@ import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
 import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
 import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
-import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "./src/server/appSettingsPolicy.mjs";
+import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
@@ -1491,24 +1491,6 @@ function migrateBuyOrderCollectorInterval() {
 
 migrateBuyOrderCollectorInterval();
 
-function migrateSnapshotHistoryCollectorInterval() {
-  const markerKey = "snapshot_history_interval_60_migrated_at";
-  if (statements.getSetting.get(markerKey)?.value) return;
-  const now = new Date().toISOString();
-  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
-  const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  const existing = current.snapshotHistory && typeof current.snapshotHistory === "object" ? current.snapshotHistory : {};
-  if (existing.intervalSeconds == null || Number(existing.intervalSeconds) === 900) {
-    statements.upsertSetting.run("collector_settings_json", JSON.stringify({
-      ...current,
-      snapshotHistory: { ...existing, intervalSeconds: 60 },
-    }), now);
-  }
-  statements.upsertSetting.run(markerKey, now, now);
-}
-
-migrateSnapshotHistoryCollectorInterval();
-
 function marketDealWatchSettings() {
   return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
 }
@@ -1537,7 +1519,6 @@ function getSettings() {
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     marketDealWatch: marketDealWatchSettings(),
     branding,
-    snapshotRetentionDays: normalizeSavedSnapshotRetentionDays(statements.getSetting.get("snapshot_retention_days")?.value, 365),
     visitorSecurity: visitorSecuritySettings(),
     browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
@@ -7765,15 +7746,6 @@ function marketBuyOrders(claimId, params = {}) {
   };
 }
 
-function snapshotHistory(claimId) {
-  const current = db.prepare(`
-    SELECT rowid AS id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
-    FROM settlement_state_current
-    WHERE claim_id = ?
-  `).get(claimId);
-  return { snapshots: current ? [current] : [] };
-}
-
 function activityHistory(claimId, limit = 500) {
   const eventLimit = Math.min(Math.max(Number(limit) || 500, 1), 2000);
   const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, eventLimit);
@@ -8104,11 +8076,12 @@ function dashboardHistory(claimId) {
 }
 
 function localHistory(claimId, include = null, options = {}) {
-  const sections = include instanceof Set && include.size ? include : new Set(["market", "activity", "snapshots"]);
+  const sections = include instanceof Set && include.size
+    ? include
+    : new Set(["market", "activity"]);
   const history = {};
   if (sections.has("market")) history.market = marketHistory(claimId, 120);
   if (sections.has("activity")) history.activity = activityHistory(claimId, Math.min(Math.max(Number(options.activityLimit) || 2000, 1), 2000));
-  if (sections.has("snapshots")) history.snapshots = snapshotHistory(claimId, { daily: true, days: 7, limit: 96 });
   if (sections.has("dashboard")) history.dashboard = dashboardHistory(claimId);
   return history;
 }
@@ -8136,7 +8109,6 @@ function safeJson(value, fallback = {}) {
 
 function databaseStatus() {
   const countTables = {
-    snapshots: "settlement_state_current",
     market_listings: "market_listings",
     market_events: "market_events",
     market_trades: "market_trades",
@@ -9458,8 +9430,6 @@ const server = createServer(async (req, res) => {
         const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
         if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
         const excludedMemberIds = normalizeSubmittedExcludedMemberIds(body.excludedMemberIds);
-        const snapshotRetentionDays = Number(body.snapshotRetentionDays ?? 365);
-        if (!validSnapshotRetentionDays(snapshotRetentionDays)) return send(res, 400, { error: "Retention must be between 30 and 3650 days" });
         const previousVisitorSecurity = visitorSecuritySettings(true);
         const visitorSecurity = normalizeVisitorSecuritySettings(body.visitorSecurity ?? {}, {
           includeSecrets: true,
@@ -9494,7 +9464,6 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
         statements.upsertSetting.run("excluded_member_ids_json", JSON.stringify(excludedMemberIds), updatedAt);
-        statements.upsertSetting.run("snapshot_retention_days", String(snapshotRetentionDays), updatedAt);
         statements.upsertSetting.run("visitor_security_json", JSON.stringify(visitorSecurity), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
         statements.upsertSetting.run("market_deal_watch_json", JSON.stringify(marketDealWatch), updatedAt);
@@ -9509,7 +9478,7 @@ const server = createServer(async (req, res) => {
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
         refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, snapshotRetentionDays, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 200, getSettings());
@@ -9733,12 +9702,6 @@ const server = createServer(async (req, res) => {
         if (!backup) return send(res, 404, { error: "Backup not found" });
         return sendBinary(res, 200, await readFile(path.join(backupDir, name)), "application/vnd.sqlite3", { "content-disposition": `attachment; filename="${name}"` });
       }
-      if (req.method === "POST" && url.pathname === "/api/local/admin/maintenance/prune") {
-        const retentionDays = getSettings().snapshotRetentionDays;
-        const before = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-        audit(user, "maintenance.prune", { retentionDays, removed: 0 });
-        return send(res, 200, { removed: 0, before });
-      }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
       if (!rateLimit(req, res, "local-snapshot", RATE_LIMITS.expensiveLocal)) return;
@@ -9903,18 +9866,10 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
-      const allowed = new Set(["market", "activity", "snapshots", "dashboard"]);
+      const allowed = new Set(["market", "activity", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
       return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections, {
         activityLimit: Number(url.searchParams.get("activityLimit") ?? 2000),
-      }));
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/snapshots") {
-      const claimId = url.searchParams.get("claimId") ?? "";
-      return send(res, 200, snapshotHistory(claimId, {
-        limit: Number(url.searchParams.get("limit") ?? 96),
-        daily: url.searchParams.get("daily") === "1",
-        days: Number(url.searchParams.get("days") ?? 7),
       }));
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {

@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_APP_PAGE, VALID_APP_PAGES, normalizeSavedRefreshIntervalSeconds, normalizeSavedSnapshotRetentionDays, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId, validSnapshotRetentionDays } from "../src/server/appSettingsPolicy.mjs";
+import * as appSettingsPolicy from "../src/server/appSettingsPolicy.mjs";
+
+const {
+  DEFAULT_APP_PAGE,
+  VALID_APP_PAGES,
+  normalizeSavedRefreshIntervalSeconds,
+  normalizeStoredExcludedMemberIds,
+  normalizeSubmittedExcludedMemberIds,
+  parseRegionIds,
+  validAppPage,
+  validBitcraftSyncUrl,
+  validClaimId,
+  validRefreshIntervalSeconds,
+  validRegionId,
+} = appSettingsPolicy;
 
 test("validBitcraftSyncUrl accepts only https BitCraft Sync links", () => {
   assert.equal(validBitcraftSyncUrl("https://bitcraftsync.app/claim/12345678"), true);
@@ -51,20 +65,18 @@ test("validClaimId preserves the existing numeric settlement id policy", () => {
   assert.equal(validClaimId(""), false);
 });
 
-test("settings interval and retention validators preserve the existing integer ranges", () => {
+test("settings interval validator preserves the existing integer range", () => {
   assert.equal(validRefreshIntervalSeconds(15), true);
   assert.equal(validRefreshIntervalSeconds(300), true);
   assert.equal(validRefreshIntervalSeconds("30"), true);
   assert.equal(validRefreshIntervalSeconds(14), false);
   assert.equal(validRefreshIntervalSeconds(301), false);
   assert.equal(validRefreshIntervalSeconds(30.5), false);
+});
 
-  assert.equal(validSnapshotRetentionDays(30), true);
-  assert.equal(validSnapshotRetentionDays(3650), true);
-  assert.equal(validSnapshotRetentionDays("365"), true);
-  assert.equal(validSnapshotRetentionDays(29), false);
-  assert.equal(validSnapshotRetentionDays(3651), false);
-  assert.equal(validSnapshotRetentionDays(365.5), false);
+test("snapshot retention policy is no longer exported", () => {
+  assert.equal(Object.hasOwn(appSettingsPolicy, "validSnapshotRetentionDays"), false);
+  assert.equal(Object.hasOwn(appSettingsPolicy, "normalizeSavedSnapshotRetentionDays"), false);
 });
 
 test("region and excluded member helpers preserve settings normalization", () => {
@@ -83,7 +95,7 @@ test("region and excluded member helpers preserve settings normalization", () =>
   assert.deepEqual(normalizeSubmittedExcludedMemberIds("12345678"), []);
 });
 
-test("saved interval and retention normalizers preserve settings fallback and clamp behavior", () => {
+test("saved interval normalizer preserves settings fallback and clamp behavior", () => {
   assert.equal(normalizeSavedRefreshIntervalSeconds("45", 30), 45);
   assert.equal(normalizeSavedRefreshIntervalSeconds("10", 30), 15);
   assert.equal(normalizeSavedRefreshIntervalSeconds("900", 30), 300);
@@ -91,11 +103,4 @@ test("saved interval and retention normalizers preserve settings fallback and cl
   assert.equal(normalizeSavedRefreshIntervalSeconds("0", 90), 90);
   assert.equal(normalizeSavedRefreshIntervalSeconds("0", 5), 15);
   assert.equal(normalizeSavedRefreshIntervalSeconds("0", 900), 300);
-
-  assert.equal(normalizeSavedSnapshotRetentionDays("365", 180), 365);
-  assert.equal(normalizeSavedSnapshotRetentionDays("10", 180), 30);
-  assert.equal(normalizeSavedSnapshotRetentionDays("9000", 180), 3650);
-  assert.equal(normalizeSavedSnapshotRetentionDays("not-a-number", 180), 180);
-  assert.equal(normalizeSavedSnapshotRetentionDays("0", 10), 30);
-  assert.equal(normalizeSavedSnapshotRetentionDays("0", 9000), 3650);
 });

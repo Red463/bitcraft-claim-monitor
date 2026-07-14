@@ -208,19 +208,8 @@ test("server records settlement activity before upserting current state without 
   assert.doesNotMatch(implementation, /insertSnapshot|INSERT INTO snapshots/);
 });
 
-test("legacy snapshot routes remain safe while backed by current settlement state", () => {
+test("current settlement writes remain available without legacy snapshot history routes", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-  const routeStart = source.indexOf('if (req.method === "POST" && url.pathname === "/api/local/admin/maintenance/prune")');
-  const routeEnd = source.indexOf('if (url.pathname === "/api/local/market/deal-watches")', routeStart);
-  const routes = source.slice(routeStart, routeEnd);
-  const historyStart = source.indexOf("function snapshotHistory");
-  const historyEnd = source.indexOf("function activityHistory", historyStart);
-  const history = source.slice(historyStart, historyEnd);
-
-  assert.ok(routeStart > -1);
-  assert.ok(routeEnd > routeStart);
-  assert.match(routes, /recordSettlementState\(await readJson/);
-  assert.doesNotMatch(routes, /enqueueSnapshot|DELETE FROM snapshots/);
-  assert.match(history, /FROM settlement_state_current/);
-  assert.doesNotMatch(history, /FROM snapshots/);
+  assert.match(source, /url\.pathname === "\/api\/local\/snapshot"[\s\S]*recordSettlementState\(await readJson/);
+  assert.doesNotMatch(source, /\/api\/local\/snapshots|maintenance\/prune|function snapshotHistory/);
 });

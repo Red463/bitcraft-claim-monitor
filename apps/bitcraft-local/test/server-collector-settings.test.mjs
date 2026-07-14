@@ -21,7 +21,7 @@ test("collector settings normalize saved dashboard configuration safely", () => 
   });
 
   assert.equal(Object.keys(settings).length, Object.keys(domainCollectorDefaults).length);
-  assert.deepEqual(settings.claim, { label: "Claim", enabled: false, intervalSeconds: 15 });
+  assert.deepEqual(settings.claim, { label: "Current settlement", enabled: false, intervalSeconds: 15 });
   assert.deepEqual(settings.members, { label: "Members", enabled: true, intervalSeconds: 45 });
   assert.deepEqual(settings.research, { label: "Research", enabled: true, intervalSeconds: 3600 });
   assert.deepEqual(settings.market, { label: "Market", enabled: true, intervalSeconds: 60 });
@@ -44,20 +44,19 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
   assert.deepEqual(collectorCurrentTables.buyOrders, ["market_buy_orders_current", "market_regional_sale_averages_current"]);
-  assert.deepEqual(collectorCurrentTables.snapshotHistory, ["settlement_state_current"]);
+  assert.equal(Object.hasOwn(collectorCurrentTables, "snapshotHistory"), false);
 });
 
-test("snapshot and side-effect collector intervals do not monopolize production", () => {
-  assert.equal(domainCollectorDefaults.snapshotHistory.intervalSeconds, 60);
+test("side-effect collector intervals do not monopolize production", () => {
   assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
-  assert.equal(normalizeCollectorSettings({}).snapshotHistory.intervalSeconds, 60);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
 });
 
 test("collector settings still clamp submitted intervals to the existing bounds", () => {
-  const normalized = normalizeCollectorSettings({ snapshotHistory: { intervalSeconds: 2 } });
+  const normalized = normalizeCollectorSettings({ marketListings: { intervalSeconds: 2 } });
 
-  assert.equal(normalized.snapshotHistory.intervalSeconds, 15);
+  assert.equal(normalized.marketListings.intervalSeconds, 15);
 });
 test("production activity and settlement state rows are not gated by contribution sync cadence", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");

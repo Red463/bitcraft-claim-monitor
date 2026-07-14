@@ -1180,15 +1180,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(activitySearch.searchedAllHistory, true);
   assert.equal(activitySearch.total >= 1, true);
   assert.equal(activitySearch.events.some((event) => event.summary.includes("Bronze Ingot")), true);
-  const baselineSnapshots = await fetch(`${origin}/api/local/snapshots?claimId=${claimId}&limit=10`).then((response) => response.json());
-  assert.equal(baselineSnapshots.snapshots.length, 1);
-  assert.equal(baselineSnapshots.snapshots[0].treasury, 300);
-  assert.equal(baselineSnapshots.snapshots[0].supplies, 500);
   const aggregateHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}`).then((response) => response.json());
   assert.equal(aggregateHistory.market.totals.confirmedSales, 1);
   assert.equal(aggregateHistory.activity.total >= aggregateHistory.activity.events.length, true);
-  assert.equal(aggregateHistory.snapshots.snapshots.length, 1);
-  assert.equal(aggregateHistory.snapshots.snapshots[0].treasury, 300);
+  assert.equal("snapshots" in aggregateHistory, false);
   const dashboardHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=activity,dashboard&activityLimit=1`).then((response) => response.json());
   assert.equal(dashboardHistory.activity.events.length, 1);
   assert.equal(typeof dashboardHistory.dashboard.treasuryNetToday, "number");
@@ -1202,10 +1197,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal("market" in activityOnlyHistory, false);
   assert.equal("snapshots" in activityOnlyHistory, false);
   assert.equal(activityOnlyHistory.activity.total >= activityOnlyHistory.activity.events.length, true);
-  const marketSnapshotHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=market,snapshots`).then((response) => response.json());
-  assert.equal(marketSnapshotHistory.market.totals.confirmedSales, 1);
-  assert.equal(marketSnapshotHistory.snapshots.snapshots.length, 1);
-  assert.equal("activity" in marketSnapshotHistory, false);
+  const marketHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}&include=market,snapshots`).then((response) => response.json());
+  assert.equal(marketHistory.market.totals.confirmedSales, 1);
+  assert.equal("snapshots" in marketHistory, false);
+  assert.equal("activity" in marketHistory, false);
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   craftEntityRevision = 1;

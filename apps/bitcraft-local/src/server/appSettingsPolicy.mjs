@@ -43,11 +43,6 @@ export function validRefreshIntervalSeconds(value) {
   return Number.isInteger(seconds) && seconds >= 15 && seconds <= 300;
 }
 
-export function validSnapshotRetentionDays(value) {
-  const days = Number(value);
-  return Number.isInteger(days) && days >= 30 && days <= 3650;
-}
-
 export function validRegionId(value) {
   return /^\d+$/.test(String(value ?? "").trim());
 }
@@ -83,8 +78,4 @@ function clampNumberSetting(value, fallback, min, max) {
 
 export function normalizeSavedRefreshIntervalSeconds(value, fallbackSeconds) {
   return clampNumberSetting(value, fallbackSeconds, 15, 300);
-}
-
-export function normalizeSavedSnapshotRetentionDays(value, fallbackDays = 365) {
-  return clampNumberSetting(value, fallbackDays, 30, 3650);
 }
