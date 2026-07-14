@@ -9,6 +9,22 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.33.0-beta.1] - 2026-07-14
+
+### Added
+
+- Added separate Ocean and Lake Fishing progress calculations using verified catalog data.
+
+### Changed
+
+- Changed Craft Planner progress to reflect the relative effort required for each material across the overall Needs Board, every profession, Fishing routes, and Discord reports.
+- Changed planner coverage so only confirmed stock and guaranteed active-craft outputs count; estimated outputs remain visible but do not increase progress.
+
+### Fixed
+
+- Fixed completed upstream work being shown as missing after it removed downstream requirements from the live craft plan.
+- Fixed unavailable or incomplete catalog data displaying a misleading percentage instead of a clear unavailable state.
+
 ## [0.32.0-beta.63] - 2026-07-14
 
 ### Changed
