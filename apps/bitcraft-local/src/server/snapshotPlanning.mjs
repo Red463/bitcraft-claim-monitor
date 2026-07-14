@@ -27,6 +27,18 @@ export function snapshotSummary(payload = {}) {
   };
 }
 
+export function snapshotStoragePayload(payload = {}, summary = snapshotSummary(payload)) {
+  return {
+    claimId: String(summary.claimId ?? payload.claimId ?? ""),
+    source: String(payload.source ?? ""),
+    supplies: toNumber(summary.supplies),
+    treasury: toNumber(summary.treasury),
+    membersCount: toNumber(summary.membersCount),
+    buildingsCount: toNumber(summary.buildingsCount),
+    marketCount: toNumber(summary.marketCount),
+  };
+}
+
 export function snapshotActivityChanges(previous, summary, { supplyMetadata = {} } = {}) {
   if (!previous) {
     return [{

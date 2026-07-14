@@ -95,3 +95,16 @@ test("market listing activity sync fetches live listings when the side-effect co
   assert.match(marketFunction, /syncMarketListingsForSnapshot\(claimId, marketPayload,/);
   assert.doesNotMatch(marketFunction, /currentData\.market \?\? \{ listings: \[\] \}/);
 });
+
+test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function collectorStatusPayload");
+  const end = source.indexOf("let snapshotQueue", start);
+  const implementation = source.slice(start, end);
+
+  assert.ok(start > -1);
+  assert.ok(end > start);
+  assert.match(implementation, /const claimId = currentClaimId\(\);/);
+  assert.match(implementation, /statements\.domainPayload\.get\(claimId, domain\)/);
+  assert.doesNotMatch(implementation, /getSettings\(\)\.claimId/);
+});

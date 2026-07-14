@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { snapshotActivityChanges, snapshotSummary } from "../src/server/snapshotPlanning.mjs";
+import { snapshotActivityChanges, snapshotStoragePayload, snapshotSummary } from "../src/server/snapshotPlanning.mjs";
 
 test("snapshotSummary derives the cheap settlement snapshot row fields", () => {
   const payload = {
@@ -19,6 +19,29 @@ test("snapshotSummary derives the cheap settlement snapshot row fields", () => {
     membersCount: 7,
     buildingsCount: 4,
     marketCount: 2,
+  });
+});
+
+test("snapshotStoragePayload keeps only fields required to explain the stored summary", () => {
+  const payload = {
+    claimId: "12345678",
+    claim: { supplies: 125.5, treasury: 450, name: "Timbersteel", unused: "large payload" },
+    membersCount: 7,
+    buildingsCount: 4,
+    market: { listings: Array.from({ length: 50 }, (_, id) => ({ id })) },
+    crafts: { craftResults: Array.from({ length: 50 }, (_, id) => ({ id })) },
+    source: "server_poll",
+  };
+  const summary = snapshotSummary(payload);
+
+  assert.deepEqual(snapshotStoragePayload(payload, summary), {
+    claimId: "12345678",
+    source: "server_poll",
+    supplies: 125.5,
+    treasury: 450,
+    membersCount: 7,
+    buildingsCount: 4,
+    marketCount: 50,
   });
 });
 

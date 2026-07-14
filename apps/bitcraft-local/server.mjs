@@ -66,7 +66,7 @@ import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaInd
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
-import { snapshotActivityChanges, snapshotSummary } from "./src/server/snapshotPlanning.mjs";
+import { snapshotActivityChanges, snapshotStoragePayload, snapshotSummary } from "./src/server/snapshotPlanning.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
 import {
@@ -1467,6 +1467,10 @@ function getCollectorSettings() {
   return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
 }
 
+function currentClaimId() {
+  return statements.getSetting.get("claim_id")?.value ?? defaultClaimId;
+}
+
 function migrateBuyOrderCollectorInterval() {
   const markerKey = "buy_order_baseline_split_migrated_at";
   if (statements.getSetting.get(markerKey)?.value) return;
@@ -1519,7 +1523,7 @@ function getSettings() {
   const excludedMemberIds = safeJson(statements.getSetting.get("excluded_member_ids_json")?.value, []);
   const savedDefaultPage = statements.getSetting.get("default_page")?.value ?? DEFAULT_APP_PAGE;
   return {
-    claimId: statements.getSetting.get("claim_id")?.value ?? defaultClaimId,
+    claimId: currentClaimId(),
     syncUrl: statements.getSetting.get("bitcraft_sync_url")?.value ?? defaultSyncUrl,
     excludedMemberIds: normalizeStoredExcludedMemberIds(excludedMemberIds),
     theme: { ...defaultTheme, ...theme },
@@ -5093,7 +5097,7 @@ function writeSettlementSnapshot(claimId, now, payload, summary) {
       summary.membersCount,
       summary.buildingsCount,
       summary.marketCount,
-      JSON.stringify(payload),
+      JSON.stringify(snapshotStoragePayload(payload, summary)),
     );
     for (const change of snapshotActivityChanges(previous, summary, { supplyMetadata: supplyMeta })) {
       addActivity(claimId, change.type, change.summary, now, change.metadata);
@@ -7472,6 +7476,7 @@ async function refreshCurrentClaimState(claimId, options = {}) {
 function collectorStatusPayload() {
   refreshCollectorStatusSettings();
   const intervalMs = serverRefreshIntervalMs();
+  const claimId = currentClaimId();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
   return {
@@ -7485,7 +7490,7 @@ function collectorStatusPayload() {
     lastRunMetrics: pollStatus.lastRunMetrics,
     collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => {
       const domain = collectorPrimaryPayloadDomain[key];
-      const row = domain ? statements.domainPayload.get(getSettings().claimId, domain) : null;
+      const row = domain ? statements.domainPayload.get(claimId, domain) : null;
       const lastSuccessAt = value.lastSuccessAt ?? row?.last_success_at ?? row?.collected_at ?? null;
       const collectorNextRunAt = lastSuccessAt && value.enabled !== false
         ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()

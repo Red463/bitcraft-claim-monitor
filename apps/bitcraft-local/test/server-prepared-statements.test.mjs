@@ -43,6 +43,8 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     assert.ok(statements[key], `${key} should be prepared`);
   }
   assert.match(statements.latestSnapshot.sql, /FROM snapshots/);
+  assert.doesNotMatch(statements.latestSnapshot.sql, /SELECT \*/i);
+  assert.doesNotMatch(statements.latestSnapshot.sql, /raw_json/i);
   assert.match(statements.upsertListing.sql, /INSERT INTO market_listings/);
   assert.match(statements.upsertSetting.sql, /INSERT INTO app_settings/);
   assert.match(statements.insertDiscordAdmin.sql, /INSERT INTO admin_users/);

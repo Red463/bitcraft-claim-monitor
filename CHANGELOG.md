@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.62] - 2026-07-14
+
+### Changed
+
+- Reduced settlement snapshot storage by keeping the history summary without duplicating unused market and craft payloads.
+
+### Fixed
+
+- Fixed health checks repeatedly rebuilding full public settings for every collector, which caused large native-memory growth and slow VPS deployments.
+- Fixed latest-snapshot reads loading an unused stored payload into memory.
+
 ## [0.32.0-beta.61] - 2026-07-14
 
 ### Changed

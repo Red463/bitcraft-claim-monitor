@@ -1,6 +1,6 @@
 export function createPreparedStatements(db) {
   return {
-  latestSnapshot: db.prepare("SELECT * FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
+  latestSnapshot: db.prepare("SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
   insertSnapshot: db.prepare(`
     INSERT INTO snapshots (claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
