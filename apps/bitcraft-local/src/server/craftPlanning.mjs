@@ -1157,6 +1157,7 @@ export function computeCraftPlan({
   detailsByKey = new Map(),
   storageSources = [],
   playerSources = [],
+  bankSources = [],
   deployableSources = [],
   activeCrafts = [],
   craftSourceErrors = [],
@@ -1170,6 +1171,7 @@ export function computeCraftPlan({
   const unavailableSources = [];
   addSourceTotals(availableTotals, storageSources, "Settlement storage", unavailableSources);
   addSourceTotals(availableTotals, playerSources, "Player inventory", unavailableSources);
+  addSourceTotals(availableTotals, bankSources, "Player bank", unavailableSources);
   addSourceTotals(availableTotals, deployableSources, "Player deployable", unavailableSources);
   unavailableSources.push(...(craftSourceErrors ?? []).map((source) => ({
     sourceId: String(source?.sourceId ?? "tracked-crafts"),

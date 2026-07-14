@@ -79,6 +79,23 @@ test("groupNeedCellSources keeps same-named player deployables separate by owner
   assert.deepEqual(groups.map((group) => [group.label, group.quantity]), [["Modular — Cart", 7], ["Oddfawn — Cart", 5]]);
 });
 
+test("groupNeedCellSources labels player banks with owner and settlement", () => {
+  const groups = groupNeedCellSources({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], sources: [{
+      sourceId: "player-1:bank-remote",
+      label: "Town Bank — Remote Settlement",
+      type: "Player bank",
+      playerName: "Modular",
+      quantity: 7,
+    }] }],
+  });
+
+  assert.deepEqual(groups.map((group) => [group.label, group.quantity]), [
+    ["Modular — Town Bank — Remote Settlement", 7],
+  ]);
+});
+
 test("groupNeedCellActiveCrafts combines expected and guaranteed quantities independently", () => {
   const crafts = groupNeedCellActiveCrafts({
     ...roughLogCell,

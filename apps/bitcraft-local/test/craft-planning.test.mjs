@@ -221,6 +221,34 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   assert.deepEqual(config.sourceRules.bankPlayerIds, []);
 });
 
+test("computeCraftPlan counts player bank sources as confirmed stock", () => {
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "900", kind: "items", name: "Simple Plank", quantity: 10, itemType: 0 }],
+      sourceRules: { bankPlayerIds: ["player-1"] },
+    }),
+    detailsByKey: new Map([[recipeKey("items", "900"), {
+      item: { id: "900", itemType: 0, name: "Simple Plank", tier: 2 },
+    }]]),
+    bankSources: [{
+      sourceId: "player-1:bank-remote",
+      label: "Town Bank — Remote Settlement",
+      type: "Player bank",
+      playerId: "player-1",
+      playerName: "Modular",
+      items: [{ id: "900", kind: "items", itemType: 0, name: "Simple Plank", quantity: 7 }],
+    }],
+  });
+
+  const material = plan.materials.find((row) => row.id === "900");
+  assert.equal(material.available, 7);
+  assert.equal(material.missing, 3);
+  assert.deepEqual(material.sources.map((source) => [source.label, source.type, source.playerName, source.quantity]), [
+    ["Town Bank — Remote Settlement", "Player bank", "Modular", 7],
+  ]);
+});
+
 test("chance metadata preserves normalized probability and expected yield", () => {
   const hair = { id: "200", name: "Rough Animal Hair", itemType: 0, kind: "items", tag: "Hunting" };
   const output = { id: "201", name: "Rough Animal Output", itemType: 0, kind: "items", tag: "Hunting" };
