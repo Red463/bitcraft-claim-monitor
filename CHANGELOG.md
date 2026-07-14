@@ -14,6 +14,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Changed
 
 - Replaced settlement snapshot history with one current settlement baseline while preserving Activity history.
+- On first startup after updating, the app permanently removes legacy historical snapshot rows; operators must take a pre-migration database backup and retain it until the updated app is verified.
 
 ### Removed
 
