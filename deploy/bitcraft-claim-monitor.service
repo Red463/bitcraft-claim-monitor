@@ -13,6 +13,7 @@ Environment=APP_HOST=127.0.0.1
 Environment=APP_PORT=18430
 Environment=BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor
 Environment=BITCRAFT_PROCESS_ROLE=web
+Environment=MALLOC_TRIM_THRESHOLD_=131072
 EnvironmentFile=-/etc/bitcraft-claim-monitor.env
 ExecStart=/usr/bin/node /opt/bitcraft-claim-monitor/apps/bitcraft-local/server.mjs
 Restart=on-failure

@@ -58,7 +58,7 @@ import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedS
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
-import { buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
+import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
@@ -10031,8 +10031,11 @@ function startBackgroundTasks() {
 }
 
 if (!isTestRuntime) {
-  persistApplicationHealthBucket();
-  setInterval(persistApplicationHealthBucket, 60_000);
+  const persistMetrics = () => {
+    runApplicationMetricPersistence(persistApplicationHealthBucket, (message) => console.warn(redactServerHealthText(message)));
+    setTimeout(persistMetrics, 60_000);
+  };
+  setTimeout(persistMetrics, applicationMetricInitialDelayMs(processRole));
 }
 
 if (processRoleConfig.serveHttp) {

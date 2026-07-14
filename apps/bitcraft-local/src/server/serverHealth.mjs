@@ -132,3 +132,18 @@ export function createCachedServerHealthReader(load, { ttlMs = 30_000, now = Dat
     return inflight;
   };
 }
+
+export function applicationMetricInitialDelayMs(processRole) {
+  return String(processRole) === "worker" ? 35_000 : 5_000;
+}
+
+export function runApplicationMetricPersistence(write, warn = () => {}) {
+  try {
+    write();
+    return { ok: true, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    warn(`Application health metric persistence skipped: ${message}`);
+    return { ok: false, error: message };
+  }
+}

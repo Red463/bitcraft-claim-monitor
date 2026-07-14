@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.61] - 2026-07-14
+
+### Changed
+
+- Reduced retained native memory after large Craft Planner and background-worker calculations by returning unused allocator memory to Linux more aggressively.
+- Staggered web and worker health-metric persistence to reduce SQLite write contention.
+
+### Fixed
+
+- Prevented a temporary SQLite database lock while recording health telemetry from terminating and restarting the worker service.
+
 ## [0.32.0-beta.60] - 2026-07-14
 
 ### Changed

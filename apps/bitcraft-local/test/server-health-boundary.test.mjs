@@ -36,4 +36,6 @@ test("deployment installs a root collector timer without granting Node sudo", ()
   assert.match(collector, /history\.jsonl/);
   assert.match(deploy, /bitcraft-monitor-collector\.timer/);
   assert.doesNotMatch(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor.service", import.meta.url), "utf8"), /sudo|journalctl|systemctl/);
+  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
+  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor-worker.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
 });

@@ -57,3 +57,20 @@ test("cached server health reads share in-flight work and obey the TTL", async (
   now += 30_001;
   assert.equal((await read("data")).load, 2);
 });
+
+test("application metric persistence is staggered by process role", () => {
+  assert.equal(typeof serverHealth.applicationMetricInitialDelayMs, "function");
+  assert.equal(serverHealth.applicationMetricInitialDelayMs("web"), 5_000);
+  assert.equal(serverHealth.applicationMetricInitialDelayMs("worker"), 35_000);
+});
+
+test("application metric persistence reports SQLite locks without terminating the process", () => {
+  assert.equal(typeof serverHealth.runApplicationMetricPersistence, "function");
+  const warnings = [];
+  const result = serverHealth.runApplicationMetricPersistence(
+    () => { throw new Error("database is locked"); },
+    (message) => warnings.push(message),
+  );
+  assert.equal(result.ok, false);
+  assert.match(warnings[0], /database is locked/);
+});
