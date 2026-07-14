@@ -192,6 +192,7 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
       storageContainerIds: ["store-1", "", "store-1"],
       playerIds: ["player-1"],
       craftPlayerIds: ["player-1"],
+      bankPlayerIds: ["player-bank", "player-bank", ""],
       deployableContainerIds: ["player-1:cart-1"],
     },
     routeOverrides: { [recipeKey("items", "900")]: "lake-route" },
@@ -203,6 +204,7 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
   assert.deepEqual(config.sourceRules.storageContainerIds, ["store-1"]);
   assert.deepEqual(config.sourceRules.playerIds, ["player-1"]);
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1"]);
+  assert.deepEqual(config.sourceRules.bankPlayerIds, ["player-bank"]);
   assert.deepEqual(config.sourceRules.deployableContainerIds, ["player-1:cart-1"]);
   assert.equal(config.routeOverrides[recipeKey("items", "900")], "lake-route");
   assert.equal(config.multipliers[recipeKey("items", "200")].multiplier, 1.75);
@@ -216,6 +218,7 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   });
 
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
+  assert.deepEqual(config.sourceRules.bankPlayerIds, []);
 });
 
 test("chance metadata preserves normalized probability and expected yield", () => {

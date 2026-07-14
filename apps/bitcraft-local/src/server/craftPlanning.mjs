@@ -132,6 +132,7 @@ export function normalizeCraftPlanConfig(input = {}) {
   }
   const playerIds = uniqueStrings(raw.sourceRules?.playerIds);
   const craftPlayerIds = Array.isArray(raw.sourceRules?.craftPlayerIds) ? uniqueStrings(raw.sourceRules.craftPlayerIds) : playerIds;
+  const bankPlayerIds = uniqueStrings(raw.sourceRules?.bankPlayerIds);
   const targets = (Array.isArray(raw.targets) ? raw.targets : []).map(normalizeTarget).filter(Boolean).slice(0, 50);
   const buildingTargetKeys = new Set(targets.filter((target) => target.kind === "building").map((target) => recipeKey(target.kind, target.id)));
   const buildingProgress = {};
@@ -150,6 +151,7 @@ export function normalizeCraftPlanConfig(input = {}) {
       storageContainerIds: uniqueStrings(raw.sourceRules?.storageContainerIds),
       playerIds,
       craftPlayerIds,
+      bankPlayerIds,
       deployableContainerIds: uniqueStrings(raw.sourceRules?.deployableContainerIds),
     },
     routeOverrides,
