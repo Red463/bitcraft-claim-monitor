@@ -5,7 +5,7 @@ import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
-import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime, timeAgo } from "../utils/format";
+import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime, timeAgo, timestampMs } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { memberTrackingKeys } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
@@ -259,7 +259,7 @@ export function Leaderboard({
                 {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatNumber(profession.progress)}</b></span>)}
                 </div>
               )],
-              ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"],
+              ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown", (entry) => timestampMs(entry.lastContributedAt)],
             ]}
           />
         ) : null}
@@ -320,7 +320,7 @@ export function Leaderboard({
               ["Storage", (entry) => formatNumber(entry.storageEvents)],
               ["Production", (entry) => formatNumber(entry.productionEvents)],
               ["Construction", (entry) => formatNumber(entry.constructionEvents)],
-              ["Latest", (entry) => entry.lastActivityAt ? timeAgo(entry.lastActivityAt) : "Unknown"],
+              ["Latest", (entry) => entry.lastActivityAt ? timeAgo(entry.lastActivityAt) : "Unknown", (entry) => timestampMs(entry.lastActivityAt)],
             ]} />
           )}
         </section>
@@ -347,7 +347,7 @@ export function Leaderboard({
               ["Confirmed sales", (entry) => formatNumber(entry.confirmedSales)],
               ["Sale value", (entry) => `${formatNumber(entry.confirmedSaleValue)}g`],
               ["Units sold", (entry) => formatNumber(entry.unitsSold)],
-              ["Last sale", (entry) => entry.lastSaleAt ? timeAgo(entry.lastSaleAt) : "No sales"],
+              ["Last sale", (entry) => entry.lastSaleAt ? timeAgo(entry.lastSaleAt) : "No sales", (entry) => timestampMs(entry.lastSaleAt)],
             ]} />
           )}
         </section>
@@ -362,10 +362,10 @@ export function Leaderboard({
               ["Current session", (entry) => {
                 const sessionLabel = formatCurrentSession(entry.sessionSeconds);
                 return entry.signedIn && sessionLabel ? `Playing ${sessionLabel}` : "-";
-              }],
-              ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds)],
-              ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds)],
-              ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown"],
+              }, (entry) => entry.signedIn ? toNumber(entry.sessionSeconds) : 0],
+              ["Total played", (entry) => formatPlaytime(entry.timePlayedSeconds), (entry) => toNumber(entry.timePlayedSeconds)],
+              ["Total signed in", (entry) => formatPlaytime(entry.timeSignedInSeconds), (entry) => toNumber(entry.timeSignedInSeconds)],
+              ["Last login", (entry) => entry.lastLoginTimestamp ? timeAgo(entry.lastLoginTimestamp) : "Unknown", (entry) => timestampMs(entry.lastLoginTimestamp)],
             ]} />
           )}
         </section>

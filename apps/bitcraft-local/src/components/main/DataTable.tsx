@@ -1,6 +1,12 @@
 import React from "react";
 import type { AnyRecord } from "../../main-app-data";
-import { compareSortValues, type SortDirection } from "../../utils/tableSort";
+import { sortIndexedRows, type SortDirection } from "../../utils/tableSort";
+
+type DataTableColumn = [
+  label: string,
+  render: (row: AnyRecord, index: number) => React.ReactNode,
+  sortValue?: (row: AnyRecord, index: number) => unknown,
+];
 
 /*
  * Small generic sortable table used by several operational pages.
@@ -25,7 +31,7 @@ export function DataTable({
   rowClassName,
 }: {
   rows: AnyRecord[];
-  columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]>;
+  columns: DataTableColumn[];
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
 }) {
@@ -33,12 +39,13 @@ export function DataTable({
   const indexedRows = React.useMemo(() => rows.map((row, index) => ({ row, index })), [rows]);
   const visibleRows = React.useMemo(() => {
     if (!sort) return indexedRows;
-    const [, render] = columns[sort.column] ?? [];
+    const [, render, sortValue] = columns[sort.column] ?? [];
     if (!render) return indexedRows;
-    return [...indexedRows].sort((left, right) => {
-      const result = compareSortValues(cellSortText(render(left.row, left.index)), cellSortText(render(right.row, right.index)), sort.direction);
-      return result || left.index - right.index;
-    });
+    return sortIndexedRows(
+      indexedRows,
+      sortValue ?? ((row, index) => cellSortText(render(row, index))),
+      sort.direction,
+    );
   }, [columns, indexedRows, sort]);
   const toggleSort = (column: number) => {
     setSort((current) => {

@@ -1,5 +1,7 @@
 export type SortDirection = "asc" | "desc";
 
+export type IndexedRow<Row> = { row: Row; index: number };
+
 function localizedDateTimeMs(text: string): number | null {
   const match = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if (!match) return null;
@@ -40,4 +42,15 @@ export function compareSortValues(left: unknown, right: unknown, direction: Sort
   const order = direction === "asc" ? 1 : -1;
   if (typeof a === "number" && typeof b === "number") return (a - b) * order;
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * order;
+}
+
+export function sortIndexedRows<Row>(
+  rows: ReadonlyArray<IndexedRow<Row>>,
+  sortValue: (row: Row, index: number) => unknown,
+  direction: SortDirection,
+): Array<IndexedRow<Row>> {
+  return [...rows].sort((left, right) => {
+    const result = compareSortValues(sortValue(left.row, left.index), sortValue(right.row, right.index), direction);
+    return result || left.index - right.index;
+  });
 }

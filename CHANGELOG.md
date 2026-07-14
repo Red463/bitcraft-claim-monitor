@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.59] - 2026-07-14
+
+### Fixed
+
+- Fixed Leaderboard playtime, session, and date columns sorting by their formatted labels instead of their underlying duration or timestamp.
+
 ## [0.32.0-beta.58] - 2026-07-13
 
 ### Added
