@@ -217,8 +217,8 @@ test("current settlement writes remain available without legacy snapshot history
 });
 
 function settlementTransactionFixture({ failAfterStateWrite = false } = {}) {
-  const db = new DatabaseSync(":memory:");
-  db.exec(`
+  const rawDb = new DatabaseSync(":memory:");
+  rawDb.exec(`
     CREATE TABLE settlement_state_current (claim_id TEXT PRIMARY KEY, supplies REAL);
     CREATE TABLE activity_events (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL);
     CREATE TABLE discord_notification_outbox (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL);
@@ -228,25 +228,25 @@ function settlementTransactionFixture({ failAfterStateWrite = false } = {}) {
   let processingKicks = 0;
   let processingStartedInsideTransaction = false;
   return {
-    db,
-    transactionDb: {
+    db: {
       exec(sql) {
         const command = sql.trim().toUpperCase();
-        const result = db.exec(sql);
+        const result = rawDb.exec(sql);
         if (command === "BEGIN") transactionOpen = true;
         if (command === "COMMIT" || command === "ROLLBACK") transactionOpen = false;
         return result;
       },
     },
-    readPrevious: () => db.prepare("SELECT * FROM settlement_state_current WHERE claim_id = 'a'").get(),
+    rawDb,
+    readPrevious: () => rawDb.prepare("SELECT * FROM settlement_state_current WHERE claim_id = 'a'").get(),
     activityChanges: () => [{ type: "supplies" }],
     insertActivity(change) {
-      db.prepare("INSERT INTO activity_events (event_type) VALUES (?)").run(change.type);
-      db.prepare("INSERT INTO discord_notification_outbox (event_type) VALUES (?)").run(change.type);
+      rawDb.prepare("INSERT INTO activity_events (event_type) VALUES (?)").run(change.type);
+      rawDb.prepare("INSERT INTO discord_notification_outbox (event_type) VALUES (?)").run(change.type);
       return true;
     },
     upsertState() {
-      db.prepare("UPDATE settlement_state_current SET supplies = 20 WHERE claim_id = 'a'").run();
+      rawDb.prepare("UPDATE settlement_state_current SET supplies = 20 WHERE claim_id = 'a'").run();
       if (failAfterStateWrite) throw new Error("forced settlement state failure");
     },
     processOutbox() {
@@ -263,11 +263,11 @@ test("settlement state rollback persists no activity, outbox, or changed state a
 
   assert.throws(() => runSettlementStateTransaction(fixture), /forced settlement state failure/);
 
-  assert.equal(fixture.db.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 10);
-  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 0);
-  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 0);
+  assert.equal(fixture.rawDb.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 10);
+  assert.equal(fixture.rawDb.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 0);
+  assert.equal(fixture.rawDb.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 0);
   assert.deepEqual(fixture.processing(), { processingKicks: 0, processingStartedInsideTransaction: false });
-  fixture.db.close();
+  fixture.rawDb.close();
 });
 
 test("settlement state success commits activity and outbox before starting Discord processing once", async () => {
@@ -276,9 +276,9 @@ test("settlement state success commits activity and outbox before starting Disco
 
   runSettlementStateTransaction(fixture);
 
-  assert.equal(fixture.db.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 20);
-  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
-  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 1);
+  assert.equal(fixture.rawDb.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 20);
+  assert.equal(fixture.rawDb.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
+  assert.equal(fixture.rawDb.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 1);
   assert.deepEqual(fixture.processing(), { processingKicks: 1, processingStartedInsideTransaction: false });
-  fixture.db.close();
+  fixture.rawDb.close();
 });
