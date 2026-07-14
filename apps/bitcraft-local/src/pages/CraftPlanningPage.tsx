@@ -9,7 +9,8 @@ import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
-import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, needsBoardCompletion, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
+import { selectCraftPlanningEffortView } from "./craftPlanningEffortView";
+import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
 
 const LOCAL_API = "/api/local";
@@ -38,14 +39,17 @@ function completionTone(value: number) {
 function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   const satisfied = cell.missing <= 0;
-  const hasActive = cell.inProgress > 0;
-  const supplied = cell.available + cell.inProgress;
+  const hasActive = cell.guaranteedInProgress > 0;
+  const hasEstimated = cell.estimatedInProgress > 0;
+  const estimatedRequirement = cell.items.some((item) => item.estimatedRequirement === true);
+  const supplied = cell.available + cell.guaranteedInProgress;
   const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && supplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.inProgress)} active craft output (${quantity(cell.guaranteedInProgress)} guaranteed, ${quantity(cell.estimatedInProgress)} estimated), ${quantity(cell.required)} required`} onClick={() => onSelect(cell)}>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${hasEstimated || estimatedRequirement ? " has-estimate" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.guaranteedInProgress)} guaranteed active output${hasEstimated ? `, ${quantity(cell.estimatedInProgress)} estimated active output (not counted toward progress)` : ""}, ${quantity(cell.required)} required${estimatedRequirement ? "; requirement estimated from expected processing yield" : ""}`} onClick={() => onSelect(cell)}>
       <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
       <small>{quantity(supplied)} / {quantity(cell.required)}</small>
       {hasActive ? <Factory size={11} aria-label="Actively being crafted" /> : null}
+      {hasEstimated || estimatedRequirement ? <span className="craft-plan-estimated-marker" aria-label="Estimated; not counted toward progress">~</span> : null}
     </button>
   );
 }
@@ -168,7 +172,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   );
   const needsBoardRowCount = React.useMemo(() => personalBoard.board.reduce((total, group) => total + group.rows.length, 0), [personalBoard.board]);
   const needsBoardSections = React.useMemo(() => personalBoard.board.map((group) => group.section), [personalBoard.board]);
-  const overallCompletion = React.useMemo(() => needsBoardCompletion(personalBoard.board), [personalBoard.board]);
+  const effortView = React.useMemo(
+    () => selectCraftPlanningEffortView(plan?.effortProgress, normalizedFishingRoute),
+    [plan?.effortProgress, normalizedFishingRoute],
+  );
   const filteredNeedsBoard = React.useMemo(
     () => filterNeedsBoard(personalBoard.board, selectedSections, shortagesOnly, needsSearch),
     [personalBoard.board, selectedSections, shortagesOnly, needsSearch],
@@ -518,7 +525,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           </section>
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
-            <div className="craft-plan-needs-header"><div className="craft-plan-needs-heading-content"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${completionTone(overallCompletion.completion)}`}><span><strong>{overallCompletion.completion}%</strong><small>Overall complete</small></span><div><i style={{ width: `${overallCompletion.completion}%` }} /></div><em>{quantity(overallCompletion.covered)} / {quantity(overallCompletion.required)} covered</em></div></div></div>
+            <div className="craft-plan-needs-header"><div className="craft-plan-needs-heading-content"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${effortView.overall.completion == null ? "is-unavailable" : completionTone(effortView.overall.completion)}`}><span><strong>{effortView.overall.completion == null ? "—" : `${effortView.overall.completion}%`}</strong><small>{effortView.overall.completion == null ? "Effort progress unavailable" : "Effort complete"}</small></span><div><i style={{ width: `${effortView.overall.completion ?? 0}%` }} /></div><em className="craft-plan-effort-note">Confirmed stock and guaranteed active crafts.</em></div></div></div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
               <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
@@ -528,7 +535,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
               })}
             </div> : null}
-            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
+            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered by confirmed supply</span><span className="short">More needed</span><span className="active">Guaranteed craft counted</span><span className="estimate">Estimated; not counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
               <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
                 <table className="craft-plan-needs-table">
@@ -536,9 +543,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                     <col className="craft-plan-needs-row-column" />
                     {NEED_COLUMNS.map((column) => <col className="craft-plan-needs-data-column" key={column} />)}
                   </colgroup>
-                  {filteredNeedsBoard.map((group) => (
+                  {filteredNeedsBoard.map((group) => {
+                    const sectionCompletion = effortView.sections[group.section]?.completion ?? null;
+                    return (
                     <tbody key={group.section}>
-                      <tr className="craft-plan-needs-section-row"><th><div className="craft-plan-needs-section-heading"><span className="craft-plan-needs-section-label">{group.section} <span className={completionTone(group.completion)}>{group.completion}%</span></span>{group.section === "Fishing" ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
+                      <tr className="craft-plan-needs-section-row"><th><div className="craft-plan-needs-section-heading"><span className="craft-plan-needs-section-label">{group.section} <span className={sectionCompletion == null ? "is-unavailable" : completionTone(sectionCompletion)}>{sectionCompletion == null ? "Effort unavailable" : `${sectionCompletion}%`}</span></span>{group.section === "Fishing" ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
                         <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
                         <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
                         {!personalBoard.available && personalBoard.reason ? <small role="status" aria-live="polite">{personalBoard.reason}</small> : null}
@@ -550,10 +559,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                           </tr>
                         ))}
                     </tbody>
-                  ))}
+                    );
+                  })}
                 </table>
               </div>
-            </div> : <p className="legend">{needsSearch.trim() ? "No matching items in the selected Needs Board filters." : "All planned materials are covered by selected stock sources and tracked crafts."}</p>}
+            </div> : <p className="legend">{needsSearch.trim() ? "No matching items in the selected Needs Board filters." : "All planned materials are covered by confirmed stock and guaranteed active crafts."}</p>}
           </section>
 
           {canManage && warnings.length ? (

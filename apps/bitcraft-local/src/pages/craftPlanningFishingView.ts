@@ -11,6 +11,7 @@ type PersonalFishingRoute = {
   trackedQuantity?: number;
   guaranteedTrackedQuantity?: number;
   estimatedTrackedQuantity?: number;
+  estimated?: boolean;
   needed?: number;
   usage?: AnyRecord;
   sources?: AnyRecord[];
@@ -60,6 +61,7 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
   if (!name) return null;
   const item = {
     ...route.input,
+    estimatedRequirement: route.estimated === true,
     sources: Array.isArray(route.sources) ? route.sources : [],
     activeCraftSources: Array.isArray(route.activeCraftSources) ? route.activeCraftSources : [],
     ...(route.usage && typeof route.usage === "object" ? { recipeUsages: [route.usage] } : {}),
@@ -69,7 +71,7 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
     items: [item],
     name,
     missing: needed,
-    required: needed + stockQuantity + trackedQuantity,
+    required: needed + stockQuantity + guaranteedInProgress,
     available: stockQuantity,
     inProgress: trackedQuantity,
     guaranteedInProgress,
@@ -109,7 +111,7 @@ function isPlannerTierColumn(column: string) {
 function recalculateFishingGroup(group: NeedGroup, rows: NeedRow[]): NeedGroup {
   const cells = rows.flatMap((row) => [...row.cells.values()]);
   const required = cells.reduce((sum, cell) => sum + cell.required, 0);
-  const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress), 0);
+  const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.guaranteedInProgress), 0);
   return {
     ...group,
     rows,

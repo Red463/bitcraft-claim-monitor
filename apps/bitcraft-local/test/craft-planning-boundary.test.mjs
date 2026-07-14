@@ -38,12 +38,12 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /filterNeedsBoard\(personalBoard\.board, selectedSections, shortagesOnly, needsSearch\)/);
   assert.match(page, /No matching items in the selected Needs Board filters/);
   assert.match(page, /Shortages only/);
-  assert.match(page, /group\.completion/);
+  assert.match(page, /effortView\.sections\[group\.section\]/);
   assert.match(page, /craft-plan-needs-section-row/);
   assert.match(page, /craft-plan-needs-legend/);
   assert.doesNotMatch(page, /planned secondary outputs|plannedOutput/);
   assert.match(page, /in stock/);
-  assert.match(page, /active craft output/);
+  assert.match(page, /guaranteed active output/);
   assert.match(page, /guaranteed/);
   assert.match(page, /estimated/);
   assert.match(page, /craft-plan-row-section-button/);
@@ -271,5 +271,10 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /detailLoading/);
   assert.match(page, /groupNeedCellSourceRoutes\(selectedNeed, detailSteps\)/);
   assert.match(page, /item\.hasSourceRoutes/);
+  assert.match(page, /selectCraftPlanningEffortView/);
+  assert.match(page, /Effort complete/);
+  assert.match(page, /Confirmed stock and guaranteed active crafts/);
+  assert.match(page, /Effort progress unavailable/);
+  assert.doesNotMatch(page, /needsBoardCompletion/);
   assert.match(bitjita, /activePanel === "planning"/);
 });

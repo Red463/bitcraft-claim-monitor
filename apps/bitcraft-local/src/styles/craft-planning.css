@@ -61,7 +61,10 @@
 .craft-plan-overall-progress.is-high i { background: #8fd47c; }
 .craft-plan-overall-progress.is-complete strong { color: var(--positive); }
 .craft-plan-overall-progress.is-complete i { background: var(--positive); }
+.craft-plan-overall-progress.is-unavailable > div { opacity: 0.35; }
+.craft-plan-overall-progress.is-unavailable strong { color: var(--muted); }
 .craft-plan-overall-progress em { grid-column: 1 / -1; text-align: left; }
+.craft-plan-effort-note { color: var(--muted); }
 .warning-card { border-color: rgba(240, 198, 79, 0.35); }
 .admin-craft-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .admin-craft-plan-list { display: grid; gap: 8px; }
@@ -221,6 +224,7 @@
 .craft-plan-needs-section-label > span.is-mid { color: #f0c64f; }
 .craft-plan-needs-section-label > span.is-high { color: #8fd47c; }
 .craft-plan-needs-section-label > span.is-complete { color: var(--positive); }
+.craft-plan-needs-section-label > span.is-unavailable { color: var(--muted); font-size: 0.69rem; text-transform: none; }
 .craft-plan-needs-table tbody th { color: var(--text); font-size: 0.96rem; line-height: 1.15; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .craft-plan-needs-table td { height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
 .craft-plan-need-cell { position: relative; display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
@@ -236,6 +240,8 @@
 @keyframes craft-plan-active-pulse { 0% { opacity: 0.9; transform: scale(0.55); } 70%, 100% { opacity: 0; transform: scale(1.45); } }
 .craft-plan-need-cell.has-active svg { position: absolute; top: 4px; left: 5px; color: #65b7fa; }
 .craft-plan-need-cell.has-active { padding-top: 16px; }
+.craft-plan-need-cell.has-estimate:not(.has-active) { padding-top: 16px; }
+.craft-plan-estimated-marker { position: absolute; top: 3px; right: 5px; color: var(--muted); font-size: 0.72rem; font-weight: 800; }
 .craft-plan-need-cell.is-shortage { background: rgba(240, 198, 79, 0.045); }
 .craft-plan-need-cell.is-blocked { background: rgba(239, 100, 97, 0.09); }
 .craft-plan-need-cell.is-blocked strong { color: #ff8c89; }
@@ -287,6 +293,7 @@
 .craft-plan-needs-legend .covered { color: var(--good); }
 .craft-plan-needs-legend .short { color: var(--gold); }
 .craft-plan-needs-legend .active { color: #65b7fa; }
+.craft-plan-needs-legend .estimate { color: var(--muted); }
 .craft-plan-needs-legend .blocked { color: #ef6461; }
 .craft-plan-tracked-crafts { display: grid; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .craft-plan-tracked-crafts h3 { margin: 0 0 2px; }
