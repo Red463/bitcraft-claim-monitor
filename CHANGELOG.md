@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.34.1-beta.2] - 2026-07-15
+
+### Changed
+
+- Simplified the Craft Planner progress summary by removing the lengthy effort-estimation description.
+
+### Fixed
+
+- Fixed profession effort percentages using different section groupings from the visible Needs Board rows.
+- Fixed moved, hidden, overridden, and aliased materials affecting the wrong profession or being counted twice in Fishing progress.
+
 ## [0.34.1-beta.1] - 2026-07-14
 
 ### Fixed

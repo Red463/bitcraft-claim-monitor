@@ -39,8 +39,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /No matching items in the selected Needs Board filters/);
   assert.match(page, /Shortages only/);
   assert.match(page, /effortView\.sections\[group\.section\]/);
-  assert.match(page, /effortView\.warnings\.join\(" "\)/);
-  assert.doesNotMatch(page, /effortView\.warnings\[0\]/);
+  assert.doesNotMatch(page, /craft-plan-effort-warning/);
+  assert.doesNotMatch(page, /effortView\.warnings(?:\[0\]|\.join)/);
   assert.doesNotMatch(page, /effortView\.overall\.completion == null && effortView\.warnings\[0\]/);
   assert.match(page, /craft-plan-needs-section-row/);
   assert.match(page, /craft-plan-needs-legend/);

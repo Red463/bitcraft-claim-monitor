@@ -1,3 +1,5 @@
+import { plannerTaxonomyFor } from "../pages/craftPlanningTaxonomyData.mjs";
+
 export const CRAFT_PLAN_EFFORT_MODEL_VERSION = 1;
 
 const MAX_MISSING_WEIGHT_KEYS = 25;
@@ -124,13 +126,19 @@ function compactFishingRoute(route = {}) {
 
 export function compactCraftPlanEffortInput(plan = {}) {
   return {
-    materials: (Array.isArray(plan?.materials) ? plan.materials : []).map((material) => ({
-      key: materialKey(material),
-      tag: String(material?.tag ?? ""),
-      section: String(material?.section ?? material?.apiSection ?? "Other"),
-      required: materialRequired(material),
-      missing: nonNegative(material?.missing),
-    })),
+    materials: (Array.isArray(plan?.materials) ? plan.materials : []).map((material) => {
+      const name = String(material?.name ?? material?.label ?? material?.itemName ?? "").trim();
+      const sectionOverride = String(material?.sectionOverride ?? "").trim();
+      return {
+        key: materialKey(material),
+        ...(name ? { name } : {}),
+        tag: String(material?.tag ?? ""),
+        section: String(material?.section ?? material?.apiSection ?? "Other"),
+        ...(sectionOverride ? { sectionOverride } : {}),
+        required: materialRequired(material),
+        missing: nonNegative(material?.missing),
+      };
+    }),
     personalViews: {
       fishing: {
         tiers: (Array.isArray(plan?.personalViews?.fishing?.tiers) ? plan.personalViews.fishing.tiers : []).map((tier) => ({
@@ -141,19 +149,29 @@ export function compactCraftPlanEffortInput(plan = {}) {
   };
 }
 
-function isInterchangeableFishingInput(material = {}) {
-  if (String(material.section ?? material.apiSection ?? "").toLowerCase() !== "fishing") return false;
-  return /^(ocean|lake) fish$/i.test(String(material.tag ?? "").trim());
+function effortClassification(material = {}) {
+  const taxonomy = plannerTaxonomyFor(material);
+  const sectionOverride = String(material.sectionOverride ?? "").trim();
+  const section = sectionOverride
+    || String(taxonomy.section ?? material.section ?? material.apiSection ?? "Other").trim()
+    || "Other";
+  return { taxonomy, section };
+}
+
+function isInterchangeableFishingInput(classification) {
+  return classification.section.toLowerCase() === "fishing"
+    && /^(ocean|lake) fish$/i.test(String(classification.taxonomy.row ?? "").trim());
 }
 
 export function projectCraftPlanEffortMaterials(plan = {}, fishingRoute = null) {
   const projected = new Map();
   for (const material of Array.isArray(plan?.materials) ? plan.materials : []) {
-    if (fishingRoute && isInterchangeableFishingInput(material)) continue;
+    const { taxonomy, section } = effortClassification(material);
+    if (taxonomy.hidden) continue;
+    if (fishingRoute && isInterchangeableFishingInput({ taxonomy, section })) continue;
     const key = materialKey(material);
     const required = materialRequired(material);
     if (!key || required <= 0) continue;
-    const section = String(material.section ?? material.apiSection ?? "Other").trim() || "Other";
     const current = projected.get(key);
     if (current) {
       current.required += required;

@@ -8,6 +8,7 @@ import {
   craftingEffortCandidate,
   gatheringEffortCandidate,
   normalizeGameResourceEffortCandidates,
+  projectCraftPlanEffortMaterials,
   selectLowestEffortWeights,
 } from "../src/server/craftPlanEffortProgress.mjs";
 
@@ -114,6 +115,46 @@ test("a section containing only unweighted gathered materials still has progress
   assert.deepEqual(result.overall, { state: "ready", baselineEffort: 10, remainingEffort: 4, completion: 60 });
 });
 
+test("effort sections follow the same canonical taxonomy as the Needs Board", () => {
+  const baselinePlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", bufferedRequired: 88, missing: 88 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const currentPlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", bufferedRequired: 88, missing: 34 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const result = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan, weights: new Map([["items:berry", 1]]) });
+  assert.equal(result.sections.Foraging.completion, 61.4);
+  assert.equal(result.sections.Scholar, undefined);
+});
+
+test("effort sections follow explicit Needs Board section overrides", () => {
+  const baselinePlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", sectionOverride: "Farming", bufferedRequired: 10, missing: 10 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const currentPlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", sectionOverride: "Farming", bufferedRequired: 10, missing: 4 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const result = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan, weights: new Map([["items:berry", 1]]) });
+  assert.equal(result.sections.Farming.completion, 60);
+  assert.equal(result.sections.Foraging, undefined);
+});
+
+test("effort progress excludes rows hidden by the Needs Board taxonomy", () => {
+  const baselinePlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", bufferedRequired: 10, missing: 10 },
+    { key: "items:seeds", tag: "Wild Seeds", section: "Farming", bufferedRequired: 100, missing: 100 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const currentPlan = { materials: [
+    { key: "items:berry", tag: "Citric Berry", section: "Scholar", bufferedRequired: 10, missing: 5 },
+    { key: "items:seeds", tag: "Wild Seeds", section: "Farming", bufferedRequired: 100, missing: 100 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const weights = new Map([["items:berry", 1], ["items:seeds", 1]]);
+  const result = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan, weights });
+  assert.equal(result.sections.Foraging.completion, 50);
+  assert.equal(result.sections.Farming, undefined);
+  assert.deepEqual(result.overall, { state: "ready", baselineEffort: 10, remainingEffort: 5, completion: 50 });
+});
+
 test("empty plans are complete without requiring catalog weights", () => {
   const result = calculateCraftPlanEffortProgress({ baselinePlan: { materials: [] }, currentPlan: { materials: [] }, weights: new Map() });
   assert.equal(result.state, "empty");
@@ -133,13 +174,29 @@ test("Fishing variants replace only interchangeable fish inputs", () => {
   assert.equal(result.fishingVariants.lake.route, "lake");
 });
 
+test("Fishing route projection replaces canonically classified fish aliases", () => {
+  const plan = {
+    materials: [
+      { key: "items:ocean", tag: "Oceanfish", section: "Scholar", bufferedRequired: 100, missing: 40 },
+      { key: "items:lake", tag: "Lake Fish", section: "Scholar", bufferedRequired: 10, missing: 4 },
+    ],
+    personalViews: { fishing: { tiers: [{ routes: {
+      ocean: { available: true, input: { key: "items:ocean", tag: "Oceanfish" }, needed: 40, stockQuantity: 60, guaranteedTrackedQuantity: 0 },
+      lake: { available: true, input: { key: "items:lake", tag: "Lake Fish" }, needed: 4, stockQuantity: 6, guaranteedTrackedQuantity: 0 },
+    } }] } },
+  };
+  assert.deepEqual(projectCraftPlanEffortMaterials(plan, "ocean"), [
+    { key: "items:ocean", section: "Fishing", required: 100, missing: 40 },
+  ]);
+});
+
 test("compact effort input excludes planner drilldown payloads", () => {
   const compact = compactCraftPlanEffortInput({
-    materials: [{ key: "items:1", tag: "Plank", section: "Carpentry", required: 10, missing: 4, sources: [{}], recipeUsages: [{}] }],
+    materials: [{ key: "items:1", tag: "Plank", section: "Carpentry", sectionOverride: "Farming", required: 10, missing: 4, sources: [{}], recipeUsages: [{}] }],
     personalViews: { fishing: { tiers: [{ routes: { ocean: { available: false, reason: "Missing route", alternatives: [{}] } } }] } },
     steps: [{}],
   });
-  assert.deepEqual(compact.materials, [{ key: "items:1", tag: "Plank", section: "Carpentry", required: 10, missing: 4 }]);
+  assert.deepEqual(compact.materials, [{ key: "items:1", tag: "Plank", section: "Carpentry", sectionOverride: "Farming", required: 10, missing: 4 }]);
   assert.deepEqual(compact.personalViews.fishing.tiers[0].routes.ocean, { available: false, reason: "Missing route" });
   assert.equal("steps" in compact, false);
 });
