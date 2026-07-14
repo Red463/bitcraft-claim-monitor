@@ -16,10 +16,6 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function roundPercent(value) {
-  return Math.round(value * 10) / 10;
-}
-
 export function normalizeCraftPlanReportProfession(value) {
   const key = String(value ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
   return professionAliases.get(key) ?? "";
@@ -35,11 +31,19 @@ function summarize(materials) {
   const required = materials.reduce((sum, item) => sum + Math.max(0, number(item.bufferedRequired ?? item.required)), 0);
   const covered = materials.reduce((sum, item) => {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
-    return sum + Math.min(itemRequired, Math.max(0, number(item.available) + number(item.inProgress)));
+    const estimated = Math.max(0, number(item.estimatedInProgress));
+    const guaranteed = item.guaranteedInProgress != null
+      ? Math.max(0, number(item.guaranteedInProgress))
+      : estimated > 0 ? 0 : Math.max(0, number(item.inProgress));
+    return sum + Math.min(itemRequired, Math.max(0, number(item.available) + guaranteed));
   }, 0);
   const completedItems = materials.filter((item) => {
     const itemRequired = Math.max(0, number(item.bufferedRequired ?? item.required));
-    const itemCovered = Math.max(0, number(item.available) + number(item.inProgress));
+    const estimated = Math.max(0, number(item.estimatedInProgress));
+    const guaranteed = item.guaranteedInProgress != null
+      ? Math.max(0, number(item.guaranteedInProgress))
+      : estimated > 0 ? 0 : Math.max(0, number(item.inProgress));
+    const itemCovered = Math.max(0, number(item.available) + guaranteed);
     return itemRequired > 0 && itemCovered >= itemRequired;
   }).length;
   const estimatedCraftOutput = materials.reduce((sum, item) => {
@@ -51,11 +55,19 @@ function summarize(materials) {
   return {
     required,
     covered,
-    completion: required > 0 ? roundPercent((covered / required) * 100) : 100,
     completedItems,
     totalItems: materials.length,
     ...(estimatedCraftOutput > 0 ? { estimatedCraftOutput } : {}),
   };
+}
+
+function boundedEffortWarning(summary = {}) {
+  const warning = Array.isArray(summary?.warnings)
+    ? summary.warnings.find((value) => String(value).trim())
+    : "";
+  return String(warning || "Effort progress is temporarily unavailable while the planner catalog refreshes.")
+    .replaceAll("@", "@\u200b")
+    .slice(0, 500);
 }
 
 function relevantMaterials(plan = {}) {
@@ -76,6 +88,17 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
   const selected = profession ? all.filter((material) => materialProfession(material) === profession) : all;
   if (profession && selected.length === 0) return { state: "empty_profession", title: `${profession} Progress`, message: `${profession} has no requirements in the current plan.`, profession };
 
+  const effort = plan.effortProgress?.fishingVariants?.ocean ?? plan.effortProgress;
+  const overallEffort = profession ? effort?.sections?.[profession] : effort?.overall;
+  if (!effort || overallEffort?.completion == null) {
+    return {
+      state: "unavailable",
+      title: profession ? `${profession} Progress` : "Crafting Progress",
+      message: boundedEffortWarning(plan.effortProgress),
+      ...(profession ? { profession } : {}),
+    };
+  }
+
   const byProfession = new Map();
   for (const material of all) {
     const name = materialProfession(material);
@@ -88,9 +111,9 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     .filter((item) => item.missing > 0)
     .sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name))
     .slice(0, profession ? 10 : 5);
-  const overall = summarize(selected);
+  const overall = { ...summarize(selected), completion: number(overallEffort.completion) };
   const professions = [...byProfession.entries()]
-    .map(([name, entries]) => ({ name, ...summarize(entries) }))
+    .map(([name, entries]) => ({ name, ...summarize(entries), completion: number(effort?.sections?.[name]?.completion) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return {
@@ -100,6 +123,7 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     overall,
     professions: profession ? professions.filter((entry) => entry.name === profession) : professions,
     shortages,
+    ...(effort?.sections?.Fishing || plan.effortProgress?.fishingVariants?.ocean ? { fishingRoute: "ocean" } : {}),
     calculatedAt: String(plan.totals?.calculatedAt ?? plan.calculatedAt ?? new Date().toISOString()),
   };
 }
@@ -231,7 +255,7 @@ export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https:
       allowed_mentions: { parse: [] },
     };
   }
-  const summary = progressSummary(report.overall);
+  const summary = `${progressSummary(report.overall)}\nEffort complete from confirmed stock and guaranteed active crafts`;
   const coverage = `${Math.round(number(report.overall.covered)).toLocaleString()} of ${Math.round(number(report.overall.required)).toLocaleString()} units covered`;
   const requirements = `${Math.round(number(report.overall.completedItems)).toLocaleString()} of ${Math.round(number(report.overall.totalItems)).toLocaleString()} requirements complete`;
   const professionFields = report.profession ? [] : (report.professions ?? []).map((entry) => ({
@@ -241,9 +265,10 @@ export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https:
   }));
   const shortages = (report.shortages ?? []).map((item) => `\u2022 **${safeDiscordText(item.name)}** \u2014 **${Math.ceil(item.missing).toLocaleString()}** needed`);
   const estimateNote = number(report.overall.estimatedCraftOutput) > 0
-    ? `*Includes **${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()}** estimated items from active crafts.*`
+    ? `*${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()} estimated active-craft items are shown but not counted toward progress.*`
     : "";
-  const description = [summary, coverage, requirements, estimateNote, `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
+  const routeNote = report.fishingRoute === "ocean" ? "Fishing route: Ocean" : "";
+  const description = [summary, coverage, requirements, routeNote, estimateNote, `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
   return {
     embeds: [{
       title: safeDiscordText(report.title || "Crafting Progress", 256),

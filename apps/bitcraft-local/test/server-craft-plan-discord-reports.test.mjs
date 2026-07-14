@@ -20,8 +20,82 @@ const materials = [
   { name: "Thread", section: "Tailor", sectionOverride: "Tailoring", required: 10, available: 0, inProgress: 0, missing: 10 },
 ];
 
+function makeEffortProgress({ overall, ...sections }) {
+  const mapped = Object.fromEntries(Object.entries(sections).map(([name, completion]) => [name, {
+    state: "ready", baselineEffort: 100, remainingEffort: 100 - completion, completion,
+  }]));
+  const overallAggregate = { state: "ready", baselineEffort: 100, remainingEffort: 100 - overall, completion: overall };
+  return {
+    state: "ready",
+    overall: overallAggregate,
+    sections: mapped,
+    fishingVariants: Object.prototype.hasOwnProperty.call(mapped, "Fishing")
+      ? { ocean: { route: "ocean", overall: overallAggregate, sections: mapped } }
+      : {},
+    warnings: [],
+  };
+}
+
+function withEffort(plan) {
+  const rows = Array.isArray(plan.materials) ? plan.materials : [];
+  const canonicalSection = (item) => item.tag === "Wood Log"
+    ? "Forestry"
+    : item.sectionOverride || (item.section === "Tailor" ? "Tailoring" : item.section);
+  const completion = (entries) => {
+    const required = entries.reduce((sum, item) => sum + Math.max(0, Number(item.required) || 0), 0);
+    const covered = entries.reduce((sum, item) => {
+      const estimated = Math.max(0, Number(item.estimatedInProgress) || 0);
+      const guaranteed = item.guaranteedInProgress != null
+        ? Math.max(0, Number(item.guaranteedInProgress) || 0)
+        : estimated > 0 ? 0 : Math.max(0, Number(item.inProgress) || 0);
+      return sum + Math.min(Math.max(0, Number(item.required) || 0), Math.max(0, Number(item.available) || 0) + guaranteed);
+    }, 0);
+    return required > 0 ? Math.round((covered / required) * 1000) / 10 : 100;
+  };
+  const grouped = Map.groupBy(rows, canonicalSection);
+  const sections = Object.fromEntries([...grouped].filter(([name]) => name).map(([name, entries]) => [name, completion(entries)]));
+  return { ...plan, effortProgress: makeEffortProgress({ overall: completion(rows), ...sections }) };
+}
+
+test("Discord overview uses server effort progress", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials,
+    effortProgress: makeEffortProgress({ overall: 72.5, Fishing: 57.2, Forestry: 100, Carpentry: 60, Tailoring: 50 }),
+  });
+  assert.equal(report.overall.completion, 72.5);
+  assert.equal(report.professions.find((row) => row.name === "Forestry").completion, 100);
+  assert.equal(report.fishingRoute, "ocean");
+});
+
+test("Discord refuses a raw fallback when effort is unavailable", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials,
+    effortProgress: { state: "unavailable", warnings: ["Catalog refresh required"] },
+  });
+  assert.equal(report.state, "unavailable");
+  assert.match(report.message, /catalog refresh/i);
+  assert.equal(report.overall, undefined);
+});
+
+test("Discord labels estimated active output as excluded", () => {
+  const estimatedMaterials = materials.map((item, index) => index === 0
+    ? { ...item, guaranteedInProgress: 0, estimatedInProgress: 10 }
+    : item);
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: estimatedMaterials,
+    effortProgress: makeEffortProgress({ overall: 72.5, Forestry: 70, Carpentry: 60, Tailoring: 50 }),
+  });
+  assert.match(JSON.stringify(buildCraftPlanDiscordEmbed(report)), /shown but not counted toward progress/i);
+});
+
 test("craft planner Discord overview reports weighted progress and largest shortages", () => {
-  const report = buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{ name: "Township" }], totals: { calculatedAt: "2026-07-13T12:00:00.000Z" } });
+  const report = buildCraftPlanDiscordReport(withEffort({ enabled: true, materials, targets: [{ name: "Township" }], totals: { calculatedAt: "2026-07-13T12:00:00.000Z" } }));
 
   assert.equal(report.state, "ready");
   assert.deepEqual(report.overall, { required: 180, covered: 85, completion: 47.2, completedItems: 1, totalItems: 4 });
@@ -45,7 +119,7 @@ test("craft planner Discord profession reports use canonical taxonomy and ten-it
     available: 0,
     missing: index + 1,
   }));
-  const report = buildCraftPlanDiscordReport({ enabled: true, materials: extra, targets: [{}] }, "tailoring");
+  const report = buildCraftPlanDiscordReport(withEffort({ enabled: true, materials: extra, targets: [{}] }), "tailoring");
 
   assert.equal(report.title, "Tailoring Progress");
   assert.equal(report.shortages.length, 10);
@@ -54,11 +128,11 @@ test("craft planner Discord profession reports use canonical taxonomy and ten-it
 });
 
 test("craft planner Discord reports use the same gathered-input taxonomy as the Needs Board", () => {
-  const report = buildCraftPlanDiscordReport({
+  const report = buildCraftPlanDiscordReport(withEffort({
     enabled: true,
     targets: [{}],
     materials: [{ name: "Rough Wood Log", tag: "Wood Log", section: "Carpentry", required: 100, available: 25, missing: 75, recipeUsages: [{}] }],
-  }, "forestry");
+  }), "forestry");
 
   assert.equal(report.profession, "Forestry");
   assert.deepEqual(report.overall, { required: 100, covered: 25, completion: 25, completedItems: 0, totalItems: 1 });
@@ -66,17 +140,17 @@ test("craft planner Discord reports use the same gathered-input taxonomy as the 
 });
 
 test("craft planner Discord reports ignore legacy planned output coverage", () => {
-  const report = buildCraftPlanDiscordReport({
+  const report = buildCraftPlanDiscordReport(withEffort({
     enabled: true,
     targets: [{}],
     materials: [{ name: "Sturdy Gypsite", tag: "Gypsite", tier: 3, required: 78, available: 0, inProgress: 0, plannedOutput: 25.52, missing: 78, recipeUsages: [{}] }],
-  });
+  }));
 
   assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0, completedItems: 0, totalItems: 1 });
 });
 
 test("craft planner Discord reports disclose estimated active craft coverage", () => {
-  const report = buildCraftPlanDiscordReport({
+  const report = buildCraftPlanDiscordReport(withEffort({
     enabled: true,
     targets: [{}],
     materials: [{
@@ -90,17 +164,17 @@ test("craft planner Discord reports disclose estimated active craft coverage", (
       missing: 5,
       recipeUsages: [{}],
     }],
-  });
+  }));
 
-  assert.deepEqual(report.overall, { required: 10, covered: 5, completion: 50, completedItems: 0, totalItems: 1, estimatedCraftOutput: 2 });
+  assert.deepEqual(report.overall, { required: 10, covered: 3, completion: 30, completedItems: 0, totalItems: 1, estimatedCraftOutput: 2 });
   const payload = buildCraftPlanDiscordEmbed(report);
-  assert.match(payload.embeds[0].description, /Includes \*\*2\*\* estimated items from active crafts\./);
+  assert.match(payload.embeds[0].description, /2 estimated active-craft items are shown but not counted toward progress\./);
 });
 
 test("craft planner Discord reports expose disabled, empty, complete, and unknown profession states", () => {
   assert.equal(buildCraftPlanDiscordReport({ enabled: false }).state, "disabled");
   assert.equal(buildCraftPlanDiscordReport({ enabled: true, materials: [], targets: [] }).state, "empty");
-  assert.equal(buildCraftPlanDiscordReport({ enabled: true, materials: [{ name: "Log", section: "Forestry", required: 10, available: 10, missing: 0, hasRecipeUsages: true }], targets: [{}] }).state, "complete");
+  assert.equal(buildCraftPlanDiscordReport(withEffort({ enabled: true, materials: [{ name: "Log", section: "Forestry", required: 10, available: 10, missing: 0, hasRecipeUsages: true }], targets: [{}] })).state, "complete");
   assert.equal(buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{}] }, "alchemy").state, "unknown_profession");
 });
 
@@ -153,7 +227,7 @@ test("unavailable Craft Planner reports expose a bounded non-sensitive state", (
 });
 
 test("craft planner Discord embeds stay bounded and suppress mentions", () => {
-  const report = buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{}], calculatedAt: "2026-07-13T12:00:00.000Z" });
+  const report = buildCraftPlanDiscordReport(withEffort({ enabled: true, materials, targets: [{}], calculatedAt: "2026-07-13T12:00:00.000Z" }));
   const payload = buildCraftPlanDiscordEmbed(report, { dashboardUrl: "https://app.timbersteeltrade.com/?page=planning" });
 
   assert.equal(payload.allowed_mentions.parse.length, 0);
@@ -174,7 +248,7 @@ test("craft planner Discord embeds stay bounded and suppress mentions", () => {
 });
 
 test("profession Craft Planner embeds keep one focused summary without the overview grid", () => {
-  const report = buildCraftPlanDiscordReport({ enabled: true, materials, targets: [{}] }, "forestry");
+  const report = buildCraftPlanDiscordReport(withEffort({ enabled: true, materials, targets: [{}] }), "forestry");
   const payload = buildCraftPlanDiscordEmbed(report);
   const embed = payload.embeds[0];
 
