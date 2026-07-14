@@ -263,7 +263,7 @@ export function calculateCraftPlanEffortProgress({
         continue;
       }
       weightedRequiredMaterials += 1;
-      const liveMissing = Math.min(row.required, nonNegative(currentByKey.get(row.key)?.missing ?? row.required));
+      const liveMissing = Math.min(row.required, nonNegative(currentByKey.get(row.key)?.missing ?? 0));
       const entries = sectionRows.get(row.section) ?? [];
       entries.push({ baselineEffort: row.required * weight, remainingEffort: liveMissing * weight });
       sectionRows.set(row.section, entries);

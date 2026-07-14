@@ -406,6 +406,26 @@ test("game catalog repository derives and atomically replaces versioned effort w
   db.close();
 });
 
+test("effort weight publication rolls back when its completion callback fails", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.replaceEffortWeights([
+    { catalogKey: "items:old", effortWeight: 2, method: "crafting", sourceKey: "recipe:old" },
+  ], 1, "2026-07-14T12:01:00.000Z");
+
+  assert.throws(() => repository.replaceEffortWeights([
+    { catalogKey: "items:new", effortWeight: 3, method: "crafting", sourceKey: "recipe:new" },
+  ], 1, "2026-07-14T12:02:00.000Z", () => {
+    db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)")
+      .run("test_effort_publish", "new", "2026-07-14T12:02:00.000Z");
+    throw new Error("forced publish failure");
+  }), /forced publish failure/);
+
+  assert.deepEqual([...repository.getEffortWeights(1).keys()], ["items:old"]);
+  assert.equal(db.prepare("SELECT value FROM app_settings WHERE key = ?").get("test_effort_publish"), undefined);
+  db.close();
+});
+
 test("normalizeGameCatalogDetail preserves the full expected yield of farming co-products", () => {
   const normalized = normalizeGameCatalogDetail({
     item: { id: "1220023", itemType: 0, name: "Basic Wispweave Products", tag: "Wispweave Products", tier: 1 },

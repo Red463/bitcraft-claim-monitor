@@ -890,37 +890,38 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     ...normalizeGameResourceEffortCandidates(resourcesPayload),
   ];
   const effortUpdatedAt = new Date().toISOString();
+  const completedAt = new Date().toISOString();
   const effortWeightCount = gameCatalogRepository.replaceEffortWeights(
     effortCandidates,
     CRAFT_PLAN_EFFORT_MODEL_VERSION,
     effortUpdatedAt,
-  );
-  statements.upsertSetting.run(
-    "game_catalog_effort_model_version",
-    String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
-    effortUpdatedAt,
+    () => {
+      statements.upsertSetting.run(
+        "game_catalog_effort_model_version",
+        String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
+        effortUpdatedAt,
+      );
+      gameCatalogRepository.updateRefreshRun(refreshRun.id, {
+        status: "completed",
+        phase: "complete",
+        cursorKind,
+        cursorId,
+        processedCount,
+        totalCount: queueCounts.total,
+        itemCount,
+        cargoCount,
+        recipeCount,
+        byproductCount,
+        failureCount,
+        lastError: null,
+        completedAt,
+        updatedAt: completedAt,
+      });
+    },
   );
   craftPlanEffortBaselineCache.clear();
   craftPlanResponseGeneration += 1;
   craftPlanResponseCache.clear();
-  const completedAt = new Date().toISOString();
-
-  gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-    status: "completed",
-    phase: "complete",
-    cursorKind,
-    cursorId,
-    processedCount,
-    totalCount: queueCounts.total,
-    itemCount,
-    cargoCount,
-    recipeCount,
-    byproductCount,
-    failureCount,
-    lastError: null,
-    completedAt,
-    updatedAt: completedAt,
-  });
 
   return {
     complete: true,

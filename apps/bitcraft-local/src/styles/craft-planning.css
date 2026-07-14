@@ -65,6 +65,7 @@
 .craft-plan-overall-progress.is-unavailable strong { color: var(--muted); }
 .craft-plan-overall-progress em { grid-column: 1 / -1; text-align: left; }
 .craft-plan-effort-note { color: var(--muted); }
+.craft-plan-effort-warning { grid-column: 1 / -1; max-width: 460px; color: #ffb547; font-size: 0.72rem; line-height: 1.25; text-align: left; }
 .warning-card { border-color: rgba(240, 198, 79, 0.35); }
 .admin-craft-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .admin-craft-plan-list { display: grid; gap: 8px; }

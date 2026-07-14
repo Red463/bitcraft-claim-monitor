@@ -70,6 +70,19 @@ test("progress compares a zero-stock baseline with confirmed live missing effort
   assert.deepEqual(result.overall, { state: "ready", baselineEffort: 300, remainingEffort: 150, completion: 50 });
 });
 
+test("materials removed from the live requirement graph count as completed effort", () => {
+  const baselinePlan = { materials: [
+    { key: "items:plank", section: "Carpentry", bufferedRequired: 10, missing: 10 },
+  ], personalViews: { fishing: { tiers: [] } } };
+  const result = calculateCraftPlanEffortProgress({
+    baselinePlan,
+    currentPlan: { materials: [], personalViews: { fishing: { tiers: [] } } },
+    weights: new Map([["items:plank", { effortWeight: 2 }]]),
+  });
+  assert.deepEqual(result.overall, { state: "ready", baselineEffort: 20, remainingEffort: 0, completion: 100 });
+  assert.equal(result.sections.Carpentry.completion, 100);
+});
+
 test("a missing weight disables only its section and overall", () => {
   const baselinePlan = { materials: [
     { key: "items:known", section: "Carpentry", bufferedRequired: 10, missing: 10 },

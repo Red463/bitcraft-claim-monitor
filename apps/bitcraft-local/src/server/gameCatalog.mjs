@@ -853,7 +853,7 @@ export function createGameCatalogRepository(db) {
         probability: 1,
       }));
     },
-    replaceEffortWeights(candidates, modelVersion, updatedAt = new Date().toISOString()) {
+    replaceEffortWeights(candidates, modelVersion, updatedAt = new Date().toISOString(), publish = null) {
       const normalizedVersion = Math.max(1, Math.floor(toNumber(modelVersion)));
       const weights = selectLowestEffortWeights((candidates ?? []).filter((row) => (
         row?.method === "crafting" || row?.method === "gathering"
@@ -871,6 +871,7 @@ export function createGameCatalogRepository(db) {
             updatedAt,
           );
         }
+        if (typeof publish === "function") publish({ count: weights.size, updatedAt });
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
