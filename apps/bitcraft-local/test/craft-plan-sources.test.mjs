@@ -188,6 +188,8 @@ test("selectedPlayerInventoryIds shares inventory requests across source familie
 
 test("player banks preserve item and cargo identity", () => {
   const result = playerInventoryContainerSources("player-1", "Modular", {
+    items: [{ id: 700, name: "Regular Item 700", tier: 2 }],
+    cargos: [{ id: 700, name: "Cargo 700", tier: 5 }],
     inventories: [{
       entityId: "bank-1",
       inventoryName: "Town Bank",
@@ -203,6 +205,36 @@ test("player banks preserve item and cargo identity", () => {
     ["items", "700", 4],
     ["cargo", "700", 6],
   ]);
+  assert.deepEqual(result.banks[0].items.map((item) => [item.name, item.tier]), [
+    ["Regular Item 700", 2],
+    ["Cargo 700", 5],
+  ]);
+});
+
+test("player banks ignore ambiguous containers and stack types", () => {
+  const result = playerInventoryContainerSources("player-1", "Modular", {
+    items: [{ id: 700, name: "Regular Item 700" }],
+    inventories: [
+      {
+        inventoryName: "Town Bank",
+        claimName: "Missing ID Settlement",
+        pockets: [{ contents: { itemId: 700, itemType: 0, quantity: 20 } }],
+      },
+      {
+        entityId: "bank-valid",
+        inventoryName: "Town Bank",
+        claimName: "Remote Settlement",
+        pockets: [
+          { contents: { itemId: 700, quantity: 30 } },
+          { contents: { itemId: 700, itemType: 0, quantity: 4 } },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(result.banks.length, 1);
+  assert.equal(result.banks[0].sourceId, "player-1:bank-valid");
+  assert.deepEqual(result.banks[0].items.map((item) => [item.name, item.quantity]), [["Regular Item 700", 4]]);
 });
 
 test("playerInventoryContainerSources applies deployable allow-list only to counted sources", () => {

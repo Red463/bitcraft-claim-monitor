@@ -5,12 +5,19 @@ const SETTLEMENT_STORAGE_INVENTORY_NAME = /town bank|settlement storage|claim st
 const PLAYER_BANK_INVENTORY_NAME = /town bank|settlement bank|claim bank|community bank|\bbank\b/i;
 const PERSONAL_INVENTORY_NAME = /^(?:inventory|toolbelt|wallet)$/i;
 
-export function sourceItemFromContents(contents, lookup = new Map()) {
+function sourceItemKind(rawType) {
+  if (rawType === "cargo" || rawType === 1 || rawType === "1") return "cargo";
+  if (rawType === "item" || rawType === "items" || rawType === 0 || rawType === "0") return "items";
+  return null;
+}
+
+export function sourceItemFromContents(contents, lookup = new Map(), { requireKnownType = false } = {}) {
   const itemId = String(contents?.item_id ?? contents?.itemId ?? "").trim();
   if (!itemId) return null;
   const rawType = contents?.item_type ?? contents?.itemType;
-  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
-  const item = lookup.get(itemId) ?? {};
+  const kind = sourceItemKind(rawType) ?? (requireKnownType ? null : "items");
+  if (!kind) return null;
+  const item = lookup.get(`${kind}:${itemId}`) ?? lookup.get(itemId) ?? {};
   const quantity = Number(contents?.quantity ?? contents?.qty ?? contents?.count ?? 0);
   return {
     id: itemId,
@@ -25,8 +32,8 @@ export function sourceItemFromContents(contents, lookup = new Map()) {
   };
 }
 
-export function sourceItemsFromSlots(slots = [], lookup = new Map()) {
-  return (Array.isArray(slots) ? slots : []).map((slot) => sourceItemFromContents(slot?.contents ?? slot, lookup)).filter((item) => item && item.quantity > 0);
+export function sourceItemsFromSlots(slots = [], lookup = new Map(), options = {}) {
+  return (Array.isArray(slots) ? slots : []).map((slot) => sourceItemFromContents(slot?.contents ?? slot, lookup, options)).filter((item) => item && item.quantity > 0);
 }
 
 function asArray(value) {
@@ -34,12 +41,18 @@ function asArray(value) {
 }
 
 export function craftPlanCatalogLookup(payload = {}) {
-  return new Map([
-    ...asArray(payload.items),
-    ...asArray(payload.cargos),
-    ...asArray(payload.data?.items),
-    ...asArray(payload.data?.cargos),
-  ].map((item) => [String(item.id ?? item.itemId ?? ""), item]).filter(([id]) => id));
+  const lookup = new Map();
+  const addRows = (rows, kind) => {
+    for (const item of rows) {
+      const id = String(item.id ?? item.itemId ?? "").trim();
+      if (!id) continue;
+      lookup.set(`${kind}:${id}`, item);
+      if (!lookup.has(id)) lookup.set(id, item);
+    }
+  };
+  addRows([...asArray(payload.items), ...asArray(payload.data?.items)], "items");
+  addRows([...asArray(payload.cargos), ...asArray(payload.data?.cargos)], "cargo");
+  return lookup;
 }
 
 function craftOutputKind(value) {
@@ -267,10 +280,12 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
   const deployables = [];
   for (const inventory of playerInventoryRows(payload)) {
     const inventoryName = String(inventory.inventoryName ?? inventory.name ?? inventory.type ?? "Inventory").trim() || "Inventory";
-    const rawId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? inventoryName).trim();
+    const explicitId = String(inventory.entityId ?? inventory.inventoryId ?? inventory.id ?? "").trim();
+    const rawId = explicitId || inventoryName;
     const rawSourceId = `${playerId}:${rawId}`;
-    const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup);
     if (isPlayerBankInventory(inventory, inventoryName)) {
+      if (!explicitId) continue;
+      const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup, { requireKnownType: true });
       if (!banksById.has(rawSourceId)) {
         const claimName = String(inventory.claimName ?? inventory.claim?.name ?? "").trim();
         banksById.set(rawSourceId, {
@@ -286,6 +301,7 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
       }
       continue;
     }
+    const items = sourceItemsFromSlots([...asArray(inventory.pockets), ...asArray(inventory.inventory)], lookup);
     if (isSettlementStorageInventory(inventory, inventoryName)) continue;
     if (isPlayerDeployableInventory(inventory, inventoryName)) {
       const claimName = String(inventory.claimName ?? "").trim();
