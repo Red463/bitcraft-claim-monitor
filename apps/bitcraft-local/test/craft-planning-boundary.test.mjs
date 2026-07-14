@@ -119,6 +119,7 @@ test("Craft Planning manager owns full admin editing controls", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const admin = readFileSync(new URL("../src/components/admin/AdminCraftPlanSection.tsx", import.meta.url), "utf8");
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
 
   assert.match(admin, /Open Manager/);
   assert.match(admin, /page=planning/);
@@ -136,6 +137,11 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.doesNotMatch(manager, /craft-plan-item-icon"><ItemIcon item=\{target\} \/><\/span><ItemLabel item=\{target\} \/>/);
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);
+  assert.match(manager, /bankPlayerIds/);
+  assert.match(manager, />Banks<\/span>/);
+  assert.match(manager, /all BitJita-visible settlement banks/i);
+  assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(styles, /@media[^}]*max-width[^}]*\{[\s\S]*?\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(manager, /groupDeployablesByPlayer/);
   assert.match(manager, /craft-plan-deployable-group/);
   assert.match(manager, /function itemTypeLabel/);

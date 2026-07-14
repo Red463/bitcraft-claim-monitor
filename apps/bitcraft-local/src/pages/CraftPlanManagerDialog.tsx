@@ -15,7 +15,7 @@ type CraftPlanConfig = {
   enabled: boolean;
   name: string;
   targets: AnyRecord[];
-  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; deployableContainerIds: string[] };
+  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; bankPlayerIds: string[]; deployableContainerIds: string[] };
   routeOverrides: Record<string, string>;
   sectionOverrides: Record<string, string>;
   rowNameOverrides: Record<string, string>;
@@ -24,7 +24,7 @@ type CraftPlanConfig = {
 };
 
 function emptyConfig(): CraftPlanConfig {
-  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, buildingProgress: {} };
+  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, buildingProgress: {} };
 }
 
 function itemKind(item: AnyRecord) {
@@ -95,9 +95,17 @@ function sourceCard(source: AnyRecord, checked: boolean, onChange: (checked: boo
 }
 
 
-function playerSourceCard(source: AnyRecord, inventoryChecked: boolean, craftsChecked: boolean, onInventoryChange: (checked: boolean) => void, onCraftsChange: (checked: boolean) => void) {
+function playerSourceCard(
+  source: AnyRecord,
+  inventoryChecked: boolean,
+  craftsChecked: boolean,
+  banksChecked: boolean,
+  onInventoryChange: (checked: boolean) => void,
+  onCraftsChange: (checked: boolean) => void,
+  onBanksChange: (checked: boolean) => void,
+) {
   return (
-    <article className={`craft-plan-source-card${inventoryChecked || craftsChecked ? " is-included" : ""}`} key={source.playerId}>
+    <article className={`craft-plan-source-card${inventoryChecked || craftsChecked || banksChecked ? " is-included" : ""}`} key={source.playerId}>
       <header>
         <div>
           <strong>{source.label}</strong>
@@ -106,6 +114,7 @@ function playerSourceCard(source: AnyRecord, inventoryChecked: boolean, craftsCh
         <div className="craft-plan-player-source-toggles">
           <label className="compact-toggle"><input type="checkbox" checked={inventoryChecked} onChange={(event) => onInventoryChange(event.target.checked)} /><span>Inventory</span></label>
           <label className="compact-toggle"><input type="checkbox" checked={craftsChecked} onChange={(event) => onCraftsChange(event.target.checked)} /><span>Crafts</span></label>
+          <label className="compact-toggle"><input type="checkbox" checked={banksChecked} onChange={(event) => onBanksChange(event.target.checked)} /><span>Banks</span></label>
         </div>
       </header>
     </article>
@@ -274,7 +283,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setConfig((current) => ({ ...current, ...patch }));
   }
 
-  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "deployableContainerIds", id: string, checked: boolean) {
+  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "deployableContainerIds", id: string, checked: boolean) {
     setConfig((current) => {
       const currentValues = current.sourceRules[kind] ?? [];
       const nextValues = checked ? [...new Set([...currentValues, id])] : currentValues.filter((value) => value !== id);
@@ -500,7 +509,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each BitJita storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
 
-          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories and active crafts count toward the plan, then include BitJita-visible carts, personal cache, and deployable storage.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
+          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories, active crafts, and banks count toward the plan. Banks include all BitJita-visible settlement banks for that player, including banks in other settlements, as confirmed stock.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), config.sourceRules.bankPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked), (checked) => updateSource("bankPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><div className="split-header"><div><h3>Recipe routes in use</h3><p className="legend">These are the recipes currently pulled into the plan from your targets. Change a dropdown, then save the plan to recalculate needed materials.</p></div><small>{routeSteps.length ? `${routeSteps.length} recipe steps` : "No recipe steps"}</small></div>{routeSteps.length ? <div className="craft-plan-route-overview-list">{routeSteps.map((step: AnyRecord, index: number) => { const outputKey = routeOutputKey(step); const alternatives = Array.isArray(step.alternatives) ? step.alternatives : []; const selectedRecipeId = String(config.routeOverrides[outputKey] ?? step.selectedRecipeId ?? ""); return <article className="craft-plan-route-overview-card" key={`${outputKey}:${step.id ?? index}`}><div><strong><ItemLabel item={step.output ?? step} /></strong><small>{step.recipeName ?? "Selected recipe"}{step.buildingName ? ` - ${step.buildingName}` : ""}</small></div><label className="field compact-field"><span>Recipe</span><select value={selectedRecipeId} disabled={alternatives.length <= 1} onChange={(event) => setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [outputKey]: event.target.value } }))}>{alternatives.length ? alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{routeOptionLabel(recipe)}</option>) : <option value={selectedRecipeId}>{step.recipeName ?? "Default recipe"}</option>}</select></label>{config.routeOverrides[outputKey] ? <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[outputKey]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Reset</button> : <span className="legend">Default</span>}</article>; })}</div> : <p className="legend">Add targets and save the plan to see the recipe chain used for the current goals.</p>}</section> : null}
 
