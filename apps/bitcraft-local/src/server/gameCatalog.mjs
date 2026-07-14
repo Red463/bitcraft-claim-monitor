@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 3;
+import { selectLowestEffortWeights } from "./craftPlanEffortProgress.mjs";
+
+export const GAME_CATALOG_NORMALIZATION_VERSION = 4;
 
 export function catalogNormalizationNeedsRefresh(storedVersion) {
   return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
@@ -123,6 +125,16 @@ function recipeSkillName(recipe) {
   return value == null ? null : String(value).trim() || null;
 }
 
+function recipeActionCount(recipe) {
+  return Math.max(0, toNumber(
+    recipe?.actionsRequired
+    ?? recipe?.actions_required
+    ?? recipe?.actionCount
+    ?? recipe?.action_count,
+    0,
+  ));
+}
+
 function displayLooksTransport(value) {
   return /\b(pack|package|unpack|packed|transport|bundle|crate)\b/i.test(String(value ?? ""));
 }
@@ -193,6 +205,7 @@ function normalizeRecipe(recipe, sourceEntity) {
     recipeKey: recipeStableKey(sourceEntity, recipe, outputs, inputs),
     sourceKind: primaryOutput?.kind ?? sourceEntity.kind,
     sourceId: primaryOutput?.targetId ?? sourceEntity.targetId,
+    actionCount: recipeActionCount(recipe),
     name: String(recipe?.name ?? recipe?.recipeName ?? "Recipe").trim() || "Recipe",
     stationName: recipeStationName(recipe),
     skillName: recipeSkillName(recipe),
@@ -297,6 +310,7 @@ function mapRecipeRow(row, inputs, outputs) {
     recipeKey: row.recipe_key,
     sourceKind: row.source_kind,
     sourceId: row.source_id,
+    actionCount: toNumber(row.action_count),
     name: row.name ?? null,
     stationName: row.station_name ?? null,
     skillName: row.skill_name ?? null,
@@ -378,11 +392,12 @@ export function createGameCatalogRepository(db) {
     deleteItemListOutputs: db.prepare("DELETE FROM game_catalog_item_list_outputs WHERE producer_key = ?"),
     insertRecipe: db.prepare(`
       INSERT INTO game_catalog_recipes (
-        recipe_key, source_kind, source_id, name, station_name, skill_name, is_passive, is_transport_route, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        recipe_key, source_kind, source_id, action_count, name, station_name, skill_name, is_passive, is_transport_route, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(recipe_key) DO UPDATE SET
         source_kind = excluded.source_kind,
         source_id = excluded.source_id,
+        action_count = excluded.action_count,
         name = excluded.name,
         station_name = excluded.station_name,
         skill_name = excluded.skill_name,
@@ -451,6 +466,48 @@ export function createGameCatalogRepository(db) {
       JOIN game_catalog_entities AS entities ON entities.catalog_key = outputs.producer_key
       WHERE outputs.output_key = ?
       ORDER BY entities.name COLLATE NOCASE ASC, outputs.producer_key ASC
+    `),
+    listDirectCraftingEffortCandidates: db.prepare(`
+      SELECT
+        outputs.output_key AS catalog_key,
+        recipes.recipe_key AS source_key,
+        recipes.action_count AS actions_required,
+        outputs.quantity AS output_quantity
+      FROM game_catalog_recipes AS recipes
+      JOIN game_catalog_recipe_outputs AS outputs ON outputs.recipe_key = recipes.recipe_key
+      WHERE recipes.is_transport_route = 0
+        AND recipes.action_count > 0
+        AND outputs.quantity > 0
+    `),
+    listByproductCraftingEffortCandidates: db.prepare(`
+      SELECT
+        outputs.output_key AS catalog_key,
+        recipes.recipe_key || ':item-list' AS source_key,
+        recipes.action_count AS actions_required,
+        outputs.quantity AS output_quantity
+      FROM game_catalog_item_list_outputs AS outputs
+      JOIN game_catalog_recipes AS recipes
+        ON recipes.source_kind || ':' || recipes.source_id = outputs.producer_key
+      WHERE recipes.is_transport_route = 0
+        AND recipes.action_count > 0
+        AND outputs.quantity > 0
+    `),
+    deleteEffortWeights: db.prepare("DELETE FROM game_catalog_effort_weights"),
+    insertEffortWeight: db.prepare(`
+      INSERT INTO game_catalog_effort_weights (
+        catalog_key, model_version, effort_weight, method, source_key, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `),
+    listEffortWeights: db.prepare(`
+      SELECT catalog_key, model_version, effort_weight, method, source_key, updated_at
+      FROM game_catalog_effort_weights
+      WHERE model_version = ?
+      ORDER BY catalog_key ASC
+    `),
+    getEffortWeightRevision: db.prepare(`
+      SELECT MAX(updated_at) AS updated_at
+      FROM game_catalog_effort_weights
+      WHERE model_version = ?
     `),
     insertRefreshRun: db.prepare(`
       INSERT INTO game_catalog_refresh_runs (
@@ -722,6 +779,7 @@ export function createGameCatalogRepository(db) {
             recipe.recipeKey,
             recipe.sourceKind,
             recipe.sourceId,
+            recipe.actionCount,
             recipe.name,
             recipe.stationName,
             recipe.skillName,
@@ -782,6 +840,56 @@ export function createGameCatalogRepository(db) {
         guaranteedQuantity: Math.max(0, toNumber(row.output_guaranteed_quantity)),
         producer: mapEntityRow(row),
       }));
+    },
+    listCraftingEffortCandidates() {
+      return [
+        ...statements.listDirectCraftingEffortCandidates.all(),
+        ...statements.listByproductCraftingEffortCandidates.all(),
+      ].map((row) => ({
+        catalogKey: row.catalog_key,
+        sourceKey: row.source_key,
+        actionsRequired: toNumber(row.actions_required),
+        outputQuantity: toNumber(row.output_quantity),
+        probability: 1,
+      }));
+    },
+    replaceEffortWeights(candidates, modelVersion, updatedAt = new Date().toISOString()) {
+      const normalizedVersion = Math.max(1, Math.floor(toNumber(modelVersion)));
+      const weights = selectLowestEffortWeights((candidates ?? []).filter((row) => (
+        row?.method === "crafting" || row?.method === "gathering"
+      )));
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        statements.deleteEffortWeights.run();
+        for (const row of weights.values()) {
+          statements.insertEffortWeight.run(
+            row.catalogKey,
+            normalizedVersion,
+            row.effortWeight,
+            row.method,
+            String(row.sourceKey ?? ""),
+            updatedAt,
+          );
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      return weights.size;
+    },
+    getEffortWeights(modelVersion) {
+      return new Map(statements.listEffortWeights.all(modelVersion).map((row) => [row.catalog_key, {
+        catalogKey: row.catalog_key,
+        effortWeight: toNumber(row.effort_weight),
+        method: row.method,
+        sourceKey: row.source_key,
+        modelVersion: toNumber(row.model_version),
+        updatedAt: row.updated_at,
+      }]));
+    },
+    getEffortWeightRevision(modelVersion) {
+      return statements.getEffortWeightRevision.get(modelVersion)?.updated_at ?? null;
     },
   };
 }

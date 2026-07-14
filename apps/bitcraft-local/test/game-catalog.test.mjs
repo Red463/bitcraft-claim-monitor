@@ -40,6 +40,7 @@ const baitAndShellsDetail = {
       {
         id: "process-guppi",
         name: "Process Briny Guppi",
+        actionsRequired: 12,
         buildingName: "Fishing Table",
         craftedItemStacks: [
           { item_id: "1220019", item_type: "item", quantity: 1 },
@@ -168,6 +169,7 @@ test("game catalog schema bootstraps normalized catalog tables, indexes, and cas
     "game_catalog_recipe_outputs",
     "game_catalog_recipe_sources",
     "game_catalog_item_list_outputs",
+    "game_catalog_effort_weights",
     "game_catalog_refresh_runs",
   ]) {
     assert.equal(tables.has(tableName), true, `${tableName} should exist`);
@@ -233,6 +235,7 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   const processRecipe = normalized.recipes.find((recipe) => recipe.name === "Process Briny Guppi");
   assert.equal(processRecipe.sourceKind, "items");
   assert.equal(processRecipe.sourceId, "1220019");
+  assert.equal(processRecipe.actionCount, 12);
   assert.equal(processRecipe.stationName, "Fishing Table");
   assert.equal(processRecipe.skillName, "Fishing");
   assert.equal(processRecipe.isPassive, false);
@@ -344,7 +347,7 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 3);
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 4);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
@@ -368,6 +371,38 @@ test("game catalog repository persists expected and guaranteed item-list quantit
     quantity: row.quantity,
     guaranteedQuantity: row.guaranteedQuantity,
   })), [{ quantity: 3.05, guaranteedQuantity: 3 }]);
+  db.close();
+});
+
+test("game catalog repository derives and atomically replaces versioned effort weights", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail(baitAndShellsDetail, { updatedAt: UPDATED_AT });
+
+  const candidates = repository.listCraftingEffortCandidates();
+  assert.equal(candidates.some((row) => row.catalogKey === "items:1220019" && row.actionsRequired === 12 && row.outputQuantity === 1), true);
+  assert.equal(candidates.some((row) => row.catalogKey === "items:1110012" && row.actionsRequired === 12 && row.outputQuantity === 0.1), true);
+
+  repository.replaceEffortWeights([
+    { catalogKey: "items:1110012", effortWeight: 120, method: "crafting", sourceKey: "recipe:process-guppi" },
+    { catalogKey: "items:1110012", effortWeight: 50, method: "gathering", sourceKey: "resource:clay" },
+  ], 1, "2026-07-14T12:01:00.000Z");
+  assert.deepEqual(repository.getEffortWeights(1).get("items:1110012"), {
+    catalogKey: "items:1110012",
+    effortWeight: 50,
+    method: "gathering",
+    sourceKey: "resource:clay",
+    modelVersion: 1,
+    updatedAt: "2026-07-14T12:01:00.000Z",
+  });
+  assert.equal(repository.getEffortWeightRevision(1), "2026-07-14T12:01:00.000Z");
+
+  repository.replaceEffortWeights([
+    { catalogKey: "items:1220019", effortWeight: 8, method: "crafting", sourceKey: "recipe:replacement" },
+  ], 1, "2026-07-14T12:02:00.000Z");
+  assert.deepEqual([...repository.getEffortWeights(1).keys()], ["items:1220019"]);
+  assert.equal(repository.getEffortWeights(2).size, 0);
+  assert.equal(repository.getEffortWeightRevision(1), "2026-07-14T12:02:00.000Z");
   db.close();
 });
 

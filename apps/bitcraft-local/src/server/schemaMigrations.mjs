@@ -24,6 +24,7 @@ export const additiveColumnMigrations = [
   { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
   { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
   { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
+  { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
 ];
 
 export const schemaIndexStatements = [

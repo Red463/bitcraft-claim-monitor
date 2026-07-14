@@ -37,6 +37,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
     { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
     { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
+    { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
   ]);
 });
 
@@ -73,6 +74,29 @@ test("schemaIndexStatements preserves release-sensitive unique indexes", () => {
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
   ]);
+});
+
+test("recipe action count migrates without inventing effort for old rows", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE game_catalog_recipes (
+      recipe_key TEXT PRIMARY KEY,
+      name TEXT
+    );
+    INSERT INTO game_catalog_recipes (recipe_key, name) VALUES ('recipe:old', 'Old recipe');
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "game_catalog_recipes",
+    column: "action_count",
+    definition: "REAL NOT NULL DEFAULT 0",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT recipe_key, action_count FROM game_catalog_recipes").get() },
+    { recipe_key: "recipe:old", action_count: 0 },
+  );
+  db.close();
 });
 
 test("applyAdditiveColumnMigrations adds only missing columns", () => {

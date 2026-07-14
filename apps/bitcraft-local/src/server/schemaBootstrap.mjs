@@ -239,6 +239,7 @@ export const schemaBootstrapSql = `
     recipe_key TEXT PRIMARY KEY,
     source_kind TEXT NOT NULL,
     source_id TEXT NOT NULL,
+    action_count REAL NOT NULL DEFAULT 0,
     name TEXT,
     station_name TEXT,
     skill_name TEXT,
@@ -281,6 +282,14 @@ export const schemaBootstrapSql = `
     chance REAL,
     guaranteed_quantity REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (producer_key, output_key)
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_effort_weights (
+    catalog_key TEXT PRIMARY KEY,
+    model_version INTEGER NOT NULL,
+    effort_weight REAL NOT NULL CHECK (effort_weight > 0),
+    method TEXT NOT NULL CHECK (method IN ('crafting', 'gathering')),
+    source_key TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS game_catalog_refresh_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
