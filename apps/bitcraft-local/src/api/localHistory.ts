@@ -10,11 +10,18 @@ const LOCAL_API = "/api/local";
  * Loads locally recorded history that BitJita does not provide directly.
  *
  * Live page data still comes from BitJita/proxy calls, but activity history,
- * snapshots, dashboard trend data, and market history are built from SQLite
- * records captured by the local server.
+ * dashboard trend data, and market history are built from SQLite records
+ * captured by the local server.
  */
 export function useLocalHistory(refreshToken: number, claimId: string, activePanel: ActivePanel): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({ market: null, activity: [], activityTotal: 0, snapshots: [], dashboard: null, error: null, refreshToken: 0 });
+  const [state, setState] = React.useState<LocalHistoryState>({
+    market: null,
+    activity: [],
+    activityTotal: 0,
+    dashboard: null,
+    error: null,
+    refreshToken: 0,
+  });
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -26,12 +33,10 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
         const history = await response.json();
         const activity = history.activity ?? {};
-        const snapshots = history.snapshots ?? {};
         setState((prev) => ({
           market: history.market ?? (activePanel === "market" || activePanel === "dashboard" ? null : prev.market),
           activity: activity.events ?? [],
           activityTotal: toNumber(activity.total ?? activity.events?.length),
-          snapshots: snapshots.snapshots ?? (activePanel === "dashboard" ? [] : prev.snapshots),
           dashboard: history.dashboard ?? (activePanel === "dashboard" ? null : prev.dashboard),
           error: null,
           refreshToken: prev.refreshToken + 1,

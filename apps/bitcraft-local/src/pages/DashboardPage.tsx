@@ -23,10 +23,7 @@ import { activityMetadata, signedDelta } from "./activity/activityUtils";
 import { buildMarketIncomeSummary } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
-export function Dashboard({ data, activity, snapshots, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; snapshots: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
-  // The dashboard intentionally mixes live BitJita data with local historical
-  // snapshots. Snapshot-backed trends only appear when enough history exists;
-  // the page should never fabricate trend data.
+export function Dashboard({ data, activity, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   const { claim, members, market, construction, crafts } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);

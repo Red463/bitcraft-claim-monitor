@@ -152,7 +152,6 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   buyOrders: { label: "Regional buy orders", enabled: true, intervalSeconds: 300 },
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", enabled: true, intervalSeconds: 900 },
   marketListings: { label: "Market listing sync", enabled: true, intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", enabled: true, intervalSeconds: 300 },
   storageActivity: { label: "Storage activity", enabled: true, intervalSeconds: 60 },
@@ -173,7 +172,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   toastSettings: { marketListings: true, marketSales: true, production: true },
   marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true },
   branding: {},
-  snapshotRetentionDays: 365,
   visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
   browserSnapshotsEnabled: true,
   discord: {

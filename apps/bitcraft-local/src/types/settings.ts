@@ -81,7 +81,6 @@ export type AppSettings = {
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   marketDealWatch: MarketDealWatchSettings;
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
-  snapshotRetentionDays: number;
   visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipProvider: string; geoipCacheDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
   browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;

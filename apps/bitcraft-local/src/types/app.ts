@@ -26,7 +26,6 @@ export type LocalHistoryState = {
   market: AnyRecord | null;
   activity: AnyRecord[];
   activityTotal: number;
-  snapshots: AnyRecord[];
   dashboard: AnyRecord | null;
   error: string | null;
   refreshToken: number;

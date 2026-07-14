@@ -924,8 +924,8 @@ export function AdminPanel({
   const adminSetupItems = [
     { label: "Discord administrator", done: Boolean(auth?.user), detail: auth?.user?.username ? `Signed in as ${auth.user.username}` : "Sign in with an approved Discord admin account." },
     { label: "Settlement defaults", done: Boolean(draft.claimId), detail: draft.claimId ? `Settlement ${draft.claimId}` : "Add the monitored settlement ID." },
-    { label: "Local data collection", done: Boolean(status?.polling?.enabled || status?.counts?.snapshots), detail: status?.polling?.enabled ? `Collects every ${Math.round(toNumber(status.polling.intervalMs) / 1000)} seconds` : "Enable server polling in production or run manual collection." },
-    { label: "Database history", done: toNumber(status?.counts?.snapshots) > 0 || toNumber(status?.counts?.activity_events) > 0 || toNumber(status?.counts?.market_trades) > 0, detail: `${formatNumber(status?.counts?.snapshots)} snapshots, ${formatNumber(status?.counts?.market_trades)} trades` },
+    { label: "Local data collection", done: Boolean(status?.polling?.enabled), detail: status?.polling?.enabled ? `Collects every ${Math.round(toNumber(status.polling.intervalMs) / 1000)} seconds` : "Enable server polling in production or run manual collection." },
+    { label: "Database history", done: toNumber(status?.counts?.activity_events) > 0 || toNumber(status?.counts?.market_trades) > 0, detail: `${formatNumber(status?.counts?.activity_events)} activity events, ${formatNumber(status?.counts?.market_trades)} trades` },
     { label: "Branding", done: Boolean(draft.branding?.logo || draft.branding?.favicon), detail: draft.branding?.logo || draft.branding?.favicon ? "Custom brand assets configured." : "Optional logo and favicon can be added." },
     { label: "Discord bot", done: Boolean(draft.discord?.botTokenConfigured && draft.discord?.enabled), detail: draft.discord?.botTokenConfigured ? (draft.discord.enabled ? "Enabled and token configured." : "Token configured, bot disabled.") : "Optional bot token not configured." },
   ];
@@ -1174,7 +1174,6 @@ export function AdminPanel({
           <div className="metric-grid admin-metrics">
             <Stat icon={<Server />} label="Environment" value={status?.environment ?? "-"} />
             <Stat icon={<Database />} label="Database" value={bytesLabel(status?.databaseSize)} />
-            <Stat icon={<Save />} label="Snapshots" value={formatNumber(status?.counts?.snapshots)} />
             <Stat icon={<CircleDollarSign />} label="Confirmed Trades" value={formatNumber(status?.counts?.market_trades)} />
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
@@ -1566,11 +1565,6 @@ export function AdminPanel({
                 <span>Server collection interval</span>
                 <div className="unit-input"><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
                 <small>Fallback interval for background history and notification collectors.</small>
-              </label>
-              <label className="field unit-field">
-                <span>Snapshot retention</span>
-                <div className="unit-input"><input type="number" min={30} max={3650} value={draft.snapshotRetentionDays} onChange={(event) => updateDraft("snapshotRetentionDays", Number(event.target.value))} /><em>days</em></div>
-                <small>How long daily snapshot records are kept.</small>
               </label>
               <label className="field unit-field">
                 <span>Full IP retention</span>
@@ -2284,11 +2278,6 @@ export function AdminPanel({
             <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" title="Create a downloadable SQLite backup on the server." onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.")}><Save size={15} /> Create Backup</button></div>
             <p className="legend">Downloadable SQLite copies are stored on the server. Restore them manually on the VPS while services are stopped.</p>
             <div className="backup-list">{backups.length ? backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" title="Download this database backup file." href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>) : <p className="legend">No database backups have been created yet.</p>}</div>
-          </section>
-          <section className="form-card maintenance-card">
-            <h3><Database size={17} /> Retention Maintenance</h3>
-            <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
-            <button className="toolbar-button" title="Remove expired snapshot rows only. Market trades and activity history are retained." onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
           </section>
         </div>
       ) : null}

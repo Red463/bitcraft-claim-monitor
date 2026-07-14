@@ -535,7 +535,7 @@ function DashboardApp() {
   }, [active, appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
 
   const panels: Record<string, React.ReactNode> = {
-    dashboard: <Dashboard data={data} activity={localHistory.activity} snapshots={localHistory.snapshots} marketHistory={localHistory.market} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
+    dashboard: <Dashboard data={data} activity={localHistory.activity} marketHistory={localHistory.market} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
     leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} data={data} access={effectiveAccess} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
