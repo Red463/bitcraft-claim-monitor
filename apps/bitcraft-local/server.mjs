@@ -42,6 +42,11 @@ import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSe
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import {
+  CRAFT_PLAN_EFFORT_MODEL_VERSION,
+  craftingEffortCandidate,
+  normalizeGameResourceEffortCandidates,
+} from "./src/server/craftPlanEffortProgress.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
@@ -860,6 +865,24 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
 
   gameCatalogRepository.deleteOrphanRecipes();
   const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
+  const resourcesPayload = await fetchBitjita("/resources", { cache: false });
+  const effortCandidates = [
+    ...gameCatalogRepository.listCraftingEffortCandidates()
+      .map(craftingEffortCandidate)
+      .filter(Boolean),
+    ...normalizeGameResourceEffortCandidates(resourcesPayload),
+  ];
+  const effortUpdatedAt = new Date().toISOString();
+  const effortWeightCount = gameCatalogRepository.replaceEffortWeights(
+    effortCandidates,
+    CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    effortUpdatedAt,
+  );
+  statements.upsertSetting.run(
+    "game_catalog_effort_model_version",
+    String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
+    effortUpdatedAt,
+  );
   const completedAt = new Date().toISOString();
 
   gameCatalogRepository.updateRefreshRun(refreshRun.id, {
@@ -891,6 +914,9 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     resumed: resuming,
     cursorKind,
     cursorId,
+    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    effortWeightCount,
+    effortUpdatedAt,
     ...legacyRefresh,
   };
 }
@@ -1081,6 +1107,11 @@ function scheduleScheduledJobContinuation(jobKey, delayMs) {
 function craftPlanCatalogRefreshStatus() {
   recoverStaleScheduledJobs();
   const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
+  const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
+  const effortCompatible = storedEffortModelVersion === CRAFT_PLAN_EFFORT_MODEL_VERSION;
+  const effortWeights = effortCompatible
+    ? gameCatalogRepository.getEffortWeights(CRAFT_PLAN_EFFORT_MODEL_VERSION)
+    : new Map();
   return {
     scheduledJob: scheduledJobRow(statements.getScheduledJob.get("recipe_catalog_refresh")),
     latestRun: gameCatalogRepository.getLatestRefreshRun(),
@@ -1088,6 +1119,13 @@ function craftPlanCatalogRefreshStatus() {
     normalizationVersion: GAME_CATALOG_NORMALIZATION_VERSION,
     storedNormalizationVersion,
     normalizationOutdated: catalogNormalizationNeedsRefresh(storedNormalizationVersion),
+    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    storedEffortModelVersion,
+    effortCompatible,
+    effortWeightCount: effortWeights.size,
+    effortUpdatedAt: effortCompatible
+      ? gameCatalogRepository.getEffortWeightRevision(CRAFT_PLAN_EFFORT_MODEL_VERSION)
+      : null,
   };
 }
 

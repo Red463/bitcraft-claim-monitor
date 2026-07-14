@@ -6,6 +6,7 @@ import {
   calculateCraftPlanEffortProgress,
   craftingEffortCandidate,
   gatheringEffortCandidate,
+  normalizeGameResourceEffortCandidates,
   selectLowestEffortWeights,
 } from "../src/server/craftPlanEffortProgress.mjs";
 
@@ -65,4 +66,34 @@ test("empty plans are complete without requiring catalog weights", () => {
   const result = calculateCraftPlanEffortProgress({ baselinePlan: { materials: [] }, currentPlan: { materials: [] }, weights: new Map() });
   assert.equal(result.state, "empty");
   assert.deepEqual(result.overall, { state: "empty", baselineEffort: 0, remainingEffort: 0, completion: 100 });
+});
+
+test("resource outputs become gathering effort candidates without merging item and cargo ids", () => {
+  const candidates = normalizeGameResourceEffortCandidates({ resources: [{
+    id: 44,
+    outputs: [
+      { itemId: 700, itemType: 0, quantity: 1, probability: 0.02 },
+      { itemId: 700, itemType: 0, quantity: 2, chance: 5 },
+      { itemId: 700, itemType: 1, quantity: 1, chance: 0.5 },
+    ],
+  }] });
+  assert.deepEqual(candidates.map((row) => [row.catalogKey, row.sourceKey, row.effortWeight]), [
+    ["items:700", "resource:44", 50],
+    ["items:700", "resource:44", 10],
+    ["cargo:700", "resource:44", 2],
+  ]);
+});
+
+test("resource normalization accepts wrapped BitJita output aliases and rejects unverifiable rows", () => {
+  const candidates = normalizeGameResourceEffortCandidates({ data: { resources: [{
+    entityId: "resource-9",
+    resourceOutputs: [
+      { targetItem: { id: "80" }, amount: "4", dropChance: "25" },
+      { targetId: "81", quantity: 1, chance: 0 },
+      { targetId: "82", quantity: 0, chance: 1 },
+    ],
+  }] } });
+  assert.deepEqual(candidates.map((row) => [row.catalogKey, row.sourceKey, row.effortWeight]), [
+    ["items:80", "resource:resource-9", 1],
+  ]);
 });

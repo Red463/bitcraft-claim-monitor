@@ -231,6 +231,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(server, /GAME_CATALOG_NORMALIZATION_VERSION/);
   assert.match(server, /catalogRefreshShouldResume\(previousRun, storedNormalizationVersion\)/);
   assert.match(server, /game_catalog_normalization_version/);
+  assert.match(server, /fetchBitjita\("\/resources", \{ cache: false \}\)/);
+  assert.match(server, /normalizeGameResourceEffortCandidates\(resourcesPayload\)/);
+  assert.match(server, /replaceEffortWeights\(\s*effortCandidates,\s*CRAFT_PLAN_EFFORT_MODEL_VERSION/);
+  assert.match(server, /game_catalog_effort_model_version/);
   assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";

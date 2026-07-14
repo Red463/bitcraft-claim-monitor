@@ -43,6 +43,47 @@ export function gatheringEffortCandidate(input = {}) {
   return effortCandidate("gathering", { ...input, actionsRequired: 1 });
 }
 
+function resourceRows(payload = {}) {
+  if (Array.isArray(payload?.resources)) return payload.resources;
+  if (Array.isArray(payload?.data?.resources)) return payload.data.resources;
+  if (Array.isArray(payload?.results)) return payload.results;
+  return [];
+}
+
+function resourceOutputs(resource = {}) {
+  for (const value of [resource.outputs, resource.items, resource.itemListPossibilities, resource.resourceOutputs]) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+export function normalizeGameResourceEffortCandidates(payload = {}) {
+  const candidates = [];
+  for (const resource of resourceRows(payload)) {
+    const resourceId = String(resource?.id ?? resource?.entityId ?? resource?.resourceId ?? "").trim();
+    if (!resourceId) continue;
+    for (const output of resourceOutputs(resource)) {
+      const target = output?.targetItem ?? {};
+      const id = String(output?.itemId ?? output?.item_id ?? output?.targetId ?? target?.id ?? "").trim();
+      if (!id) continue;
+      const rawType = output?.itemType ?? output?.item_type ?? target?.itemType ?? target?.item_type;
+      const kind = output?.isCargo === true || rawType === 1 || rawType === "1" || String(rawType ?? "").toLowerCase() === "cargo"
+        ? "cargo"
+        : "items";
+      const rawChance = Number(output?.probability ?? output?.chance ?? output?.dropChance);
+      const probability = rawChance > 1 ? rawChance / 100 : rawChance;
+      const candidate = gatheringEffortCandidate({
+        catalogKey: `${kind}:${id}`,
+        sourceKey: `resource:${resourceId}`,
+        outputQuantity: output?.quantity ?? output?.amount,
+        probability,
+      });
+      if (candidate) candidates.push(candidate);
+    }
+  }
+  return candidates;
+}
+
 export function selectLowestEffortWeights(candidates = []) {
   const weights = new Map();
   for (const row of candidates) {

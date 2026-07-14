@@ -1475,6 +1475,9 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
         count: 1,
       });
     }
+    if (url.pathname === "/api/resources") {
+      return json(res, { resources: [] });
+    }
     if (url.pathname === "/api/items/100") {
       detailRequests.push("items:100");
       await firstDetailGate;
@@ -1714,6 +1717,7 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
       cargoListRequests += 1;
       return json(res, { cargos: [], metrics: { total: 0, totalPages: 1, page: 1 } });
     }
+    if (url.pathname === "/api/resources") return json(res, { resources: [] });
     if (url.pathname === "/api/items/100" || url.pathname === "/api/items/200") return json(res, { item: { id: url.pathname.endsWith("100") ? "100" : "200", itemType: 0, name: "Catalog item", tag: "Material", tier: 1 }, craftingRecipes: [] });
     return json(res, { error: "not found" }, 404);
   });
@@ -1809,6 +1813,7 @@ test("craft plan catalog refresh resets stale resume cursor counters when the sa
         metrics: { total: 1, totalPages: 1, page: 1 },
       });
     }
+    if (url.pathname === "/api/resources") return json(res, { resources: [] });
     if (url.pathname === "/api/items/100") {
       detailRequests.push("items:100");
       return json(res, {
