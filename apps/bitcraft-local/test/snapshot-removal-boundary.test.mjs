@@ -29,6 +29,12 @@ test("admin surfaces no longer expose snapshot counts, retention, or pruning", (
   assert.doesNotMatch(serverHealth, /counts\?\.snapshots/);
 });
 
+test("admin setup accepts a successful manual collection when polling is disabled", () => {
+  const adminPanel = source("../src/components/admin/AdminPanel.tsx");
+
+  assert.match(adminPanel, /done: Boolean\(status\?\.polling\?\.enabled \|\| status\?\.polling\?\.lastSuccessAt\)/);
+});
+
 test("frontend settings and collector copy no longer describe snapshot history", () => {
   const adminDisplay = source("../src/components/admin/adminDisplay.ts");
   const settingsDefaults = source("../src/settingsDefaults.ts");
