@@ -4,12 +4,12 @@ import { mkdir, readFile, rename, statfs, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { compactMonitoringHistory } from "./monitoring-history.mjs";
 
 const exec = promisify(execFile);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR || "/var/lib/bitcraft-claim-monitor";
 const outputDir = path.join(dataDir, "monitoring");
 const now = new Date();
-const cutoff = now.getTime() - 7 * 86_400_000;
 const services = ["bitcraft-claim-monitor", "bitcraft-claim-monitor-worker", "caddy"];
 const secret = /((?:token|secret|password|passwd|api[_-]?key|authorization|cookie|session|dsn)\s*[=:]\s*)([^\s,;]+)/gi;
 const redact = (value) => String(value ?? "").replace(secret, "$1[redacted]").replace(/\b(Bearer|Bot)\s+\S+/gi, "$1 [redacted]").replace(/\b\d{17,20}\b/g, "[discord-id]").slice(0, 4000);
@@ -66,7 +66,8 @@ await writeFile(`${snapshotPath}.tmp`, JSON.stringify(snapshot), { mode: 0o640 }
 await rename(`${snapshotPath}.tmp`, snapshotPath);
 const historyPath = path.join(outputDir, "history.jsonl");
 let history = [];
-try { history = (await readFile(historyPath, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((row) => new Date(row.capturedAt).getTime() >= cutoff); } catch {}
+try { history = (await readFile(historyPath, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch {}
 history.push({ schemaVersion: 1, capturedAt: snapshot.capturedAt, host: snapshot.host });
-await writeFile(`${historyPath}.tmp`, `${history.slice(-10_080).map((row) => JSON.stringify(row)).join("\n")}\n`, { mode: 0o640 });
+history = compactMonitoringHistory(history, { now: now.getTime() });
+await writeFile(`${historyPath}.tmp`, `${history.map((row) => JSON.stringify(row)).join("\n")}\n`, { mode: 0o640 });
 await rename(`${historyPath}.tmp`, historyPath);

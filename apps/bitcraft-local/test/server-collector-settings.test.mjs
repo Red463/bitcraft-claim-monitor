@@ -7,6 +7,7 @@ import {
   collectorPrimaryPayloadDomain,
   domainCollectorDefaults,
   normalizeCollectorSettings,
+  payloadDomainsForCollectors,
   payloadDomainCollector,
 } from "../src/server/collectorSettings.mjs";
 
@@ -27,6 +28,13 @@ test("collector settings normalize saved dashboard configuration safely", () => 
   assert.equal(Object.hasOwn(settings, "unknown"), false);
 });
 
+test("due collectors select only the domain payloads they own", () => {
+  assert.deepEqual(payloadDomainsForCollectors(["members", "inventory"]), [
+    "members", "inventories", "recruitment", "layout",
+  ]);
+  assert.deepEqual(payloadDomainsForCollectors([]), []);
+});
+
 test("collector domain maps preserve current refresh and cache ownership", () => {
   assert.equal(collectorPrimaryPayloadDomain.production, "crafts");
   assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
@@ -39,10 +47,10 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
 });
 
 test("snapshot and side-effect collector intervals do not monopolize production", () => {
-  assert.equal(domainCollectorDefaults.snapshotHistory.intervalSeconds, 900);
+  assert.equal(domainCollectorDefaults.snapshotHistory.intervalSeconds, 60);
   assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
-  assert.equal(normalizeCollectorSettings({}).snapshotHistory.intervalSeconds, 900);
+  assert.equal(normalizeCollectorSettings({}).snapshotHistory.intervalSeconds, 60);
 });
 
 test("collector settings still clamp submitted intervals to the existing bounds", () => {
@@ -62,6 +70,7 @@ test("production activity rows are not gated by contribution sync cadence", () =
   assert.ok(contributionStart > activityStart);
   assert.ok(snapshotStart > contributionStart);
   assert.match(source, /await runProductionActivityCollector\(claimId, currentData\);\s*await runProductionContributionCollector\(claimId, currentData, force\);/);
+  assert.match(source, /if \(sideEffectCollectorDue\("snapshotHistory", force\)\) \{/);
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
   assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
   assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);

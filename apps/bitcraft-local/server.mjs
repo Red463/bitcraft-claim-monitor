@@ -37,16 +37,17 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
-import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector } from "./src/server/collectorSettings.mjs";
+import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector, payloadDomainsForCollectors } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, compactCraftPlanResponse, computeCraftPlan, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
+import { createRequestCoordinator } from "./src/server/requestCoordinator.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
@@ -57,7 +58,7 @@ import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeSavedS
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
-import { filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
+import { buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
@@ -103,17 +104,17 @@ function applicationHealthTelemetry() {
     current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
     return groups;
   }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
-  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry }, bitjita: { ...bitjitaTelemetry } };
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry }, bitjita: { ...bitjitaTelemetry, coordinator: workerRequestCoordinator?.stats() ?? null } };
 }
 
-async function serverHealthResponse(url) {
-  const files = await readServerHealthFiles(dataDir);
+async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {}) {
+  const files = await readCachedServerHealthFiles();
   const application = applicationHealthTelemetry();
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
   const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
-  return { ...response, diagnosticBundle: { ...response, logs: { ...logs, entries: logs.entries.slice(0, 50) } } };
+  return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
 function persistApplicationHealthBucket() {
@@ -137,7 +138,7 @@ async function notifyServerHealthOwner(title, description, color) {
 }
 
 async function evaluateServerHealthIncidents() {
-  const files = await readServerHealthFiles(dataDir);
+  const files = await readCachedServerHealthFiles();
   const result = serverHealthState(files.snapshot, applicationHealthTelemetry());
   const bad = new Map(result.state === "critical" ? result.reasons.map((reason) => [incidentKey(reason), reason]) : []);
   const existing = new Map(db.prepare("SELECT * FROM server_health_incidents").all().map((row) => [row.incident_key, row]));
@@ -182,6 +183,7 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const processRole = resolveProcessRole(process.env, { isProduction });
 const processRoleConfig = processRoleCapabilities(processRole);
+const workerRequestCoordinator = processRole === "worker" ? createRequestCoordinator({ concurrency: 8 }) : null;
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
@@ -218,6 +220,7 @@ const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
+const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
@@ -1483,6 +1486,24 @@ function migrateBuyOrderCollectorInterval() {
 
 migrateBuyOrderCollectorInterval();
 
+function migrateSnapshotHistoryCollectorInterval() {
+  const markerKey = "snapshot_history_interval_60_migrated_at";
+  if (statements.getSetting.get(markerKey)?.value) return;
+  const now = new Date().toISOString();
+  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
+  const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const existing = current.snapshotHistory && typeof current.snapshotHistory === "object" ? current.snapshotHistory : {};
+  if (existing.intervalSeconds == null || Number(existing.intervalSeconds) === 900) {
+    statements.upsertSetting.run("collector_settings_json", JSON.stringify({
+      ...current,
+      snapshotHistory: { ...existing, intervalSeconds: 60 },
+    }), now);
+  }
+  statements.upsertSetting.run(markerKey, now, now);
+}
+
+migrateSnapshotHistoryCollectorInterval();
+
 function marketDealWatchSettings() {
   return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
 }
@@ -2191,22 +2212,31 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   return detailsByKey;
 }
 async function computedCraftPlanResponse(claimId = getSettings().claimId) {
+  return (await computedCraftPlanWorkspace(claimId)).plan;
+}
+
+async function computedCompactCraftPlanResponse(claimId = getSettings().claimId) {
+  return (await computedCraftPlanWorkspace(claimId)).compact();
+}
+
+async function computedCraftPlanWorkspace(claimId = getSettings().claimId) {
   const normalizedClaimId = String(claimId ?? "").trim();
   const now = Date.now();
   const cached = craftPlanResponseCache.get(normalizedClaimId);
-  if (cached && cached.expiresAt > now) { plannerTelemetry.cacheHits += 1; return cached.plan; }
+  if (cached && cached.expiresAt > now) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
   const existing = craftPlanResponseInflight.get(normalizedClaimId);
   if (existing?.generation === craftPlanResponseGeneration) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
   const generation = craftPlanResponseGeneration;
   const startedAt = Date.now();
   plannerTelemetry.freshCalculations += 1;
   const promise = computedCraftPlanResponseFresh(normalizedClaimId).then((plan) => {
+    const workspace = createCraftPlanResponseWorkspace(plan);
     plannerTelemetry.lastDurationMs = Date.now() - startedAt;
     plannerTelemetry.lastCompletedAt = new Date().toISOString();
     if (generation === craftPlanResponseGeneration) {
-      craftPlanResponseCache.set(normalizedClaimId, { plan, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS });
+      craftPlanResponseCache.set(normalizedClaimId, { workspace, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS });
     }
-    return plan;
+    return workspace;
   }).finally(() => {
     if (craftPlanResponseInflight.get(normalizedClaimId)?.promise === promise) craftPlanResponseInflight.delete(normalizedClaimId);
   });
@@ -5226,6 +5256,12 @@ async function recordSnapshot(payload) {
   return { ok: true, capturedAt: now };
 }
 async function fetchBitjita(pathname, options = {}) {
+  if (!workerRequestCoordinator) return fetchBitjitaUncoordinated(pathname, options);
+  const key = `${options.cache === false ? "direct" : "cached"}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
+  return workerRequestCoordinator.run(key, () => fetchBitjitaUncoordinated(pathname, options));
+}
+
+async function fetchBitjitaUncoordinated(pathname, options = {}) {
   // Central BitJita client used by collectors and local helper endpoints. Keep
   // the identifying header here so upstream sees a consistent app identity, and
   // prefer adding resilience here instead of duplicating fetch logic in callers.
@@ -7254,16 +7290,16 @@ function persistRegionalSaleAverages(claimId, averages, collectedAt) {
   return written;
 }
 
-function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null) {
+function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null, domains = domainPayloadKeys) {
   const payloadWriteStartedAt = Date.now();
-  for (const domain of domainPayloadKeys) {
+  for (const domain of domains) {
     const domainStartedAt = Date.now();
     const payload = domainPayloadFromData(data, domain);
     const domainError = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.partialError : null;
     statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
     recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
   }
-  persistRegionalBuyOrdersCurrent(claimId, data?.regionalBuyOrders, collectedAt);
+  if (domains.includes("regionalBuyOrders")) persistRegionalBuyOrdersCurrent(claimId, data?.regionalBuyOrders, collectedAt);
   if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
 }
 
@@ -7417,7 +7453,7 @@ async function refreshCurrentClaimState(claimId, options = {}) {
   try {
     const data = await buildCurrentClaimData(id, { ...options, metrics });
     const collectedAt = new Date().toISOString();
-    persistDomainPayloads(id, data, attemptedAt, collectedAt, metrics);
+    persistDomainPayloads(id, data, attemptedAt, collectedAt, metrics, payloadDomainsForCollectors(dueCollectors));
     applyCollectionMetrics(metrics, dueCollectors, id, collectedAt);
     for (const [key, startedAt] of Object.entries(domainStartedAt)) collectorSuccess(key, startedAt);
     return readCurrentClaimState(id);
@@ -7514,17 +7550,19 @@ async function collectServerSnapshot(force = false) {
     const members = unwrap(currentData.members, "members", []);
     const buildings = unwrap(currentData.buildings, "buildings", []);
     await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
-    const snapshotStartedAt = collectorAttempt("snapshotHistory");
-    await enqueueSnapshot({
-      claimId,
-      claim,
-      membersCount: members.length,
-      buildingsCount: buildings.length,
-      market: currentData.market ?? { listings: [] },
-      crafts: currentData.crafts ?? { craftResults: [] },
-      source: "server_poll",
-    });
-    collectorSuccess("snapshotHistory", snapshotStartedAt);
+    if (sideEffectCollectorDue("snapshotHistory", force)) {
+      const snapshotStartedAt = collectorAttempt("snapshotHistory");
+      await enqueueSnapshot({
+        claimId,
+        claim,
+        membersCount: members.length,
+        buildingsCount: buildings.length,
+        market: currentData.market ?? { listings: [] },
+        crafts: currentData.crafts ?? { craftResults: [] },
+        source: "server_poll",
+      });
+      collectorSuccess("snapshotHistory", snapshotStartedAt);
+    }
     await runMarketListingsCollector(claimId, currentData, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
@@ -8987,7 +9025,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan") {
       try {
-        const compactPlan = compactCraftPlanResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)));
+        const compactPlan = await computedCompactCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId));
         plannerTelemetry.lastResponseBytes = Buffer.byteLength(JSON.stringify(compactPlan));
         return send(res, 200, compactPlan);
       } catch (error) {
@@ -9156,7 +9194,7 @@ const server = createServer(async (req, res) => {
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
-      if (req.method === "GET" && url.pathname === "/api/local/admin/server-health") return send(res, 200, await serverHealthResponse(url));
+      if (req.method === "GET" && url.pathname === "/api/local/admin/server-health") return send(res, 200, await serverHealthResponse(url, { includeDiagnosticBundle: url.searchParams.get("bundle") === "1" }));
       if (req.method === "GET" && url.pathname === "/api/local/admin/jobs") return send(res, 200, scheduledJobsStatus());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/jobs") {
         const body = await readJson(req, BODY_LIMITS.json);

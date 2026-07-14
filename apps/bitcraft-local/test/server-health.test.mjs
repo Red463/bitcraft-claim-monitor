@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { filterServerHealthLogs, normalizeServerHealthSnapshot, redactServerHealthText, serverHealthState } from "../src/server/serverHealth.mjs";
+import * as serverHealth from "../src/server/serverHealth.mjs";
 
 const snapshot = (overrides = {}) => normalizeServerHealthSnapshot({ schemaVersion: 1, capturedAt: new Date().toISOString(), host: { diskPercent: 40, memoryPercent: 50, cores: 2 }, services: [{ name: "web", active: true }], processes: [], logs: [], ...overrides });
 
@@ -24,4 +25,35 @@ test("server health state reports critical host conditions", () => {
 test("server health log filters and pagination remain bounded", () => {
   const logs = [{ service: "web", severity: "error", message: "Failed request" }, { service: "worker", severity: "warning", message: "Retry" }];
   assert.equal(filterServerHealthLogs(logs, { service: "web", search: "failed", limit: 500 }).entries.length, 1);
+});
+
+test("normal server health responses omit the diagnostic bundle and downsample history", () => {
+  assert.equal(typeof serverHealth.buildServerHealthResponse, "function");
+  const history = Array.from({ length: 1_000 }, (_, index) => ({ capturedAt: new Date(index * 60_000).toISOString(), host: { cpuPercent: index } }));
+  const base = { overall: { state: "healthy" }, history, logs: { entries: Array.from({ length: 80 }, (_, index) => ({ id: index })) } };
+
+  const normal = serverHealth.buildServerHealthResponse(base);
+  assert.equal(Object.hasOwn(normal, "diagnosticBundle"), false);
+  assert.ok(normal.history.length <= 360);
+  assert.equal(normal.history[0].capturedAt, history[0].capturedAt);
+  assert.equal(normal.history.at(-1).capturedAt, history.at(-1).capturedAt);
+
+  const bundled = serverHealth.buildServerHealthResponse(base, { includeDiagnosticBundle: true });
+  assert.equal(bundled.diagnosticBundle.history.length, history.length);
+  assert.equal(bundled.diagnosticBundle.logs.entries.length, 50);
+});
+
+test("cached server health reads share in-flight work and obey the TTL", async () => {
+  assert.equal(typeof serverHealth.createCachedServerHealthReader, "function");
+  let now = 1_000;
+  let loads = 0;
+  const load = async () => ({ load: ++loads });
+  const read = serverHealth.createCachedServerHealthReader(load, { ttlMs: 30_000, now: () => now });
+
+  const [first, shared] = await Promise.all([read("data"), read("data")]);
+  assert.equal(loads, 1);
+  assert.deepEqual(first, shared);
+  assert.deepEqual(await read("data"), first);
+  now += 30_001;
+  assert.equal((await read("data")).load, 2);
 });

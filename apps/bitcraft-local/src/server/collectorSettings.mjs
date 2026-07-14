@@ -16,7 +16,7 @@ export const domainCollectorDefaults = {
   buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 900 },
+  snapshotHistory: { label: "Snapshot and history", intervalSeconds: 60 },
   marketListings: { label: "Market listing sync", intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
   storageActivity: { label: "Storage activity", intervalSeconds: 60 },
@@ -60,6 +60,11 @@ export const payloadDomainCollector = {
   region: "region",
   regionStatus: "region",
 };
+
+export function payloadDomainsForCollectors(collectorKeys = []) {
+  const selected = new Set(Array.isArray(collectorKeys) ? collectorKeys.map(String) : []);
+  return domainPayloadKeys.filter((domain) => selected.has(payloadDomainCollector[domain]));
+}
 
 export const collectorCurrentTables = {
   production: ["production_contributions"],

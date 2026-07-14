@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import * as craftPlanning from "../src/server/craftPlanning.mjs";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
@@ -53,6 +54,20 @@ test("compactCraftPlanResponse keeps live board values without nested drilldown 
   assert.deepEqual(compact.steps, []);
   assert.deepEqual(compact.gatherNext[0].items[0], compact.materials[0]);
   assert.equal(compact.totals.missingItems, 1);
+});
+
+test("Craft Planner workspace creates one shared compact projection", () => {
+  assert.equal(typeof craftPlanning.createCraftPlanResponseWorkspace, "function");
+  let projections = 0;
+  const plan = { enabled: true, materials: [{ key: "item:1" }] };
+  const workspace = craftPlanning.createCraftPlanResponseWorkspace(plan, (value) => {
+    projections += 1;
+    return { enabled: value.enabled };
+  });
+
+  assert.equal(workspace.plan, plan);
+  assert.equal(workspace.compact(), workspace.compact());
+  assert.equal(projections, 1);
 });
 
 test("craftPlanDetailResponse returns drilldown data only for requested material keys", () => {

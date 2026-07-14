@@ -131,8 +131,8 @@ wait_for_health() {
   local response
 
   printf "Waiting for web health at %s" "$HEALTH_URL"
-  for _ in {1..30}; do
-    if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>>"$LOG_FILE")"; then
+  for _ in {1..12}; do
+    if response="$(curl -fsS --connect-timeout 1 --max-time 10 "$HEALTH_URL" 2>>"$LOG_FILE")"; then
       printf " ok\n"
       HEALTH_SUMMARY="$(health_summary "$response")"
       printf "%s\n" "$HEALTH_SUMMARY"
@@ -140,7 +140,7 @@ wait_for_health() {
       return 0
     fi
     printf "."
-    sleep 1
+    sleep 2
   done
 
   printf " failed\n"

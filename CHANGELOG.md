@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.32.0-beta.60] - 2026-07-14
+
+### Changed
+
+- Reduced Server Health, Craft Planner, background polling, and monitoring-history memory overhead while preserving live multi-user updates.
+- Limited worker BitJita traffic to eight concurrent requests and shared identical in-flight requests.
+- Changed snapshot persistence to the configured 60-second cadence and compacted older monitoring history automatically.
+
+### Fixed
+
+- Fixed Server Health auto-refresh requests overlapping and making the web service or deployment health check unresponsive.
+- Fixed the VPS update helper timing out too quickly while the application was still starting.
+
 ## [0.32.0-beta.59] - 2026-07-14
 
 ### Fixed

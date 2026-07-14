@@ -1323,6 +1323,21 @@ export function compactCraftPlanResponse(plan = {}) {
   };
 }
 
+export function createCraftPlanResponseWorkspace(plan = {}, project = compactCraftPlanResponse) {
+  let compactPlan;
+  let projected = false;
+  return {
+    plan,
+    compact() {
+      if (!projected) {
+        compactPlan = project(plan);
+        projected = true;
+      }
+      return compactPlan;
+    },
+  };
+}
+
 export function craftPlanDetailResponse(plan = {}, requestedKeys = []) {
   const keys = new Set(requestedKeys.map(String).filter(Boolean));
   return {

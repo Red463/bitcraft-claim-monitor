@@ -28,22 +28,41 @@ export function ServerHealthSection() {
   const [service, setService] = React.useState("");
   const [severity, setSeverity] = React.useState("");
   const [search, setSearch] = React.useState("");
+  const [bundleLoading, setBundleLoading] = React.useState(false);
+  const refreshPromiseRef = React.useRef<Promise<void> | null>(null);
 
-  const refresh = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ service, severity, search, limit: "100" });
-      const response = await fetch(`${LOCAL_API}/admin/server-health?${params}`, { cache: "no-store" });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-      setData(body);
-      setError("");
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
-    finally { setLoading(false); }
+  const refresh = React.useCallback(() => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+    const request = (async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ service, severity, search, limit: "100" });
+        const response = await fetch(`${LOCAL_API}/admin/server-health?${params}`, { cache: "no-store" });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+        setData(body);
+        setError("");
+      } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+      finally { setLoading(false); }
+    })();
+    refreshPromiseRef.current = request;
+    void request.finally(() => { if (refreshPromiseRef.current === request) refreshPromiseRef.current = null; });
+    return request;
   }, [service, severity, search]);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
-  React.useEffect(() => { const timer = window.setInterval(() => void refresh(), intervalSeconds * 1000); return () => window.clearInterval(timer); }, [refresh, intervalSeconds]);
+  React.useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const schedule = () => {
+      timer = window.setTimeout(async () => {
+        await refresh();
+        if (!cancelled) schedule();
+      }, intervalSeconds * 1000);
+    };
+    schedule();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [refresh, intervalSeconds]);
 
   const snapshot = data?.hostSnapshot;
   const host = snapshot?.host ?? {};
@@ -51,12 +70,23 @@ export function ServerHealthSection() {
   const history = Array.isArray(data?.history) ? data.history : [];
   const state = String(data?.overall?.state ?? "warning");
   const StateIcon = state === "healthy" ? CheckCircle2 : state === "critical" ? ShieldAlert : AlertTriangle;
-  const copyBundle = async () => navigator.clipboard.writeText(JSON.stringify(data?.diagnosticBundle ?? data, null, 2));
+  const copyBundle = async () => {
+    setBundleLoading(true);
+    try {
+      const params = new URLSearchParams({ service, severity, search, limit: "100", bundle: "1" });
+      const response = await fetch(`${LOCAL_API}/admin/server-health?${params}`, { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      await navigator.clipboard.writeText(JSON.stringify(body.diagnosticBundle ?? body, null, 2));
+      setError("");
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : String(nextError)); }
+    finally { setBundleLoading(false); }
+  };
 
   return <div className="admin-section server-health-page">
     <section className={`server-health-command ${state}`}>
       <div><StateIcon size={22} /><span><strong>{state === "healthy" ? "All monitored systems healthy" : state === "critical" ? "Critical server condition" : "Server health needs attention"}</strong><small>{data?.overall?.reasons?.join(" · ") || "No active health warnings"}</small></span></div>
-      <div className="toolbar"><label className="inline-field"><span>Auto refresh</span><select value={intervalSeconds} onChange={(event) => setIntervalSeconds(Number(event.target.value))}><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">60 sec</option></select></label><button className="toolbar-button" onClick={() => void copyBundle()}><Copy size={14} /> Copy bundle</button><button className="toolbar-button primary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={14} /> {loading ? "Refreshing" : "Refresh"}</button></div>
+      <div className="toolbar"><label className="inline-field"><span>Auto refresh</span><select value={intervalSeconds} onChange={(event) => setIntervalSeconds(Number(event.target.value))}><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">60 sec</option></select></label><button className="toolbar-button" disabled={bundleLoading} onClick={() => void copyBundle()}><Copy size={14} /> {bundleLoading ? "Preparing" : "Copy bundle"}</button><button className="toolbar-button primary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={14} /> {loading ? "Refreshing" : "Refresh"}</button></div>
     </section>
     {error ? <div className="admin-message error">{error}</div> : null}
     {data?.collectorWarning ? <div className="admin-message info">{data.collectorWarning}. Application telemetry remains available.</div> : null}

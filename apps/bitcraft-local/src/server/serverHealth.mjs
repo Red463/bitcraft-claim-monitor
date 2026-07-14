@@ -91,3 +91,44 @@ export function filterServerHealthLogs(logs, { service = "", severity = "", sear
   const size = Math.min(100, Math.max(10, Math.floor(number(limit, 50))));
   return { entries: filtered.slice(start, start + size), nextCursor: start + size < filtered.length ? start + size : null, total: filtered.length };
 }
+
+export function downsampleServerHealthHistory(history, limit = 360) {
+  const rows = Array.isArray(history) ? history : [];
+  const size = Math.max(2, Math.floor(number(limit, 360)));
+  if (rows.length <= size) return rows;
+  const lastIndex = rows.length - 1;
+  const indexes = new Set([0, lastIndex]);
+  for (let index = 1; index < size - 1; index += 1) indexes.add(Math.round((index / (size - 1)) * lastIndex));
+  return [...indexes].sort((left, right) => left - right).map((index) => rows[index]);
+}
+
+export function buildServerHealthResponse(base = {}, { includeDiagnosticBundle = false, historyLimit = 360 } = {}) {
+  const normal = { ...base, history: downsampleServerHealthHistory(base.history, historyLimit) };
+  if (!includeDiagnosticBundle) return normal;
+  const bundleLogs = base.logs && typeof base.logs === "object"
+    ? { ...base.logs, entries: safeArray(base.logs.entries, 50) }
+    : base.logs;
+  return { ...normal, diagnosticBundle: { ...base, logs: bundleLogs } };
+}
+
+export function createCachedServerHealthReader(load, { ttlMs = 30_000, now = Date.now } = {}) {
+  const entries = new Map();
+  return async (...args) => {
+    const key = JSON.stringify(args);
+    const cached = entries.get(key);
+    const readAt = now();
+    if (cached?.value !== undefined && cached.expiresAt > readAt) return cached.value;
+    if (cached?.inflight) return cached.inflight;
+    const entry = cached ?? { value: undefined, expiresAt: 0, inflight: null };
+    const inflight = Promise.resolve().then(() => load(...args)).then((value) => {
+      entry.value = value;
+      entry.expiresAt = now() + Math.max(0, number(ttlMs, 30_000));
+      return value;
+    }).finally(() => {
+      entry.inflight = null;
+    });
+    entry.inflight = inflight;
+    entries.set(key, entry);
+    return inflight;
+  };
+}

@@ -14,7 +14,8 @@ test("VPS update script reports code changes and waits for service health", () =
   assert.match(script, /git -C "\$APP_DIR" diff --stat/);
   assert.match(script, /wait_for_service\(\)/);
   assert.match(script, /wait_for_health\(\)/);
-  assert.match(script, /curl -fsS --max-time 3 "\$HEALTH_URL"/);
+  assert.match(script, /curl -fsS --connect-timeout 1 --max-time 10 "\$HEALTH_URL"/);
+  assert.match(script, /sleep 2/);
   assert.match(script, /Waiting for web health/);
 });
 

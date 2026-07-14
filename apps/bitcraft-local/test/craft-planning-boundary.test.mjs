@@ -252,7 +252,8 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
   const bitjita = readFileSync(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
 
-  assert.match(server, /compactCraftPlanResponse\(await computedCraftPlanResponse/);
+  assert.match(server, /computedCompactCraftPlanResponse/);
+  assert.match(server, /createCraftPlanResponseWorkspace/);
   assert.match(server, /\/api\/local\/craft-plan\/detail/);
   assert.match(server, /craftPlanDetailResponse\(await computedCraftPlanResponse/);
   assert.match(server, /craftPlanResponseCache/);
