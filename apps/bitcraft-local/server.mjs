@@ -66,7 +66,7 @@ import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaInd
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
-import { settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
+import { runSettlementStateTransaction, settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
 import {
@@ -3319,11 +3319,12 @@ function analyticsDashboard(days = 30) {
   return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
-function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null) {
+function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, { processDiscordImmediately = true } = {}) {
   const result = sourceKey
     ? statements.insertSourcedActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata), sourceKey)
     : statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
-  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata);
+  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, { processImmediately: processDiscordImmediately });
+  return result.changes > 0;
 }
 
 function formatGold(value) {
@@ -3690,8 +3691,12 @@ async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata =
   const now = new Date().toISOString();
   const sourceKey = String(options.sourceKey ?? discordOutboxSourceKey(eventType, summary, occurredAt, metadata));
   statements.enqueueDiscordNotification.run(sourceKey, eventType, summary, occurredAt, JSON.stringify(metadata ?? {}), now, now, now);
-  void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+  if (options.processImmediately !== false) kickDiscordNotificationOutbox();
   return { ok: true, queued: true, sourceKey };
+}
+
+function kickDiscordNotificationOutbox() {
+  void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 function discordNotificationRetryAt(attempts) {
@@ -3745,8 +3750,11 @@ function discordEmbedForActivity(eventType, summary, occurredAt, metadata = {}, 
   return buildDiscordEmbedForActivity(eventType, summary, occurredAt, metadata, settings);
 }
 
-function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}) {
-  void enqueueDiscordActivity(eventType, summary, occurredAt, metadata, { sourceKey: `${eventType}:${claimId}:${metadata.sourceKey ?? metadata.id ?? summary}` }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
+function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata = {}, { processImmediately = true } = {}) {
+  void enqueueDiscordActivity(eventType, summary, occurredAt, metadata, {
+    sourceKey: `${eventType}:${claimId}:${metadata.sourceKey ?? metadata.id ?? summary}`,
+    processImmediately,
+  }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
@@ -5072,15 +5080,12 @@ function recordSettlementState(payload) {
   if (!claimId) throw new Error("Missing claim id");
   const claim = payload.claim ?? {};
   const supplyMeta = supplyRunwayMetadata(claim, summary.supplies);
-  db.exec("BEGIN");
-  try {
-    const previous = statements.getSettlementState.get(claimId);
-    if (previous) {
-      for (const change of settlementStateActivityChanges(previous, summary, { supplyMetadata: supplyMeta })) {
-        addActivity(claimId, change.type, change.summary, now, change.metadata);
-      }
-    }
-    statements.upsertSettlementState.run(
+  runSettlementStateTransaction({
+    db,
+    readPrevious: () => statements.getSettlementState.get(claimId),
+    activityChanges: (previous) => settlementStateActivityChanges(previous, summary, { supplyMetadata: supplyMeta }),
+    insertActivity: (change) => addActivity(claimId, change.type, change.summary, now, change.metadata, null, { processDiscordImmediately: false }),
+    upsertState: () => statements.upsertSettlementState.run(
       claimId,
       now,
       summary.supplies,
@@ -5089,12 +5094,9 @@ function recordSettlementState(payload) {
       summary.buildingsCount,
       summary.marketCount,
       now,
-    );
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+    ),
+    processOutbox: kickDiscordNotificationOutbox,
+  });
   return { ok: true, capturedAt: now };
 }
 

@@ -44,3 +44,29 @@ export function settlementStateActivityChanges(previous, summary, { supplyMetada
       metadata: extraMetadata ? { before, after, ...extraMetadata } : { before, after },
     }));
 }
+
+export function runSettlementStateTransaction({
+  db,
+  readPrevious,
+  activityChanges,
+  insertActivity,
+  upsertState,
+  processOutbox,
+}) {
+  let shouldProcessOutbox = false;
+  db.exec("BEGIN");
+  try {
+    const previous = readPrevious();
+    if (previous) {
+      for (const change of activityChanges(previous)) {
+        if (insertActivity(change)) shouldProcessOutbox = true;
+      }
+    }
+    upsertState();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  if (shouldProcessOutbox) processOutbox();
+}

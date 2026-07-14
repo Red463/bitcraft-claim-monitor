@@ -1,7 +1,7 @@
 # Settlement Current State Design
 
-**Status:** Approved design  
-**Date:** 14 July 2026  
+**Status:** Approved design
+**Date:** 14 July 2026
 **Area:** Server polling, activity history, and database storage
 
 ## Purpose

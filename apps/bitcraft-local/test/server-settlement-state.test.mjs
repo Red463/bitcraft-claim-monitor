@@ -204,7 +204,9 @@ test("server records settlement activity before upserting current state without 
   assert.ok(end > start);
   assert.ok(implementation.indexOf("statements.getSettlementState.get") < implementation.indexOf("settlementStateActivityChanges"));
   assert.ok(implementation.indexOf("settlementStateActivityChanges") < implementation.indexOf("statements.upsertSettlementState.run"));
-  assert.match(implementation, /if \(previous\)/);
+  assert.match(implementation, /runSettlementStateTransaction/);
+  assert.match(implementation, /processDiscordImmediately: false/);
+  assert.match(implementation, /processOutbox: kickDiscordNotificationOutbox/);
   assert.doesNotMatch(implementation, /insertSnapshot|INSERT INTO snapshots/);
 });
 
@@ -212,4 +214,71 @@ test("current settlement writes remain available without legacy snapshot history
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(source, /url\.pathname === "\/api\/local\/snapshot"[\s\S]*recordSettlementState\(await readJson/);
   assert.doesNotMatch(source, /\/api\/local\/snapshots|maintenance\/prune|function snapshotHistory/);
+});
+
+function settlementTransactionFixture({ failAfterStateWrite = false } = {}) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE settlement_state_current (claim_id TEXT PRIMARY KEY, supplies REAL);
+    CREATE TABLE activity_events (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL);
+    CREATE TABLE discord_notification_outbox (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL);
+    INSERT INTO settlement_state_current (claim_id, supplies) VALUES ('a', 10);
+  `);
+  let transactionOpen = false;
+  let processingKicks = 0;
+  let processingStartedInsideTransaction = false;
+  return {
+    db,
+    transactionDb: {
+      exec(sql) {
+        const command = sql.trim().toUpperCase();
+        const result = db.exec(sql);
+        if (command === "BEGIN") transactionOpen = true;
+        if (command === "COMMIT" || command === "ROLLBACK") transactionOpen = false;
+        return result;
+      },
+    },
+    readPrevious: () => db.prepare("SELECT * FROM settlement_state_current WHERE claim_id = 'a'").get(),
+    activityChanges: () => [{ type: "supplies" }],
+    insertActivity(change) {
+      db.prepare("INSERT INTO activity_events (event_type) VALUES (?)").run(change.type);
+      db.prepare("INSERT INTO discord_notification_outbox (event_type) VALUES (?)").run(change.type);
+      return true;
+    },
+    upsertState() {
+      db.prepare("UPDATE settlement_state_current SET supplies = 20 WHERE claim_id = 'a'").run();
+      if (failAfterStateWrite) throw new Error("forced settlement state failure");
+    },
+    processOutbox() {
+      processingKicks += 1;
+      processingStartedInsideTransaction ||= transactionOpen;
+    },
+    processing: () => ({ processingKicks, processingStartedInsideTransaction }),
+  };
+}
+
+test("settlement state rollback persists no activity, outbox, or changed state and never starts Discord processing", async () => {
+  const { runSettlementStateTransaction } = await import("../src/server/settlementState.mjs");
+  const fixture = settlementTransactionFixture({ failAfterStateWrite: true });
+
+  assert.throws(() => runSettlementStateTransaction(fixture), /forced settlement state failure/);
+
+  assert.equal(fixture.db.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 10);
+  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 0);
+  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 0);
+  assert.deepEqual(fixture.processing(), { processingKicks: 0, processingStartedInsideTransaction: false });
+  fixture.db.close();
+});
+
+test("settlement state success commits activity and outbox before starting Discord processing once", async () => {
+  const { runSettlementStateTransaction } = await import("../src/server/settlementState.mjs");
+  const fixture = settlementTransactionFixture();
+
+  runSettlementStateTransaction(fixture);
+
+  assert.equal(fixture.db.prepare("SELECT supplies FROM settlement_state_current WHERE claim_id = 'a'").get().supplies, 20);
+  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
+  assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 1);
+  assert.deepEqual(fixture.processing(), { processingKicks: 1, processingStartedInsideTransaction: false });
+  fixture.db.close();
 });
