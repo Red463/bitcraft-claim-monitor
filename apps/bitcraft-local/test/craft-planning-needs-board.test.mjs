@@ -3,6 +3,23 @@ import test from "node:test";
 
 import { buildNeedsBoard, filterNeedsBoard, needsBoardCompletion } from "../src/pages/craftPlanningNeedsBoard.ts";
 
+test("Needs Board covers quantities with guaranteed output only", () => {
+  const board = buildNeedsBoard([{
+    key: "items:1",
+    name: "Plank",
+    tag: "Plank",
+    tier: 1,
+    section: "Carpentry",
+    required: 10,
+    available: 2,
+    inProgress: 7,
+    guaranteedInProgress: 3,
+    estimatedInProgress: 4,
+    missing: 5,
+  }], []);
+  assert.equal(board[0].covered, 5);
+});
+
 test("buildNeedsBoard groups enriched API items by tag and authoritative tier", () => {
   const board = buildNeedsBoard([
     {
@@ -291,8 +308,8 @@ test("buildNeedsBoard calculates section completion from required and covered qu
   ], []);
 
   assert.equal(board[0].required, 200);
-  assert.equal(board[0].covered, 180);
-  assert.equal(board[0].completion, 90);
+  assert.equal(board[0].covered, 177);
+  assert.equal(board[0].completion, 88.5);
   assert.equal(board[0].rows[0].cells.get("T1")?.guaranteedInProgress, 2);
   assert.equal(board[0].rows[0].cells.get("T1")?.estimatedInProgress, 3);
   assert.equal(board[0].rows[0].cells.get("T2")?.guaranteedInProgress, 0);

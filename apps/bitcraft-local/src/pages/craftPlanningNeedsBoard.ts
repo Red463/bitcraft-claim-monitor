@@ -127,9 +127,10 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     const existing = row.cells.get(column);
     const available = Number(material.available) || 0;
     const inProgress = Number(material.inProgress) || 0;
-    const hasBreakdown = material.guaranteedInProgress != null || material.estimatedInProgress != null;
-    const guaranteedInProgress = hasBreakdown ? Number(material.guaranteedInProgress) || 0 : inProgress;
-    const estimatedInProgress = hasBreakdown ? Number(material.estimatedInProgress) || 0 : 0;
+    const estimatedInProgress = Number(material.estimatedInProgress) || 0;
+    const guaranteedInProgress = material.guaranteedInProgress != null
+      ? Number(material.guaranteedInProgress) || 0
+      : estimatedInProgress > 0 ? 0 : inProgress;
     if (existing) {
       existing.items.push(material);
       existing.missing += missing;
@@ -150,7 +151,7 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
       const sortedRows = [...rows.values()].sort((a, b) => plannerRowOrder(section, a.name) - plannerRowOrder(section, b.name) || a.name.localeCompare(b.name));
       const cells = sortedRows.flatMap((row) => [...row.cells.values()]);
       const required = cells.reduce((sum, cell) => sum + cell.required, 0);
-      const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.inProgress), 0);
+      const covered = cells.reduce((sum, cell) => sum + Math.min(cell.required, cell.available + cell.guaranteedInProgress), 0);
       return { section, rows: sortedRows, required, covered, completion: required > 0 ? Math.round((covered / required) * 1000) / 10 : 100 };
     });
 }

@@ -1108,8 +1108,9 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
     const verifiedRoutes = Object.values(routes).filter((route) => route.available);
     const activeOil = activeCraftTotals.get(oil.key);
     const trackedOil = activeOil?.total ?? 0;
-    const availableOilEquivalent = oil.available + trackedOil + verifiedRoutes.reduce((total, route) => (
-      total + (route.stockQuantity + route.trackedQuantity) * route.guaranteedYield
+    const guaranteedTrackedOil = activeOil?.guaranteedTotal ?? 0;
+    const availableOilEquivalent = oil.available + guaranteedTrackedOil + verifiedRoutes.reduce((total, route) => (
+      total + (route.stockQuantity + route.guaranteedTrackedQuantity) * route.guaranteedYield
     ), 0);
     const remainingOil = Math.max(0, oil.bufferedRequired - availableOilEquivalent);
     return {
@@ -1119,7 +1120,7 @@ export function buildPersonalFishingView({ materials, detailsByKey, availableTot
       requiredOil: oil.bufferedRequired,
       availableOil: oil.available,
       trackedOil,
-      guaranteedTrackedOil: activeOil?.guaranteedTotal ?? 0,
+      guaranteedTrackedOil,
       estimatedTrackedOil: activeOil?.estimatedTotal ?? 0,
       remainingOil,
       routes: Object.fromEntries(Object.entries(routes).map(([family, route]) => {
@@ -1198,8 +1199,9 @@ export function computeCraftPlan({
 
   const effectiveStockTotals = new Map(availableTotals);
   for (const [key, active] of countedActiveTotals.entries()) {
+    if (active.guaranteedTotal <= 0) continue;
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
-    effectiveStockTotals.set(key, { ...current, total: current.total + active.total, sources: current.sources });
+    effectiveStockTotals.set(key, { ...current, total: current.total + active.guaranteedTotal, sources: current.sources });
   }
   const calculationTargets = expandedPlanTargets(normalized.targets, normalized.buildingProgress);
   const { required, steps, usages, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
@@ -1245,7 +1247,7 @@ export function computeCraftPlan({
       inProgress,
       guaranteedInProgress,
       estimatedInProgress,
-      missing: Math.max(0, bufferedRequired - available - inProgress),
+      missing: Math.max(0, bufferedRequired - available - guaranteedInProgress),
       sources: availableTotals.get(item.key)?.sources ?? [],
       activeCraftSources: active?.sources ?? [],
       sourceRoutes,
