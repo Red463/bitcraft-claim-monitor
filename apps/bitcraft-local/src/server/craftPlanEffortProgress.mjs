@@ -106,9 +106,50 @@ function materialRequired(material = {}) {
   return nonNegative(material.bufferedRequired ?? material.required);
 }
 
-export function projectCraftPlanEffortMaterials(plan = {}) {
+function compactFishingRoute(route = {}) {
+  if (route?.available !== true) {
+    return { available: false, reason: String(route?.reason ?? "Verified route unavailable") };
+  }
+  return {
+    available: true,
+    input: {
+      key: String(route?.input?.key ?? ""),
+      tag: String(route?.input?.tag ?? ""),
+    },
+    needed: nonNegative(route.needed),
+    stockQuantity: nonNegative(route.stockQuantity),
+    guaranteedTrackedQuantity: nonNegative(route.guaranteedTrackedQuantity),
+  };
+}
+
+export function compactCraftPlanEffortInput(plan = {}) {
+  return {
+    materials: (Array.isArray(plan?.materials) ? plan.materials : []).map((material) => ({
+      key: materialKey(material),
+      tag: String(material?.tag ?? ""),
+      section: String(material?.section ?? material?.apiSection ?? "Other"),
+      required: materialRequired(material),
+      missing: nonNegative(material?.missing),
+    })),
+    personalViews: {
+      fishing: {
+        tiers: (Array.isArray(plan?.personalViews?.fishing?.tiers) ? plan.personalViews.fishing.tiers : []).map((tier) => ({
+          routes: Object.fromEntries(Object.entries(tier?.routes ?? {}).map(([name, route]) => [name, compactFishingRoute(route)])),
+        })),
+      },
+    },
+  };
+}
+
+function isInterchangeableFishingInput(material = {}) {
+  if (String(material.section ?? material.apiSection ?? "").toLowerCase() !== "fishing") return false;
+  return /^(ocean|lake) fish$/i.test(String(material.tag ?? "").trim());
+}
+
+export function projectCraftPlanEffortMaterials(plan = {}, fishingRoute = null) {
   const projected = new Map();
   for (const material of Array.isArray(plan?.materials) ? plan.materials : []) {
+    if (fishingRoute && isInterchangeableFishingInput(material)) continue;
     const key = materialKey(material);
     const required = materialRequired(material);
     if (!key || required <= 0) continue;
@@ -125,6 +166,23 @@ export function projectCraftPlanEffortMaterials(plan = {}) {
       required,
       missing: Math.min(required, nonNegative(material.missing)),
     });
+  }
+  if (fishingRoute) {
+    for (const tier of Array.isArray(plan?.personalViews?.fishing?.tiers) ? plan.personalViews.fishing.tiers : []) {
+      const route = tier?.routes?.[fishingRoute];
+      if (route?.available !== true) continue;
+      const key = String(route?.input?.key ?? "").trim();
+      if (!key) continue;
+      const required = nonNegative(route.needed) + nonNegative(route.stockQuantity) + nonNegative(route.guaranteedTrackedQuantity);
+      const missing = Math.min(required, nonNegative(route.needed));
+      const current = projected.get(key);
+      if (current) {
+        current.required += required;
+        current.missing += missing;
+      } else if (required > 0) {
+        projected.set(key, { key, section: "Fishing", required, missing });
+      }
+    }
   }
   return [...projected.values()];
 }
@@ -158,11 +216,85 @@ function unavailableAggregate() {
   };
 }
 
+export function unavailableCraftPlanEffortProgress() {
+  return {
+    modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    state: "unavailable",
+    overall: unavailableAggregate(),
+    sections: {},
+    fishingVariants: {},
+    coverage: {
+      weightedRequiredMaterials: 0,
+      totalRequiredMaterials: 0,
+      missingWeightCount: 0,
+      missingWeightKeys: [],
+    },
+    warnings: ["Effort progress is unavailable until the planner catalog refresh completes."],
+  };
+}
+
 export function calculateCraftPlanEffortProgress({
   baselinePlan = {},
   currentPlan = {},
   weights = new Map(),
 } = {}) {
+  const calculateProjection = (baseline, current) => {
+    if (!baseline.length) return {
+      state: "empty",
+      overall: { state: "empty", baselineEffort: 0, remainingEffort: 0, completion: 100 },
+      sections: {},
+      coverage: { weightedRequiredMaterials: 0, totalRequiredMaterials: 0, missingWeightCount: 0, missingWeightKeys: [] },
+      warnings: [],
+    };
+
+    const currentByKey = new Map(current.map((row) => [row.key, row]));
+    const sectionRows = new Map();
+    const missingBySection = new Map();
+    const missingWeights = new Set();
+    let weightedRequiredMaterials = 0;
+
+    for (const row of baseline) {
+      const weight = positive(weights instanceof Map ? weights.get(row.key)?.effortWeight ?? weights.get(row.key) : null);
+      if (!weight) {
+        missingWeights.add(row.key);
+        const sectionMissing = missingBySection.get(row.section) ?? new Set();
+        sectionMissing.add(row.key);
+        missingBySection.set(row.section, sectionMissing);
+        continue;
+      }
+      weightedRequiredMaterials += 1;
+      const liveMissing = Math.min(row.required, nonNegative(currentByKey.get(row.key)?.missing ?? row.required));
+      const entries = sectionRows.get(row.section) ?? [];
+      entries.push({ baselineEffort: row.required * weight, remainingEffort: liveMissing * weight });
+      sectionRows.set(row.section, entries);
+    }
+
+    const sectionNames = new Set([...sectionRows.keys(), ...missingBySection.keys()]);
+    const sections = {};
+    for (const section of sectionNames) {
+      sections[section] = missingBySection.get(section)?.size
+        ? unavailableAggregate()
+        : readyAggregate(sectionRows.get(section) ?? []);
+    }
+    const overall = missingWeights.size ? unavailableAggregate() : readyAggregate([...sectionRows.values()].flat());
+    const state = missingWeights.size ? weightedRequiredMaterials > 0 ? "partial" : "unavailable" : "ready";
+    const missingWeightKeys = [...missingWeights].sort();
+    return {
+      state,
+      overall,
+      sections,
+      coverage: {
+        weightedRequiredMaterials,
+        totalRequiredMaterials: baseline.length,
+        missingWeightCount: missingWeightKeys.length,
+        missingWeightKeys: missingWeightKeys.slice(0, MAX_MISSING_WEIGHT_KEYS),
+      },
+      warnings: missingWeightKeys.length
+        ? [`Effort progress is missing verified catalog weights for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"}.`]
+        : [],
+    };
+  };
+
   const baseline = projectCraftPlanEffortMaterials(baselinePlan);
   if (!baseline.length) {
     return {
@@ -181,60 +313,24 @@ export function calculateCraftPlanEffortProgress({
     };
   }
 
-  const current = new Map(projectCraftPlanEffortMaterials(currentPlan).map((row) => [row.key, row]));
-  const sectionRows = new Map();
-  const missingBySection = new Map();
-  const missingWeights = new Set();
-  let weightedRequiredMaterials = 0;
-
-  for (const row of baseline) {
-    const weight = positive(weights instanceof Map ? weights.get(row.key)?.effortWeight ?? weights.get(row.key) : null);
-    if (!weight) {
-      missingWeights.add(row.key);
-      const sectionMissing = missingBySection.get(row.section) ?? new Set();
-      sectionMissing.add(row.key);
-      missingBySection.set(row.section, sectionMissing);
-      continue;
-    }
-    weightedRequiredMaterials += 1;
-    const liveMissing = Math.min(row.required, nonNegative(current.get(row.key)?.missing ?? row.required));
-    const entries = sectionRows.get(row.section) ?? [];
-    entries.push({
-      baselineEffort: row.required * weight,
-      remainingEffort: liveMissing * weight,
-    });
-    sectionRows.set(row.section, entries);
+  const generic = calculateProjection(baseline, projectCraftPlanEffortMaterials(currentPlan));
+  const fishingVariants = {};
+  for (const route of ["ocean", "lake"]) {
+    const baselineRoutes = baselinePlan?.personalViews?.fishing?.tiers ?? [];
+    const currentRoutes = currentPlan?.personalViews?.fishing?.tiers ?? [];
+    const routeAvailable = baselineRoutes.length > 0
+      && baselineRoutes.every((tier) => tier?.routes?.[route]?.available === true)
+      && currentRoutes.every((tier) => tier?.routes?.[route]?.available === true);
+    if (!routeAvailable) continue;
+    const variant = calculateProjection(
+      projectCraftPlanEffortMaterials(baselinePlan, route),
+      projectCraftPlanEffortMaterials(currentPlan, route),
+    );
+    fishingVariants[route] = { route, ...variant };
   }
-
-  const sectionNames = new Set([...sectionRows.keys(), ...missingBySection.keys()]);
-  const sections = {};
-  for (const section of sectionNames) {
-    sections[section] = missingBySection.get(section)?.size
-      ? unavailableAggregate()
-      : readyAggregate(sectionRows.get(section) ?? []);
-  }
-
-  const overall = missingWeights.size
-    ? unavailableAggregate()
-    : readyAggregate([...sectionRows.values()].flat());
-  const state = missingWeights.size
-    ? weightedRequiredMaterials > 0 ? "partial" : "unavailable"
-    : "ready";
-  const missingWeightKeys = [...missingWeights].sort();
   return {
     modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    state,
-    overall,
-    sections,
-    fishingVariants: {},
-    coverage: {
-      weightedRequiredMaterials,
-      totalRequiredMaterials: baseline.length,
-      missingWeightCount: missingWeightKeys.length,
-      missingWeightKeys: missingWeightKeys.slice(0, MAX_MISSING_WEIGHT_KEYS),
-    },
-    warnings: missingWeightKeys.length
-      ? [`Effort progress is missing verified catalog weights for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"}.`]
-      : [],
+    ...generic,
+    fishingVariants,
   };
 }

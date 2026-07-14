@@ -44,9 +44,13 @@ import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig
 import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
+  calculateCraftPlanEffortProgress,
+  compactCraftPlanEffortInput,
   craftingEffortCandidate,
   normalizeGameResourceEffortCandidates,
+  unavailableCraftPlanEffortProgress,
 } from "./src/server/craftPlanEffortProgress.mjs";
+import { createCraftPlanEffortBaselineCache, craftPlanEffortBaselineKey } from "./src/server/craftPlanEffortCache.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
@@ -96,7 +100,20 @@ setDefaultResultOrder("ipv4first");
 const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
 eventLoopHistogram.enable();
 const requestTelemetry = [];
-const plannerTelemetry = { freshCalculations: 0, cacheHits: 0, inflightReuse: 0, lastDurationMs: 0, lastResponseBytes: 0, lastCompletedAt: null };
+const plannerTelemetry = {
+  freshCalculations: 0,
+  cacheHits: 0,
+  inflightReuse: 0,
+  baselineHits: 0,
+  baselineMisses: 0,
+  baselineInflightReuse: 0,
+  baselineEntries: 0,
+  baselineBytes: 0,
+  lastBaselineDurationMs: 0,
+  lastDurationMs: 0,
+  lastResponseBytes: 0,
+  lastCompletedAt: null,
+};
 const bitjitaTelemetry = { requests: 0, failures: 0, timeouts: 0, rateLimits: 0, lastFailureAt: null };
 
 function applicationHealthTelemetry() {
@@ -883,6 +900,9 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
     effortUpdatedAt,
   );
+  craftPlanEffortBaselineCache.clear();
+  craftPlanResponseGeneration += 1;
+  craftPlanResponseCache.clear();
   const completedAt = new Date().toISOString();
 
   gameCatalogRepository.updateRefreshRun(refreshRun.id, {
@@ -1814,6 +1834,7 @@ const CRAFT_PLAN_KEY = "active";
 const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(5000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 20_000));
 const craftPlanResponseCache = new Map();
 const craftPlanResponseInflight = new Map();
+const craftPlanEffortBaselineCache = createCraftPlanEffortBaselineCache();
 let craftPlanResponseGeneration = 0;
 
 function storedCraftPlanConfig() {
@@ -1827,6 +1848,7 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   statements.upsertCraftPlan.run(CRAFT_PLAN_KEY, JSON.stringify(normalized), existing?.created_at ?? timestamp, timestamp);
   craftPlanResponseGeneration += 1;
   craftPlanResponseCache.clear();
+  craftPlanEffortBaselineCache.clear();
   return normalized;
 }
 
@@ -2270,7 +2292,11 @@ async function computedCraftPlanWorkspace(claimId = getSettings().claimId) {
 
 async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
   let config = storedCraftPlanConfig();
-  if (!config.enabled || !config.targets.length) return computeCraftPlan({ config });
+  if (!config.enabled || !config.targets.length) {
+    const plan = computeCraftPlan({ config });
+    plan.effortProgress = calculateCraftPlanEffortProgress({ baselinePlan: plan, currentPlan: plan, weights: new Map() });
+    return plan;
+  }
   try {
     const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`);
     const reconciled = reconcileCraftPlanBuildingProgress(config, buildingsPayload);
@@ -2316,8 +2342,8 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
       playerSources.push({ sourceId: playerId, label: `${label} inventory`, unavailable: true, error: error instanceof Error ? error.message : String(error), items: [] });
     }
   }
-  return computeCraftPlan({
-    config: storedCraftPlanConfig(),
+  const livePlan = computeCraftPlan({
+    config,
     detailsByKey,
     catalogWarnings,
     storageSources,
@@ -2326,6 +2352,28 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     activeCrafts: trackedCraftPlanOutputs(craftPayloads, detailsByKey),
     craftSourceErrors,
   });
+  const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
+  if (storedEffortModelVersion !== CRAFT_PLAN_EFFORT_MODEL_VERSION) {
+    livePlan.effortProgress = unavailableCraftPlanEffortProgress();
+    return livePlan;
+  }
+  const catalogRevision = gameCatalogRepository.getEffortWeightRevision(CRAFT_PLAN_EFFORT_MODEL_VERSION);
+  const weights = gameCatalogRepository.getEffortWeights(CRAFT_PLAN_EFFORT_MODEL_VERSION);
+  const baselineKey = craftPlanEffortBaselineKey(config, catalogRevision, CRAFT_PLAN_EFFORT_MODEL_VERSION);
+  const baselineStartedAt = Date.now();
+  const statsBefore = craftPlanEffortBaselineCache.stats();
+  const baselinePlan = await craftPlanEffortBaselineCache.getOrCreate(baselineKey, async () => (
+    compactCraftPlanEffortInput(computeCraftPlan({ config, detailsByKey, catalogWarnings }))
+  ));
+  const baselineStats = craftPlanEffortBaselineCache.stats();
+  if (baselineStats.misses > statsBefore.misses) plannerTelemetry.lastBaselineDurationMs = Date.now() - baselineStartedAt;
+  plannerTelemetry.baselineHits = baselineStats.hits;
+  plannerTelemetry.baselineMisses = baselineStats.misses;
+  plannerTelemetry.baselineInflightReuse = baselineStats.inflightReuse;
+  plannerTelemetry.baselineEntries = baselineStats.entries;
+  plannerTelemetry.baselineBytes = baselineStats.bytes;
+  livePlan.effortProgress = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan: livePlan, weights });
+  return livePlan;
 }
 
 async function craftPlanDiscordReport(profession = "") {

@@ -47,13 +47,22 @@ const animalHairDetail = {
 
 test("compactCraftPlanResponse keeps live board values without nested drilldown payloads", () => {
   const material = { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, guaranteedInProgress: 12, estimatedInProgress: 8, plannedOutput: 10, missing: 50, sources: [{ quantity: 30 }], activeCraftSources: [{ quantity: 20 }], sourceRoutes: [{ id: "route" }], recipeUsages: [{ outputKey: "items:2" }] };
-  const compact = compactCraftPlanResponse({ enabled: true, materials: [material], steps: [{ output: material }], gatherNext: [{ section: "Tailoring", items: [material] }], totals: { missingItems: 1 } });
+  const compact = compactCraftPlanResponse({
+    enabled: true,
+    materials: [material],
+    steps: [{ output: material }],
+    gatherNext: [{ section: "Tailoring", items: [material] }],
+    totals: { missingItems: 1 },
+    effortProgress: { modelVersion: 1, overall: { completion: 40 }, sections: { Tailoring: { completion: 40 } } },
+  });
 
   assert.deepEqual(compact.materials[0], { key: "items:1", name: "Cloth", required: 100, available: 30, inProgress: 20, guaranteedInProgress: 12, estimatedInProgress: 8, missing: 50, hasSourceRoutes: true, hasRecipeUsages: true });
   assert.equal("plannedOutput" in compact.materials[0], false);
   assert.deepEqual(compact.steps, []);
   assert.deepEqual(compact.gatherNext[0].items[0], compact.materials[0]);
   assert.equal(compact.totals.missingItems, 1);
+  assert.equal(compact.effortProgress.overall.completion, 40);
+  assert.doesNotMatch(JSON.stringify(compact), /effortWeight|candidate/i);
 });
 
 test("Craft Planner workspace creates one shared compact projection", () => {

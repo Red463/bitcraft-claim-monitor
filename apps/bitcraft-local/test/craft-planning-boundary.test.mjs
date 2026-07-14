@@ -248,6 +248,11 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
   assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
+  assert.match(computedCraftPlan, /craftPlanEffortBaselineKey/);
+  assert.match(computedCraftPlan, /craftPlanEffortBaselineCache\.getOrCreate/);
+  assert.match(computedCraftPlan, /compactCraftPlanEffortInput\(computeCraftPlan/);
+  assert.match(computedCraftPlan, /calculateCraftPlanEffortProgress/);
+  assert.match(computedCraftPlan, /effortProgress/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
 

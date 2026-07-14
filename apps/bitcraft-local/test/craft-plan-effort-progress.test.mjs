@@ -4,11 +4,36 @@ import test from "node:test";
 import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
   calculateCraftPlanEffortProgress,
+  compactCraftPlanEffortInput,
   craftingEffortCandidate,
   gatheringEffortCandidate,
   normalizeGameResourceEffortCandidates,
   selectLowestEffortWeights,
 } from "../src/server/craftPlanEffortProgress.mjs";
+
+function fishingPlan({ current = false } = {}) {
+  return {
+    materials: [
+      { key: "items:oil", tag: "Fish Oil", section: "Fishing", bufferedRequired: 100, missing: current ? 40 : 100 },
+      { key: "items:shells", tag: "Crushed Shells", section: "Fishing", bufferedRequired: 100, missing: current ? 45.6 : 100 },
+      { key: "items:ocean", tag: "Ocean Fish", section: "Fishing", bufferedRequired: 100, missing: current ? 42.8 : 100 },
+      { key: "items:lake", tag: "Lake Fish", section: "Fishing", bufferedRequired: 10, missing: current ? 4.28 : 10 },
+    ],
+    personalViews: { fishing: { tiers: [{ routes: {
+      ocean: { available: true, input: { key: "items:ocean", tag: "Ocean Fish" }, needed: current ? 42.8 : 100, stockQuantity: 0, guaranteedTrackedQuantity: 0 },
+      lake: { available: true, input: { key: "items:lake", tag: "Lake Fish" }, needed: current ? 4.28 : 10, stockQuantity: 0, guaranteedTrackedQuantity: 0 },
+    } }] } },
+  };
+}
+
+function fishingWeights() {
+  return new Map([
+    ["items:oil", { effortWeight: 1 }],
+    ["items:shells", { effortWeight: 1 }],
+    ["items:ocean", { effortWeight: 1 }],
+    ["items:lake", { effortWeight: 2 }],
+  ]);
+}
 
 test("effort candidates use actions or inverse gathering probability", () => {
   assert.equal(CRAFT_PLAN_EFFORT_MODEL_VERSION, 1);
@@ -66,6 +91,30 @@ test("empty plans are complete without requiring catalog weights", () => {
   const result = calculateCraftPlanEffortProgress({ baselinePlan: { materials: [] }, currentPlan: { materials: [] }, weights: new Map() });
   assert.equal(result.state, "empty");
   assert.deepEqual(result.overall, { state: "empty", baselineEffort: 0, remainingEffort: 0, completion: 100 });
+});
+
+test("Fishing variants replace only interchangeable fish inputs", () => {
+  const result = calculateCraftPlanEffortProgress({
+    baselinePlan: fishingPlan(),
+    currentPlan: fishingPlan({ current: true }),
+    weights: fishingWeights(),
+  });
+  assert.equal(result.fishingVariants.ocean.sections.Fishing.completion, 57.2);
+  assert.equal(result.fishingVariants.lake.sections.Fishing.completion, 57.2);
+  assert.notEqual(result.fishingVariants.ocean.overall.baselineEffort, result.fishingVariants.lake.overall.baselineEffort);
+  assert.equal(result.fishingVariants.ocean.route, "ocean");
+  assert.equal(result.fishingVariants.lake.route, "lake");
+});
+
+test("compact effort input excludes planner drilldown payloads", () => {
+  const compact = compactCraftPlanEffortInput({
+    materials: [{ key: "items:1", tag: "Plank", section: "Carpentry", required: 10, missing: 4, sources: [{}], recipeUsages: [{}] }],
+    personalViews: { fishing: { tiers: [{ routes: { ocean: { available: false, reason: "Missing route", alternatives: [{}] } } }] } },
+    steps: [{}],
+  });
+  assert.deepEqual(compact.materials, [{ key: "items:1", tag: "Plank", section: "Carpentry", required: 10, missing: 4 }]);
+  assert.deepEqual(compact.personalViews.fishing.tiers[0].routes.ocean, { available: false, reason: "Missing route" });
+  assert.equal("steps" in compact, false);
 });
 
 test("resource outputs become gathering effort candidates without merging item and cargo ids", () => {
