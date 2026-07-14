@@ -66,7 +66,7 @@ import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaInd
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
-import { snapshotActivityChanges, snapshotStoragePayload, snapshotSummary } from "./src/server/snapshotPlanning.mjs";
+import { settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
 import {
@@ -5084,13 +5084,22 @@ function persistProductionContributions(records) {
   }
 }
 
-function writeSettlementSnapshot(claimId, now, payload, summary) {
-  const previous = statements.latestSnapshot.get(claimId);
+function recordSettlementState(payload) {
+  const now = new Date().toISOString();
+  const summary = settlementStateSummary(payload);
+  const claimId = summary.claimId;
+  if (!claimId) throw new Error("Missing claim id");
   const claim = payload.claim ?? {};
   const supplyMeta = supplyRunwayMetadata(claim, summary.supplies);
   db.exec("BEGIN");
   try {
-    statements.insertSnapshot.run(
+    const previous = statements.getSettlementState.get(claimId);
+    if (previous) {
+      for (const change of settlementStateActivityChanges(previous, summary, { supplyMetadata: supplyMeta })) {
+        addActivity(claimId, change.type, change.summary, now, change.metadata);
+      }
+    }
+    statements.upsertSettlementState.run(
       claimId,
       now,
       summary.supplies,
@@ -5098,16 +5107,14 @@ function writeSettlementSnapshot(claimId, now, payload, summary) {
       summary.membersCount,
       summary.buildingsCount,
       summary.marketCount,
-      JSON.stringify(snapshotStoragePayload(payload, summary)),
+      now,
     );
-    for (const change of snapshotActivityChanges(previous, summary, { supplyMetadata: supplyMeta })) {
-      addActivity(claimId, change.type, change.summary, now, change.metadata);
-    }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
+  return { ok: true, capturedAt: now };
 }
 
 async function syncMarketListingsForSnapshot(claimId, marketPayload, now) {
@@ -5251,15 +5258,6 @@ async function syncProductionContributionsForSnapshot(claimId, craftsPayload, co
   }
 }
 
-async function recordSnapshot(payload) {
-  const now = new Date().toISOString();
-  const summary = snapshotSummary(payload);
-  const claimId = summary.claimId;
-  if (!claimId) throw new Error("Missing claim id");
-
-  writeSettlementSnapshot(claimId, now, payload, summary);
-  return { ok: true, capturedAt: now };
-}
 async function fetchBitjita(pathname, options = {}) {
   if (!workerRequestCoordinator) return fetchBitjitaUncoordinated(pathname, options);
   const key = `${options.cache === false ? "direct" : "cached"}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
@@ -7501,14 +7499,6 @@ function collectorStatusPayload() {
   };
 }
 
-let snapshotQueue = Promise.resolve();
-
-function enqueueSnapshot(payload) {
-  const queued = snapshotQueue.then(() => recordSnapshot(payload));
-  snapshotQueue = queued.catch(() => undefined);
-  return queued;
-}
-
 async function runMarketListingsCollector(claimId, currentData, force = false) {
   if (!sideEffectCollectorDue("marketListings", force)) return;
   const startedAt = collectorAttempt("marketListings");
@@ -7540,7 +7530,7 @@ async function runProductionContributionCollector(claimId, currentData, force = 
   }
 }
 async function collectServerSnapshot(force = false) {
-  // Polling is a side-effect loop: it records snapshots, imports activity/trade
+  // Polling is a side-effect loop: it records current settlement state, imports activity/trade
   // history, and drives Discord notifications. Browser tabs should treat this as
   // supporting data, not as their exclusive source for live settlement state.
   if ((!serverPollingEnabled && !force) || pollStatus.running) return;
@@ -7556,19 +7546,13 @@ async function collectServerSnapshot(force = false) {
     const members = unwrap(currentData.members, "members", []);
     const buildings = unwrap(currentData.buildings, "buildings", []);
     await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
-    if (sideEffectCollectorDue("snapshotHistory", force)) {
-      const snapshotStartedAt = collectorAttempt("snapshotHistory");
-      await enqueueSnapshot({
-        claimId,
-        claim,
-        membersCount: members.length,
-        buildingsCount: buildings.length,
-        market: currentData.market ?? { listings: [] },
-        crafts: currentData.crafts ?? { craftResults: [] },
-        source: "server_poll",
-      });
-      collectorSuccess("snapshotHistory", snapshotStartedAt);
-    }
+    recordSettlementState({
+      claimId,
+      claim,
+      membersCount: members.length,
+      buildingsCount: buildings.length,
+      market: currentData.market ?? { listings: [] },
+    });
     await runMarketListingsCollector(claimId, currentData, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
@@ -7781,41 +7765,13 @@ function marketBuyOrders(claimId, params = {}) {
   };
 }
 
-function snapshotHistory(claimId, { limit = 96, daily = false, days = 7 } = {}) {
-  const snapshotLimit = Math.min(Math.max(Number(limit) || 96, 2), 1000);
-  if (daily) {
-    const dayLimit = Math.min(Math.max(Number(days) || 7, 2), 30);
-    const since = new Date(Date.now() - (dayLimit - 1) * 24 * 60 * 60 * 1000);
-    since.setHours(0, 0, 0, 0);
-    const rows = db.prepare(`
-      SELECT s.id, s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count, s.buildings_count, s.market_count
-      FROM snapshots s
-      JOIN (
-        SELECT substr(captured_at, 1, 10) AS day_key, MAX(captured_at) AS captured_at
-        FROM snapshots
-        WHERE claim_id = ? AND captured_at >= ?
-        GROUP BY substr(captured_at, 1, 10)
-      ) latest
-        ON substr(s.captured_at, 1, 10) = latest.day_key
-       AND s.captured_at = latest.captured_at
-      WHERE s.claim_id = ?
-      ORDER BY s.captured_at ASC, s.id ASC
-    `).all(claimId, since.toISOString(), claimId);
-    const snapshotsByDay = new Map();
-    for (const row of rows) {
-      const dayKey = String(row.captured_at ?? "").slice(0, 10);
-      if (dayKey) snapshotsByDay.set(dayKey, row);
-    }
-    return { snapshots: Array.from(snapshotsByDay.values()).slice(-dayLimit) };
-  }
-  const snapshots = db.prepare(`
-    SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
-    FROM snapshots
+function snapshotHistory(claimId) {
+  const current = db.prepare(`
+    SELECT rowid AS id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count
+    FROM settlement_state_current
     WHERE claim_id = ?
-    ORDER BY captured_at DESC, id DESC
-    LIMIT ?
-  `).all(claimId, snapshotLimit).reverse();
-  return { snapshots };
+  `).get(claimId);
+  return { snapshots: current ? [current] : [] };
 }
 
 function activityHistory(claimId, limit = 500) {
@@ -8179,8 +8135,16 @@ function safeJson(value, fallback = {}) {
 }
 
 function databaseStatus() {
-  const counts = Object.fromEntries(["snapshots", "market_listings", "market_events", "market_trades", "activity_events", "analytics_events"].map((table) => [
-    table,
+  const countTables = {
+    snapshots: "settlement_state_current",
+    market_listings: "market_listings",
+    market_events: "market_events",
+    market_trades: "market_trades",
+    activity_events: "activity_events",
+    analytics_events: "analytics_events",
+  };
+  const counts = Object.fromEntries(Object.entries(countTables).map(([key, table]) => [
+    key,
     toNumber(db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get()?.count),
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
@@ -9772,15 +9736,14 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && url.pathname === "/api/local/admin/maintenance/prune") {
         const retentionDays = getSettings().snapshotRetentionDays;
         const before = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-        const result = db.prepare("DELETE FROM snapshots WHERE captured_at < ?").run(before);
-        audit(user, "maintenance.prune", { retentionDays, removed: result.changes });
-        return send(res, 200, { removed: result.changes, before });
+        audit(user, "maintenance.prune", { retentionDays, removed: 0 });
+        return send(res, 200, { removed: 0, before });
       }
     }
     if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
       if (!rateLimit(req, res, "local-snapshot", RATE_LIMITS.expensiveLocal)) return;
       if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
-      return send(res, 200, await enqueueSnapshot(await readJson(req, BODY_LIMITS.snapshot)));
+      return send(res, 200, recordSettlementState(await readJson(req, BODY_LIMITS.snapshot)));
     }
     if (url.pathname === "/api/local/market/deal-watches") {
       const appUser = requireAppUser(req, res);

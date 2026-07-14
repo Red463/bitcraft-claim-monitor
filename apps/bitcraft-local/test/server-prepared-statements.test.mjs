@@ -18,7 +18,8 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   const statements = createPreparedStatements(db);
 
   for (const key of [
-    "latestSnapshot",
+    "getSettlementState",
+    "upsertSettlementState",
     "upsertListing",
     "insertActivity",
     "getSetting",
@@ -42,9 +43,10 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   ]) {
     assert.ok(statements[key], `${key} should be prepared`);
   }
-  assert.match(statements.latestSnapshot.sql, /FROM snapshots/);
-  assert.doesNotMatch(statements.latestSnapshot.sql, /SELECT \*/i);
-  assert.doesNotMatch(statements.latestSnapshot.sql, /raw_json/i);
+  assert.match(statements.getSettlementState.sql, /FROM settlement_state_current/);
+  assert.match(statements.upsertSettlementState.sql, /ON CONFLICT\(claim_id\) DO UPDATE/);
+  assert.equal(Object.hasOwn(statements, "latestSnapshot"), false);
+  assert.equal(Object.hasOwn(statements, "insertSnapshot"), false);
   assert.match(statements.upsertListing.sql, /INSERT INTO market_listings/);
   assert.match(statements.upsertSetting.sql, /INSERT INTO app_settings/);
   assert.match(statements.insertDiscordAdmin.sql, /INSERT INTO admin_users/);

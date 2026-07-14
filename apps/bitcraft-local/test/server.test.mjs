@@ -1181,7 +1181,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(activitySearch.total >= 1, true);
   assert.equal(activitySearch.events.some((event) => event.summary.includes("Bronze Ingot")), true);
   const baselineSnapshots = await fetch(`${origin}/api/local/snapshots?claimId=${claimId}&limit=10`).then((response) => response.json());
-  assert.equal(baselineSnapshots.snapshots.length >= 2, true);
+  assert.equal(baselineSnapshots.snapshots.length, 1);
   assert.equal(baselineSnapshots.snapshots[0].treasury, 300);
   assert.equal(baselineSnapshots.snapshots[0].supplies, 500);
   const aggregateHistory = await fetch(`${origin}/api/local/history?claimId=${claimId}`).then((response) => response.json());

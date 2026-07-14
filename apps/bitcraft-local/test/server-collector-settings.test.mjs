@@ -44,6 +44,7 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
   assert.deepEqual(collectorCurrentTables.buyOrders, ["market_buy_orders_current", "market_regional_sale_averages_current"]);
+  assert.deepEqual(collectorCurrentTables.snapshotHistory, ["settlement_state_current"]);
 });
 
 test("snapshot and side-effect collector intervals do not monopolize production", () => {
@@ -58,7 +59,7 @@ test("collector settings still clamp submitted intervals to the existing bounds"
 
   assert.equal(normalized.snapshotHistory.intervalSeconds, 15);
 });
-test("production activity rows are not gated by contribution sync cadence", () => {
+test("production activity and settlement state rows are not gated by contribution sync cadence", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const activityStart = source.indexOf("async function runProductionActivityCollector");
   const contributionStart = source.indexOf("async function runProductionContributionCollector");
@@ -70,7 +71,9 @@ test("production activity rows are not gated by contribution sync cadence", () =
   assert.ok(contributionStart > activityStart);
   assert.ok(snapshotStart > contributionStart);
   assert.match(source, /await runProductionActivityCollector\(claimId, currentData\);\s*await runProductionContributionCollector\(claimId, currentData, force\);/);
-  assert.match(source, /if \(sideEffectCollectorDue\("snapshotHistory", force\)\) \{/);
+  assert.match(source, /recordSettlementState\(\{/);
+  assert.doesNotMatch(source, /sideEffectCollectorDue\("snapshotHistory"/);
+  assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("snapshotHistory"/);
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
   assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
   assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
@@ -99,7 +102,7 @@ test("market listing activity sync fetches live listings when the side-effect co
 test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function collectorStatusPayload");
-  const end = source.indexOf("let snapshotQueue", start);
+  const end = source.indexOf("async function runMarketListingsCollector", start);
   const implementation = source.slice(start, end);
 
   assert.ok(start > -1);

@@ -71,7 +71,7 @@ export const collectorCurrentTables = {
   market: ["market_listings", "market_trades"],
   buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
   mapCatalog: ["domain_payload_current"],
-  snapshotHistory: ["snapshots"],
+  snapshotHistory: ["settlement_state_current"],
   marketListings: ["market_listings", "market_events", "market_trades"],
   productionContributions: ["production_jobs", "production_contributions"],
   storageActivity: ["activity_events"],

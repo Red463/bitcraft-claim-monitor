@@ -1,9 +1,23 @@
 export function createPreparedStatements(db) {
   return {
-  latestSnapshot: db.prepare("SELECT id, claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count FROM snapshots WHERE claim_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1"),
-  insertSnapshot: db.prepare(`
-    INSERT INTO snapshots (claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  getSettlementState: db.prepare(`
+    SELECT claim_id, captured_at, supplies, treasury, members_count, buildings_count, market_count, updated_at
+    FROM settlement_state_current
+    WHERE claim_id = ?
+  `),
+  upsertSettlementState: db.prepare(`
+    INSERT INTO settlement_state_current (
+      claim_id, captured_at, supplies, treasury, members_count,
+      buildings_count, market_count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(claim_id) DO UPDATE SET
+      captured_at = excluded.captured_at,
+      supplies = excluded.supplies,
+      treasury = excluded.treasury,
+      members_count = excluded.members_count,
+      buildings_count = excluded.buildings_count,
+      market_count = excluded.market_count,
+      updated_at = excluded.updated_at
   `),
   listingByKey: db.prepare("SELECT * FROM market_listings WHERE listing_key = ?"),
   activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),

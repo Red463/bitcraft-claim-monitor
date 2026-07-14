@@ -14,7 +14,7 @@ function signedChange(after, before, suffix = "") {
   return `${sign}${diff.toLocaleString()}${suffix}`;
 }
 
-export function snapshotSummary(payload = {}) {
+export function settlementStateSummary(payload = {}) {
   const claim = payload.claim ?? {};
   const market = unwrap(payload.market, "listings", []);
   return {
@@ -27,30 +27,8 @@ export function snapshotSummary(payload = {}) {
   };
 }
 
-export function snapshotStoragePayload(payload = {}, summary = snapshotSummary(payload)) {
-  return {
-    claimId: String(summary.claimId ?? payload.claimId ?? ""),
-    source: String(payload.source ?? ""),
-    supplies: toNumber(summary.supplies),
-    treasury: toNumber(summary.treasury),
-    membersCount: toNumber(summary.membersCount),
-    buildingsCount: toNumber(summary.buildingsCount),
-    marketCount: toNumber(summary.marketCount),
-  };
-}
-
-export function snapshotActivityChanges(previous, summary, { supplyMetadata = {} } = {}) {
-  if (!previous) {
-    return [{
-      type: "baseline",
-      summary: "Baseline snapshot saved",
-      metadata: {
-        membersCount: summary.membersCount,
-        buildingsCount: summary.buildingsCount,
-        marketCount: summary.marketCount,
-      },
-    }];
-  }
+export function settlementStateActivityChanges(previous, summary, { supplyMetadata = {} } = {}) {
+  if (!previous) return [];
   const checks = [
     ["supplies", toNumber(previous.supplies), summary.supplies, `${signedChange(summary.supplies, previous.supplies)} supplies`, supplyMetadata],
     ["treasury", toNumber(previous.treasury), summary.treasury, `${signedChange(summary.treasury, previous.treasury, "g")} to treasury`, null],
