@@ -18,8 +18,8 @@ test("Empires contains wide tables on phones and names their keyboard scrollers"
   assert.match(css, /\.empires-page \.table-wrap\s*\{[^}]*max-width:\s*100%/s);
   assert.match(empiresPage, /scrollLabel="Regional empires table"/);
   assert.match(empiresPage, /scrollLabel="Watchtowers table"/);
-  assert.match(dataTable, /scrollLabel\?:\s*string/);
-  assert.match(dataTable, /tabIndex=\{scrollLabel \? 0 : undefined\}/);
+  assert.match(dataTable, /scrollLabel:\s*string/);
+  assert.match(dataTable, /tabIndex=\{0\}/);
   assert.match(dataTable, /aria-label=\{scrollLabel\}/);
 });
 

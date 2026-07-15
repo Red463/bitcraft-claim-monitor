@@ -34,7 +34,7 @@ export function DataTable({
   emptyKind?: Extract<AsyncStateKind, "empty" | "no-match">;
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
-  scrollLabel?: string;
+  scrollLabel: string;
 }) {
   const [sort, setSort] = React.useState<{ column: number; direction: SortDirection } | null>(null);
   const indexedRows = React.useMemo(() => rows.map((row, index) => ({ row, index })), [rows]);
@@ -55,7 +55,7 @@ export function DataTable({
     });
   };
   return (
-    <div className="table-wrap" tabIndex={scrollLabel ? 0 : undefined} aria-label={scrollLabel}>
+    <div className="table-wrap" tabIndex={0} aria-label={scrollLabel}>
       <table>
         <thead><tr>{columns.map(([label], columnIndex) => (
           <th key={label} aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>

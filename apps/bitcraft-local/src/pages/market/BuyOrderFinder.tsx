@@ -156,7 +156,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
       </section>
       <section>
         <h3><ShoppingBag size={17} /> Current Buy Orders <small>{regionLabel}</small></h3>
-        <div className="table-wrap">
+        <div className="table-wrap" tabIndex={0} aria-label="Current buy orders table">
           <table>
             <thead>
               <tr>

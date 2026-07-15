@@ -87,7 +87,7 @@ export function AdminAnalyticsSection({
           <div className="admin-grid">
             <section className="form-card">
               <h3><Globe2 size={17} /> Most Used Pages</h3>
-              <DataTable rows={data.analyticsData?.pages ?? []} emptyState="No page analytics were recorded for this period." columns={[
+              <DataTable rows={data.analyticsData?.pages ?? []} scrollLabel="Page analytics table" emptyState="No page analytics were recorded for this period." columns={[
                 ["Page", (row) => String(row.page).replaceAll("publiccrafts", "Public Craft Finder")],
                 ["Views", (row) => formatNumber(row.pageViews)],
                 ["Visitors", (row) => formatNumber(row.visitors)],
@@ -96,7 +96,7 @@ export function AdminAnalyticsSection({
             </section>
             <section className="form-card">
               <h3><Factory size={17} /> Feature Usage</h3>
-              <DataTable rows={data.analyticsData?.features ?? []} emptyState="No feature analytics were recorded for this period." columns={[
+              <DataTable rows={data.analyticsData?.features ?? []} scrollLabel="Feature analytics table" emptyState="No feature analytics were recorded for this period." columns={[
                 ["Feature", (row) => String(row.eventName).replaceAll("_", " ")],
                 ["Uses", (row) => formatNumber(row.uses)],
                 ["Visitors", (row) => formatNumber(row.visitors)],
@@ -121,7 +121,7 @@ export function AdminAnalyticsSection({
           <div className="admin-grid">
             <section className="form-card">
               <h3><Globe2 size={17} /> Location Summary</h3>
-              <DataTable rows={data.visitorSecurityData?.locations ?? []} emptyState="No visitor locations were recorded for this period." columns={[
+              <DataTable rows={data.visitorSecurityData?.locations ?? []} scrollLabel="Visitor locations table" emptyState="No visitor locations were recorded for this period." columns={[
                 ["Country", (row) => row.country || "Unknown"],
                 ["City", (row) => row.city || "-"],
                 ["Requests", (row) => formatNumber(row.requests)],
@@ -130,7 +130,7 @@ export function AdminAnalyticsSection({
             </section>
             <section className="form-card">
               <h3><Server size={17} /> Route Groups</h3>
-              <DataTable rows={data.visitorSecurityData?.routes ?? []} emptyState="No route visits were recorded for this period." columns={[
+              <DataTable rows={data.visitorSecurityData?.routes ?? []} scrollLabel="Route visits table" emptyState="No route visits were recorded for this period." columns={[
                 ["Group", (row) => row.routeGroup],
                 ["Requests", (row) => formatNumber(row.requests)],
                 ["Errors", (row) => formatNumber(row.errors)],
@@ -157,7 +157,7 @@ export function AdminAnalyticsSection({
               <SearchBox label="Search visitor security events" value={data.securityEventSearch} onChange={onSecurityEventSearchChange} placeholder="Search time, group, status, IP, country or city" />
               <span className="legend">{formatNumber(securityEventTotal)} matching events</span>
             </div>
-            <DataTable rows={securityEventRows} emptyState="No security events match the current search and filters." columns={[
+            <DataTable rows={securityEventRows} scrollLabel="Security events table" emptyState="No security events match the current search and filters." columns={[
               ["Time", (row) => dateLabel(row.occurredAt)],
               ["Method", (row) => row.method],
               ["Group", (row) => row.routeGroup],

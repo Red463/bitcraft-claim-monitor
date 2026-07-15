@@ -1353,6 +1353,7 @@ export function AdminPanel({
                   <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} · ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
                 </div>
                 <DataTable
+                  scrollLabel="Endpoint diagnostics table"
                   emptyState="No analytics summary records were returned."
                   rows={endpointChecks}
                   columns={[

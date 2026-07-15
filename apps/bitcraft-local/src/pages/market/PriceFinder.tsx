@@ -267,7 +267,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
           <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
           <section>
             <h3><ShoppingBag size={17} /> Recent Trades <small>{formatNumber(stats.totalTrades)} total trades</small></h3>
-            <DataTable rows={recentTrades.slice(0, 15)} emptyState="No completed trades were returned for this item and region." columns={[
+            <DataTable rows={recentTrades.slice(0, 15)} scrollLabel="Recent item trades table" emptyState="No completed trades were returned for this item and region." columns={[
               ["When", row => dateLabel(row.timestamp ?? row.createdAt)],
               ["Unit Price", row => `${formatNumber(row.unitPrice ?? row.price)}g`],
               ["Quantity", row => formatNumber(row.quantity)],

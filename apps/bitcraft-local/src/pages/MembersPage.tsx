@@ -128,6 +128,7 @@ export function Members({
       </div>
       <div className="members-roster-table">
         <DataTable
+          scrollLabel="Settlement roster table"
           rows={filtered}
           emptyState={searchTerm ? "No members match this search." : "No settlement members were returned."}
           onRowClick={openMemberDetails}
@@ -261,7 +262,7 @@ export function Members({
                 </section>
                 <section className="profile-history-panel">
                   <h3><Star size={17} /> Quests</h3>
-                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} emptyState="No recent quests were returned for this member." columns={[
+                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} scrollLabel="Member quests table" emptyState="No recent quests were returned for this member." columns={[
                     ["Quest", (row) => row.description ?? "-"],
                     ["Status", (row) => row.completed ? "Complete" : "Open"],
                   ]} />

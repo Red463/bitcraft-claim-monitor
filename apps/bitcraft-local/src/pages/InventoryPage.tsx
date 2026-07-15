@@ -231,7 +231,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
                 <span><Package size={16} /> <strong>{container.name}</strong>{container.locked ? <Lock size={13} /> : null}</span>
                 <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
               </summary>
-              <DataTable rows={container.items} emptyState="No matching items are stored in this container." columns={[
+              <DataTable rows={container.items} scrollLabel="Storage container items table" emptyState="No matching items are stored in this container." columns={[
                 ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],

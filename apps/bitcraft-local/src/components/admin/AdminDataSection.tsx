@@ -85,7 +85,7 @@ export function AdminDataSection({
               <a className="toolbar-button" title="Download the selected table with the current search filter as JSON." href={tableExportHref("json")}><Download size={14} /> Export JSON</a>
             </div>
           </div>
-          {tableColumns.length ? <DataTable rows={tableRows} emptyState="No database records match the current search." columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
+          {tableColumns.length ? <DataTable rows={tableRows} scrollLabel="Database records table" emptyState="No database records match the current search." columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
           <div className="pager"><span>{formatNumber(activeTableResult.total)} matching records</span><button className="toolbar-button" disabled={!data.tableOffset} onClick={onPreviousTablePage}>Previous</button><button className="toolbar-button" disabled={data.tableOffset + 50 >= activeTableResult.total} onClick={onNextTablePage}>Next</button></div>
         </section>
       ) : null}

@@ -260,6 +260,7 @@ export function Leaderboard({
         ) : null}
         {filteredContributors.length ? (
           <DataTable
+            scrollLabel="Craft contributions table"
             emptyState="No settlement summary rows were returned."
             rows={filteredContributors}
             columns={[
@@ -300,7 +301,7 @@ export function Leaderboard({
             </div>
           </header>
           {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when BitJita returns citizen skill data." : "Choose another profession or show all professions."} /> : (
-            <DataTable rows={sortedProfessionRows} emptyState="No profession leaderboard rows were returned." columns={[
+            <DataTable rows={sortedProfessionRows} scrollLabel="Profession leaderboard table" emptyState="No profession leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],
               ["Total levels", (entry) => formatNumber(entry.totalLevel)],
@@ -326,7 +327,7 @@ export function Leaderboard({
             </label>
           </header>
           {!sortedActivityRows.length ? <div className="empty-state"><Activity />No member activity has been recorded with identifiable member names yet.</div> : (
-            <DataTable rows={sortedActivityRows} emptyState="No activity leaderboard rows were returned." columns={[
+            <DataTable rows={sortedActivityRows} scrollLabel="Activity leaderboard table" emptyState="No activity leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Total events", (entry) => formatNumber(entry.totalEvents)],
               ["Market", (entry) => formatNumber(entry.marketEvents)],
@@ -353,7 +354,7 @@ export function Leaderboard({
             </label>
           </header>
           {!sortedMarketRows.length ? <div className="empty-state"><CircleDollarSign />No settlement market listings or confirmed sales have been recorded yet.</div> : (
-            <DataTable rows={sortedMarketRows} emptyState="No market leaderboard rows were returned." columns={[
+            <DataTable rows={sortedMarketRows} scrollLabel="Market leaderboard table" emptyState="No market leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Active listings", (entry) => formatNumber(entry.activeListings)],
               ["Listing value", (entry) => `${formatNumber(entry.activeListingValue)}g`],
@@ -369,7 +370,7 @@ export function Leaderboard({
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title"><span><Users size={14} /> Online and sessions</span></header>
           {!onlineRows.length ? <div className="empty-state"><Users />No tracked settlement members are available.</div> : (
-            <DataTable rows={onlineRows} emptyState="No members are currently online." columns={[
+            <DataTable rows={onlineRows} scrollLabel="Online members table" emptyState="No members are currently online." columns={[
               ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} members={data.members} /></strong>],
               ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
               ["Current session", (entry) => {

@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const readSource = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const url = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, directory);
+    return entry.isDirectory() ? sourceFiles(url) : entry.name.endsWith(".tsx") ? [url] : [];
+  });
+}
 
 test("SearchBox requires a durable caller supplied label", () => {
   const source = readSource("../src/components/main/SearchBox.tsx");
@@ -31,6 +38,28 @@ test("DataTable owns sort state on headers and accepts caller empty content", ()
   assert.match(source, /\{emptyState\}/);
   assert.doesNotMatch(source, /No data returned\./);
   assert.doesNotMatch(source, /<button[^>]*aria-sort=/s);
+});
+
+test("every data table and custom horizontal table scroller has a durable keyboard label", () => {
+  const dataTable = readSource("../src/components/main/DataTable.tsx");
+  assert.match(dataTable, /scrollLabel:\s*string/);
+  assert.doesNotMatch(dataTable, /scrollLabel\?:\s*string/);
+  assert.match(dataTable, /className="table-wrap"\s+tabIndex=\{0\}\s+aria-label=\{scrollLabel\}/);
+
+  const unlabeledCallers = sourceFiles(new URL("../src/", import.meta.url)).flatMap((url) => {
+    const source = readFileSync(url, "utf8");
+    return source.split("<DataTable").slice(1).flatMap((segment, index) => segment.includes("scrollLabel=") ? [] : [`${url.pathname}#${index + 1}`]);
+  });
+  assert.deepEqual(unlabeledCallers, []);
+
+  for (const [path, label] of [
+    ["../src/pages/PublicCraftFinderPage.tsx", "Public craft jobs table"],
+    ["../src/pages/RegionPage.tsx", "Regional rankings table"],
+    ["../src/pages/market/BuyOrderFinder.tsx", "Current buy orders table"],
+  ]) {
+    const source = readSource(path);
+    assert.match(source, new RegExp(`<div className="table-wrap" tabIndex=\\{0\\} aria-label="${label}"`));
+  }
 });
 
 for (const [name, relativePath] of [

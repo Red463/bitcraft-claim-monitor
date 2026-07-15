@@ -377,7 +377,7 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
           <section className="market-section">
             <h3><CheckCircle2 size={17} /> Recent Confirmed Sales</h3>
             <p className="legend">Imported completed sales retained in this monitor's history for the selected current settlement member(s).</p>
-            <DataTable rows={apiTrades} emptyState="No completed trades were returned for this window." columns={[
+            <DataTable rows={apiTrades} scrollLabel="Completed market trades table" emptyState="No completed trades were returned for this window." columns={[
               ["When", r => dateLabel(r.timestamp ?? r.createdAt)],
               ["Item", r => <ItemLabel item={r} name={r.itemName ?? "-"} />],
               ["Tier", r => r.itemTier ? <TierBadge tier={r.itemTier} /> : "-"],
@@ -423,7 +423,7 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
         </div>
       </section>
       {rows.length > renderedRows.length ? <p className="legend market-legend">Showing the first {formatNumber(renderedRows.length)} of {formatNumber(rows.length)} matching listings. Narrow the filters to inspect more specific results.</p> : null}
-      <DataTable rows={renderedRows} emptyState="No market listings match the current filters." columns={[
+      <DataTable rows={renderedRows} scrollLabel="Market listings table" emptyState="No market listings match the current filters." columns={[
         ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
         ["Qty", r => formatNumber(r.quantity)],
