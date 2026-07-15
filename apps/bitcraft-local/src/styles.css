@@ -1444,7 +1444,11 @@ body .market-page tbody tr:hover td {
   .command-kpi-strip .overview-kpi-card { min-height: 132px; }
   .command-supply-grid { grid-template-columns: 1fr; }
   .app-shell, .app-shell.sidebar-collapsed { display: block; padding-top: 52px; }
-  .mobile-shell-bar { position: fixed; inset: 0 0 auto; z-index: calc(var(--z-sticky) + 2); height: 52px; padding: 0 16px; background: #080c12; border-bottom: 1px solid rgba(108,123,145,.28); display: flex; align-items: center; justify-content: space-between; }
+  .mobile-shell-bar { position: fixed; inset: 0 0 auto; z-index: calc(var(--z-sticky) + 2); height: 52px; padding: 0 8px 0 16px; background: #080c12; border-bottom: 1px solid rgba(108,123,145,.28); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mobile-shell-bar > span { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 8px; }
+  .mobile-shell-brand { color: var(--text); white-space: nowrap; }
+  .mobile-shell-route { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-shell-bar > button { flex: 0 0 44px; min-width: 44px; min-height: 44px; border: 0; border-radius: 7px; background: transparent; color: var(--text); display: inline-grid; place-items: center; cursor: pointer; }
   .mobile-navigation-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-sticky) + 2); display: block; background: rgba(0,0,0,.66); transition: opacity .2s ease; }
   .mobile-navigation-close { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
   .page-refresh-line, .sidebar-collapsed .page-refresh-line { left: 0; }

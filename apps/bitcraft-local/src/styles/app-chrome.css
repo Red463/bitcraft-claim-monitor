@@ -74,6 +74,12 @@ body:has(.admin-loading-panel) .floating-actions {
   transform: var(--floating-actions-shift) scale(.96);
 }
 .floating-help:hover { color: var(--active-color); border-color: var(--hover-border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 38%, transparent), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 92%, transparent), color-mix(in srgb, var(--card-bottom) 98%, transparent)); }
+@media (max-width: 920px) {
+  .floating-actions {
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .floating-actions,
   .floating-actions .floating-action-item,
@@ -183,5 +189,4 @@ body:has(.admin-loading-panel) .floating-actions {
 
 @media (max-width: 900px) {
   .cookie-banner, .cookie-actions { display: grid; }
-  .floating-actions { right: 12px; bottom: 72px; }
 }

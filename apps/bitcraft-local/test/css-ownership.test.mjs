@@ -38,6 +38,9 @@ test("application shell uses a compact drawer at narrow widths", () => {
     assert.match(css, new RegExp(`\\${selector}[^\\{]*\\{[^}]*display:\\s*none\\b`, "s"));
   }
   assert.match(narrow, /\.mobile-shell-bar\s*\{[^}]*position:\s*fixed\b[^}]*height:\s*52px\b/s);
+  assert.match(narrow, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid\b/s);
+  assert.match(narrow, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis\b/s);
+  assert.match(narrow, /\.mobile-shell-bar\s*>\s*button\s*\{[^}]*min-width:\s*44px\b[^}]*min-height:\s*44px\b/s);
   assert.match(narrow, /\.mobile-navigation-backdrop\s*\{[^}]*position:\s*fixed\b[^}]*inset:\s*0\b/s);
   assert.match(narrow, /\.app-sidebar\s*\{[^}]*position:\s*fixed\b[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*44px\)\)/s);
   assert.match(narrow, /\.app-sidebar\.mobile-open\s*\{[^}]*transform:\s*translateX\(0\)/s);

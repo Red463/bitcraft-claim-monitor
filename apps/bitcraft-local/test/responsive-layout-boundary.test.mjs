@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+const shellCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const chromeCss = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
+const dashboardCss = readFileSync(new URL("../src/styles/dashboard.css", import.meta.url), "utf8");
+
+test("narrow shell separates brand from route and reserves no expanded tool rail", () => {
+  assert.match(appShell, /className="mobile-shell-brand"/);
+  assert.match(appShell, /className="mobile-shell-route"/);
+  assert.match(shellCss, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid/s);
+  assert.match(shellCss, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-right\)/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-bottom\)/s);
+});
+
+test("Dashboard reduces five KPI columns before the expanded sidebar causes collisions", () => {
+  assert.match(dashboardCss, /\.dashboard-page\s*\{[^}]*container-type:\s*inline-size/s);
+  assert.match(dashboardCss, /\.dashboard-kpis\s*\{[^}]*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(dashboardCss, /@container \(max-width:\s*1250px\)\s*\{\s*\.dashboard-kpis\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(dashboardCss, /@container \(max-width:\s*900px\)\s*\{\s*\.dashboard-kpis\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(dashboardCss, /@media \(max-width:\s*900px\)[\s\S]*\.dashboard-kpis,\s*\.dashboard-main-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});

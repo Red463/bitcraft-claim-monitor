@@ -126,11 +126,15 @@ function DashboardApp() {
   const mobileNavigationTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const mobileNavigationWasOpenRef = React.useRef(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = React.useState(false);
+  const [mobileFloatingActionsOpen, setMobileFloatingActionsOpen] = React.useState(false);
   const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
   const [collapsedNavTooltip, setCollapsedNavTooltip] = React.useState<{ label: string; left: number; top: number } | null>(null);
   React.useEffect(() => {
     const narrowViewport = window.matchMedia("(max-width: 920px)");
-    const updateNarrowViewport = () => setIsNarrowViewport(narrowViewport.matches);
+    const updateNarrowViewport = () => {
+      setIsNarrowViewport(narrowViewport.matches);
+      if (narrowViewport.matches) setMobileFloatingActionsOpen(false);
+    };
     narrowViewport.addEventListener("change", updateNarrowViewport);
     return () => narrowViewport.removeEventListener("change", updateNarrowViewport);
   }, []);
@@ -595,10 +599,11 @@ function DashboardApp() {
   const sidebarAccountStatus = accountCharacterStatusLabel(userAuth.user);
   const sidebarAccountInitial = sidebarAccountName.slice(0, 1).toUpperCase();
   const mobileNavigationUnavailable = isNarrowViewport && !mobileNavigationOpen;
+  const narrowAwareFloatingActionsCollapsed = isNarrowViewport ? !mobileFloatingActionsOpen : floatingActionsCollapsed;
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <header className="mobile-shell-bar">
-        <span><strong>Claim Monitor</strong><small>{activePageLabel}</small></span>
+        <span><strong className="mobile-shell-brand">Claim Monitor</strong><small className="mobile-shell-route">{activePageLabel}</small></span>
         <button ref={mobileNavigationTriggerRef} type="button" aria-label="Open navigation" aria-controls="mobile-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
           <Menu size={18} />
         </button>
@@ -713,15 +718,15 @@ function DashboardApp() {
         </footer>
       </main>
       {releaseUpdateBuildId ? <div className="release-update-banner" role="status" aria-live="polite"><div><strong>Update available</strong><span>A newer version is ready. Refresh to use the latest app.</span></div><button className="toolbar-button primary" onClick={() => window.location.reload()}><RefreshCw size={14} /> Refresh now</button></div> : null}
-      <div className={`floating-actions ${floatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
+      <div className={`floating-actions ${narrowAwareFloatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
         <button
           className="floating-actions-toggle"
-          onClick={() => setFloatingActionsCollapsed((current) => !current)}
-          aria-expanded={!floatingActionsCollapsed}
-          aria-label={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
-          title={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
+          onClick={() => isNarrowViewport ? setMobileFloatingActionsOpen((current) => !current) : setFloatingActionsCollapsed((current) => !current)}
+          aria-expanded={!narrowAwareFloatingActionsCollapsed}
+          aria-label={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
+          title={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
         >
-          {floatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          {narrowAwareFloatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
         </button>
         {adminAuth.authenticated ? <a
           className={`floating-action-item ${active === "admin" ? "active" : ""}`}

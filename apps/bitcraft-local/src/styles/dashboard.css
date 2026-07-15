@@ -2,6 +2,7 @@
   min-height: 100%;
   padding: 22px;
   display: grid;
+  container-type: inline-size;
   gap: 16px;
   color: #f4f7fb;
   font-family: Inter, Outfit, system-ui, sans-serif;
@@ -333,8 +334,11 @@
   background: rgba(5,10,16,.18);
 }
 
-@media (max-width: 1250px) {
+@container (max-width: 1250px) {
   .dashboard-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1250px) {
   .dashboard-main-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
@@ -343,6 +347,10 @@
       "members production"
       "attention attention";
   }
+}
+
+@container (max-width: 900px) {
+  .dashboard-kpis { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
