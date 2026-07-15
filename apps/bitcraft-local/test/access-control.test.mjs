@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -8,6 +9,13 @@ import {
   pageAccessTargets,
   publicAccessDecision,
 } from "../src/access/accessControl.mjs";
+
+let resolveAllowedView;
+try {
+  ({ resolveAllowedView } = await import("../src/navigation/routeState.ts"));
+} catch {
+  // RED starts with the shared resolver absent.
+}
 
 const anonymous = { user: null };
 const signedIn = { user: { discordId: "111111", characterStatus: "pending" } };
@@ -50,4 +58,17 @@ test("access control tab fallback chooses the first allowed tab", () => {
   assert.equal(firstAllowedTab(config, "market", anonymous), "pricing");
   assert.equal(firstAllowedTab(config, "market", signedIn), "analytics");
   assert.equal(firstAllowedTab(config, "market", verified), "live");
+});
+
+test("allowed-view resolution returns a fallback or null when every view is restricted", () => {
+  assert.equal(typeof resolveAllowedView, "function");
+  assert.equal(resolveAllowedView("market", ["contribution", "market"]), "market");
+  assert.equal(resolveAllowedView("online", ["contribution", "market"]), "contribution");
+  assert.equal(resolveAllowedView("online", []), null);
+});
+
+test("account settings keep administrator sign-in discoverable before authentication", () => {
+  const settingsDialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+  assert.match(settingsDialog, /Administrator sign-in/);
+  assert.doesNotMatch(settingsDialog, /settingsSection === "account" && showAdminTools/);
 });

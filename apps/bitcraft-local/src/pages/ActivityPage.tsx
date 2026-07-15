@@ -10,6 +10,7 @@ import { trackAnalyticsEvent } from "../utils/analytics";
 import { activityActorName, activityContainerName, activitySummary, compactActivity } from "./activity/activityUtils";
 import { activityStyle } from "./activity/activityDisplay";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
+import { resolveAllowedView } from "../navigation/routeState.ts";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
@@ -31,10 +32,10 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
   const [searchState, setSearchState] = React.useState<{ loading: boolean; error: string | null; events: AnyRecord[]; total: number; query: string }>({ loading: false, error: null, events: [], total: 0, query: "" });
   const [compact, setCompact] = usePersistedState("activity.compact", true);
   const visibleActivityFilters = React.useMemo(() => ACTIVITY_FILTERS.filter(([id]) => effectiveTargetAllowed(access, targetIdForTab("activity", id))), [access]);
+  const resolvedFilter = resolveAllowedView(filter, visibleActivityFilters.map(([id]) => id));
   React.useEffect(() => {
-    if (!visibleActivityFilters.length) return;
-    if (!visibleActivityFilters.some(([id]) => id === filter)) setFilter(visibleActivityFilters[0][0]);
-  }, [filter, setFilter, visibleActivityFilters]);
+    if (resolvedFilter && resolvedFilter !== filter) setFilter(resolvedFilter);
+  }, [filter, resolvedFilter, setFilter]);
   const [members, setMembers] = React.useState<AnyRecord[]>([]);
   React.useEffect(() => {
     const controller = new AbortController();
@@ -74,13 +75,23 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
     if (memberFilter !== "All" && !memberOptions.includes(memberFilter)) setMemberFilter("All");
   }, [memberFilter, memberOptions.join("|")]);
   const memberActivity = memberFilter === "All" ? combined : combined.filter((item) => activityActorName(item).toLowerCase() === memberFilter.toLowerCase());
-  const baseFiltered = filter === "all" ? memberActivity : memberActivity.filter((item) => String(item.event_type ?? "").includes(filter));
+  const currentFilter = resolvedFilter ?? filter;
+  const baseFiltered = currentFilter === "all" ? memberActivity : memberActivity.filter((item) => String(item.event_type ?? "").includes(currentFilter));
   const filtered = compact ? compactActivity(baseFiltered) : baseFiltered;
   const filterCounts = new Map(ACTIVITY_FILTERS.map(([id]) => [id, id === "all" ? memberActivity.length : memberActivity.filter((item) => String(item.event_type ?? "").includes(id)).length]));
   const storageMoves = memberActivity.filter((item) => item.event_type === "storage").length;
   const settlementChanges = memberActivity.length - storageMoves;
   const latestEvent = memberActivity[0]?.occurred_at ?? memberActivity[0]?.occurredAt;
   const scopeLabel = memberFilter === "All" ? "settlement" : memberFilter;
+  if (!resolvedFilter) return (
+    <div className="panel restricted-access-panel">
+      <section className="empty-state restricted-access-state">
+        <Activity size={34} />
+        <strong>Activity is restricted</strong>
+        <span>No activity categories are available for your account.</span>
+      </section>
+    </div>
+  );
   return (
     <div className="panel activity-panel">
       <header className="members-topbar activity-topbar">
@@ -95,7 +106,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
           </div>
           <div className="dashboard-meta-cluster">
             <span>{memberFilter === "All" ? "All members" : memberFilter}</span>
-            <span>{filter === "all" ? "All categories" : visibleActivityFilters.find(([id]) => id === filter)?.[1]}</span>
+            <span>{currentFilter === "all" ? "All categories" : visibleActivityFilters.find(([id]) => id === currentFilter)?.[1]}</span>
           </div>
         </div>
       </header>
@@ -130,7 +141,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
           </label>
           <div className="activity-filters" role="group" aria-label="Activity categories">
             {visibleActivityFilters.map(([id, label]) => (
-              <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
+              <button key={id} className={currentFilter === id ? "active" : ""} onClick={() => { setFilter(id); trackAnalyticsEvent("activity_category_filter_used", { category: id }); }}>
                 <span>{label}</span>
                 <strong>{filterCounts.get(id) ?? 0}</strong>
               </button>

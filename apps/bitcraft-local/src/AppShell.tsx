@@ -81,6 +81,7 @@ const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
+const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
@@ -127,6 +128,7 @@ function DashboardApp() {
   const mobileNavigationWasOpenRef = React.useRef(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = React.useState(false);
   const [mobileFloatingActionsOpen, setMobileFloatingActionsOpen] = React.useState(false);
+  const [routeStatus, setRouteStatus] = React.useState("");
   const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
   const [collapsedNavTooltip, setCollapsedNavTooltip] = React.useState<{ label: string; left: number; top: number } | null>(null);
   React.useEffect(() => {
@@ -326,6 +328,7 @@ function DashboardApp() {
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
+  const visibleNavigationItems = React.useMemo(() => NAV.filter(([id]) => isPageAllowed(id)), [isPageAllowed]);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -343,6 +346,14 @@ function DashboardApp() {
       mapName: activeMapFocus?.name ?? null,
       mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
+    }, "push");
+    const label = NAV.find(([id]) => id === panel)?.[1] ?? "Dashboard";
+    setRouteStatus("");
+    window.requestAnimationFrame(() => {
+      if (mainRef.current) mainRef.current.scrollTop = 0;
+      window.scrollTo(0, 0);
+      mainRef.current?.focus();
+      setRouteStatus(`${label} page loaded`);
     });
   }, [mapFocus, setActive]);
   useBrowserNotificationSmoke({ active, pushToast });
@@ -361,7 +372,12 @@ function DashboardApp() {
     const requestedMapFocus = urlMapFocus();
     if (requestedMapFocus) setMapFocus(requestedMapFocus);
     if (requested) setActive(requested);
+    else if (rawPanel) {
+      setActive("dashboard");
+      updateQueryState({ page: "dashboard" });
+    }
     function restoreFromHistory() {
+      setRouteStatus("");
       const panel = urlPanel();
       const historyMapFocus = urlMapFocus();
       if (historyMapFocus) setMapFocus(historyMapFocus);
@@ -431,6 +447,7 @@ function DashboardApp() {
         if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
+          updateQueryState({ page: next.defaultPage });
         }
       })
       .catch(() => undefined);
@@ -464,8 +481,8 @@ function DashboardApp() {
     };
   }, [active, consent]);
   React.useEffect(() => {
-    if (mainRef.current) mainRef.current.scrollTop = 0;
-    window.scrollTo(0, 0);
+    const label = NAV.find(([id]) => id === active)?.[1] ?? "Dashboard";
+    document.title = `${label} — BitCraft Claim Monitor`;
   }, [active]);
   React.useEffect(() => {
     const intervalMs = appSettings.refreshSeconds * 1000;
@@ -692,6 +709,7 @@ function DashboardApp() {
       </aside>
       {collapsedNavTooltip ? <span className="collapsed-nav-tooltip" aria-hidden="true" style={{ left: collapsedNavTooltip.left, top: collapsedNavTooltip.top }}>{collapsedNavTooltip.label}</span> : null}
       <main ref={mainRef} tabIndex={-1}>
+        <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <div className={`page-refresh-line ${state.loading ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
@@ -748,7 +766,7 @@ function DashboardApp() {
       </div>
       {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
-      {commandOpen ? <CommandPalette navItems={NAV} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
+      {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
@@ -761,6 +779,13 @@ function DashboardApp() {
   );
 }
 
+function DedicatedLegalApp({ type }: { type: "terms" | "privacy" }) {
+  React.useEffect(() => {
+    document.title = `${type === "terms" ? "Terms & Discord Bot Use" : "Privacy Policy"} — BitCraft Claim Monitor`;
+  }, [type]);
+  return <DedicatedLegalPage type={type} />;
+}
+
 /**
  * Dedicated bot dashboard route.
  *
@@ -771,6 +796,7 @@ function BotControlApp() {
   const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = React.useState(true);
   React.useEffect(() => {
+    document.title = "Discord Bot Control — BitCraft Claim Monitor";
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
@@ -786,7 +812,7 @@ function BotControlApp() {
       <AdminPanel settings={settings} onSettingsSaved={(next) => {
         setSettings(next);
         applyTheme(next.theme);
-      }} botOnly />
+      }} botOnly headingLevel={1} />
     </main>
   );
 }
@@ -796,7 +822,7 @@ export default function App() {
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
   // Route-level branching happens before mounting DashboardApp so legal pages
   // and the bot console do not initialise public page data unnecessarily.
-  if (dedicatedLegalPath) return <DedicatedLegalPage type={dedicatedLegalPath} />;
+  if (dedicatedLegalPath) return <DedicatedLegalApp type={dedicatedLegalPath} />;
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }

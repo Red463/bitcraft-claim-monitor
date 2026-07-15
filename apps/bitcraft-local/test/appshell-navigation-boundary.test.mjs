@@ -1,10 +1,75 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../src/navigation.ts", import.meta.url), "utf8");
+const routeStateUrl = new URL("../src/navigation/routeState.ts", import.meta.url);
+const routeState = existsSync(routeStateUrl) ? readFileSync(routeStateUrl, "utf8") : "";
 const shellCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+
+let routeStateModule = {};
+try {
+  routeStateModule = await import("../src/navigation/routeState.ts");
+} catch {
+  // RED starts with the route-state module absent.
+}
+
+test("route-state helpers distinguish explicit navigation from normalization", () => {
+  assert.equal(typeof routeStateModule.writePageLocation, "function");
+  assert.match(routeState, /export type NavigationMode = "push" \| "replace"/);
+
+  const calls = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: { href: "http://localhost/?page=dashboard&tab=live#status" },
+    history: {
+      pushState: (_state, _title, href) => calls.push(["push", href]),
+      replaceState: (_state, _title, href) => calls.push(["replace", href]),
+    },
+  };
+  try {
+    routeStateModule.writePageLocation("market", "push");
+    routeStateModule.writePageLocation("production", "replace");
+  } finally {
+    globalThis.window = originalWindow;
+  }
+
+  assert.deepEqual(calls, [
+    ["push", "/?page=market&tab=live#status"],
+    ["replace", "/?page=production&tab=live#status"],
+  ]);
+});
+
+test("route shell restores history and announces explicit route changes", () => {
+  assert.match(appShell, /window\.addEventListener\("popstate", restoreFromHistory\)/);
+  assert.match(appShell, /function restoreFromHistory\(\) \{[\s\S]*?setRouteStatus\(""\)/);
+  assert.match(appShell, /document\.title = `\$\{[^}]+\} — BitCraft Claim Monitor`/);
+  assert.match(appShell, /role="status" aria-live="polite"/);
+  assert.match(appShell, /mainRef\.current\?\.focus\(\)/);
+  assert.match(appShell, /updateQueryState\(\{[\s\S]*?page: panel,[\s\S]*?\}, "push"\)/);
+});
+
+test("sidebar and command palette consume the same effective page access", () => {
+  assert.match(appShell, /const visibleNavigationItems = React\.useMemo\(\(\) => NAV\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);
+  assert.match(appShell, /<CommandPalette navItems=\{visibleNavigationItems\} access=\{effectiveAccess\}/);
+  assert.match(commandPalette, /effectiveTargetAllowed\(access, targetIdForTab\("market", tab\)\)/);
+  assert.match(commandPalette, /allowedPages\.has\("members"\)/);
+});
+
+test("dedicated bot route has a route title and level-one panel heading", () => {
+  assert.match(appShell, /document\.title = "Discord Bot Control — BitCraft Claim Monitor"/);
+  assert.match(appShell, /<AdminPanel[\s\S]*?botOnly headingLevel=\{1\}/);
+  assert.match(adminPanel, /headingLevel\?: 1 \| 2/);
+  assert.match(adminPanel, /const Heading = headingLevel === 1 \? "h1" : "h2"/);
+});
+
+test("dedicated legal routes set their titles from an effect", () => {
+  assert.match(appShell, /function DedicatedLegalApp\([\s\S]*?React\.useEffect\(\(\) => \{[\s\S]*?document\.title/);
+  assert.match(appShell, /return <DedicatedLegalPage type=\{type\} \/>/);
+});
 
 test("sidebar destinations preserve routing, access filtering, and active-route semantics", () => {
   assert.match(appShell, /group\.items\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);

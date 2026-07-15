@@ -277,10 +277,10 @@ export function UserSettingsDialog({
             <h3>This Browser</h3>
             <p className="legend">When signed in with Discord, your page, filters, density and notification preferences sync to your account. Local storage is still used on this device for signed-out browsing and instant loading.</p>
           </section> : null}
-          {settingsSection === "account" && showAdminTools ? <section>
-            <h3>Admin Tools</h3>
-            <p className="legend">For settlement monitor administrators. Opens the admin console where configuration, database, accounts and diagnostics are managed.</p>
-            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> Open Admin Console</button>
+          {settingsSection === "account" ? <section>
+            <h3>Administrator Access</h3>
+            <p className="legend">For approved settlement monitor administrators. Administrator sign-in and tools open in the protected console.</p>
+            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> {showAdminTools ? "Open Admin Console" : "Administrator sign-in"}</button>
           </section> : null}
           {settingsSection === "theme" ? <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
             <div className="settings-section-heading">

@@ -69,6 +69,7 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { updateQueryState } from "../navigation";
+import { resolveAllowedView } from "../navigation/routeState.ts";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
@@ -175,10 +176,12 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
     { id: "dealWatchlist" as const, label: "Deal Watchlist", icon: <Bell size={15} /> },
     { id: "buyOrders" as const, label: "Buy Order Finder", icon: <ShoppingBag size={15} /> },
   ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("market", entry.id))), [access]);
+  const resolvedView = resolveAllowedView(view, marketViews.map((entry) => entry.id));
   React.useEffect(() => {
-    if (!marketViews.length) return;
-    if (!marketViews.some((entry) => entry.id === view)) setView(marketViews[0].id);
-  }, [marketViews, setView, view]);
+    if (!resolvedView || resolvedView === view) return;
+    setView(resolvedView);
+    updateQueryState({ page: "market", tab: resolvedView === "buyOrders" ? "buy-orders" : resolvedView === "dealWatchlist" ? "deal-watchlist" : resolvedView });
+  }, [resolvedView, setView, view]);
   React.useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
@@ -187,7 +190,7 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
   }, [setView]);
   const selectView = (next: "live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist") => {
     setView(next);
-    updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next === "dealWatchlist" ? "deal-watchlist" : next });
+    updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next === "dealWatchlist" ? "deal-watchlist" : next }, "push");
     trackAnalyticsEvent("market_tab_viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {
@@ -276,12 +279,22 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
   const filterLabel = memberFilter === "All" ? "all members" : memberFilter;
+  const currentView = resolvedView ?? view;
+  if (!resolvedView) return (
+    <div className="panel restricted-access-panel">
+      <section className="empty-state restricted-access-state">
+        <Lock size={34} />
+        <strong>Market is restricted</strong>
+        <span>No market views are available for your account.</span>
+      </section>
+    </div>
+  );
   return (
     <div className="panel market-page">
       <header className="members-topbar market-topbar">
         <div>
           <h2>Market</h2>
-          <p>{view === "pricing" ? "Regional completed-trade pricing for smarter listings" : view === "buyOrders" ? "Find active buy orders across regional markets" : view === "dealWatchlist" ? "Manage watched market deals and alert thresholds" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
+          <p>{currentView === "pricing" ? "Regional completed-trade pricing for smarter listings" : currentView === "buyOrders" ? "Find active buy orders across regional markets" : currentView === "dealWatchlist" ? "Manage watched market deals and alert thresholds" : `${formatNumber(all.length)} live listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -303,30 +316,30 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
       <section className="command-filter-panel market-command-panel" data-tour="market-tools">
         <div className="command-filter-header">
           <span className="command-filter-title"><CircleDollarSign size={15} /> Market tools</span>
-          <span className="market-command-note">{view === "pricing" ? "Use completed trade history to estimate listing prices." : view === "buyOrders" ? "Search current buy orders by item and region." : view === "dealWatchlist" ? "Manage deal alerts without running a price lookup first." : "Browse settlement market data by view and member."}</span>
+          <span className="market-command-note">{currentView === "pricing" ? "Use completed trade history to estimate listing prices." : currentView === "buyOrders" ? "Search current buy orders by item and region." : currentView === "dealWatchlist" ? "Manage deal alerts without running a price lookup first." : "Browse settlement market data by view and member."}</span>
         </div>
         <div className="market-tool-row">
           <div className="tabs primary-tabs market-tabs">
-            {marketViews.map((entry) => <button key={entry.id} className={view === entry.id ? "active" : ""} onClick={() => selectView(entry.id)}>{entry.icon} {entry.label}</button>)}
+            {marketViews.map((entry) => <button key={entry.id} className={currentView === entry.id ? "active" : ""} onClick={() => selectView(entry.id)}>{entry.icon} {entry.label}</button>)}
           </div>
-          <label className={`market-member-field ${view === "pricing" || view === "buyOrders" || view === "dealWatchlist" ? "is-placeholder" : ""}`}>
+          <label className={`market-member-field ${currentView === "pricing" || currentView === "buyOrders" || currentView === "dealWatchlist" ? "is-placeholder" : ""}`}>
             <span>Member</span>
-            {view !== "pricing" && view !== "buyOrders" && view !== "dealWatchlist" ? (
+            {currentView !== "pricing" && currentView !== "buyOrders" && currentView !== "dealWatchlist" ? (
               <select className="select-control" value={memberFilter} onChange={(event) => { setMemberFilter(event.target.value); trackAnalyticsEvent("market_member_filter_used", { scope: event.target.value === "All" ? "all" : "member" }); }}>
                 <option>All</option>
                 {memberOptions.map((name) => <option key={name}>{name}</option>)}
               </select>
-            ) : <span className="market-member-placeholder">{view === "buyOrders" ? "All market buyers" : view === "dealWatchlist" ? "Your watched deals" : "All settlement history"}</span>}
+            ) : <span className="market-member-placeholder">{currentView === "buyOrders" ? "All market buyers" : currentView === "dealWatchlist" ? "Your watched deals" : "All settlement history"}</span>}
           </label>
         </div>
       </section>
-      {view === "pricing" ? (
+      {currentView === "pricing" ? (
         <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
-      ) : view === "dealWatchlist" ? (
+      ) : currentView === "dealWatchlist" ? (
         <DealWatchlist monitoredRegionId={String(data.claim?.regionId ?? "19")} />
-      ) : view === "buyOrders" ? (
+      ) : currentView === "buyOrders" ? (
         <BuyOrderFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
-      ) : view === "analytics" ? (
+      ) : currentView === "analytics" ? (
         <>
           <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
           <div className="metric-grid market-analytics-metrics">

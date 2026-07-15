@@ -61,7 +61,7 @@ import {
   DiscordTestsPanel,
   DiscordYouTubeMonitorSection,
 } from "../bot/lazySections";
-import { Header, TablePanel, ToolbarButton } from "../main/AppChrome";
+import { TablePanel, ToolbarButton } from "../main/AppChrome";
 import { AdminPopupsSection } from "./AdminPopupsSection";
 import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
 import { ServerHealthSection } from "./ServerHealthSection";
@@ -190,6 +190,7 @@ export type AdminPanelProps = {
   members?: AnyRecord[];
   onSettingsSaved: (settings: AppSettings) => void;
   botOnly?: boolean;
+  headingLevel?: 1 | 2;
   onAuthChanged?: (auth: AnyRecord) => void;
 };
 
@@ -198,8 +199,10 @@ export function AdminPanel({
   members = [],
   onSettingsSaved,
   botOnly = false,
+  headingLevel = 2,
   onAuthChanged,
 }: AdminPanelProps) {
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authLoaderMinimumActive, setAuthLoaderMinimumActive] = React.useState(true);
@@ -774,7 +777,7 @@ export function AdminPanel({
         </div>
         <div className="admin-loader-copy">
           <span className="eyebrow">Admin Console</span>
-          <h2>Verifying Access</h2>
+          <Heading>{botOnly ? "Discord Bot Control" : "Verifying Access"}</Heading>
           <p>Checking your session, permissions, and console modules.</p>
         </div>
         <div className="admin-loader-track" aria-hidden="true">
@@ -794,7 +797,7 @@ export function AdminPanel({
       <div className="panel admin-login">
         <header className="members-topbar admin-topbar">
           <div>
-            <h2>{botOnly ? "Discord Bot Control" : "Admin"}</h2>
+            <Heading>{botOnly ? "Discord Bot Control" : "Admin"}</Heading>
             <p>Sign in with an approved Discord administrator account to manage this installation.</p>
           </div>
         </header>
@@ -1100,7 +1103,7 @@ export function AdminPanel({
     <div className={`panel admin-console ${botOnly ? "bot-console" : "admin-page"}`}>
       {botOnly ? (
         <div className="split-header">
-          <Header title="Discord Bot Control">Manage bot setup, notifications, self-assign roles, tools and diagnostics</Header>
+          <div className="section-header"><div><Heading>Discord Bot Control</Heading><p>Manage bot setup, notifications, self-assign roles, tools and diagnostics</p></div></div>
           <div className="toolbar">
             <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>
             <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
@@ -1109,7 +1112,7 @@ export function AdminPanel({
       ) : (
         <header className="members-topbar admin-topbar">
           <div>
-            <h2>Admin Console</h2>
+            <Heading>Admin Console</Heading>
             <p>Configuration and operational controls for this installation</p>
           </div>
           <div className="dashboard-top-meta" aria-label="Admin status">

@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
+const marketPageSource = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+
+test("Market renders a restricted state when every tool view is denied", () => {
+  assert.match(marketPageSource, /resolveAllowedView\(view, marketViews\.map\(\(entry\) => entry\.id\)\)/);
+  assert.match(marketPageSource, /No market views are available for your account\./);
+  assert.match(marketPageSource, /updateQueryState\(\{ page: "market", tab:[^}]+\}, "push"\)/);
+});
+
 test("Market page replaces the legacy MainPages bundle", () => {
   const mainPagesUrl = new URL("../src/pages/MainPages.tsx", import.meta.url);
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");

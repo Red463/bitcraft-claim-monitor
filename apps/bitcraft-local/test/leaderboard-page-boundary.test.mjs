@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
+const leaderboardPage = readFileSync(new URL("../src/pages/LeaderboardPage.tsx", import.meta.url), "utf8");
+
+test("Leaderboard renders a restricted state when every category is denied", () => {
+  assert.match(leaderboardPage, /resolveAllowedView\(activeTab, visibleTabs\.map\(\(tab\) => tab\.id\)\)/);
+  assert.match(leaderboardPage, /No leaderboard categories are available for your account\./);
+});
+
 test("Leaderboard page lives outside the legacy MainPages bundle", () => {
   const mainPagesUrl = new URL("../src/pages/MainPages.tsx", import.meta.url);
   const mainPages = existsSync(mainPagesUrl) ? readFileSync(mainPagesUrl, "utf8") : "";

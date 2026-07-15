@@ -8,6 +8,7 @@ import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
+import { resolveAllowedView } from "../navigation/routeState.ts";
 
 const LOCAL_API = "/api/local";
 
@@ -226,10 +227,11 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     { id: "overview" as const, label: "Overview", icon: <Landmark size={15} /> },
     { id: "watchtowers" as const, label: "Watchtowers", icon: <RadioTower size={15} /> },
   ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("empires", entry.id))), [access]);
+  const resolvedTab = resolveAllowedView(tab, empireTabs.map((entry) => entry.id));
+  const currentTab = resolvedTab ?? tab;
   React.useEffect(() => {
-    if (!empireTabs.length) return;
-    if (!empireTabs.some((entry) => entry.id === tab)) setTab(empireTabs[0].id);
-  }, [empireTabs, setTab, tab]);
+    if (resolvedTab && resolvedTab !== tab) setTab(resolvedTab);
+  }, [resolvedTab, setTab, tab]);
   const [regionId, setRegionId] = usePersistedState("empires.region", initialRegion);
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
@@ -256,7 +258,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   }, [regionId]);
 
   React.useEffect(() => {
-    if (tab !== "watchtowers") return;
+    if (currentTab !== "watchtowers") return;
     const controller = new AbortController();
     setWatchtowers((current) => ({ ...current, loading: true, error: null }));
     fetch(`${LOCAL_API}/empires/watchtowers?regionId=${encodeURIComponent(regionId)}&inactiveDays=${encodeURIComponent(inactiveDays)}`, { signal: controller.signal })
@@ -266,7 +268,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
         if (!controller.signal.aborted) setWatchtowers((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [inactiveDays, regionId, tab]);
+  }, [currentTab, inactiveDays, regionId]);
 
   const overviewRows: AnyRecord[] = overview.data?.empires ?? [];
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];
@@ -322,6 +324,15 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Leader activity", (row) => row.inactiveRisk ? <span className="status-pill warn" title={row.inactivityReason}>Risk</span> : <span className="status-pill good" title={row.lastLeaderLogin ? dateLabel(row.lastLeaderLogin) : row.inactivityReason}>OK</span>],
   ];
 
+  if (!resolvedTab) return (
+    <div className="panel restricted-access-panel">
+      <section className="empty-state restricted-access-state">
+        <Shield size={34} />
+        <strong>Empires is restricted</strong>
+        <span>No empire views are available for your account.</span>
+      </section>
+    </div>
+  );
   return (
     <div className="panel empires-page">
       <header className="page-title-row" data-tour="empires-page">
@@ -340,10 +351,10 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
       </header>
 
       <div className="leaderboard-tabs empires-tabs" role="tablist" aria-label="Empire views">
-        {empireTabs.map((entry) => <button key={entry.id} className={tab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
+        {empireTabs.map((entry) => <button key={entry.id} className={currentTab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
       </div>
 
-      {tab === "overview" ? (
+      {currentTab === "overview" ? (
         <>
           <div className="stats-grid">
             <MiniStat icon={<Landmark />} label="Regional empires" value={overview.loading && !overview.data ? "..." : formatNumber(overviewSummary.empires)} />

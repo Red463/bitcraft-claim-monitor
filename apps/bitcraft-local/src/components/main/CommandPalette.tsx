@@ -3,6 +3,7 @@ import { Bell, Calculator, CircleDollarSign, Search, ShoppingBag, User } from "l
 import type { LucideIcon } from "lucide-react";
 import type { ActivePanel } from "../../types/app";
 import type { AnyRecord } from "../../main-app-data";
+import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../../access/accessControl.mjs";
 
 type NavItem = readonly [ActivePanel, string, LucideIcon];
 
@@ -12,12 +13,14 @@ function memberName(member: AnyRecord): string {
 
 export function CommandPalette({
   navItems,
+  access,
   members,
   onClose,
   onNavigate,
   onSelectMember,
 }: {
   navItems: readonly NavItem[];
+  access?: EffectiveAccess | null;
   members: AnyRecord[];
   onClose: () => void;
   onNavigate: (panel: ActivePanel, marketTab?: string) => void;
@@ -25,23 +28,26 @@ export function CommandPalette({
 }) {
   const [query, setQuery] = React.useState("");
   const q = query.toLowerCase().trim();
+  const allowedPages = new Set(navItems.map(([id]) => id));
+  const marketViewAllowed = (tab: "pricing" | "dealWatchlist" | "buyOrders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
   const commands = [
-    ...navItems.map(([id, label, Icon]) => ({ key: `page-${id}`, label, description: "Open page", icon: <Icon size={15} />, run: () => onNavigate(id) })),
-    { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, run: () => onNavigate("market", "pricing") },
-    { key: "deal-watchlist", label: "Deal Watchlist", description: "Manage watched market deals", icon: <Bell size={15} />, run: () => onNavigate("market", "deal-watchlist") },
-    { key: "buy-order-finder", label: "Buy Order Finder", description: "Find active buy orders", icon: <ShoppingBag size={15} />, run: () => onNavigate("market", "buy-orders") },
-    { key: "craft-calculator", label: "Craft Calculator", description: "Calculate recipe chains", icon: <Calculator size={15} />, run: () => onNavigate("craftcalc") },
-    ...members.map((member) => ({
+    ...navItems.map(([id, label, Icon]) => ({ key: `page-${id}`, label, description: "Open page", icon: <Icon size={15} />, allowed: true, run: () => onNavigate(id) })),
+    { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, allowed: marketViewAllowed("pricing"), run: () => onNavigate("market", "pricing") },
+    { key: "deal-watchlist", label: "Deal Watchlist", description: "Manage watched market deals", icon: <Bell size={15} />, allowed: marketViewAllowed("dealWatchlist"), run: () => onNavigate("market", "deal-watchlist") },
+    { key: "buy-order-finder", label: "Buy Order Finder", description: "Find active buy orders", icon: <ShoppingBag size={15} />, allowed: marketViewAllowed("buyOrders"), run: () => onNavigate("market", "buy-orders") },
+    { key: "craft-calculator", label: "Craft Calculator", description: "Calculate recipe chains", icon: <Calculator size={15} />, allowed: allowedPages.has("craftcalc"), run: () => onNavigate("craftcalc") },
+    ...(allowedPages.has("members") ? members : []).map((member) => ({
       key: `member-${member.playerEntityId}`,
       label: memberName(member),
       description: "Open member details",
       icon: <User size={15} />,
+      allowed: true,
       run: () => {
         onSelectMember(String(member.playerEntityId));
         onNavigate("members");
       },
     })),
-  ].filter((command) => !q || `${command.label} ${command.description}`.toLowerCase().includes(q)).slice(0, 12);
+  ].filter((command) => command.allowed && (!q || `${command.label} ${command.description}`.toLowerCase().includes(q))).slice(0, 12);
 
   React.useEffect(() => {
     function keydown(event: KeyboardEvent) {
