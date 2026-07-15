@@ -52,13 +52,16 @@ test("every data table and custom horizontal table scroller has a durable keyboa
   });
   assert.deepEqual(unlabeledCallers, []);
 
-  for (const [path, label] of [
-    ["../src/pages/PublicCraftFinderPage.tsx", "Public craft jobs table"],
-    ["../src/pages/RegionPage.tsx", "Regional rankings table"],
-    ["../src/pages/market/BuyOrderFinder.tsx", "Current buy orders table"],
+  for (const [path, className, label] of [
+    ["../src/pages/PublicCraftFinderPage.tsx", "table-wrap", "Public craft jobs table"],
+    ["../src/pages/RegionPage.tsx", "table-wrap", "Regional rankings table"],
+    ["../src/pages/market/BuyOrderFinder.tsx", "table-wrap", "Current buy orders table"],
+    ["../src/pages/SkillsPage.tsx", "heatmap-wrap", "Profession skill levels table"],
+    ["../src/pages/SkillsPage.tsx", "heatmap-wrap", "Adventure skill levels table"],
+    ["../src/pages/CraftPlanningPage.tsx", "craft-plan-needs-scroll", "Craft plan needs board"],
   ]) {
     const source = readSource(path);
-    assert.match(source, new RegExp(`<div className="table-wrap" tabIndex=\\{0\\} aria-label="${label}"`));
+    assert.match(source, new RegExp(`<div className="${className}" tabIndex=\\{0\\} aria-label="${label}"`));
   }
 });
 

@@ -526,7 +526,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
               })}
             </div> : null}
             <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered</span><span className="short">More needed</span><span className="active">Active craft counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
-            {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll">
+            {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll" tabIndex={0} aria-label="Craft plan needs board">
               <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
                 <table className="craft-plan-needs-table">
                   <colgroup>

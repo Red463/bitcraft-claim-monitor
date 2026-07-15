@@ -204,7 +204,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <h3><GraduationCap size={17} /> Professions</h3>
           <p className="legend">Professions are the main crafting and gathering disciplines.</p>
         </div>
-      <div className="heatmap-wrap">
+      <div className="heatmap-wrap" tabIndex={0} aria-label="Profession skill levels table">
         <table className="skill-table">
           <thead>
             <tr>
@@ -254,7 +254,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <h3><Activity size={17} /> Skills</h3>
           <p className="legend">Adventure skills are tracked separately from professions.</p>
         </div>
-        <div className="heatmap-wrap">
+        <div className="heatmap-wrap" tabIndex={0} aria-label="Adventure skill levels table">
           <table className="skill-table">
             <thead>
               <tr>
