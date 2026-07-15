@@ -2,6 +2,7 @@
   background: #030303;
   background: var(--command-page-gradient);
   min-height: 100%;
+  align-content: start;
   color: #f4f7fb;
 }
 .leaderboard-topbar { align-items: center; }

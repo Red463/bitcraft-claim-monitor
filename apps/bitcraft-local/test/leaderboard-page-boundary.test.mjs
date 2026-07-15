@@ -23,6 +23,7 @@ test("Leaderboard page lives outside the legacy MainPages bundle", () => {
 test("Leaderboard summary steps down to two columns and then one", () => {
   const css = readFileSync(new URL("../src/styles/leaderboard.css", import.meta.url), "utf8");
 
+  assert.match(css, /\.leaderboard-page\s*\{[^}]*align-content:\s*start;/s);
   assert.match(css, /@media \(max-width:\s*1250px\)[\s\S]*\.leaderboard-summary\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.leaderboard-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.leaderboard-filter\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0/s);
