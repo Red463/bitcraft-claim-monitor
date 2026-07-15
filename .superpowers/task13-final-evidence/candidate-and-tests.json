@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-07-15T20:20:00+01:00",
+  "candidate": {
+    "commit": "cee5825fafbcae0cbc64dbfc550f92207d0aee98",
+    "packageVersion": "0.32.0-beta.57",
+    "buildId": "",
+    "node": "v24.15.0",
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "timezone": "GMT Standard Time",
+    "healthOk": true,
+    "pollingEnabled": false,
+    "servedEntry": "assets/index-BPSf3A2y.js",
+    "localEntry": "assets/index-BPSf3A2y.js",
+    "servedLocalMatch": true
+  },
+  "verification": {
+    "fullTests": { "passed": 743, "failed": 0 },
+    "focusedAccessStateA11y": { "passed": 67, "failed": 0 },
+    "focusedCustomScrollers": { "passed": 12, "failed": 0 },
+    "build": { "passed": true, "viteModules": 1826 },
+    "diffCheck": "passed"
+  },
+  "assets": {
+    "entry": ["index-BPSf3A2y.js", "index-D-3n2JGN.css"],
+    "shell": ["AppShell-COo8NC0-.js", "AppShell-DglpARwf.css"],
+    "admin": ["AdminPanel-BpFuG5kO.js", "AdminPanel-CqcjKhhM.css"],
+    "routes": [
+      ["ActivityPage-BBqUdelq.js", "ActivityPage-Dqyadb84.css"],
+      ["ConstructionPage-BWtmEWgS.js", "ConstructionPage-D572-Uxz.css"],
+      ["CraftCalculatorPage-De2_ugAL.js", "CraftCalculatorPage-G5S_lBan.css"],
+      ["CraftPlanningPage-T1GNlE0I.js", "CraftPlanningPage-DdAFw_rs.css"],
+      ["DashboardPage-C8B01hE_.js", "DashboardPage-4Ws3VQv2.css"],
+      ["EmpiresPage-DnsehVMx.js", "EmpiresPage-BQl4Fyo1.css"],
+      ["InventoryPage-BIdC6KEF.js", "InventoryPage-CUfeIYE8.css"],
+      ["LeaderboardPage-We_me80y.js", "LeaderboardPage-Bf8jL85a.css"],
+      ["MapPage-ySSl1zHh.js", "MapPage-YnsaPjyq.css"],
+      ["MarketPage-B-IRHd3k.js", "MarketPage-SuGiL1wH.css"],
+      ["MembersPage-DVia4lGW.js", "MembersPage-BxIA6Rhg.css"],
+      ["ProductionPage-CnGXr3u_.js", "ProductionPage-Bv0s-8du.css"],
+      ["PublicCraftFinderPage-CAS3v-f7.js", "PublicCraftFinderPage-BnHLnI3F.css"],
+      ["RegionPage-CeqIEzH-.js", "RegionPage-CMGrt5YZ.css"],
+      ["ResearchPage-CqkEA5uP.js", "ResearchPage-FPs5-cOP.css"],
+      ["SkillsPage-CIpO6WIq.js", "SkillsPage-BDTKMQFi.css"],
+      ["SyncPage-C-R-p_h2.js", "SyncPage-ZjhBCinf.css"]
+    ]
+  }
+}

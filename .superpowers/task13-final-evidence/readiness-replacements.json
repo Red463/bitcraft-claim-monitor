@@ -1,0 +1,49 @@
+{
+  "readinessRule": "Expected route-specific document title and a visible route-owned root or final restricted/error state, with no route-loading state, stable for two consecutive 250ms polls within 20 seconds.",
+  "normal": {
+    "matrixCases": 153,
+    "initialReady": 127,
+    "replacements": 26,
+    "replacementReady": 26,
+    "mergedReady": 153,
+    "mergedOverflowFailures": 0,
+    "replacedCases": [
+      "activity@390x600", "activity@480x900", "activity@760x900", "activity@1440x1000",
+      "craftcalc@390x844", "craftcalc@480x900", "craftcalc@1440x1000",
+      "dashboard@320x700", "dashboard@375x812", "dashboard@480x900", "dashboard@1250x900", "dashboard@1440x1000",
+      "leaderboard@390x600", "leaderboard@480x900", "leaderboard@1250x900",
+      "members@760x900", "production@760x900", "production@1440x1000",
+      "publiccrafts@375x812", "publiccrafts@760x900", "publiccrafts@1440x1000",
+      "skills@920x900", "sync@320x700", "sync@375x812", "sync@760x900", "sync@920x900"
+    ]
+  },
+  "forcedColors": {
+    "matrixCases": 17,
+    "initialReady": 11,
+    "replacements": 6,
+    "replacementReady": 6,
+    "mergedReady": 17,
+    "mediaActive": 17,
+    "mergedOverflowFailures": 0,
+    "replacedCases": ["empire@390x844", "market@390x844", "members@390x844", "production@390x844", "skills@390x844", "sync@390x844"]
+  },
+  "reducedMotion": {
+    "matrixCases": 17,
+    "initialReady": 12,
+    "replacements": 5,
+    "replacementReady": 5,
+    "mergedReady": 17,
+    "mediaActive": 17,
+    "mergedOverflowFailures": 0,
+    "replacedCases": ["craftcalc@390x844", "dashboard@390x844", "inventory@390x844", "leaderboard@390x844", "market@390x844"]
+  },
+  "text200Planned": {
+    "matrixCases": 34,
+    "initialReady": 32,
+    "replacements": 2,
+    "replacementReady": 2,
+    "mergedReady": 34,
+    "mergedOverflowFailures": 0,
+    "replacedCases": ["dashboard@390x844", "production@1440x1000"]
+  }
+}

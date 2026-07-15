@@ -10,7 +10,7 @@ Release status: **not released, pushed, deployed, or compared with production**
 
 ## Candidate identity
 
-The verified application-code candidate is commit `16dacbd9e049e0798d2339e9dc334e83af351de3`. This report is committed separately and does not change that candidate's application assets.
+The verified application-code candidate is commit `cee5825fafbcae0cbc64dbfc550f92207d0aee98`. This report is committed separately and does not change that candidate's application assets.
 
 | Property | Recorded value |
 | --- | --- |
@@ -20,41 +20,43 @@ The verified application-code candidate is commit `16dacbd9e049e0798d2339e9dc334
 | Node | `v24.15.0` |
 | OS | Microsoft Windows NT `10.0.26200.0` |
 | Time zone | `GMT Standard Time` (Europe/London) |
-| Identity captured | `2026-07-15T19:53:21.1548857+01:00` |
+| Identity captured | `2026-07-15T20:20:00+01:00` |
 | Smoke origin | `http://127.0.0.1:18451/` |
 | Server health | `ok: true`; package `0.32.0-beta.57`; polling disabled and not running |
-| Served entry | `assets/index-BKi3F4uD.js` |
-| Local `dist` entry | `assets/index-BKi3F4uD.js` |
+| Served entry | `assets/index-BPSf3A2y.js` |
+| Local `dist` entry | `assets/index-BPSf3A2y.js` |
 | Served/local match | yes |
+
+[Candidate, test, and generated-asset summary](../../.superpowers/task13-final-evidence/candidate-and-tests.json)
 
 ### Generated asset inventory
 
 Entry and shared boundaries:
 
-- `index-BKi3F4uD.js`, `index-D-3n2JGN.css`
-- `AppShell-BO6s-ssb.js`, `AppShell-DglpARwf.css`
-- `AdminPanel-BC7cvXAa.js`, `AdminPanel-CqcjKhhM.css`
+- `index-BPSf3A2y.js`, `index-D-3n2JGN.css`
+- `AppShell-COo8NC0-.js`, `AppShell-DglpARwf.css`
+- `AdminPanel-BpFuG5kO.js`, `AdminPanel-CqcjKhhM.css`
 
 Public route boundaries:
 
 | Route boundary | JavaScript | CSS |
 | --- | --- | --- |
-| Dashboard | `DashboardPage-DWGpSxR7.js` | `DashboardPage-4Ws3VQv2.css` |
-| Leaderboard | `LeaderboardPage-jzDoDawN.js` | `LeaderboardPage-Bf8jL85a.css` |
-| Members | `MembersPage-BuJQBj7F.js` | `MembersPage-BxIA6Rhg.css` |
-| Skills | `SkillsPage-UGobBf77.js` | `SkillsPage-BDTKMQFi.css` |
-| Production | `ProductionPage-CEVocdGI.js` | `ProductionPage-Bv0s-8du.css` |
-| Craft Planning | `CraftPlanningPage-BJIyqKXu.js` | `CraftPlanningPage-DdAFw_rs.css` |
-| Inventory | `InventoryPage-DDoeUIhy.js` | `InventoryPage-CUfeIYE8.css` |
-| Construction | `ConstructionPage-D5sDyLQG.js` | `ConstructionPage-D572-Uxz.css` |
-| Research | `ResearchPage-C0UrWaMz.js` | `ResearchPage-FPs5-cOP.css` |
-| Market | `MarketPage-CLOLaXXs.js` | `MarketPage-SuGiL1wH.css` |
-| Empire / Region | `RegionPage-8eVi0nwP.js` | `RegionPage-CMGrt5YZ.css` |
-| Empires | `EmpiresPage-DF9yovyS.js` | `EmpiresPage-BQl4Fyo1.css` |
-| Map | `MapPage-rX2gxrNT.js` | `MapPage-YnsaPjyq.css` |
-| Activity | `ActivityPage-BBsGdFpP.js` | `ActivityPage-Dqyadb84.css` |
-| Public Craft Finder | `PublicCraftFinderPage-BMj9ANP-.js` | `PublicCraftFinderPage-BnHLnI3F.css` |
-| Craft Calculator | `CraftCalculatorPage-C61rZmQf.js` | `CraftCalculatorPage-G5S_lBan.css` |
+| Dashboard | `DashboardPage-C8B01hE_.js` | `DashboardPage-4Ws3VQv2.css` |
+| Leaderboard | `LeaderboardPage-We_me80y.js` | `LeaderboardPage-Bf8jL85a.css` |
+| Members | `MembersPage-DVia4lGW.js` | `MembersPage-BxIA6Rhg.css` |
+| Skills | `SkillsPage-CIpO6WIq.js` | `SkillsPage-BDTKMQFi.css` |
+| Production | `ProductionPage-CnGXr3u_.js` | `ProductionPage-Bv0s-8du.css` |
+| Craft Planning | `CraftPlanningPage-T1GNlE0I.js` | `CraftPlanningPage-DdAFw_rs.css` |
+| Inventory | `InventoryPage-BIdC6KEF.js` | `InventoryPage-CUfeIYE8.css` |
+| Construction | `ConstructionPage-BWtmEWgS.js` | `ConstructionPage-D572-Uxz.css` |
+| Research | `ResearchPage-CqkEA5uP.js` | `ResearchPage-FPs5-cOP.css` |
+| Market | `MarketPage-B-IRHd3k.js` | `MarketPage-SuGiL1wH.css` |
+| Empire / Region | `RegionPage-CeqIEzH-.js` | `RegionPage-CMGrt5YZ.css` |
+| Empires | `EmpiresPage-DnsehVMx.js` | `EmpiresPage-BQl4Fyo1.css` |
+| Map | `MapPage-ySSl1zHh.js` | `MapPage-YnsaPjyq.css` |
+| Activity | `ActivityPage-BBqUdelq.js` | `ActivityPage-Dqyadb84.css` |
+| Public Craft Finder | `PublicCraftFinderPage-CAS3v-f7.js` | `PublicCraftFinderPage-BnHLnI3F.css` |
+| Craft Calculator | `CraftCalculatorPage-De2_ugAL.js` | `CraftCalculatorPage-G5S_lBan.css` |
 | Sync | `SyncPage-C-R-p_h2.js` | `SyncPage-ZjhBCinf.css` |
 
 ## Verification commands and results
@@ -63,13 +65,19 @@ Public route boundaries:
 | --- | --- | --- |
 | Full tests | `corepack pnpm --filter @workspace/bitcraft-local test` | **743/743 passed** |
 | Production build | `corepack pnpm --filter @workspace/bitcraft-local run build` | passed; TypeScript passed; Vite transformed 1,826 modules |
-| Focused access/state/a11y | `node --test` over access control, state feedback, modal foundation, shared controls, navigation, first-run tour, theme, route delivery, and admin-section boundaries | **67/67 passed** |
+| Focused access/state/a11y | exact command below | **67/67 passed** |
 | Focused text/responsive | `node --test apps/bitcraft-local/test/market-page-boundary.test.mjs apps/bitcraft-local/test/responsive-layout-boundary.test.mjs` | **12/12 passed** |
 | Source hygiene | `git diff --check` | passed |
 | Candidate identity | fetched `/` and compared its `index-*.js` with local `dist/index.html` | exact match |
 | Health | fetched `/api/local/health` | healthy; background polling disabled |
 
 The render harness used the bounded Edge/CDP endpoint on port 9223 because the in-app browser bootstrap was unavailable. It performed read-only navigation and screenshots only. No admin, Discord, database, or external mutation was triggered.
+
+Exact focused access/state/a11y command:
+
+```powershell
+node --test apps/bitcraft-local/test/access-control.test.mjs apps/bitcraft-local/test/state-feedback-boundary.test.mjs apps/bitcraft-local/test/modal-foundation-boundary.test.mjs apps/bitcraft-local/test/shared-controls-boundary.test.mjs apps/bitcraft-local/test/appshell-navigation-boundary.test.mjs apps/bitcraft-local/test/first-run-tour.test.mjs apps/bitcraft-local/test/theme-contract.test.mjs apps/bitcraft-local/test/route-delivery-boundary.test.mjs apps/bitcraft-local/test/admin-sections-boundary.test.mjs
+```
 
 ## Responsive and special-mode evidence
 
@@ -79,26 +87,31 @@ All 17 public routes were rendered at:
 
 `1440×1000`, `1250×900`, `920×900`, `760×900`, `480×900`, `390×844`, `375×812`, `320×700`, and `390×600`.
 
-- **153/153 route/viewport cases had zero body, main, page, and route overflow.**
+- The first capture contained 26 static-title lazy-loading frames. Those rows were rejected, not counted as passes, and rerun with the route-specific readiness rule below.
+- **The merged matrix has 153/153 route/viewport cases route-ready and zero body, main, page, and route overflow.**
 - The prior Empires overflow was reproduced before the fix and is zero at all nine required widths on this candidate.
-- Across the normal matrix, 255 case-level observations of horizontally scrollable `.table-wrap` regions were visible, durably labelled, and keyboard reachable with `tabIndex=0`; failures: **0**.
-- 122 cases logged expected anonymous `401` resource responses for authenticated data endpoints. These were not JavaScript exceptions and did not produce route/layout failure.
+- The merged matrix contains 349 case-level custom-scroller observations, 261 of which are horizontally scrollable. Visibility, durable-name, and `tabIndex=0` failures: **0**.
+- 148 of 153 cases logged 151 expected anonymous `401` resource responses for authenticated data endpoints. These were not JavaScript exceptions and did not produce route/layout failure.
 
-Evidence JSON and associated PNGs:
+Readiness required the expected route-specific document title and a visible route-owned root or final restricted/error state, with no route-loading state, stable for two consecutive 250ms polls within 20 seconds. All 26 normal replacements reached that state; none timed out.
 
-- `.superpowers/task13-candidate-matrix-a/results-dashboard,leaderboard,members,skills,production,planning-required.json`
-- `.superpowers/task13-candidate-matrix-b/results-inventory,construction,research,market,empire,empires-required.json`
-- `.superpowers/task13-candidate-matrix-c/results-map,activity,publiccrafts,craftcalc,sync-required.json`
+Durable evidence:
+
+- [Readiness replacement summary](../../.superpowers/task13-final-evidence/readiness-replacements.json)
+- [Scroller summary](../../.superpowers/task13-final-evidence/scroller-summary.json)
+- [Normal Dashboard at 320×700](../../.superpowers/task13-final-ready-normal/dashboard-default-320x700.png)
+- [Skills custom scrollers at 320×700](../../.superpowers/task13-custom-scrollers/skills-default-320x700.png)
+
+The Skills runtime screenshot and summary contain two visible horizontal heatmaps, both named and `tabIndex=0`, with 256px clients containing 1,580px tables and no main overflow. The conditional Craft Planning needs board was not mounted because the safe anonymous fixture returned no filtered rows; runtime geometry is not claimed for it. Its exact `Craft plan needs board` name and `tabIndex=0` are verified by the passing source boundary.
 
 ### Special modes
 
 | Mode | Result | Evidence |
 | --- | --- | --- |
-| Forced colours at 390×844 | 17/17 media queries active; 17/17 zero overflow | `.superpowers/task13-candidate-forced-colors/results-all-special.json` |
-| Reduced motion at 390×844 | 17/17 media queries active; 17/17 zero overflow | `.superpowers/task13-candidate-reduced-motion/results-all-special.json` |
-| 200% zoom equivalent (720 CSS px for a 1440px reference) | 16/17 zero overflow; Activity retained 23px main/page/route overflow | `.superpowers/task13-candidate-zoom200/results-all-special.json` |
-| Text-only 200%, 1440×1000 | 17/17 zero overflow | `.superpowers/task13-all-text200-*/results-*-textWidths.json` |
-| Text-only 200%, 390×844 | 17/17 zero overflow | same three text-width result sets |
+| Forced colours at 390×844 | initial 6 static-title rows replaced; 17/17 route-ready, media active, and zero overflow | [Readiness summary](../../.superpowers/task13-final-evidence/readiness-replacements.json); [Skills PNG](../../.superpowers/task13-final-ready-forced/skills-forced-colors-390x844.png) |
+| Reduced motion at 390×844 | initial 5 static-title rows replaced; 17/17 route-ready, media active, and zero overflow | [Readiness summary](../../.superpowers/task13-final-evidence/readiness-replacements.json); [Dashboard PNG](../../.superpowers/task13-final-ready-reduced/dashboard-reduced-motion-390x844.png) |
+| 200% zoom equivalent (720 CSS px for a 1440px reference) | 16/17 zero overflow; Activity retained 23px main/page/route overflow | [Special/residual summary](../../.superpowers/task13-final-evidence/special-and-residual-summary.json) |
+| Text-only 200%, 1440×1000 and 390×844 | initial 2 static-title rows replaced; combined planned set 34/34 route-ready and zero overflow | [Readiness summary](../../.superpowers/task13-final-evidence/readiness-replacements.json); [Dashboard PNG](../../.superpowers/task13-final-ready-text200/dashboard-text200-390x844.png) |
 
 The wider cross-product text-only stress run intentionally went beyond the planned 1440/390 acceptance points. It found these residuals:
 

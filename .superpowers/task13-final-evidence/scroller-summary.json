@@ -1,0 +1,27 @@
+{
+  "candidate": "cee5825fafbcae0cbc64dbfc550f92207d0aee98",
+  "mergedNormalMatrix": {
+    "totalScrollerObservations": 349,
+    "horizontalScrollerObservations": 261,
+    "visibleNamedTabIndexZeroFailures": 0
+  },
+  "skills320Runtime": {
+    "routeReady": true,
+    "mainOverflow": 0,
+    "scrollers": [
+      { "label": "Profession skill levels table", "tabIndex": 0, "visible": true, "horizontalScrollable": true, "clientWidth": 256, "scrollWidth": 1580 },
+      { "label": "Adventure skill levels table", "tabIndex": 0, "visible": true, "horizontalScrollable": true, "clientWidth": 256, "scrollWidth": 1580 }
+    ]
+  },
+  "craftPlanning320Runtime": {
+    "routeReady": true,
+    "mainOverflow": 0,
+    "needsBoardMounted": false,
+    "reason": "The safe anonymous fixture returned no filtered needs-board rows. Runtime geometry is not claimed for the conditional wrapper."
+  },
+  "sourceBoundary": {
+    "passed": true,
+    "labels": ["Profession skill levels table", "Adventure skill levels table", "Craft plan needs board"],
+    "requiredTabIndex": 0
+  }
+}
