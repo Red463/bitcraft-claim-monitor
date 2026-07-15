@@ -69,7 +69,7 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { updateQueryState } from "../navigation";
-import { resolveAllowedView } from "../navigation/routeState.ts";
+import { marketViewLocation, resolveAllowedView, type MarketViewId } from "../navigation/routeState.ts";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
@@ -161,9 +161,9 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
     </div>
   );
 }
-export function Market({ data, history, claimId, access }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null }) {
+export function Market({ data, history, claimId, access, locationSearch, onQueryStateChange }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; onQueryStateChange: () => void }) {
   const [q, setQ] = React.useState("");
-  const [view, setView] = usePersistedState<"live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist">("market.view", "live");
+  const [view, setView] = usePersistedState<MarketViewId>("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
   const [tier, setTier] = usePersistedState("market.tier", "All");
   const [rarity, setRarity] = usePersistedState("market.rarity", "All");
@@ -181,16 +181,20 @@ export function Market({ data, history, claimId, access }: { data: ReturnType<ty
     if (!resolvedView || resolvedView === view) return;
     setView(resolvedView);
     updateQueryState({ page: "market", tab: resolvedView === "buyOrders" ? "buy-orders" : resolvedView === "dealWatchlist" ? "deal-watchlist" : resolvedView });
-  }, [resolvedView, setView, view]);
+    onQueryStateChange();
+  }, [onQueryStateChange, resolvedView, setView, view]);
+  const locationView = React.useMemo(() => marketViewLocation(new URLSearchParams(locationSearch).get("tab")), [locationSearch]);
   React.useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (requested === "live" || requested === "analytics" || requested === "pricing") setView(requested);
-    if (requested === "buy-orders" || requested === "buyOrders") setView("buyOrders");
-    if (requested === "deal-watchlist" || requested === "dealWatchlist") setView("dealWatchlist");
-  }, [setView]);
-  const selectView = (next: "live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist") => {
+    if (locationView.view) setView(locationView.view);
+    if (locationView.shouldReplace) {
+      updateQueryState({ page: "market", tab: locationView.canonicalTab });
+      onQueryStateChange();
+    }
+  }, [locationSearch, locationView, onQueryStateChange, setView]);
+  const selectView = (next: MarketViewId) => {
     setView(next);
     updateQueryState({ page: "market", tab: next === "buyOrders" ? "buy-orders" : next === "dealWatchlist" ? "deal-watchlist" : next }, "push");
+    onQueryStateChange();
     trackAnalyticsEvent("market_tab_viewed", { tab: next });
   };
   const memberOptions = React.useMemo(() => {

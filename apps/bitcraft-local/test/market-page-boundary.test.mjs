@@ -10,6 +10,15 @@ test("Market renders a restricted state when every tool view is denied", () => {
   assert.match(marketPageSource, /updateQueryState\(\{ page: "market", tab:[^}]+\}, "push"\)/);
 });
 
+test("Market synchronizes URL subviews without turning normalization into navigation", () => {
+  assert.match(marketPageSource, /locationSearch: string/);
+  assert.match(marketPageSource, /marketViewLocation\(new URLSearchParams\(locationSearch\)\.get\("tab"\)\)/);
+  assert.match(marketPageSource, /React\.useEffect\(\(\) => \{[\s\S]*?setView\(locationView\.view\)[\s\S]*?locationSearch/);
+  assert.match(marketPageSource, /if \(locationView\.shouldReplace\)[\s\S]*?updateQueryState\(\{ page: "market", tab: locationView\.canonicalTab \}\);[\s\S]*?onQueryStateChange\(\)/);
+  assert.match(marketPageSource, /updateQueryState\(\{ page: "market", tab: next[^}]+\}, "push"\);[\s\S]*?onQueryStateChange\(\)/);
+  assert.match(marketPageSource, /if \(!resolvedView \|\| resolvedView === view\) return;[\s\S]*?updateQueryState\(\{ page: "market", tab: resolvedView[^}]+\}\);/);
+});
+
 test("Market page replaces the legacy MainPages bundle", () => {
   const mainPagesUrl = new URL("../src/pages/MainPages.tsx", import.meta.url);
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");

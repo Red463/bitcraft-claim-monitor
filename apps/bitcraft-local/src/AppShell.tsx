@@ -122,6 +122,7 @@ function accountDisplayName(user: UserAuthState["user"]): string {
  */
 function DashboardApp() {
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
+  const [routeSearch, setRouteSearch] = React.useState(() => window.location.search);
   const mainRef = React.useRef<HTMLElement | null>(null);
   const navigationRef = React.useRef<HTMLElement | null>(null);
   const mobileNavigationTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -329,6 +330,7 @@ function DashboardApp() {
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
   const visibleNavigationItems = React.useMemo(() => NAV.filter(([id]) => isPageAllowed(id)), [isPageAllowed]);
+  const syncRouteSearch = React.useCallback(() => setRouteSearch(window.location.search), []);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -347,6 +349,7 @@ function DashboardApp() {
       mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
     }, "push");
+    setRouteSearch(window.location.search);
     const label = NAV.find(([id]) => id === panel)?.[1] ?? "Dashboard";
     setRouteStatus("");
     window.requestAnimationFrame(() => {
@@ -378,6 +381,7 @@ function DashboardApp() {
     }
     function restoreFromHistory() {
       setRouteStatus("");
+      setRouteSearch(window.location.search);
       const panel = urlPanel();
       const historyMapFocus = urlMapFocus();
       if (historyMapFocus) setMapFocus(historyMapFocus);
@@ -567,7 +571,7 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} />,
     empire: <Region data={data} />,
     empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,

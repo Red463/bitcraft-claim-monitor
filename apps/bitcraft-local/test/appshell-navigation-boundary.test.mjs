@@ -43,6 +43,15 @@ test("route-state helpers distinguish explicit navigation from normalization", (
   ]);
 });
 
+test("Market tab locations canonicalize aliases and clean invalid values", () => {
+  assert.equal(typeof routeStateModule.marketViewLocation, "function");
+  assert.deepEqual(routeStateModule.marketViewLocation("pricing"), { view: "pricing", canonicalTab: "pricing", shouldReplace: false });
+  assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { view: "buyOrders", canonicalTab: "buy-orders", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { view: "dealWatchlist", canonicalTab: "deal-watchlist", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { view: null, canonicalTab: null, shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation(null), { view: null, canonicalTab: null, shouldReplace: false });
+});
+
 test("route shell restores history and announces explicit route changes", () => {
   assert.match(appShell, /window\.addEventListener\("popstate", restoreFromHistory\)/);
   assert.match(appShell, /function restoreFromHistory\(\) \{[\s\S]*?setRouteStatus\(""\)/);
@@ -50,6 +59,10 @@ test("route shell restores history and announces explicit route changes", () => 
   assert.match(appShell, /role="status" aria-live="polite"/);
   assert.match(appShell, /mainRef\.current\?\.focus\(\)/);
   assert.match(appShell, /updateQueryState\(\{[\s\S]*?page: panel,[\s\S]*?\}, "push"\)/);
+  assert.match(appShell, /const \[routeSearch, setRouteSearch\] = React\.useState\(\(\) => window\.location\.search\)/);
+  assert.match(appShell, /function restoreFromHistory\(\) \{[\s\S]*?setRouteSearch\(window\.location\.search\)/);
+  assert.match(appShell, /updateQueryState\([\s\S]*?"push"\);[\s\S]*?setRouteSearch\(window\.location\.search\)/);
+  assert.match(appShell, /<Market[\s\S]*?locationSearch=\{routeSearch\}[\s\S]*?onQueryStateChange=\{syncRouteSearch\}/);
 });
 
 test("sidebar and command palette consume the same effective page access", () => {
