@@ -1789,6 +1789,35 @@ test("computeCraftPlan applies row name overrides after API row identity resolut
   assert.equal(material?.rowNameOverride, "Finished Planks");
 });
 
+test("computeCraftPlan applies row overrides independently to material families that share a tag", () => {
+  const brick = { id: "3030002", name: "Sturdy Brick", itemType: 0, tag: "Brick", tier: 3 };
+  const unfiredBrick = { id: "812749346", name: "Unfired Sturdy Brick", itemType: 0, tag: "Brick", tier: 3 };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [
+        { id: brick.id, kind: "items", name: brick.name, quantity: 1, itemType: 0 },
+        { id: unfiredBrick.id, kind: "items", name: unfiredBrick.name, quantity: 1, itemType: 0 },
+      ],
+      sectionOverrides: { "row:Unfired Brick": "Construction" },
+      rowNameOverrides: { "row:Unfired Brick": "Green Brick" },
+    }),
+    detailsByKey: new Map([
+      [recipeKey("items", brick.id), { item: brick, craftingRecipes: [] }],
+      [recipeKey("items", unfiredBrick.id), { item: unfiredBrick, craftingRecipes: [] }],
+    ]),
+  });
+
+  const ordinaryMaterial = plan.materials.find((item) => item.name === brick.name);
+  const unfiredMaterial = plan.materials.find((item) => item.name === unfiredBrick.name);
+  assert.equal(ordinaryMaterial?.sectionOverrideKey, "tag:Brick");
+  assert.equal(ordinaryMaterial?.sectionOverride, null);
+  assert.equal(ordinaryMaterial?.rowNameOverride, null);
+  assert.equal(unfiredMaterial?.sectionOverrideKey, "row:Unfired Brick");
+  assert.equal(unfiredMaterial?.sectionOverride, "Construction");
+  assert.equal(unfiredMaterial?.rowNameOverride, "Green Brick");
+});
+
 test("computeCraftPlan treats gathering byproducts as acquisition routes and ignores direct craft overrides", () => {
   const gypsiteDetail = {
     item: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },

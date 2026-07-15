@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildNeedsBoard, filterNeedsBoard, needsBoardCompletion } from "../src/pages/craftPlanningNeedsBoard.ts";
+import * as plannerTaxonomy from "../src/pages/craftPlanningTaxonomyData.mjs";
 
 test("Needs Board covers quantities with guaranteed output only", () => {
   const board = buildNeedsBoard([{
@@ -170,6 +171,42 @@ test("buildNeedsBoard splits generic trade-good tags by actual item name", () =>
   ], []);
 
   assert.deepEqual(board[0].rows.map((row) => row.name).sort(), ["Guild Ledger", "Merchant Contract"]);
+});
+
+test("planner taxonomy gives shared-tag material families independent identities", () => {
+  const ordinaryBrick = { key: "items:3030002", name: "Sturdy Brick", tag: "Brick" };
+  const unfiredBrick = { key: "items:812749346", name: "Unfired Sturdy Brick", tag: "Brick" };
+
+  assert.equal(plannerTaxonomy.plannerTaxonomyFor(ordinaryBrick).row, "Brick");
+  assert.equal(plannerTaxonomy.plannerTaxonomyFor(unfiredBrick).row, "Unfired Brick");
+  assert.equal(typeof plannerTaxonomy.plannerOverrideKeyFor, "function");
+  assert.equal(plannerTaxonomy.plannerOverrideKeyFor(ordinaryBrick, "items:3030002"), "tag:Brick");
+  assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unfiredBrick, "items:812749346"), "row:Unfired Brick");
+});
+
+test("buildNeedsBoard keeps distinct material families separate when an API tag is shared", () => {
+  const board = buildNeedsBoard([
+    { key: "items:3030002", name: "Sturdy Brick", tag: "Brick", tier: 3, section: "Masonry", sectionOverrideKey: "tag:Brick", required: 500, available: 67, missing: 433 },
+    { key: "items:812749346", name: "Unfired Sturdy Brick", tag: "Brick", tier: 3, section: "Masonry", sectionOverrideKey: "tag:Brick", required: 433, available: 16, missing: 417 },
+    { key: "items:4030002", name: "Fine Brick", tag: "Brick", tier: 4, section: "Masonry", sectionOverrideKey: "tag:Brick", required: 250, available: 114, missing: 136 },
+    { key: "items:656215507", name: "Unfired Fine Brick", tag: "Brick", tier: 4, section: "Masonry", sectionOverrideKey: "tag:Brick", required: 136, available: 0, missing: 136 },
+  ], []);
+
+  const masonry = board.find((group) => group.section === "Masonry");
+  assert.deepEqual(masonry?.rows.map((row) => row.name), ["Unfired Brick", "Brick"]);
+
+  const unfired = masonry?.rows.find((row) => row.name === "Unfired Brick");
+  assert.deepEqual(
+    [unfired?.cells.get("T3")?.available, unfired?.cells.get("T3")?.required, unfired?.cells.get("T4")?.available, unfired?.cells.get("T4")?.required],
+    [16, 433, 0, 136],
+  );
+
+  const brick = masonry?.rows.find((row) => row.name === "Brick");
+  assert.deepEqual(
+    [brick?.cells.get("T3")?.available, brick?.cells.get("T3")?.required, brick?.cells.get("T4")?.available, brick?.cells.get("T4")?.required],
+    [67, 500, 114, 250],
+  );
+
 });
 test("buildNeedsBoard exposes stable section override row metadata", () => {
   const board = buildNeedsBoard([

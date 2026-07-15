@@ -42,15 +42,54 @@ for (const [section, rows] of Object.entries(ROWS)) {
 
 const text = (value) => String(value ?? "").trim();
 
+const words = (value) => text(value).toLowerCase().match(/[a-z0-9]+/g) ?? [];
+
+function wordsAppearInOrder(needles, haystack) {
+  let index = 0;
+  for (const word of haystack) {
+    if (word === needles[index]) index += 1;
+    if (index === needles.length) return true;
+  }
+  return needles.length === 0;
+}
+
+function moreSpecificKnownRow(base, name) {
+  const baseWords = words(base.row);
+  const nameWords = words(name);
+  let best = base;
+  let bestLength = baseWords.length;
+  for (const candidate of ROW_LOOKUP.values()) {
+    const candidateWords = words(candidate.row);
+    if (candidate.section !== base.section || candidateWords.length <= bestLength) continue;
+    if (!baseWords.every((word) => candidateWords.includes(word))) continue;
+    if (!wordsAppearInOrder(candidateWords, nameWords)) continue;
+    best = candidate;
+    bestLength = candidateWords.length;
+  }
+  return best;
+}
+
 export function plannerTaxonomyFor(item = {}) {
   const tag = text(item.tag ?? item.itemTag ?? item.categoryTag);
   const name = text(item.name ?? item.label ?? item.itemName);
   const rawIdentity = /^trade\s+good$/i.test(tag) || !tag ? name : tag;
   const normalized = rawIdentity.toLowerCase();
   if (HIDDEN_TAGS.has(normalized)) return { hidden: true, row: rawIdentity, section: null, order: Number.MAX_SAFE_INTEGER, known: true };
-  const row = ALIASES.get(normalized) ?? rawIdentity;
-  const known = ROW_LOOKUP.get(row.toLowerCase());
+  let row = ALIASES.get(normalized) ?? rawIdentity;
+  let known = ROW_LOOKUP.get(row.toLowerCase());
+  if (known && tag && !/^trade\s+good$/i.test(tag) && name) {
+    known = moreSpecificKnownRow(known, name);
+    row = known.row;
+  }
   return { hidden: false, row, section: known?.section ?? null, order: known?.order ?? Number.MAX_SAFE_INTEGER, known: Boolean(known) };
+}
+
+export function plannerOverrideKeyFor(item = {}, fallbackIdentity = "") {
+  const tag = text(item.tag ?? item.itemTag ?? item.categoryTag);
+  if (!tag || /^trade\s+good$/i.test(tag)) return `item:${fallbackIdentity}`;
+  const taggedFamily = plannerTaxonomyFor({ tag, name: tag }).row;
+  const family = plannerTaxonomyFor(item).row;
+  return family === taggedFamily ? `tag:${tag}` : `row:${family}`;
 }
 
 export function plannerRowOrder(section, row) {

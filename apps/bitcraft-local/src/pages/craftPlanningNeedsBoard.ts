@@ -1,5 +1,6 @@
 import type { AnyRecord } from "../main-app-data";
 import { plannerRowOrder, plannerTaxonomyFor, PLANNER_SECTION_ORDER } from "./craftPlanningTaxonomy.ts";
+import { plannerOverrideKeyFor } from "./craftPlanningTaxonomyData.mjs";
 
 export const NEED_COLUMNS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "Materials"];
 
@@ -67,12 +68,6 @@ export function itemName(item: AnyRecord) {
   return String(item.name ?? item.label ?? item.itemName ?? item.key ?? "Unknown item");
 }
 
-function itemTag(item: AnyRecord) {
-  const tag = String(item.tag ?? item.itemTag ?? item.categoryTag ?? "").trim();
-  if (/^trade\s+good$/i.test(tag)) return null;
-  return tag || null;
-}
-
 function itemTier(item: AnyRecord) {
   const value = Number(item.tier ?? item.itemTier ?? item.tierLevel);
   return Number.isFinite(value) && value >= 1 && value <= 10 ? value : null;
@@ -83,9 +78,7 @@ function rowNameForNeed(item: AnyRecord) {
 }
 
 function rowOverrideKeyForNeed(item: AnyRecord) {
-  const tag = itemTag(item);
-  if (tag) return `tag:${tag}`;
-  return `item:${itemKey(item)}`;
+  return plannerOverrideKeyFor(item, itemKey(item));
 }
 
 function columnForNeed(item: AnyRecord) {
@@ -112,11 +105,13 @@ export function buildNeedsBoard(materials: AnyRecord[], targets: AnyRecord[]): N
     const hasRecipeUsages = Boolean(material.hasRecipeUsages || (Array.isArray(material.recipeUsages) && material.recipeUsages.length > 0));
     if (material.isTarget || targetKeys.has(itemKey(material))) continue;
     if (required <= 0 || (missing <= 0 && !hasRecipeUsages)) continue;
-    const sectionOverride = material.sectionOverride == null ? null : String(material.sectionOverride);
-    const section = sectionOverride || taxonomy.section || String(material.section ?? "Other");
     const apiName = rowNameForNeed(material);
-    const rowOverrideKey = String(material.sectionOverrideKey ?? rowOverrideKeyForNeed(material));
-    const rowNameOverride = material.rowNameOverride == null ? null : String(material.rowNameOverride).trim() || null;
+    const rowOverrideKey = rowOverrideKeyForNeed(material);
+    const suppliedOverrideKey = material.sectionOverrideKey == null ? null : String(material.sectionOverrideKey);
+    const overrideMatchesFamily = suppliedOverrideKey == null || suppliedOverrideKey === rowOverrideKey;
+    const sectionOverride = overrideMatchesFamily && material.sectionOverride != null ? String(material.sectionOverride) : null;
+    const section = sectionOverride || taxonomy.section || String(material.section ?? "Other");
+    const rowNameOverride = overrideMatchesFamily && material.rowNameOverride != null ? String(material.rowNameOverride).trim() || null : null;
     const rowName = rowNameOverride || apiName;
     const apiSection = String(material.apiSection ?? material.section ?? "Other");
     const column = columnForNeed(material);

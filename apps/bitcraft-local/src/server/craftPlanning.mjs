@@ -1,3 +1,5 @@
+import { plannerOverrideKeyFor } from "../pages/craftPlanningTaxonomyData.mjs";
+
 const DEFAULT_PLAN_NAME = "Settlement craft plan";
 const PLAN_SECTIONS = new Set([
   "Carpentry",
@@ -529,9 +531,7 @@ function sectionForMaterial(material, recipe) {
 }
 
 function sectionOverrideKeyForItem(item) {
-  const tag = String(item?.tag ?? item?.itemTag ?? item?.categoryTag ?? "").trim();
-  if (tag && !/^trade\s+good$/i.test(tag)) return `tag:${tag}`;
-  return `item:${recipeKey(item?.kind, item?.id)}`;
+  return plannerOverrideKeyFor(item, recipeKey(item?.kind, item?.id));
 }
 
 function routeAlternativesForUi(recipes) {
