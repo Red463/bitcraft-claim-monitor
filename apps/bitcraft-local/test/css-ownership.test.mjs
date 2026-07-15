@@ -1,8 +1,32 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const setupWorkflowCss = readFileSync(new URL("../src/styles/setup-workflow.css", import.meta.url), "utf8");
+
+function collectSourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const url = new URL(entry.name + (entry.isDirectory() ? "/" : ""), directory);
+    if (entry.isDirectory()) return collectSourceFiles(url);
+    return entry.name.endsWith(".tsx") ? [url] : [];
+  });
+}
+
+test("confirmed legacy selector families stay unused by active markup", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const source = collectSourceFiles(new URL("../src/", import.meta.url))
+    .map((url) => readFileSync(url, "utf8"))
+    .join("\n");
+  const deadClassTokens = [...source.matchAll(/["'`]([^"'`\r\n]+)["'`]/g)]
+    .flatMap((match) => match[1].split(/\s+/))
+    .filter((token) => /^(?:overview-|command-centre-|row-enter$)/.test(token));
+
+  assert.match(globalCss, /\.overview-[a-z0-9-]+/);
+  assert.match(globalCss, /\.command-centre-[a-z0-9-]+/);
+  assert.match(globalCss, /@keyframes\s+row-enter\b/);
+  assert.match(globalCss, /@media\s*\(max-width:\s*520px\)\s*\{\s*\}/);
+  assert.deepEqual([...new Set(deadClassTokens)].sort(), []);
+});
 
 test("application shell uses a compact drawer at narrow widths", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");

@@ -11,16 +11,19 @@
   --card-value: #ffffff;
   --icon-bg: #12181f;
   --active-color: #f0c64f;
+  --accent: var(--active-color);
   --active-bg: #3a3118;
   --active-border: #7a6428;
   --hover-border: #5f5127;
   --muted: #a8adba;
+  --text-muted: var(--muted);
   --text: #f6f3ea;
   --gold: #f0c64f;
   --gold-dim: rgba(240, 198, 79, 0.18);
   --copper: #74b6ff;
   --danger: #ef6461;
   --good: #4ee28a;
+  --positive: var(--good);
   --surface-subtle: rgba(255,255,255,.035);
   --surface-raised: rgba(255,255,255,.055);
   --focus-ring: rgba(240,198,79,.18);
@@ -30,6 +33,7 @@
   --control-height: 38px;
   --control-height-compact: 34px;
   --font-caption: 12px;
+  --font-small: var(--font-caption);
   --font-micro: 11px;
   --shadow-card: 0 10px 24px rgba(0,0,0,.14);
   --theme-gradient-top: #1f1f1f;
@@ -44,6 +48,7 @@
   --z-toast: 22;
   --z-sticky: 25;
   --z-overlay: 30;
+  --z-modal: var(--z-overlay);
   --z-cookie: 60;
   font-family: Outfit, system-ui, sans-serif;
   background: var(--bg);
