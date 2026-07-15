@@ -1,4 +1,4 @@
-.first-run-tour-overlay { position: fixed; inset: 0; z-index: calc(var(--z-overlay) + 12); pointer-events: auto; background: transparent; }
+.first-run-tour-overlay { position: fixed; inset: 0; z-index: calc(var(--z-overlay) + 12); pointer-events: auto; background: transparent; backdrop-filter: none; }
 .first-run-tour-spotlight-layer { pointer-events: none; }
 .first-run-tour-prompt-overlay, .first-run-tour-overlay.is-centered { display: grid; place-items: center; padding: 20px; background: rgba(2, 4, 8, .58); backdrop-filter: blur(3px); }
 .first-run-tour-overlay.is-card-centered { display: grid; place-items: center; padding: 20px; }

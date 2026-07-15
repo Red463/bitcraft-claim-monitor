@@ -69,6 +69,13 @@ test("tour card stacks above the spotlight dim layer", () => {
   assert.match(rootCss, /--z-cookie: 60;/);
 });
 
+test("guided tour keeps highlighted targets crisp while the welcome prompt may blur", () => {
+  const css = readFileSync(new URL("../src/styles/first-run-tour.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.first-run-tour-overlay\s*\{[^}]*backdrop-filter:\s*none;/s);
+  assert.match(css, /\.first-run-tour-prompt-overlay,\s*\.first-run-tour-overlay\.is-centered\s*\{[^}]*backdrop-filter:\s*blur\(3px\);/s);
+});
+
 test("tour does not force a settings modal open during guided steps", () => {
   const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
 
