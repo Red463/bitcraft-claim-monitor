@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/craftcalc.css";
 import { Calculator, CheckCircle2, ClipboardList, Factory, Package, Search, Workflow } from "lucide-react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";

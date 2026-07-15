@@ -17,7 +17,7 @@ test("Leaderboard page lives outside the legacy MainPages bundle", () => {
 
   assert.equal(existsSync(leaderboardPageUrl), true);
   assert.doesNotMatch(mainPages, new RegExp("export function Leaderboard\\b"));
-  assert.equal(appShell.includes('import { Leaderboard } from "./pages/LeaderboardPage";'), true);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/LeaderboardPage"\)/);
 });
 
 test("Leaderboard summary steps down to two columns and then one", () => {

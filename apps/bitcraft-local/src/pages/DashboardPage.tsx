@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/dashboard.css";
 import { AlertTriangle, ArrowUp, CircleDollarSign, Factory, Globe2, Hammer, Package, Target, TrendingUp, Users } from "lucide-react";
 
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "../components/main/DashboardWidgets";
@@ -251,3 +252,4 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     </div>
   );
 }
+import "../styles/dashboard.css";

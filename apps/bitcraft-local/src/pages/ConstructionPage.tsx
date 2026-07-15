@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/construction.css";
 import { AlertTriangle, Box, CheckCircle2, ChevronDown, Hammer, Package, Search } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
@@ -200,3 +201,4 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
     </div>
   );
 }
+import "../styles/construction.css";

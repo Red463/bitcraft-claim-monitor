@@ -12,7 +12,7 @@ test("Production page lives outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, /export function MemberPassiveCrafts\b/);
   assert.match(productionPage, /export function Production\b/);
   assert.match(productionPage, /export function MemberPassiveCrafts\b/);
-  assert.match(appShell, /from "\.\/pages\/ProductionPage"/);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/ProductionPage"\)/);
   assert.doesNotMatch(appShell, /import \{ Market, Production \} from "\.\/pages\/MainPages"/);
 });
 test("Production contributors render as a wrapping grid", () => {

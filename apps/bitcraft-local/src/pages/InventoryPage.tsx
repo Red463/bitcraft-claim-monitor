@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/inventory.css";
 import { Box, Building2, CircleDollarSign, Factory, Lock, Package, Search, TrendingUp, Wrench, X } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../components/main/Badges";
@@ -244,3 +245,4 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
     </div>
   );
 }
+import "../styles/inventory.css";

@@ -261,7 +261,7 @@ test("dashboard page styles live in the dashboard stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/dashboard\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/dashboard\.css";/);
   for (const selector of dashboardSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(dashboardCss.includes(selector), true, `${selector} should live in dashboard.css`);
@@ -286,7 +286,7 @@ test("dashboard page styles live in the dashboard stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/leaderboard\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/LeaderboardPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/leaderboard\.css";/);
   for (const selector of leaderboardSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(leaderboardCss.includes(selector), true, `${selector} should live in leaderboard.css`);
@@ -316,7 +316,7 @@ test("production page styles live in the production stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/production\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/production\.css";/);
   for (const selector of productionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(productionCss.includes(selector), true, `${selector} should live in production.css`);
@@ -342,7 +342,7 @@ test("public craft finder page styles live in the public craft stylesheet", () =
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/public-craft\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/PublicCraftFinderPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/public-craft\.css";/);
   for (const selector of publicCraftSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(publicCraftCss.includes(selector), true, `${selector} should live in public-craft.css`);
@@ -386,7 +386,7 @@ test("market page styles live in the market stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/market\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/market\.css";/);
   for (const selector of marketSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(marketCss.includes(selector), true, `${selector} should live in market.css`);
@@ -423,7 +423,7 @@ test("craft calculator page styles live in the craft calculator stylesheet", () 
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/craftcalc\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/CraftCalculatorPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/craftcalc\.css";/);
   for (const selector of craftcalcSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(craftcalcCss.includes(selector), true, `${selector} should live in craftcalc.css`);
@@ -460,7 +460,7 @@ test("skills page styles live in the skills stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/skills\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/SkillsPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/skills\.css";/);
   for (const selector of skillsSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(skillsCss.includes(selector), true, `${selector} should live in skills.css`);
@@ -505,7 +505,7 @@ test("members page styles live in the members stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/members\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/members\.css";/);
   for (const selector of membersSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(membersCss.includes(selector), true, `${selector} should live in members.css`);
@@ -532,7 +532,7 @@ test("inventory page styles live in the inventory stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/inventory\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/InventoryPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/inventory\.css";/);
   for (const selector of inventorySelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(inventoryCss.includes(selector), true, `${selector} should live in inventory.css`);
@@ -561,7 +561,7 @@ test("construction page styles live in the construction stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/construction\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ConstructionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/construction\.css";/);
   for (const selector of constructionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(constructionCss.includes(selector), true, `${selector} should live in construction.css`);
@@ -589,7 +589,7 @@ test("research page styles live in the research stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/research\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ResearchPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/research\.css";/);
   for (const selector of researchSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(researchCss.includes(selector), true, `${selector} should live in research.css`);
@@ -620,7 +620,7 @@ test("activity page styles live in the activity stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/activity\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ActivityPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/activity\.css";/);
   for (const selector of activitySelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(activityCss.includes(selector), true, `${selector} should live in activity.css`);
@@ -650,7 +650,7 @@ test("region page styles live in the region stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/region\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/RegionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/region\.css";/);
   for (const selector of regionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(regionCss.includes(selector), true, `${selector} should live in region.css`);
@@ -672,7 +672,7 @@ test("sync page styles live in the sync stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/sync\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/SyncPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/sync\.css";/);
   for (const selector of syncSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(syncCss.includes(selector), true, `${selector} should live in sync.css`);
@@ -702,7 +702,7 @@ test("map page styles live in the map stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/map\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/map\.css";/);
   for (const selector of mapSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(mapCss.includes(selector), true, `${selector} should live in map.css`);
@@ -747,7 +747,7 @@ test("admin page and loader styles live in the admin stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/admin\.css";/);
+  assert.match(readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8"), /import "\.\.\/\.\.\/styles\/admin\.css";/);
   for (const selector of adminSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(adminCss.includes(selector), true, `${selector} should live in admin.css`);
@@ -784,7 +784,7 @@ test("Discord admin and bot section styles live in the Discord admin stylesheet"
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/discord-admin\.css";/);
+  assert.match(readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8"), /import "\.\.\/\.\.\/styles\/discord-admin\.css";/);
   for (const selector of discordAdminSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(discordAdminCss.includes(selector), true, `${selector} should live in discord-admin.css`);

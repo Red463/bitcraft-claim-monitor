@@ -1,4 +1,9 @@
 import React from "react";
+import "../../styles/setup-workflow.css";
+import "../../styles/admin.css";
+import "../../styles/server-health.css";
+import "../../styles/discord-admin.css";
+import "../../styles/bot-dashboard.css";
 import {
   Activity,
   AlertTriangle,

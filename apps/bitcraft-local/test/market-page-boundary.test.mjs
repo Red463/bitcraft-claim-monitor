@@ -29,7 +29,7 @@ test("Market page replaces the legacy MainPages bundle", () => {
   assert.match(marketPage, /from "\.\/market\/PriceFinder"/);
   assert.match(marketPage, /from "\.\/market\/BuyOrderFinder"/);
   assert.match(marketPage, /from "\.\/market\/DealWatchlist"/);
-  assert.match(appShell, /from "\.\/pages\/MarketPage"/);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MarketPage"\)/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
 });
 test("Market page exposes a dedicated deal watchlist tool tab", () => {

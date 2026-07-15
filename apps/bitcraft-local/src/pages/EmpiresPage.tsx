@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/empires.css";
 import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
 import { AsyncState } from "../components/main/AsyncState";
@@ -427,3 +428,4 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   );
 }
 
+import "../styles/empires.css";

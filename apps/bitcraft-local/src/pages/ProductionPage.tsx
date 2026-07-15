@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/production.css";
 import { Activity, AlertTriangle, CheckCircle2, Factory, Lock, Star, TrendingUp, User, Wrench } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
@@ -330,3 +331,4 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   );
 }
 
+import "../styles/production.css";

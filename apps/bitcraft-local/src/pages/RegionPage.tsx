@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/region.css";
 import {
   ArrowDown,
   ArrowUp,
@@ -164,3 +165,4 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
 }
 
+import "../styles/region.css";

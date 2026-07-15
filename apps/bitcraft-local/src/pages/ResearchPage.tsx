@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/research.css";
 import { Box, CheckCircle2, Circle, Crown, Lock, MapPin, Search } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { PageHeader } from "../components/main/PageHeader";
@@ -94,3 +95,4 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
+import "../styles/research.css";

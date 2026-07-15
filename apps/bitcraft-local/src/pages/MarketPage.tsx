@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/market.css";
 import {
   Activity,
   AlertTriangle,
@@ -440,3 +441,4 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
   );
 }
 
+import "../styles/market.css";

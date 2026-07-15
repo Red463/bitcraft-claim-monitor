@@ -1,4 +1,9 @@
 import React from "react";
+import "./styles/app-chrome.css";
+import "./styles/user-settings.css";
+import "./styles/notifications.css";
+import "./styles/app-popups.css";
+import "./styles/first-run-tour.css";
 import {
   ArrowDown,
   Bell,
@@ -19,7 +24,6 @@ import {
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
-import { AdminPanel } from "./components/admin/AdminPanel";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
@@ -45,23 +49,6 @@ import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
 import type { ActivePanel } from "./types/app";
 import type { AppSettings, UserAuthState, UserToastSettings } from "./types/settings";
-import { Construction } from "./pages/ConstructionPage";
-import { Empires } from "./pages/EmpiresPage";
-import { CraftCalculatorPage } from "./pages/CraftCalculatorPage";
-import { CraftPlanningPage } from "./pages/CraftPlanningPage";
-import { Members } from "./pages/MembersPage";
-import { Research } from "./pages/ResearchPage";
-import { Region } from "./pages/RegionPage";
-import { Skills } from "./pages/SkillsPage";
-import { SyncPanel } from "./pages/SyncPage";
-import { Dashboard } from "./pages/DashboardPage";
-import { ActivityPanel } from "./pages/ActivityPage";
-import { Inventory } from "./pages/InventoryPage";
-import { Leaderboard } from "./pages/LeaderboardPage";
-import { MapPanel } from "./pages/MapPage";
-import { PublicCraftFinder } from "./pages/PublicCraftFinderPage";
-import { Production } from "./pages/ProductionPage";
-import { Market } from "./pages/MarketPage";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
@@ -82,6 +69,52 @@ const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
+
+const Dashboard = React.lazy(() => import("./pages/DashboardPage").then(({ Dashboard }) => ({ default: Dashboard })));
+const Leaderboard = React.lazy(() => import("./pages/LeaderboardPage").then(({ Leaderboard }) => ({ default: Leaderboard })));
+const Members = React.lazy(() => import("./pages/MembersPage").then(({ Members }) => ({ default: Members })));
+const Skills = React.lazy(() => import("./pages/SkillsPage").then(({ Skills }) => ({ default: Skills })));
+const Production = React.lazy(() => import("./pages/ProductionPage").then(({ Production }) => ({ default: Production })));
+const CraftPlanningPage = React.lazy(() => import("./pages/CraftPlanningPage").then(({ CraftPlanningPage }) => ({ default: CraftPlanningPage })));
+const Inventory = React.lazy(() => import("./pages/InventoryPage").then(({ Inventory }) => ({ default: Inventory })));
+const Construction = React.lazy(() => import("./pages/ConstructionPage").then(({ Construction }) => ({ default: Construction })));
+const Research = React.lazy(() => import("./pages/ResearchPage").then(({ Research }) => ({ default: Research })));
+const Market = React.lazy(() => import("./pages/MarketPage").then(({ Market }) => ({ default: Market })));
+const Region = React.lazy(() => import("./pages/RegionPage").then(({ Region }) => ({ default: Region })));
+const Empires = React.lazy(() => import("./pages/EmpiresPage").then(({ Empires }) => ({ default: Empires })));
+const ActivityPanel = React.lazy(() => import("./pages/ActivityPage").then(({ ActivityPanel }) => ({ default: ActivityPanel })));
+const PublicCraftFinder = React.lazy(() => import("./pages/PublicCraftFinderPage").then(({ PublicCraftFinder }) => ({ default: PublicCraftFinder })));
+const CraftCalculatorPage = React.lazy(() => import("./pages/CraftCalculatorPage").then(({ CraftCalculatorPage }) => ({ default: CraftCalculatorPage })));
+const MapPanel = React.lazy(() => import("./pages/MapPage").then(({ MapPanel }) => ({ default: MapPanel })));
+const SyncPanel = React.lazy(() => import("./pages/SyncPage").then(({ SyncPanel }) => ({ default: SyncPanel })));
+const AdminPanel = React.lazy(() => import("./components/admin/AdminPanel").then(({ AdminPanel }) => ({ default: AdminPanel })));
+
+class RouteErrorBoundary extends React.Component<{ routeKey: string; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidUpdate(previousProps: { routeKey: string }) {
+    if (this.state.failed && previousProps.routeKey !== this.props.routeKey) this.setState({ failed: false });
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <section className="empty-state route-error-state" role="alert">
+        <strong>This page could not be loaded.</strong>
+        <span>Check your connection, then try again.</span>
+        <button className="toolbar-button primary" onClick={() => window.location.reload()}>Try again</button>
+      </section>
+    );
+  }
+}
+
+function RouteLoadingState() {
+  return <section className="empty-state route-loading-state" aria-live="polite">Loading page...</section>;
+}
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
@@ -718,7 +751,11 @@ function DashboardApp() {
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
-            <div className="page-view" key={active}>{activePanel}</div>
+            <div className="page-view" key={active}>
+              <RouteErrorBoundary routeKey={active}>
+                <React.Suspense fallback={<RouteLoadingState />}>{activePanel}</React.Suspense>
+              </RouteErrorBoundary>
+            </div>
           </>
         )}
       <footer className="app-footer">

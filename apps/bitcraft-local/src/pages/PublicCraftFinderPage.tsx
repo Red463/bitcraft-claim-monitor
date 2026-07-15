@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/public-craft.css";
 import { ArrowDown, ArrowUp, ArrowUpDown, Factory, Globe2, GraduationCap, MapPin, Search, TrendingUp } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
@@ -173,3 +174,4 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     </section>
   );
 }
+import "../styles/public-craft.css";

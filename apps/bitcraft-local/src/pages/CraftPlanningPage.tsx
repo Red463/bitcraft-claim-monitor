@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/craft-planning.css";
 import { AlertTriangle, ClipboardList, Factory, LoaderCircle, Package, Route, Search, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
@@ -574,3 +575,4 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     </div>
   );
 }
+import "../styles/craft-planning.css";

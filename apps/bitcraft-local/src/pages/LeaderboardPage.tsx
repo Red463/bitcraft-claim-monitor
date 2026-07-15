@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/leaderboard.css";
 import { Activity, CircleDollarSign, Clock, Factory, GraduationCap, RefreshCw, ShoppingBag, TrendingUp, Trophy, Users } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
@@ -423,3 +424,4 @@ export function Leaderboard({
   );
 }
 
+import "../styles/leaderboard.css";

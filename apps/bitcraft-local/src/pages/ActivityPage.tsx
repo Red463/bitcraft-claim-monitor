@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/activity.css";
 import { Activity, Box, Building2, RefreshCw } from "lucide-react";
 
 import { MiniStat } from "../components/main/Stats";
@@ -174,3 +175,4 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
     </div>
   );
 }
+import "../styles/activity.css";

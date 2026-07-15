@@ -10,7 +10,19 @@ test("Map page lives outside the legacy MainPages bundle", () => {
 
   assert.equal(existsSync(mapPageUrl), true);
   assert.doesNotMatch(mainPages, new RegExp("export function MapPanel\\b"));
-  assert.equal(appShell.includes('import { MapPanel } from "./pages/MapPage";'), true);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MapPage"\)/);
+});
+
+test("Map iframe host exposes loading, timeout, failure, retry, and full-page recovery", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /type FrameState = "loading" \| "ready" \| "timed-out" \| "failed"/);
+  assert.match(mapPage, /Loading embedded map/);
+  assert.match(mapPage, /taking longer than expected/);
+  assert.match(mapPage, /onLoad=/);
+  assert.match(mapPage, /onError=/);
+  assert.match(mapPage, /Retry/);
+  assert.match(mapPage, /Open full page/);
 });
 
 test("Map page exposes compact player tracking controls", () => {

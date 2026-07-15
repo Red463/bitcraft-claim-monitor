@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/members.css";
 import {
   Activity,
   Factory,
@@ -274,3 +275,4 @@ export function Members({
   );
 }
 
+import "../styles/members.css";

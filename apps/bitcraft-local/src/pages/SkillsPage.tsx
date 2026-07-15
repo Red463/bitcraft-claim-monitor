@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/skills.css";
 import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, ShieldCheck, Target, TriangleAlert } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { PageHeader } from "../components/main/PageHeader";
@@ -311,3 +312,4 @@ function skillStyle(level: number): React.CSSProperties {
   const textColor = tier === 9 ? "#c7c7c7" : tier === 10 ? "#deffff" : color;
   return { backgroundColor: `${color}${tier === 9 ? "55" : "25"}`, color: textColor };
 }
+import "../styles/skills.css";
