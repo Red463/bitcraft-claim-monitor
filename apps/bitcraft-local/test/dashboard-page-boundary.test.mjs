@@ -34,7 +34,7 @@ test("Dashboard Gather Next shows known item tiers", () => {
   assert.match(css, /\.dashboard-feed-item\s*\{[^}]*grid-column:\s*2/);
 });
 
-test("Dashboard market trend exposes nearest-point pointer and keyboard readouts", () => {
+test("Dashboard market trend exposes pointer detail without false button semantics", () => {
   const widgets = readFileSync(new URL("../src/components/main/DashboardWidgets.tsx", import.meta.url), "utf8");
 
   assert.match(widgets, /activePointIndex/);
@@ -42,10 +42,13 @@ test("Dashboard market trend exposes nearest-point pointer and keyboard readouts
   assert.match(widgets, /getBoundingClientRect/);
   assert.match(widgets, /dashboard-chart-guide/);
   assert.match(widgets, /dashboard-chart-tooltip/);
-  assert.match(widgets, /tabIndex=\{0\}/);
-  assert.match(widgets, /onFocus=\{\(\) => setActivePointIndex\(index\)\}/);
+  assert.match(widgets, /dashboard-chart-summary/);
+  assert.match(widgets, /role="img"/);
+  assert.match(widgets, /aria-describedby=/);
   assert.match(widgets, /shortDateLabel\(activePoint\.at\)/);
   assert.match(widgets, /formatNumber\(activePoint\.value\)/);
+  assert.doesNotMatch(widgets, /className="dashboard-chart-hit"[^>]*role="button"/);
+  assert.doesNotMatch(widgets, /className="dashboard-chart-hit"[^>]*tabIndex/);
 });
 
 test("Dashboard online members do not fall back to the settlement region as player location", () => {

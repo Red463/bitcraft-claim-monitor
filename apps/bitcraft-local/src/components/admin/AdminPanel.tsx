@@ -1361,6 +1361,7 @@ export function AdminPanel({
                   <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} Â· ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
                 </div>
                 <DataTable
+                  emptyState="No analytics summary records were returned."
                   rows={endpointChecks}
                   columns={[
                     ["Endpoint", (check) => <span className="endpoint-name">{check.label}</span>],
@@ -1394,7 +1395,7 @@ export function AdminPanel({
           <div className="admin-grid">
             <section className="form-card">
               <h3><Globe2 size={17} /> Most Used Pages</h3>
-              <DataTable rows={analyticsData?.pages ?? []} columns={[
+              <DataTable rows={analyticsData?.pages ?? []} emptyState="No page analytics were recorded for this period." columns={[
                 ["Page", (row) => String(row.page).replaceAll("publiccrafts", "Public Craft Finder")],
                 ["Views", (row) => formatNumber(row.pageViews)],
                 ["Visitors", (row) => formatNumber(row.visitors)],
@@ -1403,7 +1404,7 @@ export function AdminPanel({
             </section>
             <section className="form-card">
               <h3><Factory size={17} /> Feature Usage</h3>
-              <DataTable rows={analyticsData?.features ?? []} columns={[
+              <DataTable rows={analyticsData?.features ?? []} emptyState="No feature analytics were recorded for this period." columns={[
                 ["Feature", (row) => String(row.eventName).replaceAll("_", " ")],
                 ["Uses", (row) => formatNumber(row.uses)],
                 ["Visitors", (row) => formatNumber(row.visitors)],
@@ -1428,7 +1429,7 @@ export function AdminPanel({
           <div className="admin-grid">
             <section className="form-card">
               <h3><Globe2 size={17} /> Location Summary</h3>
-              <DataTable rows={visitorSecurityData?.locations ?? []} columns={[
+              <DataTable rows={visitorSecurityData?.locations ?? []} emptyState="No visitor locations were recorded for this period." columns={[
                 ["Country", (row) => row.country || "Unknown"],
                 ["City", (row) => row.city || "-"],
                 ["Requests", (row) => formatNumber(row.requests)],
@@ -1437,7 +1438,7 @@ export function AdminPanel({
             </section>
             <section className="form-card">
               <h3><Server size={17} /> Route Groups</h3>
-              <DataTable rows={visitorSecurityData?.routes ?? []} columns={[
+              <DataTable rows={visitorSecurityData?.routes ?? []} emptyState="No route visits were recorded for this period." columns={[
                 ["Group", (row) => row.routeGroup],
                 ["Requests", (row) => formatNumber(row.requests)],
                 ["Errors", (row) => formatNumber(row.errors)],
@@ -1461,10 +1462,10 @@ export function AdminPanel({
               </label>
             </div>
             <div className="database-toolbar">
-              <SearchBox value={securityEventSearch} onChange={(value) => { setSecurityEventSearch(value); setSecurityEventPage(1); }} placeholder="Search time, group, status, IP, country or city" />
+              <SearchBox label="Search visitor security events" value={securityEventSearch} onChange={(value) => { setSecurityEventSearch(value); setSecurityEventPage(1); }} placeholder="Search time, group, status, IP, country or city" />
               <span className="legend">{formatNumber(securityEventTotal)} matching events</span>
             </div>
-            <DataTable rows={securityEventRows} columns={[
+            <DataTable rows={securityEventRows} emptyState="No security events match the current search and filters." columns={[
               ["Time", (row) => dateLabel(row.occurredAt)],
               ["Method", (row) => row.method],
               ["Group", (row) => row.routeGroup],
@@ -2158,13 +2159,13 @@ export function AdminPanel({
             <Info label="Showing" value={`${formatNumber(tableRangeStart)}-${formatNumber(tableRangeEnd)}`} />
           </div>
           <div className="database-toolbar">
-            <SearchBox value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Search across visible table records" />
+            <SearchBox label="Search visible database records" value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Search across visible table records" />
             <div className="database-export-actions">
               <a className="toolbar-button" title="Download the selected table with the current search filter as CSV." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export CSV</a>
               <a className="toolbar-button" title="Download the selected table with the current search filter as JSON." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export JSON</a>
             </div>
           </div>
-          {tableColumns.length ? <DataTable rows={tableRows} columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
+          {tableColumns.length ? <DataTable rows={tableRows} emptyState="No database records match the current search." columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
           <div className="pager"><span>{formatNumber(activeTableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= activeTableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
         </section>
       ) : null}

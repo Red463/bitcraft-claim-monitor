@@ -204,6 +204,7 @@ function recipeRouteMeta(recipe: AnyRecord) {
 export function CraftCalculatorPage() {
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(-1);
   const [selectedTarget, setSelectedTarget] = React.useState<RecipeTarget | null>(null);
   const [amount, setAmount] = React.useState(1);
   const [recipeSelections, setRecipeSelections] = React.useState<RecipeSelections>({});
@@ -225,6 +226,7 @@ export function CraftCalculatorPage() {
         .then((payload) => {
           const items: AnyRecord[] = payload.data?.items ?? [];
           setSuggestions(items.filter((item) => String(item.name ?? "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10));
+          setActiveSuggestionIndex(-1);
           setSearchState("idle");
         })
         .catch(() => {
@@ -261,6 +263,26 @@ export function CraftCalculatorPage() {
     setRecipeSelections({});
     setQuery(target.name);
     setSuggestions([]);
+    setActiveSuggestionIndex(-1);
+  }
+
+  function handleSuggestionKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSuggestions([]);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (!suggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSuggestionIndex >= 0) {
+      event.preventDefault();
+      chooseItem(suggestions[activeSuggestionIndex]);
+    }
   }
 
   const recipeChoices = React.useMemo(() => {
@@ -303,12 +325,12 @@ export function CraftCalculatorPage() {
           <span>Item and cargo recipes are resolved recursively where BitJita exposes the chain.</span>
         </div>
         <div className="craftcalc-control-grid">
-          <label className="research-filter-field">
-            <span>Item or cargo</span>
+          <div className="research-filter-field">
+            <label htmlFor="craftcalc-item-search">Item or cargo</label>
             <div className="suggestion-anchor">
-              <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedTarget(null); }} placeholder="Start typing an item name" />
-              {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
-                <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+              <input id="craftcalc-item-search" value={query} role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls="craftcalc-item-suggestions" aria-activedescendant={activeSuggestionIndex >= 0 ? `craftcalc-item-suggestion-${activeSuggestionIndex}` : undefined} autoComplete="off" onKeyDown={handleSuggestionKeyDown} onChange={(event) => { setQuery(event.target.value); setSelectedTarget(null); setActiveSuggestionIndex(-1); }} placeholder="Start typing an item name" />
+              {suggestions.length ? <div className="suggestion-menu" id="craftcalc-item-suggestions" role="listbox">{suggestions.map((item, index) => (
+                <button id={`craftcalc-item-suggestion-${index}`} role="option" aria-selected={activeSuggestionIndex === index} tabIndex={-1} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestionIndex(index)} onClick={() => chooseItem(item)}>
                   <ItemIcon item={item} />
                   <strong>{item.name}</strong>
                   {item.tier ? <TierBadge tier={item.tier} /> : null}
@@ -316,9 +338,8 @@ export function CraftCalculatorPage() {
                 </button>
               ))}</div> : null}
             </div>
-            {searchState === "loading" ? <small className="legend">Searching BitJita item catalogue...</small> : null}
-            {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
-          </label>
+            <small className="legend" role="status" aria-live="polite">{searchState === "loading" ? "Searching BitJita item catalogue..." : searchState === "error" ? "Unable to search items right now." : query.trim().length >= 2 ? `${suggestions.length} results available.` : "Type at least two characters to search."}</small>
+          </div>
           <label className="research-filter-field">
             <span>Amount to make</span>
             <input type="number" min={1} step={1} value={amount} onChange={(event) => setAmount(Math.max(1, Math.floor(toNumber(event.target.value) || 1)))} />

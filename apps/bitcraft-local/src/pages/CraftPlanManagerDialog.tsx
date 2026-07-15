@@ -185,6 +185,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [activeTab, setActiveTab] = React.useState<ManagerTab>("targets");
   const [query, setQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState<AnyRecord[]>([]);
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(-1);
   const [status, setStatus] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -264,11 +265,40 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const timer = window.setTimeout(() => {
       fetch(`${BITJITA_API}/market?search=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then((response) => response.ok ? response.json() : { items: [], cargos: [] })
-        .then((body) => setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16)))
+        .then((body) => {
+          setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
+          setActiveSearchResultIndex(-1);
+        })
         .catch(() => setSearchResults([]));
     }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [query]);
+
+  function selectSearchResult(item: AnyRecord) {
+    addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`);
+    setQuery("");
+    setSearchResults([]);
+    setActiveSearchResultIndex(-1);
+  }
+
+  function handleSearchResultKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSearchResults([]);
+      setActiveSearchResultIndex(-1);
+      return;
+    }
+    if (!searchResults.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSearchResultIndex((current) => current >= searchResults.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSearchResultIndex((current) => current <= 0 ? searchResults.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSearchResultIndex >= 0) {
+      event.preventDefault();
+      selectSearchResult(searchResults[activeSearchResultIndex]);
+    }
+  }
 
   function patchConfig(patch: Partial<CraftPlanConfig>) {
     setConfig((current) => ({ ...current, ...patch }));
@@ -479,8 +509,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
                 {workstationPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add workstation targets for ${preset.label}`} disabled={busy} key={preset.key} onClick={() => void addWorkstationPreset(preset)}>{preset.label}</button>)}
               </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>BitJita did not return compatible workstation definitions.</span></div>}
             </section>
-            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search BitJita items" /></div></label>
-            {searchResults.length ? <div className="craft-plan-search-results">{searchResults.map((item) => <button className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onClick={() => { addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`); setQuery(""); setSearchResults([]); }}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
+            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search BitJita items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
+            {searchResults.length ? <div className="craft-plan-search-results" id="craft-plan-target-suggestions" role="listbox">{searchResults.map((item, index) => <button id={`craft-plan-target-suggestion-${index}`} role="option" aria-selected={activeSearchResultIndex === index} tabIndex={-1} className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onMouseEnter={() => setActiveSearchResultIndex(index)} onClick={() => selectSearchResult(item)}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}>
                 <ItemLabel item={target} />

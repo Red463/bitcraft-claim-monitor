@@ -196,8 +196,8 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
           </div>
         </div>
         <div className="inventory-filter-grid">
-          <label className="inventory-filter-field"><span>Item</span><SearchBox value={q} onChange={setQ} placeholder="Search items" /></label>
-          <label className="inventory-filter-field"><span>Container</span><SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" /></label>
+          <div className="inventory-filter-field"><span>Item</span><SearchBox label="Search inventory items" value={q} onChange={setQ} placeholder="Search items" /></div>
+          <div className="inventory-filter-field"><span>Container</span><SearchBox label="Search inventory containers" value={containerQ} onChange={setContainerQ} placeholder="Search containers" /></div>
           <label className="inventory-filter-field"><span>Type</span>
             <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
               <option>All</option><option>Item</option><option>Cargo</option>
@@ -230,7 +230,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
                 <span><Package size={16} /> <strong>{container.name}</strong>{container.locked ? <Lock size={13} /> : null}</span>
                 <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
               </summary>
-              <DataTable rows={container.items} columns={[
+              <DataTable rows={container.items} emptyState="No matching items are stored in this container." columns={[
                 ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],

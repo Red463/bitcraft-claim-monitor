@@ -21,11 +21,13 @@ function cellSortText(value: React.ReactNode): string {
 export function DataTable({
   rows,
   columns,
+  emptyState,
   onRowClick,
   rowClassName,
 }: {
   rows: AnyRecord[];
   columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]>;
+  emptyState: React.ReactNode;
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
 }) {
@@ -51,13 +53,12 @@ export function DataTable({
     <div className="table-wrap">
       <table>
         <thead><tr>{columns.map(([label], columnIndex) => (
-          <th key={label}>
+          <th key={label} aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
             <button
               type="button"
               className={`table-sort-button ${sort?.column === columnIndex ? "is-sorted" : ""}`}
               onClick={() => toggleSort(columnIndex)}
               aria-label={`Sort by ${label}`}
-              aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
             >
               <span>{label}</span>
               <span className="table-sort-indicator">{sort?.column === columnIndex ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
@@ -73,7 +74,7 @@ export function DataTable({
             >
               {columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}
             </tr>
-          )) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
+          )) : <tr><td colSpan={columns.length}>{emptyState}</td></tr>}
         </tbody>
       </table>
     </div>

@@ -99,6 +99,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   });
   const outlookLabel = (capability: ProfessionCapability) => capability.nextOutlook === "ready" ? `T${capability.nextTier} capability ready` : capability.nextOutlook === "developing" ? `Developing for T${capability.nextTier}` : capability.nextOutlook === "maximum-tier" ? "Maximum tier" : "Tier unavailable";
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
+  const sortAria = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc"): "ascending" | "descending" | "none" => activeSortKey !== key ? "none" : activeSortDir === "asc" ? "ascending" : "descending";
 
   return (
     <div className="panel skills-page" data-tour="skills-page">
@@ -195,7 +196,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       </div> : null}
       </section>
       <div className="toolbar-row skills-toolbar">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
+        <SearchBox label="Search members by name" value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
       </div>
       <section className="skills-table-section">
@@ -207,12 +208,12 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
         <table className="skill-table">
           <thead>
             <tr>
-              <th className="sticky-col clickable" onClick={() => toggleSort("name", sortKey, setSortKey, setSortDir)}>Member {sortIcon("name", sortKey, sortDir)}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("total", sortKey, setSortKey, setSortDir)}><span>Total Levels</span>{sortIcon("total", sortKey, sortDir)}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", sortKey, setSortKey, setSortDir)}><span>Best Level</span>{sortIcon("highest", sortKey, sortDir)}</th>
+              <th className="sticky-col" aria-sort={sortAria("name", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by member" onClick={() => toggleSort("name", sortKey, setSortKey, setSortDir)}>Member {sortIcon("name", sortKey, sortDir)}</button></th>
+              <th className="numeric summary-header" aria-sort={sortAria("total", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by total levels" onClick={() => toggleSort("total", sortKey, setSortKey, setSortDir)}><span>Total Levels</span>{sortIcon("total", sortKey, sortDir)}</button></th>
+              <th className="numeric summary-header" aria-sort={sortAria("highest", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by best level" onClick={() => toggleSort("highest", sortKey, setSortKey, setSortDir)}><span>Best Level</span>{sortIcon("highest", sortKey, sortDir)}</button></th>
               {professionIds.map((id) => (
-                <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, sortKey, setSortKey, setSortDir)}>
-                  <span>{skillLabel(id)}</span>{sortIcon(id, sortKey, sortDir)}
+                <th key={id} className={`profession-header ${sortKey === id ? "sorted" : ""}`} aria-sort={sortAria(id, sortKey, sortDir)}>
+                  <button type="button" className="skill-sort-button" aria-label={`Sort by ${skillLabel(id)}`} onClick={() => toggleSort(id, sortKey, setSortKey, setSortDir)}><span>{skillLabel(id)}</span>{sortIcon(id, sortKey, sortDir)}</button>
                 </th>
               ))}
             </tr>
@@ -257,12 +258,12 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <table className="skill-table">
             <thead>
               <tr>
-                <th className="sticky-col clickable" onClick={() => toggleSort("name", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>Member {sortIcon("name", adventureSortKey, adventureSortDir)}</th>
-                <th className="clickable numeric summary-header" onClick={() => toggleSort("total", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Total Levels</span>{sortIcon("total", adventureSortKey, adventureSortDir)}</th>
-                <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Best Level</span>{sortIcon("highest", adventureSortKey, adventureSortDir)}</th>
+                <th className="sticky-col" aria-sort={sortAria("name", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by member" onClick={() => toggleSort("name", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>Member {sortIcon("name", adventureSortKey, adventureSortDir)}</button></th>
+                <th className="numeric summary-header" aria-sort={sortAria("total", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by total levels" onClick={() => toggleSort("total", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Total Levels</span>{sortIcon("total", adventureSortKey, adventureSortDir)}</button></th>
+                <th className="numeric summary-header" aria-sort={sortAria("highest", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by best level" onClick={() => toggleSort("highest", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Best Level</span>{sortIcon("highest", adventureSortKey, adventureSortDir)}</button></th>
                 {adventureSkillIds.map((id) => (
-                  <th key={id} className={`clickable profession-header ${adventureSortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>
-                    <span>{skillLabel(id)}</span>{sortIcon(id, adventureSortKey, adventureSortDir)}
+                  <th key={id} className={`profession-header ${adventureSortKey === id ? "sorted" : ""}`} aria-sort={sortAria(id, adventureSortKey, adventureSortDir)}>
+                    <button type="button" className="skill-sort-button" aria-label={`Sort by ${skillLabel(id)}`} onClick={() => toggleSort(id, adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>{skillLabel(id)}</span>{sortIcon(id, adventureSortKey, adventureSortDir)}</button>
                   </th>
                 ))}
               </tr>

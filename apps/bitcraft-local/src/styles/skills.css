@@ -370,3 +370,19 @@
   .skills-page .focus-tier-strip { grid-template-columns: repeat(5, minmax(42px, 1fr)); }
   .capability-grid { grid-template-columns: 1fr; }.capability-card-metrics { grid-template-columns: repeat(3, minmax(70px, 1fr)); }
 }
+.skill-sort-button {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  gap: 5px;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.skill-sort-button:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }

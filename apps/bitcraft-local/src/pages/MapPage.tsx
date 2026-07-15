@@ -89,7 +89,7 @@ function MapPlayerTrackingControls({
               <div className="map-player-tabs" role="tablist" aria-label="Player filters">
                 {filterTabs.map((tab) => <button key={tab.key} className={filter === tab.key ? "active" : ""} onClick={() => setFilter(tab.key)}>{tab.label}</button>)}
               </div>
-              <SearchBox value={search} onChange={setSearch} placeholder="Find members" />
+              <SearchBox label="Find tracked members" value={search} onChange={setSearch} placeholder="Find members" />
             </div>
             <div className="map-player-list">
               {visibleRows.map((row) => (
@@ -336,7 +336,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             })}</select></label>
             <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
             <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-            <SearchBox value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
+            <SearchBox label="Find map resources" value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
           </div>
           {selectedResources.length ? (
             <div className="map-selected-resources">

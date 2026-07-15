@@ -22,6 +22,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
   const defaultRegion = monitoredRegionId || "19";
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(-1);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.price.region", defaultRegion);
@@ -58,6 +59,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
         .then((payload) => {
           setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).slice(0, 8));
+          setActiveSuggestionIndex(-1);
           setSearchState("idle");
         })
         .catch(() => {
@@ -153,8 +155,28 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     setSelectedItem(item);
     setQuery(String(item.name));
     setSuggestions([]);
+    setActiveSuggestionIndex(-1);
     updateQueryState({ item: String(item.id), itemName: String(item.name), itemType: String(item.itemType ?? 0), region: activeRegion || "all" });
     trackAnalyticsEvent("price_finder_search", { region: activeRegion ? "selected_region" : "all_regions" });
+  }
+
+  function handleSuggestionKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSuggestions([]);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (!suggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSuggestionIndex >= 0) {
+      event.preventDefault();
+      chooseItem(suggestions[activeSuggestionIndex]);
+    }
   }
 
   const stats = priceState.data?.priceStats ?? {};
@@ -184,12 +206,12 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
         <span>{regionLabel} completed trades</span>
       </div>
       <div className="price-finder-controls">
-        <label className="research-filter-field price-item-search">
-          <span>Item</span>
+        <div className="research-filter-field price-item-search">
+          <label htmlFor="price-item-search">Item</label>
           <div className="suggestion-anchor">
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Start typing an item name" />
-            {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
-              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+            <input id="price-item-search" value={query} role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls="price-item-suggestions" aria-activedescendant={activeSuggestionIndex >= 0 ? `price-item-suggestion-${activeSuggestionIndex}` : undefined} autoComplete="off" onKeyDown={handleSuggestionKeyDown} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); setActiveSuggestionIndex(-1); }} placeholder="Start typing an item name" />
+            {suggestions.length ? <div className="suggestion-menu" id="price-item-suggestions" role="listbox">{suggestions.map((item, index) => (
+              <button id={`price-item-suggestion-${index}`} role="option" aria-selected={activeSuggestionIndex === index} tabIndex={-1} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestionIndex(index)} onClick={() => chooseItem(item)}>
                 <ItemIcon item={item} />
                 <strong>{item.name}</strong>
                 {item.tier ? <TierBadge tier={item.tier} /> : null}
@@ -197,9 +219,8 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
               </button>
             ))}</div> : null}
           </div>
-          {searchState === "loading" ? <small className="legend">Finding market items...</small> : null}
-          {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
-        </label>
+          <small className="legend" role="status" aria-live="polite">{searchState === "loading" ? "Finding market items..." : searchState === "error" ? "Unable to search items right now." : query.trim().length >= 2 ? `${suggestions.length} results available.` : "Type at least two characters to search."}</small>
+        </div>
         <label className="research-filter-field price-region-field">
           <span>Region</span>
           <select value={regionChoice} onChange={(event) => { setRegionChoice(event.target.value); updateQueryState({ region: event.target.value === "All" ? "all" : event.target.value }); trackAnalyticsEvent("price_finder_region_changed", { scope: event.target.value === "All" ? "all_regions" : "specific_region" }); }}>
@@ -246,7 +267,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
           <p className="legend">Suggested price follows the most recent available completed-trade average and is rounded to whole gold. Review recent trades and active listings before posting.</p>
           <section>
             <h3><ShoppingBag size={17} /> Recent Trades <small>{formatNumber(stats.totalTrades)} total trades</small></h3>
-            <DataTable rows={recentTrades.slice(0, 15)} columns={[
+            <DataTable rows={recentTrades.slice(0, 15)} emptyState="No completed trades were returned for this item and region." columns={[
               ["When", row => dateLabel(row.timestamp ?? row.createdAt)],
               ["Unit Price", row => `${formatNumber(row.unitPrice ?? row.price)}g`],
               ["Quantity", row => formatNumber(row.quantity)],

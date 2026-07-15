@@ -307,6 +307,11 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Location", (row) => coordinates(row)],
     ["Updated", (row) => compactDate(row.updatedAt)],
   ];
+  const openTowerDetails = (row: AnyRecord) => setSelectedTower({
+    ...row,
+    members: membersByEmpire.get(String(row.empireId ?? "")) ?? [],
+    claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [],
+  });
   const towerColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
     ["Empire", (row) => <strong>{row.empireName}</strong>],
     ["Tower", (row) => {
@@ -322,6 +327,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Active", (row) => statusPill(Boolean(row.active), row.active ? "Active" : "Inactive")],
     ["Siege", (row) => toNumber(row.siegeCount) > 0 ? <span className="status-pill danger">{formatNumber(row.siegeCount)} siege</span> : <span className="status-pill muted">None</span>],
     ["Leader activity", (row) => row.inactiveRisk ? <span className="status-pill warn" title={row.inactivityReason}>Risk</span> : <span className="status-pill good" title={row.lastLeaderLogin ? dateLabel(row.lastLeaderLogin) : row.inactivityReason}>OK</span>],
+    ["Details", (row) => <button className="toolbar-button compact-map-action" type="button" onClick={(event) => { event.stopPropagation(); openTowerDetails(row); }}>View tower details</button>],
   ];
 
   if (!resolvedTab) return (
@@ -365,7 +371,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           {overview.error ? <div className="error-card"><AlertTriangle /> {overview.error}</div> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
-            <DataTable rows={overviewRows} columns={overviewColumns} />
+            <DataTable rows={overviewRows} columns={overviewColumns} emptyState={overview.loading ? "Loading regional empires…" : "No regional empires were returned."} />
           </section>
         </>
       ) : (
@@ -402,7 +408,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
                 <small>{formatNumber(selectedEmpireRiskCount)}</small>
               </label>
             </div>
-            <DataTable rows={visibleTowerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [], claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
+            <DataTable rows={visibleTowerRows} columns={towerColumns} emptyState={watchtowers.loading ? "Loading claimed watchtowers…" : "No claimed watchtowers match these filters."} onRowClick={openTowerDetails} rowClassName={() => "clickable-row"} />
           </section>
         </>
       )}

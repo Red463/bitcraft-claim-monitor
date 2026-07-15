@@ -28,7 +28,7 @@ export function ToolbarButton({ onClick, children }: { onClick: () => void; chil
 }
 
 export function TablePanel({ title, subtitle, rows, columns }: { title: string; subtitle: string; rows: AnyRecord[]; columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]> }) {
-  return <div className="panel"><Header title={title}>{subtitle}</Header><DataTable rows={rows} columns={columns} /></div>;
+  return <div className="panel"><Header title={title}>{subtitle}</Header><DataTable rows={rows} columns={columns} emptyState={`No ${title.toLowerCase()} records were returned.`} /></div>;
 }
 
 export function AppSkeleton() {

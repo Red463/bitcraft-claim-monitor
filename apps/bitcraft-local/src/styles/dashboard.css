@@ -369,3 +369,9 @@
   }
   .dashboard-supply-breakdown { grid-template-columns: 1fr; }
 }
+.dashboard-chart-summary {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}

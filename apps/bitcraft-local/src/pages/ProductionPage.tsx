@@ -71,7 +71,7 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
       {state.error ? <p className="legend">{state.error}</p> : null}
       {state.loading && !state.data ? <p className="legend">Loading passive craft history...</p> : null}
       {!state.loading && rows.length === 0 ? <div className="empty-state"><Factory />No passive craft history reported for settlement members.</div> : null}
-      {rows.length ? <DataTable rows={rows} columns={[
+      {rows.length ? <DataTable rows={rows} emptyState="No production jobs match the current filters." columns={[
         ["Output", (row) => <strong>{row.recipe}</strong>],
         ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
         ["Member", (row) => row.memberName],
@@ -255,7 +255,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
               <option value="name">Item Name</option>
             </select>
           </label>
-          <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+          <Segmented options={[{ id: "Descending", label: "Descending" }, { id: "Ascending", label: "Ascending" }]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
           <label className="production-private-toggle"><span><Lock size={13} /> Show private crafts</span><input type="checkbox" checked={showPrivateCrafts} onChange={(event) => setShowPrivateCrafts(event.target.checked)} /></label>
         </div>
         {Object.keys(crafterCounts).length ? (

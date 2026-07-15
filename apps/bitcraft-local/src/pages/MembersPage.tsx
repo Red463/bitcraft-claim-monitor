@@ -65,6 +65,10 @@ export function Members({
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
   const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
   const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
+  const openMemberDetails = (member: AnyRecord) => {
+    setSelectedId(String(member.playerEntityId));
+    onMemberDetailsOpened?.();
+  };
   React.useEffect(() => {
     if (!selectedId) {
       setProfile(null);
@@ -118,13 +122,14 @@ export function Members({
         <article><Shield /><span>Storage Access</span><strong>{merged.filter((member) => member.inventoryPermission).length}</strong><small>Members with inventory rights</small></article>
       </div>
       <div className="toolbar-row members-toolbar">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
+        <SearchBox label="Search settlement members" value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
         <span>{filtered.length} members found</span>
       </div>
       <div className="members-roster-table">
         <DataTable
           rows={filtered}
-          onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); onMemberDetailsOpened?.(); }}
+          emptyState={searchTerm ? "No members match this search." : "No settlement members were returned."}
+          onRowClick={openMemberDetails}
           rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
           columns={[
             ["Username", (m) => (
@@ -142,7 +147,11 @@ export function Members({
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
               return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
             }],
-            ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
+            ["Permissions", (m) => {
+              const canManage = Boolean(m.coOwnerPermission || m.officerPermission || m.buildPermission || m.inventoryPermission);
+              return <span className="permission-icons"><Hammer aria-hidden="true" className={m.buildPermission ? "enabled" : ""} /><Package aria-hidden="true" className={m.inventoryPermission ? "enabled blue" : ""} /><span className={`status-pill ${canManage ? "good" : "muted"}`}>{canManage ? "Can manage settlement" : "Standard member"}</span></span>;
+            }],
+            ["Details", (m) => <button className="mini-action" type="button" aria-label={`View ${String(m.username ?? "member")} details`} onClick={(event) => { event.stopPropagation(); openMemberDetails(m); }}>View details</button>],
           ]}
         />
       </div>
@@ -251,7 +260,7 @@ export function Members({
                 </section>
                 <section className="profile-history-panel">
                   <h3><Star size={17} /> Quests</h3>
-                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} columns={[
+                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} emptyState="No recent quests were returned for this member." columns={[
                     ["Quest", (row) => row.description ?? "-"],
                     ["Status", (row) => row.completed ? "Complete" : "Open"],
                   ]} />

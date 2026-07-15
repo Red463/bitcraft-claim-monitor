@@ -83,7 +83,7 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
         <div className="research-filter-grid">
           <label className="research-filter-field">
             <span>Technology</span>
-            <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
+            <SearchBox label="Search research technologies" value={query} onChange={setQuery} placeholder="Search technologies" />
           </label>
           <label className="research-filter-field">
             <span>Tier</span>
