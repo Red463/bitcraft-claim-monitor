@@ -95,4 +95,3 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
-import "../styles/research.css";

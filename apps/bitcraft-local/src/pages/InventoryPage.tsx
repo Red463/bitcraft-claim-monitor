@@ -245,4 +245,3 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
     </div>
   );
 }
-import "../styles/inventory.css";

@@ -440,5 +440,3 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
     </div>
   );
 }
-
-import "../styles/market.css";

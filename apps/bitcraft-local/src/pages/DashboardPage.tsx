@@ -252,4 +252,3 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
     </div>
   );
 }
-import "../styles/dashboard.css";

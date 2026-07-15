@@ -330,5 +330,3 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     </div>
   );
 }
-
-import "../styles/production.css";

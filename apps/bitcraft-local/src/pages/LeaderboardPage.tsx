@@ -423,5 +423,3 @@ export function Leaderboard({
     </div>
   );
 }
-
-import "../styles/leaderboard.css";

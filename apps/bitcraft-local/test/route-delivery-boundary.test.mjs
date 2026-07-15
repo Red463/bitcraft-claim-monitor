@@ -60,7 +60,8 @@ test("each feature route owns its stylesheet", () => {
   const main = source("../src/main.tsx");
   for (const [page, stylesheet] of routeStyles) {
     const pageSource = source(`../src/pages/${page}`);
-    assert.match(pageSource, new RegExp(`import \"\\.\\.\\/styles\\/${stylesheet.replace(".", "\\.")}\";`), page);
+    const ownedImport = new RegExp(`import \"\\.\\.\\/styles\\/${stylesheet.replace(".", "\\.")}\";`, "g");
+    assert.equal(pageSource.match(ownedImport)?.length ?? 0, 1, `${page} should import ${stylesheet} exactly once`);
     assert.doesNotMatch(main, new RegExp(stylesheet.replace(".", "\\.")), stylesheet);
   }
 });

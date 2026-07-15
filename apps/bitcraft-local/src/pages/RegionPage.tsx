@@ -164,5 +164,3 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
-
-import "../styles/region.css";

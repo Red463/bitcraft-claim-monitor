@@ -427,5 +427,3 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     </div>
   );
 }
-
-import "../styles/empires.css";

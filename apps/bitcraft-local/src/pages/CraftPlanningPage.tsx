@@ -575,4 +575,3 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     </div>
   );
 }
-import "../styles/craft-planning.css";

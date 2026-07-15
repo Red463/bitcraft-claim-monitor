@@ -201,4 +201,3 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
     </div>
   );
 }
-import "../styles/construction.css";

@@ -175,4 +175,3 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
     </div>
   );
 }
-import "../styles/activity.css";

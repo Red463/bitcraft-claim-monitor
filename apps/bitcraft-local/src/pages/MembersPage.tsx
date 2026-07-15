@@ -274,5 +274,3 @@ export function Members({
     </div>
   );
 }
-
-import "../styles/members.css";

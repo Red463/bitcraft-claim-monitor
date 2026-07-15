@@ -174,4 +174,3 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     </section>
   );
 }
-import "../styles/public-craft.css";
