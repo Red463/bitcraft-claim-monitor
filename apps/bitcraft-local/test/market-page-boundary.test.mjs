@@ -50,3 +50,10 @@ test("Market summaries and form controls stack on phones", () => {
   assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-member-field\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-member-placeholder\s*\{[^}]*justify-content:\s*flex-start[^}]*white-space:\s*normal/s);
 });
+
+test("Market tool tabs cannot impose their max-content width on phones", () => {
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+
+  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-tabs\s*\{[^}]*min-width:\s*0[^}]*display:\s*grid[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-tabs button\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*white-space:\s*normal/s);
+});

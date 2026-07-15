@@ -694,6 +694,20 @@
   .opportunity-strip { grid-template-columns: 1fr; }
   .market-member-field { grid-template-columns: 1fr; }
   .market-member-placeholder { justify-content: flex-start; white-space: normal; }
+  .market-tool-row { min-width: 0; }
+  .market-tabs {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+  .market-tabs button {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    padding: 8px 10px;
+    white-space: normal;
+  }
   .price-finder-controls,
   .price-finder-heading { display: grid; }
   .price-finder-controls .field { min-width: 0; }
