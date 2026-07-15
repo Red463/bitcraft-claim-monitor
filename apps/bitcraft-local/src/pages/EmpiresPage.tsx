@@ -374,7 +374,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
-            <DataTable rows={overviewRows} columns={overviewColumns} emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
+            <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>
             )
@@ -418,7 +418,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
                 <small>{formatNumber(selectedEmpireRiskCount)}</small>
               </label>
             </div>
-            <DataTable rows={visibleTowerRows} columns={towerColumns} emptyKind="no-match" emptyState="No claimed watchtowers match these filters." onRowClick={openTowerDetails} rowClassName={() => "clickable-row"} />
+            <DataTable rows={visibleTowerRows} columns={towerColumns} scrollLabel="Watchtowers table" emptyKind="no-match" emptyState="No claimed watchtowers match these filters." onRowClick={openTowerDetails} rowClassName={() => "clickable-row"} />
           </section>
         </>
             )

@@ -9,6 +9,20 @@ test("Empires renders a restricted state when every view is denied", () => {
   assert.match(empiresPage, /No empire views are available for your account\./);
 });
 
+test("Empires contains wide tables on phones and names their keyboard scrollers", () => {
+  const dataTable = readFileSync(new URL("../src/components/main/DataTable.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.empires-page\s*\{[^}]*min-width:\s*0/s);
+  assert.match(css, /\.empires-page\s*>\s*\*\s*\{[^}]*min-width:\s*0/s);
+  assert.match(css, /\.empires-page \.table-wrap\s*\{[^}]*max-width:\s*100%/s);
+  assert.match(empiresPage, /scrollLabel="Regional empires table"/);
+  assert.match(empiresPage, /scrollLabel="Watchtowers table"/);
+  assert.match(dataTable, /scrollLabel\?:\s*string/);
+  assert.match(dataTable, /tabIndex=\{scrollLabel \? 0 : undefined\}/);
+  assert.match(dataTable, /aria-label=\{scrollLabel\}/);
+});
+
 test("watchtower dialog stays viewport bounded and renders all empire members", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
