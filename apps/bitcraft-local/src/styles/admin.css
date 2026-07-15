@@ -99,7 +99,7 @@
 .admin-loader-copy .eyebrow {
   color: var(--gold);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: .14em;
   text-transform: uppercase;
 }
@@ -285,7 +285,7 @@
   color: #b8c2cf;
   background: rgba(255,255,255,.018);
   cursor: pointer;
-  font-weight: 850;
+  font-weight: 800;
   text-align: center;
   white-space: nowrap;
 }
@@ -328,7 +328,7 @@
   display: block;
   color: #7f8da0;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -539,7 +539,7 @@
 .collector-summary strong {
   color: var(--gold);
   font-size: var(--font-micro);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -856,7 +856,7 @@
   border-radius: 999px;
   padding: 3px 9px;
   font-size: var(--font-micro);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
@@ -907,7 +907,7 @@
 .app-popups-card { gap: 14px; }
 .popup-admin-table { display: grid; gap: 7px; min-width: 0; }
 .popup-admin-table-row { min-width: 0; display: grid; grid-template-columns: 42px minmax(130px, .95fr) 92px minmax(150px, .9fr) minmax(120px, 1fr) auto; gap: 10px; align-items: center; border: 1px solid rgba(108,123,145,.18); border-radius: 7px; background: rgba(255,255,255,.018); padding: 9px 10px; }
-.popup-admin-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
+.popup-admin-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
 .popup-admin-table-row.header span:first-child { color: transparent; }
 .popup-admin-table-row .compact-toggle { width: 34px; min-width: 0; max-width: 34px; min-height: 20px; justify-self: center; justify-content: center; gap: 0; padding: 0; border: 0; background: transparent; }
 .popup-admin-table-row .compact-toggle > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -919,7 +919,7 @@
 .popup-title-cell small { color: #8794a7; font-size: 11px; font-weight: 750; }
 .popup-row-actions { justify-content: flex-end; flex-wrap: nowrap; min-width: 0; }
 .popup-row-actions .toolbar-button { padding-inline: 9px; }
-.popup-type-badge { width: fit-content; border: 1px solid rgba(86,213,255,.28); border-radius: 999px; padding: 3px 8px; color: #9ee8ff; background: rgba(86,213,255,.08); font-size: 12px; font-weight: 850; }
+.popup-type-badge { width: fit-content; border: 1px solid rgba(86,213,255,.28); border-radius: 999px; padding: 3px 8px; color: #9ee8ff; background: rgba(86,213,255,.08); font-size: 12px; font-weight: 800; }
 .popup-type-badge.warning { color: #ffcf86; border-color: rgba(255,179,71,.32); background: rgba(255,179,71,.09); }
 .popup-type-badge.danger { color: #ffaaa8; border-color: rgba(239,100,97,.34); background: rgba(239,100,97,.09); }
 .popup-type-badge.success { color: #a9f7c9; border-color: rgba(99,235,165,.32); background: rgba(99,235,165,.08); }
@@ -945,7 +945,7 @@
 .audit-summary-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .audit-table { display: grid; gap: 6px; overflow-x: auto; }
 .audit-table-row { min-width: 820px; display: grid; grid-template-columns: minmax(180px, 1fr) 160px 170px minmax(240px, 1.3fr); gap: 10px; align-items: center; border: 1px solid rgba(108,123,145,.16); border-radius: 7px; background: rgba(255,255,255,.018); padding: 9px 10px; }
-.audit-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
+.audit-table-row.header { color: #7f8da0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.03); }
 .audit-table-row.failed { border-color: rgba(239,100,97,.22); background: rgba(239,100,97,.055); }
 .audit-table-row strong, .audit-table-row span, .audit-table-row small, .audit-table-row time { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audit-load-more { justify-self: center; }

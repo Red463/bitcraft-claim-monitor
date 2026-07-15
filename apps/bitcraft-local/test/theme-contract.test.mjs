@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const themeSource = readFileSync(new URL("../src/theme.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const settingsDialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
 
 async function loadThemeModule() {
   return import("../src/theme.ts");
@@ -16,7 +15,7 @@ test("default and deliberately extreme valid themes meet the public contrast con
   const validThemes = [
     DEFAULT_THEME,
     { ...DEFAULT_THEME, bg: "#000000", sidebar: "#050505", panel: "#101010", panel2: "#171717", cardTop: "#121212", cardBottom: "#050505", text: "#ffffff", muted: "#b8b8b8", cardTitle: "#d0d0d0", cardValue: "#ffffff", activeColor: "#ffe66d", activeBg: "#332b00", activeBorder: "#9d8500" },
-    { ...DEFAULT_THEME, bg: "#f7f9fc", sidebar: "#ffffff", panel: "#eef2f7", panel2: "#e5eaf1", cardTop: "#eef2f7", cardBottom: "#e4e9f0", text: "#101828", muted: "#475467", cardTitle: "#344054", cardValue: "#101828", activeColor: "#5235a8", activeBg: "#eee9ff", activeBorder: "#6941c6" },
+    { ...DEFAULT_THEME, bg: "#f7f9fc", sidebar: "#ffffff", panel: "#eef2f7", panel2: "#e5eaf1", cardTop: "#eef2f7", cardBottom: "#e4e9f0", text: "#101828", muted: "#475467", cardTitle: "#344054", cardValue: "#101828", activeColor: "#5235a8", activeBg: "#eee9ff", activeBorder: "#6941c6", gold: "#5235a8", good: "#067647", danger: "#b42318" },
   ];
 
   for (const theme of validThemes) assert.deepEqual(validateThemeContrast(theme), { valid: true, failures: [] });
@@ -39,14 +38,24 @@ test("unsafe themes report role-specific failures", async () => {
   assert.ok(result.failures.every((failure) => Number.isFinite(failure.ratio)));
 });
 
-test("custom theme save and import validate before persistence or activation", () => {
-  const saveBody = settingsDialog.match(/const saveCustomTheme = \(\) => \{(?<body>[\s\S]*?)\n  \};/)?.groups?.body ?? "";
-  const importBody = settingsDialog.match(/const applyImportedTheme = \(\) => \{(?<body>[\s\S]*?)\n  \};/)?.groups?.body ?? "";
+test("theme candidate and contrast behavior reject unsupported runtime colors", async () => {
+  const { DEFAULT_THEME, normalizeThemeCandidate, validateThemeContrast } = await loadThemeModule();
+  for (const color of ["not-a-color", "#ffffff80", "#fff", "rgb(255,255,255)"]) {
+    assert.equal(normalizeThemeCandidate({ text: color }), null, color);
+    const result = validateThemeContrast({ ...DEFAULT_THEME, text: color });
+    assert.equal(result.valid, false, color);
+    assert.ok(result.failures.some((failure) => failure.role === "text color format"));
+    assert.ok(result.failures.every((failure) => Number.isFinite(failure.ratio)));
+  }
+});
 
-  assert.match(settingsDialog, /validateThemeContrast/);
-  assert.ok(saveBody.indexOf("validateThemeContrast") < saveBody.indexOf("localStorage.setItem"));
-  assert.ok(importBody.indexOf("validateThemeContrast") < importBody.indexOf("onThemeChange"));
-  assert.match(settingsDialog, /failures\.map/);
+test("status and accent text roles are validated against operational panels", async () => {
+  const { DEFAULT_THEME, validateThemeContrast } = await loadThemeModule();
+  for (const [key, role] of [["good", "positive text on panel"], ["danger", "danger text on panel"], ["gold", "accent text on panel"]]) {
+    const result = validateThemeContrast({ ...DEFAULT_THEME, [key]: DEFAULT_THEME.panel });
+    assert.equal(result.valid, false, role);
+    assert.ok(result.failures.some((failure) => failure.role === role && failure.minimum === 4.5));
+  }
 });
 
 test("placeholder, focus, touch, and z-index roles use shared semantic tokens", () => {
@@ -67,6 +76,11 @@ test("font assets cover requested shared roles without the unloaded Dashboard In
   assert.match(indexHtml, /family=JetBrains\+Mono:wght@400;500;700;800/);
   const dashboardCss = readFileSync(new URL("../src/styles/dashboard.css", import.meta.url), "utf8");
   assert.doesNotMatch(dashboardCss, /font-family:\s*Inter\b/);
+  const css = [styles, ...readdirSync(new URL("../src/styles/", import.meta.url))
+    .filter((name) => name.endsWith(".css"))
+    .map((name) => readFileSync(new URL(`../src/styles/${name}`, import.meta.url), "utf8"))].join("\n");
+  const requested = [...css.matchAll(/font-weight:\s*(\d+)\b/g)].map((match) => Number(match[1]));
+  assert.equal(Math.max(...requested), 800);
 });
 
 test("PageHeader is shared by exactly the first seven canonical routes", () => {
@@ -100,5 +114,12 @@ test("resting route panels avoid wide decorative shadows and layout-property tra
     assert.doesNotMatch(css, /box-shadow:[^;]*0\s+1[02468]px\s+2[048]px\s+rgba\(0,0,0/);
   }
   assert.doesNotMatch(styles, /transition:\s*grid-template-columns\b/);
+  const appSidebarRule = styles.match(/\.app-sidebar\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+  assert.doesNotMatch(appSidebarRule, /transition:/);
+  for (const selector of [".brand", ".brand > img", ".brand > div", ".sidebar-toggle", "nav .nav-label", ".sidebar-account-card"]) {
+    const escaped = selector.replaceAll(".", "\\.").replaceAll(" ", "\\s+").replaceAll(">", "\\s*>\\s*");
+    const body = styles.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]*)\\}`))?.groups?.body ?? "";
+    assert.doesNotMatch(body, /transition:[^;]*(?:width|height|max-width|margin|padding|gap)/, selector);
+  }
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
 });

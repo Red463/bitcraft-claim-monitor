@@ -139,10 +139,10 @@
 .leaderboard-profession-list article { grid-template-columns: minmax(0, 1fr) auto; }
 .leaderboard-profession-list strong, .leaderboard-recent-list strong { color: #fff; font-size: 14px; }
 .leaderboard-profession-list small, .leaderboard-recent-list small { display: block; color: #aab5c4; font-size: 12px; margin-top: 2px; }
-.leaderboard-profession-list article > span { color: #f0c64f; font-weight: 900; font-size: 16px; }
+.leaderboard-profession-list article > span { color: #f0c64f; font-weight: 800; font-size: 16px; }
 .leaderboard-profession-list em { grid-column: 1 / -1; color: #7f8998; font-size: 12px; font-style: normal; }
 .leaderboard-recent-list article { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
-.leaderboard-recent-list article > span:not(.activity-dot) { color: #f0c64f; font-weight: 850; }
+.leaderboard-recent-list article > span:not(.activity-dot) { color: #f0c64f; font-weight: 800; }
 .leaderboard-recent-list time { color: #7f8998; font-size: 12px; white-space: nowrap; }
 .leaderboard-page .select-control {
   border-color: rgba(154,168,190,.28);

@@ -74,6 +74,9 @@ function contrastRatio(foreground: string, background: string) {
 }
 
 export function validateThemeContrast(theme: BrowserTheme): ThemeContrastResult {
+  const colorKeys = (Object.keys(DEFAULT_THEME) as ThemeKey[]).filter((key): key is ThemeColorKey => !THEME_RANGE_KEYS.includes(key as ThemeRangeKey));
+  const invalidColors = new Set(colorKeys.filter((key) => typeof theme[key] !== "string" || !HEX_COLOR_RE.test(theme[key])));
+  const formatFailures = [...invalidColors].map((key) => ({ role: `${key} color format`, ratio: 0, minimum: 1 }));
   const checks: Array<{ role: string; foreground: ThemeColorKey; background: ThemeColorKey; minimum: number }> = [
     { role: "primary text on page", foreground: "text", background: "bg", minimum: 4.5 },
     { role: "primary text on sidebar", foreground: "text", background: "sidebar", minimum: 4.5 },
@@ -88,13 +91,18 @@ export function validateThemeContrast(theme: BrowserTheme): ThemeContrastResult 
     { role: "card value on bottom surface", foreground: "cardValue", background: "cardBottom", minimum: 4.5 },
     { role: "active text on active surface", foreground: "activeColor", background: "activeBg", minimum: 4.5 },
     { role: "focus indicator on active surface", foreground: "activeColor", background: "activeBg", minimum: 3 },
-    { role: "focus border on panel", foreground: "activeBorder", background: "panel", minimum: 3 },
+    { role: "focus indicator on panel", foreground: "activeColor", background: "panel", minimum: 3 },
+    { role: "selected border on panel", foreground: "activeBorder", background: "panel", minimum: 3 },
+    { role: "positive text on panel", foreground: "good", background: "panel", minimum: 4.5 },
+    { role: "danger text on panel", foreground: "danger", background: "panel", minimum: 4.5 },
+    { role: "accent text on panel", foreground: "gold", background: "panel", minimum: 4.5 },
   ];
   const failures = checks.flatMap(({ role, foreground, background, minimum }) => {
+    if (invalidColors.has(foreground) || invalidColors.has(background)) return [];
     const ratio = contrastRatio(theme[foreground], theme[background]);
     return ratio < minimum ? [{ role, ratio: Number(ratio.toFixed(2)), minimum }] : [];
   });
-  return { valid: failures.length === 0, failures };
+  return { valid: formatFailures.length === 0 && failures.length === 0, failures: [...formatFailures, ...failures] };
 }
 
 export function clampThemeNumber(value: unknown, min: number, max: number, fallback: string) {
@@ -124,6 +132,8 @@ export function normalizeThemeCandidate(input: unknown): { theme: ThemeSettings;
     } else if (typeof value === "string" && HEX_COLOR_RE.test(value)) {
       nextTheme[key] = value;
       applied += 1;
+    } else if (value !== undefined) {
+      return null;
     }
   }
   return applied ? { theme: nextTheme, count: applied } : null;

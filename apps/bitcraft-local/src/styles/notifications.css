@@ -39,7 +39,7 @@
 .toast button { width: 27px; height: 27px; border: 1px solid transparent; border-radius: 7px; color: #8793a4; background: transparent; display: grid; place-items: center; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 
-.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 900; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
+.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 800; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
 
 .notification-sound-settings { gap: 12px; }
 .notification-sound-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr); gap: 12px; align-items: end; }

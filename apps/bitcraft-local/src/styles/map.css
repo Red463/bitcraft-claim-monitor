@@ -44,7 +44,7 @@
 .map-player-tracking-summary { min-width: 220px; display: flex; align-items: center; gap: 9px; }
 .map-player-tracking-summary svg { color: var(--gold); }
 .map-player-tracking-summary div { display: grid; gap: 2px; min-width: 0; }
-.map-player-tracking-summary strong { color: #f7f8fb; font-size: 13px; font-weight: 850; line-height: 1.05; }
+.map-player-tracking-summary strong { color: #f7f8fb; font-size: 13px; font-weight: 800; line-height: 1.05; }
 .map-player-tracking-summary span { color: #aab5c4; font-size: 12px; line-height: 1.1; }
 .map-player-tracking-actions,
 .map-player-bulk-actions,
@@ -201,7 +201,7 @@
 .map-player-tracking-summary { min-width: 220px; display: flex; align-items: center; gap: 9px; }
 .map-player-tracking-summary svg { color: var(--gold); }
 .map-player-tracking-summary div { display: grid; gap: 2px; min-width: 0; }
-.map-player-tracking-summary strong { color: #f7f8fb; font-size: 13px; font-weight: 850; line-height: 1.05; }
+.map-player-tracking-summary strong { color: #f7f8fb; font-size: 13px; font-weight: 800; line-height: 1.05; }
 .map-player-tracking-summary span { color: #aab5c4; font-size: 12px; line-height: 1.1; }
 .map-player-tracking-actions,
 .map-player-bulk-actions,

@@ -270,7 +270,7 @@
   cursor: pointer;
 }
 .dashboard-member-list button:hover { background: rgba(255,255,255,.025); }
-.dashboard-avatar { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #6b4f27, #0b0f14); color: #fff; display: grid; place-items: center; position: relative; font-weight: 900; }
+.dashboard-avatar { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #6b4f27, #0b0f14); color: #fff; display: grid; place-items: center; position: relative; font-weight: 800; }
 .dashboard-avatar .online-dot { position: absolute; right: -2px; bottom: -2px; margin: 0; border: 2px solid #0c141f; }
 .dashboard-member-copy,
 .dashboard-member-session { display: grid; gap: 5px; min-width: 0; }
@@ -315,7 +315,7 @@
   cursor: pointer;
 }
 .dashboard-alert-list button:hover { background: rgba(255,255,255,.025); }
-.dashboard-alert-list button > span { grid-row: span 2; width: 34px; height: 28px; border-radius: 14px; display: grid; place-items: center; color: var(--card-bottom); background: var(--active-color); font-weight: 900; font-size: 12px; }
+.dashboard-alert-list button > span { grid-row: span 2; width: 34px; height: 28px; border-radius: 14px; display: grid; place-items: center; color: var(--card-bottom); background: var(--active-color); font-weight: 800; font-size: 12px; }
 .dashboard-alert-list button.danger > span { background: #dc5959; color: #fff; }
 .dashboard-alert-list button.blue > span { background: #3e8be5; color: #08111b; }
 .dashboard-alert-list button.purple > span { background: #8a4be4; color: #fff; }
