@@ -437,7 +437,7 @@
 
 @media (max-width: 900px) {
   .production-page .contributors { grid-template-columns: 1fr; }
-  .production-grid { grid-template-columns: 1fr; }
+  .production-page .production-grid { grid-template-columns: 1fr; }
   .production-member-banner { flex-wrap: wrap; }
   .production-member-banner small { margin-left: 0; width: 100%; }
 }
@@ -446,6 +446,7 @@
   .production-page .production-summary { grid-template-columns: 1fr; }
   .production-controls { align-items: stretch; flex-direction: column; }
   .production-controls .select-control { width: 100%; min-width: 0; }
+  .production-crafter-line { flex-wrap: wrap; }
 }
 
 

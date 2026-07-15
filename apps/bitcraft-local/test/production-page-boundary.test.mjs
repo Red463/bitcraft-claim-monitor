@@ -50,3 +50,21 @@ test("Production summary values wrap instead of truncating on phones", () => {
   assert.match(valueRule, /overflow-wrap:\s*anywhere/);
   assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.production-page \.production-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
 });
+
+test("Production cards collapse to one contained column below the tablet breakpoint", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+
+  assert.match(
+    css,
+    /@media \(max-width:\s*900px\)[\s\S]*\.production-page \.production-grid\s*\{[^}]*grid-template-columns:\s*1fr/s,
+  );
+});
+
+test("Production crafter filters wrap within phone-width control panels", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+
+  assert.match(
+    css,
+    /@media \(max-width:\s*560px\)[\s\S]*\.production-crafter-line\s*\{[^}]*flex-wrap:\s*wrap/s,
+  );
+});
