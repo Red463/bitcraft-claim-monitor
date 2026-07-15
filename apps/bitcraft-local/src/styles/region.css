@@ -176,12 +176,16 @@
 }
 .region-table-panel .table-wrap {
   margin-top: 12px;
+  max-width: 100%;
   border-color: rgba(108,123,145,.24);
   border-radius: 7px;
   background-color: #090e15;
   background-image: none;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
+  overflow-x: auto;
+  scrollbar-gutter: stable;
 }
+.region-table-panel .table-wrap table { min-width: 760px; }
 .region-panel th {
   background: linear-gradient(180deg, rgba(15,22,31,.98), rgba(9,14,21,.99));
   color: #aeb8c6;
@@ -208,4 +212,18 @@
   border-color: rgba(240,198,79,.52);
   outline: 0;
   box-shadow: 0 0 0 2px rgba(240,198,79,.16);
+}
+
+@media (max-width: 920px) {
+  .region-rank-grid,
+  .region-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .region-context { grid-template-columns: 1fr; }
+  .region-identity { width: 100%; min-width: 0; }
+  .region-table-panel { min-width: 0; }
+}
+
+@media (max-width: 560px) {
+  .region-rank-grid,
+  .region-summary-grid { grid-template-columns: 1fr; }
+  .region-leaders-panel .bar-row { grid-template-columns: 1fr; }
 }

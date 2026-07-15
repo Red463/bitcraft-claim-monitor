@@ -39,3 +39,14 @@ test("Production current crafter pills filter by that member", () => {
   assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill/);
   assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill\.active/);
 });
+
+test("Production summary values wrap instead of truncating on phones", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+  const valueRule = css.match(/\.production-page \.mini-stat strong\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(valueRule, /overflow:\s*visible/);
+  assert.match(valueRule, /text-overflow:\s*clip/);
+  assert.match(valueRule, /white-space:\s*normal/);
+  assert.match(valueRule, /overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.production-page \.production-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});

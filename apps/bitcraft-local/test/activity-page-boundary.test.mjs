@@ -12,3 +12,10 @@ test("Activity page lives outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, new RegExp("export function ActivityPanel\\b"));
   assert.equal(appShell.includes('import { ActivityPanel } from "./pages/ActivityPage";'), true);
 });
+
+test("Activity overview and labelled filters stack on phones", () => {
+  const css = readFileSync(new URL("../src/styles/activity.css", import.meta.url), "utf8");
+
+  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.activity-overview,\s*\.activity-filter-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.activity-command-head\s*\{[^}]*align-items:\s*flex-start[^}]*flex-direction:\s*column/s);
+});

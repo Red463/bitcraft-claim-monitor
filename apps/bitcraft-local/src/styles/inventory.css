@@ -239,5 +239,15 @@
 }
 
 @media (max-width: 1250px) {
+  .inventory-summary,
   .inventory-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .inventory-summary,
+  .inventory-filter-grid { grid-template-columns: 1fr; }
+  .inventory-command-header { align-items: stretch; flex-direction: column; }
+  .inventory-command-actions { justify-content: flex-start; flex-wrap: wrap; width: 100%; }
+  .inventory-page .container-card summary { align-items: flex-start; flex-direction: column; padding-block: 12px; }
+  .inventory-page .container-card summary small { text-align: left; }
 }

@@ -686,6 +686,14 @@
 }
 
 @media (max-width: 700px) {
+  .market-summary,
+  .market-live-grid,
+  .market-analytics-metrics,
+  .market-page .price-finder .metric-grid,
+  .market-filter-grid,
+  .opportunity-strip { grid-template-columns: 1fr; }
+  .market-member-field { grid-template-columns: 1fr; }
+  .market-member-placeholder { justify-content: flex-start; white-space: normal; }
   .price-finder-controls,
   .price-finder-heading { display: grid; }
   .price-finder-controls .field { min-width: 0; }

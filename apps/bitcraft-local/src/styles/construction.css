@@ -384,7 +384,19 @@
 }
 
 @media (max-width: 1250px) {
+  .construction-summary,
+  .construction-page .gather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .construction-page .project-list { grid-template-columns: 1fr; }
   .construction-material-row { grid-template-columns: 34px minmax(0, 1fr); }
   .construction-material-numbers { grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: start; }
+}
+
+@media (max-width: 560px) {
+  .construction-summary,
+  .construction-page .gather-grid { grid-template-columns: 1fr; }
+  .construction-controls { align-items: stretch; flex-direction: column; }
+  .construction-controls > div:first-child { margin-right: 0; }
+  .construction-controls .toggle-row { width: 100%; }
+  .construction-sort-field { width: 100%; grid-template-columns: 1fr; }
+  .construction-sort-field select { width: 100%; min-width: 0; }
 }

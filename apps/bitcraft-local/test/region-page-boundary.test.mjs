@@ -13,3 +13,11 @@ test("Region page defaults rankings to weighted settlement score", () => {
   assert.match(page, /title=\{key === "score" \? scoreFormulaTitle : undefined\}/);
   assert.match(page, /<strong title=\{scoreFormulaTitle\}>/);
 });
+
+test("Region cards reflow while its rankings table keeps an explicit scroller", () => {
+  const css = readFileSync(new URL("../src/styles/region.css", import.meta.url), "utf8");
+
+  assert.match(css, /@media \(max-width:\s*920px\)[\s\S]*\.region-rank-grid,\s*\.region-summary-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.region-rank-grid,\s*\.region-summary-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(css, /\.region-table-panel \.table-wrap\s*\{[^}]*max-width:\s*100%[^}]*overflow-x:\s*auto[^}]*scrollbar-gutter:\s*stable/s);
+});

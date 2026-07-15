@@ -12,3 +12,11 @@ test("Inventory page lives outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, new RegExp("export function Inventory\\b"));
   assert.equal(appShell.includes('import { Inventory } from "./pages/InventoryPage";'), true);
 });
+
+test("Inventory summary and filters reflow without clipping", () => {
+  const css = readFileSync(new URL("../src/styles/inventory.css", import.meta.url), "utf8");
+
+  assert.match(css, /@media \(max-width:\s*1250px\)[\s\S]*\.inventory-summary,\s*\.inventory-filter-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.inventory-summary,\s*\.inventory-filter-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.inventory-command-header\s*\{[^}]*align-items:\s*stretch[^}]*flex-direction:\s*column/s);
+});
