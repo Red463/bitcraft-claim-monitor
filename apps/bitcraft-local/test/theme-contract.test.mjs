@@ -70,7 +70,7 @@ test("placeholder, focus, touch, and z-index roles use shared semantic tokens", 
   }
 });
 
-test("migrated route search controls use theme surfaces and a shared compound focus indicator", () => {
+test("migrated route search controls use theme surfaces", () => {
   const migratedSearchRules = [
     ["members.css", /\.members-toolbar \.search\s*\{(?<body>[^}]*)\}/],
     ["skills.css", /\.skills-page \.select-control,\s*\.skills-page \.skills-toolbar \.search\s*\{(?<body>[^}]*)\}/],
@@ -89,9 +89,17 @@ test("migrated route search controls use theme surfaces and a shared compound fo
   assert.match(researchControls, /background:\s*var\(--panel-2\)/);
   assert.doesNotMatch(researchControls, /#080d14|rgba\(5,\s*8,\s*12/);
 
-  const compoundFocus = styles.match(/\.search:focus-within\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+});
+
+test("compound search and checkbox focus indicators survive migrated route overrides", () => {
+  const compoundFocus = styles.match(/body \.app-shell main \.search:focus-within\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
   assert.match(compoundFocus, /border-color:\s*var\(--focus-border\)/);
   assert.match(compoundFocus, /box-shadow:\s*0\s+0\s+0\s+3px\s+var\(--focus-ring\)/);
+  assert.doesNotMatch(compoundFocus, /!important/);
+
+  const checkboxFocus = styles.match(/input\[type="checkbox"\]:focus-visible\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+  assert.match(checkboxFocus, /outline:\s*2px\s+solid\s+var\(--text\)/);
+  assert.doesNotMatch(checkboxFocus, /rgba?\(|#[0-9a-f]{3,8}\b/i);
 });
 
 test("font assets cover requested shared roles without the unloaded Dashboard Inter fallback", () => {
