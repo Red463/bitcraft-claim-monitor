@@ -238,7 +238,7 @@ export function UserSettingsDialog({
             <div className="settings-section-heading">
               <div>
                 <h3>Discord Account</h3>
-                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and save settings beyond this browser.</p>
+                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and synchronize supported preferences across browsers.</p>
               </div>
               {auth.user ? <button className="toolbar-button" onClick={() => runAccountAction(onDiscordLogout, "Signed out of Discord.")}><LogOut size={14} /> Sign out</button> : null}
             </div>
@@ -279,7 +279,7 @@ export function UserSettingsDialog({
           </section> : null}
           {settingsSection === "account" ? <section>
             <h3>This Browser</h3>
-            <p className="legend">When signed in with Discord, your page, filters, density and notification preferences sync to your account. Local storage is still used on this device for signed-out browsing and instant loading.</p>
+            <p className="legend">Density, toast preferences, theme, sidebar state and groups, and your selected production member sync automatically while you are signed in with Discord. Page and filter choices stay in this browser. Local storage is still used on this device for signed-out browsing and instant loading.</p>
           </section> : null}
           {settingsSection === "account" ? <section>
             <h3>Administrator Access</h3>

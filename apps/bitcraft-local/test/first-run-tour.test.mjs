@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -23,16 +24,30 @@ test("decline, start, skip, close, and complete all mark the first-run tour as s
   }
 });
 
-test("tour steps include page navigation metadata for the full app overview", () => {
-  const pages = new Set(FIRST_RUN_TOUR_STEPS.map((step) => step.page));
-  for (const page of ["dashboard", "leaderboard", "members", "skills", "production", "inventory", "construction", "research", "market", "empire", "empires", "map", "activity", "publiccrafts", "craftcalc", "sync"]) {
-    assert.equal(pages.has(page), true, `expected a tour step for ${page}`);
-  }
+test("first-run tour is a short task-based path to useful settlement context", () => {
+  assert.ok(FIRST_RUN_TOUR_STEPS.length <= 6, "the first-run tour should take no more than six steps");
+  assert.deepEqual(FIRST_RUN_TOUR_STEPS.map((step) => step.id), [
+    "purpose-freshness",
+    "dashboard-attention",
+    "navigation-groups",
+    "search-jump",
+    "account-access",
+    "help-replay",
+  ]);
   assert.equal(FIRST_RUN_TOUR_STEPS.every((step) => step.id && step.target && step.title && step.body), true);
-  assert.equal(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "refresh")?.placement, "center");
-  assert.equal(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "research")?.body, "Research shows what is already researched and what is still available to unlock.");
-  assert.equal(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "user-settings")?.target, "user-settings");
-  assert.equal(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "user-settings")?.action, "settings");
+  assert.match(FIRST_RUN_TOUR_STEPS[0].body, /fresh|updated|BitJita/i);
+  assert.equal(FIRST_RUN_TOUR_STEPS[1].page, "dashboard");
+  assert.equal(FIRST_RUN_TOUR_STEPS[1].target, "dashboard-summary");
+  assert.match(FIRST_RUN_TOUR_STEPS[1].body, /attention|start/i);
+  assert.match(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "search-jump")?.body ?? "", /Craft Planning/);
+  assert.match(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "account-access")?.body ?? "", /does not guarantee access/i);
+  assert.match(FIRST_RUN_TOUR_STEPS.find((step) => step.id === "help-replay")?.body ?? "", /replay/i);
+});
+
+test("account and verification guidance appears only when Discord access is useful", () => {
+  const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
+  assert.match(manager, /showAccountStep/);
+  assert.match(manager, /FIRST_RUN_TOUR_STEPS\.filter\(\(candidate\) => showAccountStep \|\| candidate\.id !== "account-access"\)/);
 });
 
 test("missing tour targets are safe and return no spotlight rectangle", () => {

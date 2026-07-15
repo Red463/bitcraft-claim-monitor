@@ -36,6 +36,9 @@ test("signed-in Discord settings autosync without manual save and load buttons",
   assert.doesNotMatch(dialog, /Save settings to account/);
   assert.doesNotMatch(dialog, /Load saved settings/);
   assert.match(dialog, /Settings sync automatically while you are signed in with Discord/);
+  assert.match(dialog, /Density, toast preferences, theme, sidebar state and groups, and your selected production member sync automatically/);
+  assert.doesNotMatch(dialog, /your page, filters/);
+  assert.match(dialog, /Page and filter choices stay in this browser\./);
 });
 
 test("approved Discord character links require unlink before relink", () => {

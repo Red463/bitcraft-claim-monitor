@@ -16,22 +16,22 @@ import {
 } from "lucide-react";
 
 export const BOT_SECTIONS = [
-  ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs", "Core"],
+  ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs", "Setup"],
   ["notifications", "Notifications", <Bell size={15} />, "Market, craft, supply and update rules", "Automation"],
   ["youtube", "YouTube Monitor", <Youtube size={15} />, "New videos and announcements", "Automation"],
-  ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing", "Routing"],
-  ["roleManager", "Role Manager", <Users size={15} />, "Create and inspect Discord roles", "Roles"],
-  ["roles", "Craft Watch", <Bell size={15} />, "Profession notification roles", "Roles"],
-  ["colours", "Colour Roles", <Palette size={15} />, "One-click name colour roles", "Roles"],
-  ["community", "Role Panels", <UserPlus size={15} />, "Self-assign roles and welcome flow", "Roles"],
-  ["moderation", "Moderation", <Shield size={15} />, "Timeouts, bans, purge and ban list", "Management"],
-  ["safety", "Safety Rules", <Lock size={15} />, "Auto-mod, slowmode, lockdown and nicknames", "Management"],
-  ["records", "Member Records", <FileText size={15} />, "Warnings, notes, cases and profiles", "Management"],
-  ["content", "Posts & Events", <MessageCircle size={15} />, "Polls, RSVPs and clean embeds", "Community"],
-  ["commands", "Commands", <Command size={15} />, "Custom slash command responses", "Community"],
-  ["tools", "Tools", <Wrench size={15} />, "Reports, announcements and events", "Community"],
-  ["tests", "Tests", <Command size={15} />, "Slash command registration and previews", "Management"],
-  ["diagnostics", "Diagnostics", <Activity size={15} />, "Delivery log and troubleshooting", "Management"],
+  ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing", "Setup"],
+  ["roleManager", "Role Manager", <Users size={15} />, "Create and inspect Discord roles", "Roles & Onboarding"],
+  ["roles", "Craft Watch", <Bell size={15} />, "Profession notification roles", "Roles & Onboarding"],
+  ["colours", "Colour Roles", <Palette size={15} />, "One-click name colour roles", "Roles & Onboarding"],
+  ["community", "Role Panels", <UserPlus size={15} />, "Self-assign roles and welcome flow", "Roles & Onboarding"],
+  ["moderation", "Moderation", <Shield size={15} />, "Timeouts, bans, purge and ban list", "Moderation"],
+  ["safety", "Safety Rules", <Lock size={15} />, "Auto-mod, slowmode, lockdown and nicknames", "Moderation"],
+  ["records", "Member Records", <FileText size={15} />, "Warnings, notes, cases and profiles", "Moderation"],
+  ["content", "Posts & Events", <MessageCircle size={15} />, "Polls, RSVPs and event posts", "Community Content"],
+  ["commands", "Commands", <Command size={15} />, "Custom slash command responses", "Community Content"],
+  ["tools", "Community Tools", <Wrench size={15} />, "Reports and one-off announcements", "Community Content"],
+  ["tests", "Command Tests", <Command size={15} />, "Preview commands before publishing; compare Diagnostics when delivery fails", "Troubleshooting"],
+  ["diagnostics", "Delivery Diagnostics", <Activity size={15} />, "Inspect delivery logs; use Tests to reproduce command issues", "Troubleshooting"],
 ] as const;
 
 export type BotSection = (typeof BOT_SECTIONS)[number][0];

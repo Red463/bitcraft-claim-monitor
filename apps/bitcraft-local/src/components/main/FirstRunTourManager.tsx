@@ -16,6 +16,7 @@ import {
 type FirstRunTourManagerProps = {
   activePage: ActivePanel;
   enabled: boolean;
+  showAccountStep: boolean;
   replayToken: number;
   onNavigate: (panel: ActivePanel) => void;
   onOpenUserSettings?: () => void;
@@ -44,16 +45,16 @@ function spotlightStyle(rect: ReturnType<typeof tourTargetRect>): React.CSSPrope
   };
 }
 
-export function FirstRunTourManager({ activePage, enabled, replayToken, onNavigate, onOpenUserSettings, onCloseUserSettings, onVisibilityChange }: FirstRunTourManagerProps) {
+export function FirstRunTourManager({ activePage, enabled, showAccountStep, replayToken, onNavigate, onVisibilityChange }: FirstRunTourManagerProps) {
   const [seen, setSeen] = usePersistedState(FIRST_RUN_TOUR_SEEN_KEY, false);
   const [promptOpen, setPromptOpen] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [stepIndex, setStepIndex] = React.useState(0);
   const [targetRect, setTargetRect] = React.useState<ReturnType<typeof tourTargetRect>>(null);
-  const openedActionStepRef = React.useRef("");
 
   const blocked = !enabled;
-  const step = FIRST_RUN_TOUR_STEPS[stepIndex] ?? FIRST_RUN_TOUR_STEPS[0];
+  const steps = FIRST_RUN_TOUR_STEPS.filter((candidate) => showAccountStep || candidate.id !== "account-access");
+  const step = steps[stepIndex] ?? steps[0];
   const visible = promptOpen || running;
 
   React.useEffect(() => {
@@ -61,12 +62,12 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
   }, [blocked, promptOpen, running, seen]);
 
   React.useEffect(() => {
-    if (replayToken <= 0) return;
+    if (replayToken <= 0 || !enabled) return;
     setSeen(true);
     setPromptOpen(false);
     setStepIndex(0);
     setRunning(true);
-  }, [replayToken, setSeen]);
+  }, [enabled, replayToken, setSeen]);
 
   React.useEffect(() => {
     onVisibilityChange?.(visible);
@@ -74,29 +75,14 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
 
   React.useEffect(() => {
     if (!running || !step) return;
-    if (step.action === "settings") {
-      if (openedActionStepRef.current !== step.id) {
-        openedActionStepRef.current = step.id;
-        onOpenUserSettings?.();
-      }
-      if (activePage !== step.page) onNavigate(step.page);
-      return;
-    }
-    openedActionStepRef.current = "";
-    onCloseUserSettings?.();
     if (activePage !== step.page) onNavigate(step.page);
-  }, [activePage, onCloseUserSettings, onNavigate, onOpenUserSettings, running, step]);
+  }, [activePage, onNavigate, running, step]);
 
   React.useEffect(() => {
     if (!running || !step) return;
     setTargetRect(null);
-    let retryTimeout: number | undefined;
     function updateTargetRect() {
       const nextRect = tourTargetRect(document, step);
-      if (!nextRect && step.action === "settings") {
-        onOpenUserSettings?.();
-        retryTimeout = window.setTimeout(updateTargetRect, 80);
-      }
       setTargetRect(nextRect);
     }
     const timeout = window.setTimeout(updateTargetRect, activePage === step.page ? 40 : 180);
@@ -104,11 +90,10 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
     window.addEventListener("scroll", updateTargetRect, true);
     return () => {
       window.clearTimeout(timeout);
-      if (retryTimeout !== undefined) window.clearTimeout(retryTimeout);
       window.removeEventListener("resize", updateTargetRect);
       window.removeEventListener("scroll", updateTargetRect, true);
     };
-  }, [activePage, onOpenUserSettings, running, step]);
+  }, [activePage, running, step]);
 
   function markSeen(action: FirstRunTourAction) {
     if (firstRunTourSeenAfterAction(action)) setSeen(true);
@@ -130,19 +115,17 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
     markSeen(action);
     setPromptOpen(false);
     setRunning(false);
-    openedActionStepRef.current = "";
-    onCloseUserSettings?.();
   }
 
   function next() {
-    if (stepIndex >= FIRST_RUN_TOUR_STEPS.length - 1) {
+    if (stepIndex >= steps.length - 1) {
       close("complete");
       return;
     }
-    setStepIndex((current) => Math.min(current + 1, FIRST_RUN_TOUR_STEPS.length - 1));
+    setStepIndex((current) => Math.min(current + 1, steps.length - 1));
   }
 
-  if (!enabled && !running) return null;
+  if (!enabled) return null;
 
   if (promptOpen) {
     return (
@@ -151,7 +134,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
           <div>
             <h2 id="first-run-tour-prompt-title">Welcome to Claim Monitor</h2>
             <p>Claim Monitor helps your settlement keep track of production, members, markets, inventory, construction, research, empire activity, and map information in one place.</p>
-            <p>Take a short tour to see where the main tools are and how to adjust notifications and browser settings.</p>
+            <p>Take a short tour to find what needs attention, jump to a task, and know where to get help.</p>
           </div>
           <div className="first-run-tour-actions">
             <button className="toolbar-button" onClick={decline}>No thanks</button>
@@ -181,7 +164,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
         style={centerCard ? undefined : cardStyle(step, targetRect)}
       >
         <header>
-          <span>{stepIndex + 1} of {FIRST_RUN_TOUR_STEPS.length}</span>
+          <span>{stepIndex + 1} of {steps.length}</span>
           <button type="button" onClick={() => close("close")} aria-label="Close app tour"><X size={16} /></button>
         </header>
         <h2 id="first-run-tour-title">{step.title}</h2>
@@ -190,7 +173,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
         <div className="first-run-tour-actions">
           <button className="toolbar-button" onClick={() => close("skip")}>Skip tour</button>
           <button className="toolbar-button" disabled={stepIndex === 0} onClick={() => setStepIndex((current) => Math.max(0, current - 1))}>Back</button>
-          <button className="toolbar-button primary" onClick={next}>{stepIndex >= FIRST_RUN_TOUR_STEPS.length - 1 ? "Finish" : "Next"}</button>
+          <button className="toolbar-button primary" onClick={next}>{stepIndex >= steps.length - 1 ? "Finish" : "Next"}</button>
         </div>
       </Dialog>
     </>
