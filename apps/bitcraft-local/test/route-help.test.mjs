@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { activatePagePaletteCommand, buildPagePaletteCommands } from "../src/navigation/paletteCommands.ts";
-import { routeHelpFor } from "../src/navigation/routeHelp.ts";
+import { ROUTE_HELP, routeHelpFor } from "../src/navigation/routeHelp.ts";
 
-const navigationSource = readFileSync(new URL("../src/navigation.ts", import.meta.url), "utf8");
-const routeIds = [...navigationSource.matchAll(/\["([a-zA-Z]+)",\s*"[^"]+",/g)].map((match) => match[1]).filter((id) => id !== "admin");
+const routeIds = Object.keys(ROUTE_HELP);
 const navItems = routeIds.map((id) => [id, id, null]);
 
 test("every non-sensitive navigation route has concise purpose and next-action help", () => {
