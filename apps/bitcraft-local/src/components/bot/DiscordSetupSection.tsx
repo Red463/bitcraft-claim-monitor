@@ -1,16 +1,7 @@
-import React from "react";
 import { MessageCircle, RefreshCw } from "lucide-react";
+import { BotStatusInfo } from "./BotStatusInfo";
 
 type DiscordSettings = Record<string, any>;
-
-function StatusInfo({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
 
 export function DiscordSetupSection({
   discord,
@@ -121,25 +112,25 @@ export function DiscordSetupSection({
           </label>
         </div>
         <div className="status-detail">
-          <StatusInfo label="Gateway" value={status?.discord?.gateway?.connected ? "Connected" : "Not connected"} />
-          <StatusInfo
+          <BotStatusInfo label="Gateway" content={status?.discord?.gateway?.connected ? "Connected" : "Not connected"} tone={status?.discord?.gateway?.connected ? "success" : "warning"} role="status" />
+          <BotStatusInfo
             label="Presence"
-            value={status?.discord?.gateway?.activity || `${discord.presence.status} - ${discord.presence.activityType} ${discord.presence.activityText}`}
+            content={status?.discord?.gateway?.activity || `${discord.presence.status} - ${discord.presence.activityType} ${discord.presence.activityText}`}
           />
-          <StatusInfo label="Gateway error" value={status?.discord?.gateway?.lastError ?? "None"} />
+          <BotStatusInfo label="Gateway error" content={status?.discord?.gateway?.lastError ?? "None"} tone={status?.discord?.gateway?.lastError ? "danger" : "neutral"} role={status?.discord?.gateway?.lastError ? "alert" : undefined} />
         </div>
       </div>
       <div className="status-detail">
-        <StatusInfo
+        <BotStatusInfo
           label="Discovered server"
-          value={discordDiscovery?.guild?.name ? `${discordDiscovery.guild.name} (${discordDiscovery.guild.id})` : "Not synced yet"}
+          content={discordDiscovery?.guild?.name ? `${discordDiscovery.guild.name} (${discordDiscovery.guild.id})` : "Not synced yet"}
         />
-        <StatusInfo
+        <BotStatusInfo
           label="Discovered bot"
-          value={discordDiscovery?.bot?.username ? `${discordDiscovery.bot.username} (${discordDiscovery.bot.id})` : "Not synced yet"}
+          content={discordDiscovery?.bot?.username ? `${discordDiscovery.bot.username} (${discordDiscovery.bot.id})` : "Not synced yet"}
         />
-        <StatusInfo label="Channels" value={formatNumber(discoveredChannelCount)} />
-        <StatusInfo label="Roles" value={formatNumber(discoveredRoleCount)} />
+        <BotStatusInfo label="Channels" content={formatNumber(discoveredChannelCount)} />
+        <BotStatusInfo label="Roles" content={formatNumber(discoveredRoleCount)} />
       </div>
       <button className="toolbar-button" onClick={onSync}>
         <RefreshCw size={15} /> Sync Discord Server

@@ -1349,8 +1349,8 @@ export function AdminPanel({
                 <div className="endpoint-summary-grid">
                   <Info label="Checks run" value={formatNumber(endpointChecks.length)} />
                   <Info label="Failures" value={formatNumber(endpointFailures.length)} />
-                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} Â· ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
-                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} Â· ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Slowest successful" value={slowestEndpoint ? `${slowestEndpoint.label} · ${formatNumber(slowestEndpoint.durationMs)} ms` : "-"} />
+                  <Info label="Fastest successful" value={fastestEndpoint ? `${fastestEndpoint.label} · ${formatNumber(fastestEndpoint.durationMs)} ms` : "-"} />
                 </div>
                 <DataTable
                   emptyState="No analytics summary records were returned."

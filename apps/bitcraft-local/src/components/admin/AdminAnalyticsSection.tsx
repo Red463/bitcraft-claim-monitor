@@ -114,7 +114,7 @@ export function AdminAnalyticsSection({
               <Stat icon={<Activity />} label="Requests" value={formatNumber(data.visitorSecurityData?.totals?.requests)} />
               <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(data.visitorSecurityData?.totals?.uniqueVisitors)} />
               <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(data.visitorSecurityData?.totals?.errors)} />
-              <Stat icon={<MapPin />} label="GeoIP Status" value={data.visitorSecurityData?.geoip?.configured ? `${data.visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} Â· ${formatNumber(data.visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
+              <Stat icon={<MapPin />} label="GeoIP Status" value={data.visitorSecurityData?.geoip?.configured ? `${data.visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} · ${formatNumber(data.visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
               <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(data.visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
             </div>
           </section>

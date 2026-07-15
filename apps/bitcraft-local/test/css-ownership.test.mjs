@@ -12,7 +12,7 @@ function collectSourceFiles(directory) {
   });
 }
 
-test("confirmed legacy selector families stay unused by active markup", () => {
+test("confirmed legacy selector families are absent from active markup and global CSS", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const source = collectSourceFiles(new URL("../src/", import.meta.url))
     .map((url) => readFileSync(url, "utf8"))
@@ -21,11 +21,80 @@ test("confirmed legacy selector families stay unused by active markup", () => {
     .flatMap((match) => match[1].split(/\s+/))
     .filter((token) => /^(?:overview-|command-centre-|row-enter$)/.test(token));
 
-  assert.match(globalCss, /\.overview-[a-z0-9-]+/);
-  assert.match(globalCss, /\.command-centre-[a-z0-9-]+/);
-  assert.match(globalCss, /@keyframes\s+row-enter\b/);
-  assert.match(globalCss, /@media\s*\(max-width:\s*520px\)\s*\{\s*\}/);
+  assert.doesNotMatch(globalCss, /(?:^|[,\s])\.overview-[a-z0-9-]+/m);
+  assert.doesNotMatch(globalCss, /\.command-centre-[a-z0-9-]+/);
+  assert.doesNotMatch(globalCss, /@keyframes\s+row-enter\b/);
+  assert.doesNotMatch(globalCss, /@media\s*\(max-width:\s*520px\)\s*\{\s*\}/);
+  assert.doesNotMatch(globalCss, /\.sidebar-auth-cta\b/);
   assert.deepEqual([...new Set(deadClassTokens)].sort(), []);
+});
+
+test("map mobile queries do not duplicate desktop player-control declarations", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  const desktopOnlyRules = [
+    /\.map-player-tracking\s*\{[^}]*min-height:\s*58px;/g,
+    /\.map-player-dialog-overlay\s*\{[^}]*position:\s*fixed;/g,
+    /\.map-player-dialog\s*\{[^}]*width:\s*min\(560px,/g,
+    /\.map-player-manager-controls\s*\{[^}]*display:\s*grid;/g,
+    /\.map-player-list\s*\{[^}]*min-height:\s*180px;/g,
+  ];
+
+  for (const rule of desktopOnlyRules) {
+    assert.equal([...mapCss.matchAll(rule)].length, 1, `${rule.source} should have one owning declaration`);
+  }
+});
+
+test("Bot Setup, Notifications, and Diagnostics share one semantic status info row", () => {
+  const sharedUrl = new URL("../src/components/bot/BotStatusInfo.tsx", import.meta.url);
+  assert.equal(existsSync(sharedUrl), true, "BotStatusInfo should own the shared Bot status/info vocabulary");
+  const consumers = [
+    "../src/components/bot/DiscordSetupSection.tsx",
+    "../src/components/bot/DiscordNotificationsSection.tsx",
+    "../src/components/bot/DiscordDiagnosticsPanel.tsx",
+  ];
+
+  for (const relativePath of consumers) {
+    const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+    assert.match(source, /import \{ BotStatusInfo \} from "\.\/BotStatusInfo";/);
+    assert.match(source, /<BotStatusInfo\b/);
+    assert.doesNotMatch(source, /function\s+(?:StatusInfo|Info)\s*\(/);
+  }
+
+  const shared = readFileSync(sharedUrl, "utf8");
+  assert.match(shared, /className="info-row bot-status-info"/);
+  assert.match(shared, /export type BotStatusTone = "neutral" \| "success" \| "warning" \| "danger" \| "info"/);
+  assert.match(shared, /content: ReactNode/);
+  assert.match(shared, /tone\?: BotStatusTone/);
+  assert.match(shared, /role\?: "status" \| "alert"/);
+  assert.match(shared, /data-tone=\{tone\}/);
+  assert.match(shared, /content \?\? "-"/);
+
+  const setup = readFileSync(new URL(consumers[0], import.meta.url), "utf8");
+  const notifications = readFileSync(new URL(consumers[1], import.meta.url), "utf8");
+  const diagnostics = readFileSync(new URL(consumers[2], import.meta.url), "utf8");
+  assert.match(setup, /tone=\{[^}]*\? "success" : "warning"\}/);
+  assert.match(notifications, /tone=\{[^}]*\? "success" : "warning"\}/);
+  assert.match(diagnostics, /tone="success"/);
+  assert.match(diagnostics, /tone="danger"/);
+});
+
+test("routine toast decoration is tonal while Discord and diagnostic status accents remain encoded", () => {
+  const notificationsCss = readFileSync(new URL("../src/styles/notifications.css", import.meta.url), "utf8");
+  const discordCss = readFileSync(new URL("../src/styles/discord-admin.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(notificationsCss, /\.toast[^{}]*\{[^}]*border-left(?:-color)?:/s);
+  assert.match(discordCss, /\.discord-preview-embed\s*\{[^}]*border-left:\s*4px\s+solid/s);
+  assert.match(discordCss, /\.discord-diagnostic-card\s*\{[^}]*border-left:\s*3px\s+solid/s);
+  assert.match(discordCss, /\.discord-diagnostic-card\.failed\s*\{[^}]*border-left-color:\s*var\(--danger\)/s);
+});
+
+test("Admin status summaries do not contain confirmed mojibake separators", () => {
+  const adminSources = [
+    "../src/components/admin/AdminPanel.tsx",
+    "../src/components/admin/AdminAnalyticsSection.tsx",
+  ].map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"));
+
+  for (const source of adminSources) assert.doesNotMatch(source, /Â·/);
 });
 
 test("application shell uses a compact drawer at narrow widths", () => {
@@ -87,7 +156,7 @@ test("collapsed navigation tooltip escapes the vertically scrolling nav", () => 
 
 test("sidebar decoration stays neutral outside active and primary states", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  for (const selector of ["aside", ".brand", ".brand svg", ".brand h1", ".sidebar-account-avatar", ".sidebar-auth-cta", ".discord-cta", ".nav-tools-menu", ".refresh-breakdown", ".app-footer", "button.sidebar-account-main:hover", ".sidebar-toggle:hover", ".sidebar-account-action:hover", ".sidebar-auth-cta:hover"]) {
+  for (const selector of ["aside", ".brand", ".brand svg", ".brand h1", ".sidebar-account-avatar", ".discord-cta", ".nav-tools-menu", ".refresh-breakdown", ".app-footer", "button.sidebar-account-main:hover", ".sidebar-toggle:hover", ".sidebar-account-action:hover"]) {
     const escaped = selector.replaceAll(".", "\\.").replaceAll(" ", "\\s+");
     const rule = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`))?.groups?.body ?? "";
     assert.notEqual(rule, "", `${selector} should have a shell rule`);

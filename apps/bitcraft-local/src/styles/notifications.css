@@ -2,7 +2,6 @@
 .toast {
   pointer-events: auto;
   border: 1px solid rgba(108,123,145,.28);
-  border-left: 3px solid var(--active-color);
   border-radius: 9px;
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 40%),
@@ -16,7 +15,6 @@
   animation: toast-enter .18s ease-out;
   backdrop-filter: blur(12px);
 }
-.toast.production { border-left-color: var(--good); }
 .toast-icon,
 .toast-item-icon {
   width: 38px;
