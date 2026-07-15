@@ -5,7 +5,7 @@
   container-type: inline-size;
   gap: 16px;
   color: #f4f7fb;
-  font-family: Inter, Outfit, system-ui, sans-serif;
+  font-family: Outfit, system-ui, sans-serif;
   background: #030303;
   background: var(--command-page-gradient);
 }
@@ -94,7 +94,7 @@
   gap: 5px 16px;
   text-align: left;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   overflow: hidden;
 }
 .dashboard-metric:hover { border-color: var(--hover-border); background: linear-gradient(180deg, color-mix(in srgb, var(--card-top) 84%, var(--active-bg)), var(--card-bottom)); }
@@ -139,7 +139,7 @@
   display: grid;
   gap: 14px;
   align-content: start;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 14px 30px rgba(0,0,0,.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
 }
 .dashboard-card-chart { grid-area: treasury; min-height: 350px; }
 .dashboard-card-supply { grid-area: supply; min-height: 350px; }

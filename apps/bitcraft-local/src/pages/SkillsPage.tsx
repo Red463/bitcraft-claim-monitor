@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, ShieldCheck, Target, TriangleAlert } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
@@ -103,12 +104,10 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
 
   return (
     <div className="panel skills-page" data-tour="skills-page">
-      <header className="skills-topbar">
-        <div>
-          <h2>Settlement Capability</h2>
-          <p>Can the settlement support T{settlementTier || "-"} now, and what needs attention before T{nextSettlementTier ?? (settlementTier || "-")}?</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Professions"
+        description={`Settlement Capability at T${settlementTier || "-"} and readiness for T${nextSettlementTier ?? (settlementTier || "-")}`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><GraduationCap size={14} /> {professionIds.length} professions assessed</span>
             <span>{citizens.length} citizens</span>
@@ -117,8 +116,8 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             {settlementTier ? <TierBadge tier={settlementTier} /> : <span className="status-pill muted">Tier unavailable</span>}
             <span>Settlement tier</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid skills-summary">
         <MiniStat icon={<Target />} label="Settlement Tier" value={settlementTier ? `T${settlementTier}` : "Unavailable"} />
         <MiniStat icon={<ShieldCheck />} label="Current Baseline" value={settlementTier ? `${currentReadyCount}/${capabilities.length}` : "-"} />

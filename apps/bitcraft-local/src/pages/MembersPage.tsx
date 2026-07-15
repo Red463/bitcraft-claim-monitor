@@ -16,6 +16,7 @@ import { RarityBadge, TierBadge, TrackedOwnerName } from "../components/main/Bad
 import { DataTable } from "../components/main/DataTable";
 import { Dialog } from "../components/main/Dialog";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -103,19 +104,17 @@ export function Members({
 
   return (
     <div className="panel members-page" data-tour="members-page">
-      <header className="members-topbar">
-        <div>
-          <h2>Settlement Roster</h2>
-          <p>Member permissions and online status</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Members"
+        description="Settlement roster, permissions, and online status"
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span className="dashboard-region-line"><Globe2 size={15} /> {data.claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{data.claim.regionId ?? "?"}</span></span>
             <span className="dashboard-refresh-line"><span className="online-dot is-online" /> {onlineCount} online / {merged.length} members</span>
           </div>
           <span className="dashboard-claim-link"><TierBadge tier={data.claim.tier} /> {data.claim.name ?? "Monitored Settlement"}</span>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="members-summary-grid">
         <article><Users /><span>Members</span><strong>{merged.length}</strong><small>{onlineCount} online now</small></article>
         <article><Activity /><span>Total Levels</span><strong>{formatNumber(totalMemberLevels)}</strong><small>Across visible citizens</small></article>

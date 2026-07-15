@@ -30,6 +30,7 @@ import {
   THEME_GRADIENT_RANGE_FIELDS,
   THEME_PRESETS,
   THEME_RANGE_FIELD_CONFIG,
+  validateThemeContrast,
   type ThemeColorKey,
   type ThemeRangeKey,
   type ThemeSettings,
@@ -122,6 +123,12 @@ export function UserSettingsDialog({
   const previewGradient = `linear-gradient(180deg, ${theme.gradientTop} ${theme.gradientTopStop}%, ${theme.gradientMid} ${theme.gradientMidStop}%, ${theme.gradientBase} ${theme.gradientFadeStop}%)`;
   const themePayload = React.useMemo(() => JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }, null, 2), [theme]);
   const saveCustomTheme = () => {
+    const contrast = validateThemeContrast(theme);
+    if (!contrast.valid) {
+      onThemeChange(customTheme);
+      setCustomThemeStatus(`Theme not saved. Improve contrast for: ${contrast.failures.map((failure) => `${failure.role} (${failure.ratio}:1; needs ${failure.minimum}:1)`).join(", ")}. The last valid custom theme is active.`);
+      return;
+    }
     localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }));
     setCustomTheme(theme);
     setLastThemeChoice("custom");
@@ -165,6 +172,8 @@ export function UserSettingsDialog({
       const parsed = JSON.parse(themeImportText);
       const result = normalizeThemeCandidate(parsed);
       if (!result) throw new Error("No recognised colour fields were found.");
+      const contrast = validateThemeContrast(result.theme);
+      if (!contrast.valid) throw new Error(`Theme not imported. Improve contrast for: ${contrast.failures.map((failure) => `${failure.role} (${failure.ratio}:1; needs ${failure.minimum}:1)`).join(", ")}.`);
       onThemeChange(result.theme);
       setLastThemeChoice("custom-editing");
       setThemeExpanded(true);

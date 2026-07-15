@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, CheckCircle2, Factory, Lock, Star, TrendingUp,
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { Segmented } from "../components/main/Segmented";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -213,12 +214,10 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
 
   return (
     <div className="panel production-page">
-      <header className="members-topbar production-topbar">
-        <div>
-          <h2>Active Production</h2>
-          <p>{visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Production"
+        description={visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Factory size={14} /> {formatNumber(visibleCrafts.length)} shown</span>
             {privateCrafts.length ? <span><Lock size={14} /> {formatNumber(privateCrafts.length)} private</span> : null}
@@ -228,8 +227,8 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
             {highestTier ? <TierBadge tier={highestTier} /> : <span className="status-pill">No tier</span>}
             <span>Highest craft tier</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid production-summary">
         <MiniStat icon={<Factory />} label="Total Jobs" value={formatNumber(visibleCrafts.length)} />
         <MiniStat icon={<Activity />} label="Active Now" value={formatNumber(activeJobs)} />

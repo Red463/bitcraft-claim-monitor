@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowUp, CircleDollarSign, Factory, Globe2, Hammer, Pack
 import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "../components/main/DashboardWidgets";
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import {
   claimSupplyCap,
   claimSupplyRunOutAt,
@@ -139,19 +140,17 @@ export function Dashboard({ data, activity, snapshots, marketHistory, dashboardS
   ].filter(Boolean).slice(0, 4) as Array<{ icon: React.ReactNode; count: React.ReactNode; title: string; body: string; panel: ActivePanel; tone: string }>;
   return (
     <div className="dashboard-page">
-      <header className="dashboard-topbar">
-        <div>
-          <h2>Dashboard</h2>
-          <p>Real-time summary of {claim.name ?? "the monitored settlement"}</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Dashboard"
+        description={`Real-time summary of ${claim.name ?? "the monitored settlement"}`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span className="dashboard-region-line"><Globe2 size={15} /> {claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{claim.regionId ?? "?"}</span></span>
             <span className="dashboard-refresh-line"><span className="online-dot is-online" /> Last updated {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "waiting"}</span>
           </div>
           <span className="dashboard-claim-link"><TierBadge tier={claim.tier} /> {claim.name ?? "Monitored Settlement"}</span>
-        </div>
-      </header>
+        </div>}
+      />
 
       <section className="dashboard-kpis" data-tour="dashboard-summary">
         <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />

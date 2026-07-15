@@ -38,6 +38,11 @@ export const DEFAULT_THEME = {
 };
 
 export type ThemeSettings = typeof DEFAULT_THEME;
+export type BrowserTheme = ThemeSettings;
+export type ThemeContrastResult = {
+  valid: boolean;
+  failures: Array<{ role: string; ratio: number; minimum: number }>;
+};
 type ThemeKey = keyof ThemeSettings;
 export type ThemeRangeKey = "gradientTopStop" | "gradientMidStop" | "gradientFadeStop" | "gradientHeight";
 export type ThemeColorKey = Exclude<ThemeKey, ThemeRangeKey>;
@@ -52,6 +57,45 @@ export const THEME_RANGE_FIELD_CONFIG: Record<ThemeRangeKey, { label: string; cs
   gradientHeight: { label: "Gradient height", cssVar: "--theme-gradient-height", min: 12, max: 72, unit: "vh" },
 };
 const THEME_RANGE_KEYS = Object.keys(THEME_RANGE_FIELD_CONFIG) as ThemeRangeKey[];
+
+function relativeLuminance(hex: string) {
+  const channels = hex.slice(1).match(/../g)?.map((channel) => Number.parseInt(channel, 16) / 255) ?? [];
+  const [red = 0, green = 0, blue = 0] = channels.map((channel) => channel <= 0.04045
+    ? channel / 12.92
+    : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
+export function validateThemeContrast(theme: BrowserTheme): ThemeContrastResult {
+  const checks: Array<{ role: string; foreground: ThemeColorKey; background: ThemeColorKey; minimum: number }> = [
+    { role: "primary text on page", foreground: "text", background: "bg", minimum: 4.5 },
+    { role: "primary text on sidebar", foreground: "text", background: "sidebar", minimum: 4.5 },
+    { role: "primary text on panel", foreground: "text", background: "panel", minimum: 4.5 },
+    { role: "primary text on field", foreground: "text", background: "panel2", minimum: 4.5 },
+    { role: "muted text on page", foreground: "muted", background: "bg", minimum: 4.5 },
+    { role: "muted text on panel", foreground: "muted", background: "panel", minimum: 4.5 },
+    { role: "placeholder text on field", foreground: "muted", background: "panel2", minimum: 4.5 },
+    { role: "card title on top surface", foreground: "cardTitle", background: "cardTop", minimum: 4.5 },
+    { role: "card title on bottom surface", foreground: "cardTitle", background: "cardBottom", minimum: 4.5 },
+    { role: "card value on top surface", foreground: "cardValue", background: "cardTop", minimum: 4.5 },
+    { role: "card value on bottom surface", foreground: "cardValue", background: "cardBottom", minimum: 4.5 },
+    { role: "active text on active surface", foreground: "activeColor", background: "activeBg", minimum: 4.5 },
+    { role: "focus indicator on active surface", foreground: "activeColor", background: "activeBg", minimum: 3 },
+    { role: "focus border on panel", foreground: "activeBorder", background: "panel", minimum: 3 },
+  ];
+  const failures = checks.flatMap(({ role, foreground, background, minimum }) => {
+    const ratio = contrastRatio(theme[foreground], theme[background]);
+    return ratio < minimum ? [{ role, ratio: Number(ratio.toFixed(2)), minimum }] : [];
+  });
+  return { valid: failures.length === 0, failures };
+}
 
 export function clampThemeNumber(value: unknown, min: number, max: number, fallback: string) {
   if (value === null || value === undefined) return fallback;
@@ -89,7 +133,8 @@ export function loadSavedCustomTheme(): ThemeSettings {
   try {
     const raw = localStorage.getItem(CUSTOM_THEME_STORAGE_KEY);
     if (!raw) return DEFAULT_THEME;
-    return normalizeThemeCandidate(JSON.parse(raw))?.theme ?? DEFAULT_THEME;
+    const theme = normalizeThemeCandidate(JSON.parse(raw))?.theme;
+    return theme && validateThemeContrast(theme).valid ? theme : DEFAULT_THEME;
   } catch {
     return DEFAULT_THEME;
   }
@@ -128,10 +173,10 @@ export const THEME_PRESETS: Array<{ id: string; label: string; description: stri
   { id: "steel", label: "Steel", description: "Cooler blue-grey surfaces with blue accent.", theme: { ...DEFAULT_THEME, bg: "#071018", sidebar: "#050a10", panel: "#121f2b", panel2: "#0b141d", border: "#2e4356", cardTop: "#142434", cardBottom: "#07111a", cardTitle: "#b9d8ef", iconBg: "#0b1824", gold: "#65b7fa", activeColor: "#65b7fa", activeBg: "#12334b", activeBorder: "#3d79a8", hoverBorder: "#4e8bbc", good: "#63eba5", gradientTop: "#16283a", gradientMid: "#071018", gradientBase: "#03070c" } },
   { id: "ember", label: "Ember", description: "Warm copper-gold for a forge feel.", theme: { ...DEFAULT_THEME, bg: "#110b08", sidebar: "#080604", panel: "#211714", panel2: "#160f0c", border: "#493329", cardTop: "#2a1d17", cardBottom: "#100a07", cardTitle: "#f0cda5", iconBg: "#1b110b", gold: "#f5aa45", activeColor: "#f5aa45", activeBg: "#3d2510", activeBorder: "#915c25", hoverBorder: "#a66a2a", good: "#63eba5", danger: "#ff6b65", gradientTop: "#2d1b10", gradientMid: "#110b08", gradientBase: "#050302" } },
   { id: "forest", label: "Forest", description: "Green accent for resource and gathering focus.", theme: { ...DEFAULT_THEME, bg: "#07100c", sidebar: "#040806", panel: "#101c16", panel2: "#0a120e", border: "#284238", cardTop: "#13231a", cardBottom: "#06100b", cardTitle: "#bcdfca", iconBg: "#0b1910", gold: "#63eba5", activeColor: "#63eba5", activeBg: "#153824", activeBorder: "#3f9565", hoverBorder: "#4eb476", good: "#78f0a2", danger: "#ff6b65", gradientTop: "#183126", gradientMid: "#07100c", gradientBase: "#020503" } },
-  { id: "violet", label: "Violet", description: "Purple accent with a sharper arcane command feel.", theme: { ...DEFAULT_THEME, bg: "#090812", sidebar: "#05050b", panel: "#151322", panel2: "#0d0b18", border: "#39304f", cardTop: "#1c1930", cardBottom: "#090815", cardTitle: "#d4c3ff", iconBg: "#111023", gold: "#b783ff", activeColor: "#b783ff", activeBg: "#2d2147", activeBorder: "#6f51a7", hoverBorder: "#8462c5", good: "#63eba5", danger: "#ff6b88", gradientTop: "#221a35", gradientMid: "#090812", gradientBase: "#030208" } },
-  { id: "void", label: "Void", description: "Very dark, moody black with restrained silver-gold highlights.", theme: { ...DEFAULT_THEME, bg: "#010203", sidebar: "#010102", panel: "#07090d", panel2: "#030507", border: "#1c2633", cardTop: "#090d13", cardBottom: "#020304", cardTitle: "#c5ccd6", cardValue: "#ffffff", iconBg: "#06090d", muted: "#87909d", text: "#f7f8fb", gold: "#d8bd68", activeColor: "#d8bd68", activeBg: "#171407", activeBorder: "#5f5229", hoverBorder: "#77683a", good: "#63eba5", danger: "#ff6b65", gradientTop: "#0c1017", gradientMid: "#020304", gradientBase: "#000000" } },
+  { id: "violet", label: "Violet", description: "Purple accent with a sharper arcane command feel.", theme: { ...DEFAULT_THEME, bg: "#090812", sidebar: "#05050b", panel: "#151322", panel2: "#0d0b18", border: "#39304f", cardTop: "#1c1930", cardBottom: "#090815", cardTitle: "#d4c3ff", iconBg: "#111023", gold: "#b783ff", activeColor: "#b783ff", activeBg: "#2d2147", activeBorder: "#8462c5", hoverBorder: "#8462c5", good: "#63eba5", danger: "#ff6b88", gradientTop: "#221a35", gradientMid: "#090812", gradientBase: "#030208" } },
+  { id: "void", label: "Void", description: "Very dark, moody black with restrained silver-gold highlights.", theme: { ...DEFAULT_THEME, bg: "#010203", sidebar: "#010102", panel: "#07090d", panel2: "#030507", border: "#1c2633", cardTop: "#090d13", cardBottom: "#020304", cardTitle: "#c5ccd6", cardValue: "#ffffff", iconBg: "#06090d", muted: "#87909d", text: "#f7f8fb", gold: "#d8bd68", activeColor: "#d8bd68", activeBg: "#171407", activeBorder: "#77683a", hoverBorder: "#77683a", good: "#63eba5", danger: "#ff6b65", gradientTop: "#0c1017", gradientMid: "#020304", gradientBase: "#000000" } },
   { id: "ocean", label: "Ocean", description: "Deep blue command surfaces with cyan highlights.", theme: { ...DEFAULT_THEME, bg: "#031018", sidebar: "#02080d", panel: "#0c1b27", panel2: "#06121b", border: "#244256", cardTop: "#102536", cardBottom: "#04101a", cardTitle: "#b8def0", iconBg: "#071721", gold: "#56d5ff", activeColor: "#56d5ff", activeBg: "#0e3340", activeBorder: "#32859a", hoverBorder: "#42a5bd", good: "#63eba5", danger: "#ff6b65", gradientTop: "#12304a", gradientMid: "#031018", gradientBase: "#010407" } },
-  { id: "crimson", label: "Crimson", description: "Dark red accents for a high-alert operations feel.", theme: { ...DEFAULT_THEME, bg: "#110607", sidebar: "#070203", panel: "#1e0f12", panel2: "#11080a", border: "#4c242b", cardTop: "#2a1217", cardBottom: "#0b0405", cardTitle: "#f0c2c8", iconBg: "#17090b", gold: "#ff6b65", activeColor: "#ff6b65", activeBg: "#3a1518", activeBorder: "#993a3f", hoverBorder: "#b6494d", good: "#63eba5", danger: "#ff7d7d", gradientTop: "#2c1014", gradientMid: "#110607", gradientBase: "#040101" } },
+  { id: "crimson", label: "Crimson", description: "Dark red accents for a high-alert operations feel.", theme: { ...DEFAULT_THEME, bg: "#110607", sidebar: "#070203", panel: "#1e0f12", panel2: "#11080a", border: "#4c242b", cardTop: "#2a1217", cardBottom: "#0b0405", cardTitle: "#f0c2c8", iconBg: "#17090b", gold: "#ff6b65", activeColor: "#ff6b65", activeBg: "#3a1518", activeBorder: "#b6494d", hoverBorder: "#b6494d", good: "#63eba5", danger: "#ff7d7d", gradientTop: "#2c1014", gradientMid: "#110607", gradientBase: "#040101" } },
   { id: "contrast", label: "High Contrast", description: "Brighter text and stronger borders.", theme: { ...DEFAULT_THEME, bg: "#020304", sidebar: "#020304", panel: "#111820", panel2: "#070b10", border: "#536072", cardTop: "#16202a", cardBottom: "#05080c", cardTitle: "#e5ebf5", cardValue: "#ffffff", iconBg: "#101720", muted: "#c1cad8", text: "#ffffff", gold: "#ffd84d", activeColor: "#ffd84d", activeBg: "#403414", activeBorder: "#b9972f", hoverBorder: "#c7a83a", good: "#68ff9a", danger: "#ff5b5b", gradientTop: "#202834", gradientMid: "#090d12", gradientBase: "#020304" } },
 ];
 

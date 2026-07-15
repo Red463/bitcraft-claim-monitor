@@ -52,7 +52,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 4px 14px;
@@ -231,7 +231,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   min-height: 260px;
 }
 .production-page .production-card:hover {
@@ -240,7 +240,7 @@
 }
 .production-page .production-card.active-work {
   border-color: rgba(99,235,165,.42);
-  box-shadow: inset 0 0 0 1px rgba(99,235,165,.08), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 0 0 1px rgba(99,235,165,.08);
 }
 .production-page .production-card.can-craft {
   border-color: rgba(99,235,165,.5);
@@ -376,7 +376,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
 .dashboard-section-heading {

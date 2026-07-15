@@ -5,6 +5,7 @@ import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
 import { AsyncState } from "../components/main/AsyncState";
 import { ItemIcon, TierMaterialIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -122,12 +123,10 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
   const uniqueVisibleItems = unique(rows.map((row: AnyRecord) => String(row.name))).length;
   return (
     <div className="panel inventory-page" data-tour="inventory-page">
-      <header className="members-topbar inventory-topbar">
-        <div>
-          <h2>Inventory & Storage</h2>
-          <p>{containers.length} containers - {rows.length} visible stacks</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Inventory"
+        description={`${containers.length} containers - ${rows.length} visible stacks`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Package size={14} /> {formatNumber(totalItems)} visible items</span>
             <span>{formatNumber(uniqueVisibleItems)} unique</span>
@@ -136,8 +135,8 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
             <span className="status-pill">{formatNumber(occupiedContainers)}</span>
             <span>Occupied containers</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid inventory-summary">
         <MiniStat icon={<Package />} label="Total Items" value={formatNumber(totalItems)} />
         <MiniStat icon={<Box />} label="Unique Items" value={uniqueVisibleItems} />
