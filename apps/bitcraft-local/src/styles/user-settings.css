@@ -1,5 +1,5 @@
 .settings-dialog { width: min(900px, calc(100vw - 32px)); max-height: min(820px, calc(100vh - 36px)); overflow: hidden; grid-template-rows: auto minmax(0, 1fr); }
-.settings-shell { min-height: 0; display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 13px; align-items: start; overflow: hidden; }
+.settings-shell { min-height: 0; display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 13px; align-items: stretch; overflow: hidden; }
 .settings-section-tabs { padding: 4px; display: flex; gap: 6px; overflow-x: auto; border: 1px solid rgba(108,123,145,.22); border-radius: 9px; background: linear-gradient(180deg, rgba(10,15,23,.86), rgba(5,8,13,.9)); }
 .settings-section-tabs button { flex: 1 1 0; min-width: 128px; min-height: 38px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 0 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; text-align: center; }
 .settings-section-tabs button:hover { color: var(--text); border-color: var(--hover-border); }

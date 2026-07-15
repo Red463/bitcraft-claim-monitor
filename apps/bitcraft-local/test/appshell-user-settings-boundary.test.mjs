@@ -75,6 +75,7 @@ test("User settings keeps tabs fixed and gives content the bounded scroll region
   const css = readFileSync(new URL("../src/styles/user-settings.css", import.meta.url), "utf8");
 
   assert.match(css, /\.settings-shell\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);[^}]*overflow:\s*hidden;/s);
+  assert.match(css, /\.settings-shell\s*\{[^}]*align-items:\s*stretch;/s);
   assert.match(css, /\.settings-grid\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none;[^}]*overflow:\s*auto;/s);
   assert.doesNotMatch(css, /\.settings-grid\s*\{[^}]*max-height:\s*calc\(100vh - 170px\)/s);
 });
