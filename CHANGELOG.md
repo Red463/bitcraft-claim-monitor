@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.35.1-beta.2] - 2026-07-15
+
+### Fixed
+
+- Fixed Unfired Brick being merged into the ordinary Brick row in Craft Planner, including independent row and section overrides for material families that share an API tag.
+
 ## [0.35.1-beta.1] - 2026-07-15
 
 ### Fixed
