@@ -150,8 +150,8 @@
 }
 .inventory-page .select-control,
 .inventory-page .search {
-  border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  border-color: var(--border);
+  background: var(--panel-2);
 }
 .inventory-page .search input {
   background: transparent;

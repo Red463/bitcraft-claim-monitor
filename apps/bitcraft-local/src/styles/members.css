@@ -76,8 +76,8 @@ border: 1px solid var(--border);
   padding: 12px;
 }
 .members-toolbar .search {
-  border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  border-color: var(--border);
+  background: var(--panel-2);
 }
 .members-roster-table .table-wrap {
   border-color: var(--border);

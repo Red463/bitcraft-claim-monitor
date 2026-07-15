@@ -70,6 +70,30 @@ test("placeholder, focus, touch, and z-index roles use shared semantic tokens", 
   }
 });
 
+test("migrated route search controls use theme surfaces and a shared compound focus indicator", () => {
+  const migratedSearchRules = [
+    ["members.css", /\.members-toolbar \.search\s*\{(?<body>[^}]*)\}/],
+    ["skills.css", /\.skills-page \.select-control,\s*\.skills-page \.skills-toolbar \.search\s*\{(?<body>[^}]*)\}/],
+    ["inventory.css", /\.inventory-page \.select-control,\s*\.inventory-page \.search\s*\{(?<body>[^}]*)\}/],
+  ];
+  for (const [file, rule] of migratedSearchRules) {
+    const css = readFileSync(new URL(`../src/styles/${file}`, import.meta.url), "utf8");
+    const body = css.match(rule)?.groups?.body ?? "";
+    assert.match(body, /border-color:\s*var\(--border\)/, file);
+    assert.match(body, /background:\s*var\(--panel-2\)/, file);
+    assert.doesNotMatch(body, /#080d14|rgba\(5,\s*8,\s*12/, file);
+  }
+
+  const researchControls = styles.match(/\.research-filter-field \.search,\s*\.research-filter-field \.select-control\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+  assert.match(researchControls, /border-color:\s*var\(--border\)/);
+  assert.match(researchControls, /background:\s*var\(--panel-2\)/);
+  assert.doesNotMatch(researchControls, /#080d14|rgba\(5,\s*8,\s*12/);
+
+  const compoundFocus = styles.match(/\.search:focus-within\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+  assert.match(compoundFocus, /border-color:\s*var\(--focus-border\)/);
+  assert.match(compoundFocus, /box-shadow:\s*0\s+0\s+0\s+3px\s+var\(--focus-ring\)/);
+});
+
 test("font assets cover requested shared roles without the unloaded Dashboard Inter fallback", () => {
   assert.match(indexHtml, /family=Rajdhani:wght@500;600;700/);
   assert.match(indexHtml, /family=Outfit:wght@300;400;500;600;700;800/);

@@ -168,8 +168,8 @@
 }
 .skills-page .select-control,
 .skills-page .skills-toolbar .search {
-  border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  border-color: var(--border);
+  background: var(--panel-2);
 }
 .skills-page .focus-metrics {
   border-color: rgba(154,168,190,.14);
