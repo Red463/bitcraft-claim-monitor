@@ -1,0 +1,23 @@
+{
+  "candidate": "cee5825fafbcae0cbc64dbfc550f92207d0aee98",
+  "plannedAcceptance": {
+    "normal": { "ready": 153, "cases": 153, "overflowFailures": 0, "expected401Cases": 148, "expected401Messages": 151 },
+    "forcedColors": { "ready": 17, "cases": 17, "mediaActive": 17, "overflowFailures": 0 },
+    "reducedMotion": { "ready": 17, "cases": 17, "mediaActive": 17, "overflowFailures": 0 },
+    "text200At1440And390": { "ready": 34, "cases": 34, "overflowFailures": 0 }
+  },
+  "acceptedStressResiduals": [
+    { "mode": "zoom200Equivalent", "route": "activity", "viewport": "720x500", "mainPageRouteOverflowPx": 23 },
+    { "mode": "text200", "route": "activity", "viewport": "720x500", "mainPageRouteOverflowPx": 99 },
+    { "mode": "text200", "route": "skills", "viewport": "320x700", "mainPageRouteOverflowPx": 41 },
+    { "mode": "text200", "route": "inventory", "viewport": "320x700", "mainPageRouteOverflowPx": 13 },
+    { "mode": "text200", "route": "construction", "viewport": "320x700", "mainPageRouteOverflowPx": 12 },
+    { "mode": "text200", "route": "empire", "viewport": "320x700", "mainPageRouteOverflowPx": 5 },
+    { "mode": "text200", "route": "activity", "viewport": "320x700", "mainPageRouteOverflowPx": 50 }
+  ],
+  "notes": [
+    "Normal unscaled 320x700 is ready and zero-overflow for all 17 routes.",
+    "Market and Research are zero-overflow at text200 for 1440, 720, 390, and 320 widths.",
+    "Stress residuals remain documented rather than hidden with global overflow clipping."
+  ]
+}

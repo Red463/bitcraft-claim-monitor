@@ -1,13 +1,17 @@
 import React from "react";
-import { createPortal } from "react-dom";
+import "../styles/empires.css";
 import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
+import { Dialog } from "../components/main/Dialog";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
+import { resolveAllowedView } from "../navigation/routeState.ts";
 
 const LOCAL_API = "/api/local";
 
@@ -88,12 +92,12 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
   React.useEffect(() => {
     const controller = new AbortController();
-    setState({ data: null, loading: true, error: null });
+    setState((current) => ({ ...current, loading: true, error: null }));
     fetch(`${LOCAL_API}/empires/claim-members?claimId=${encodeURIComponent(String(claim.claimId ?? ""))}`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Claim members HTTP ${response.status}`)))
       .then((payload) => setState({ data: payload, loading: false, error: null }))
       .catch((error) => {
-        if (!controller.signal.aborted) setState({ data: null, loading: false, error: error instanceof Error ? error.message : String(error) });
+        if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
   }, [claim.claimId]);
@@ -115,9 +119,10 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
           {rankOptions.map((rank) => <button key={rank} type="button" className={rankFilters.includes(rank) ? "active" : ""} onClick={() => toggleRankFilter(rank)}>{rank}</button>)}
         </div>
       ) : null}
-      {state.loading ? <div className="empty-state compact">Loading claim members...</div> : null}
-      {state.error ? <div className="error-card"><AlertTriangle size={15} /> {state.error}</div> : null}
-      {!state.loading && !state.error ? (
+      {state.loading && !state.data ? <AppSkeleton /> : null}
+      {state.loading && state.data ? <AsyncState kind="loading" title="Refreshing claim members" detail="Current members remain visible." compact /> : null}
+      {state.error ? <AsyncState kind="error" title="Unable to refresh claim members" detail={state.error} compact /> : null}
+      {state.data ? (
         <div className="tower-access-list">
           {visibleMembers.length ? visibleMembers.map((member) => (
             <article key={member.entityId || member.username}>
@@ -129,7 +134,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
               <div className="tower-access-flags" />
               <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
             </article>
-          )) : <div className="empty-state compact">No members were returned for this claim.</div>}
+          )) : <AsyncState kind={members.length ? "no-match" : "empty"} title={members.length ? "No members match the selected roles" : "No claim members returned"} detail={members.length ? "Clear the claim-role filters to see all members." : "BitJita did not return members for this claim."} compact />}
         </div>
       ) : null}
     </div>
@@ -153,9 +158,8 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
     setRankFilters((current) => current.includes(rank) ? current.filter((value) => value !== rank) : [...current, rank]);
   };
 
-  return createPortal(
-    <div className="help-overlay empires-watchtower-overlay" onClick={onClose}>
-      <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
+  return (
+    <Dialog open title={String(selectedClaim ? selectedClaim.name ?? "Claim members" : tower.displayName ?? tower.nickname ?? "Watchtower")} onClose={onClose} className="help-dialog tower-access-dialog" backdropClassName="help-overlay empires-watchtower-overlay">
         <header>
           <div><RadioTower /><h2 id="tower-access-title">{selectedClaim ? selectedClaim.name ?? "Claim members" : tower.displayName ?? tower.nickname ?? "Watchtower"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close tower details"><X size={16} /></button>
@@ -214,9 +218,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
             )}
           </>
         )}
-      </section>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }
 export function Empires({ monitoredRegionId, access }: { monitoredRegionId: string; access?: EffectiveAccess | null }) {
@@ -226,10 +228,11 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     { id: "overview" as const, label: "Overview", icon: <Landmark size={15} /> },
     { id: "watchtowers" as const, label: "Watchtowers", icon: <RadioTower size={15} /> },
   ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("empires", entry.id))), [access]);
+  const resolvedTab = resolveAllowedView(tab, empireTabs.map((entry) => entry.id));
+  const currentTab = resolvedTab ?? tab;
   React.useEffect(() => {
-    if (!empireTabs.length) return;
-    if (!empireTabs.some((entry) => entry.id === tab)) setTab(empireTabs[0].id);
-  }, [empireTabs, setTab, tab]);
+    if (resolvedTab && resolvedTab !== tab) setTab(resolvedTab);
+  }, [resolvedTab, setTab, tab]);
   const [regionId, setRegionId] = usePersistedState("empires.region", initialRegion);
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
@@ -256,7 +259,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   }, [regionId]);
 
   React.useEffect(() => {
-    if (tab !== "watchtowers") return;
+    if (currentTab !== "watchtowers") return;
     const controller = new AbortController();
     setWatchtowers((current) => ({ ...current, loading: true, error: null }));
     fetch(`${LOCAL_API}/empires/watchtowers?regionId=${encodeURIComponent(regionId)}&inactiveDays=${encodeURIComponent(inactiveDays)}`, { signal: controller.signal })
@@ -266,7 +269,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
         if (!controller.signal.aborted) setWatchtowers((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [inactiveDays, regionId, tab]);
+  }, [currentTab, inactiveDays, regionId]);
 
   const overviewRows: AnyRecord[] = overview.data?.empires ?? [];
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];
@@ -305,6 +308,11 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Location", (row) => coordinates(row)],
     ["Updated", (row) => compactDate(row.updatedAt)],
   ];
+  const openTowerDetails = (row: AnyRecord) => setSelectedTower({
+    ...row,
+    members: membersByEmpire.get(String(row.empireId ?? "")) ?? [],
+    claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [],
+  });
   const towerColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
     ["Empire", (row) => <strong>{row.empireName}</strong>],
     ["Tower", (row) => {
@@ -320,8 +328,14 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Active", (row) => statusPill(Boolean(row.active), row.active ? "Active" : "Inactive")],
     ["Siege", (row) => toNumber(row.siegeCount) > 0 ? <span className="status-pill danger">{formatNumber(row.siegeCount)} siege</span> : <span className="status-pill muted">None</span>],
     ["Leader activity", (row) => row.inactiveRisk ? <span className="status-pill warn" title={row.inactivityReason}>Risk</span> : <span className="status-pill good" title={row.lastLeaderLogin ? dateLabel(row.lastLeaderLogin) : row.inactivityReason}>OK</span>],
+    ["Details", (row) => <button className="toolbar-button compact-map-action" type="button" onClick={(event) => { event.stopPropagation(); openTowerDetails(row); }}>View tower details</button>],
   ];
 
+  if (!resolvedTab) return (
+    <div className="panel restricted-access-panel">
+      <AsyncState kind="restricted" title="Empires is restricted" detail="No empire views are available for your account." />
+    </div>
+  );
   return (
     <div className="panel empires-page">
       <header className="page-title-row" data-tour="empires-page">
@@ -340,27 +354,39 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
       </header>
 
       <div className="leaderboard-tabs empires-tabs" role="tablist" aria-label="Empire views">
-        {empireTabs.map((entry) => <button key={entry.id} className={tab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
+        {empireTabs.map((entry) => <button key={entry.id} className={currentTab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
       </div>
 
-      {tab === "overview" ? (
+      {currentTab === "overview" ? (
+        overview.loading && !overview.data
+          ? <AppSkeleton />
+          : overview.error && !overview.data
+            ? <AsyncState kind="error" title="Unable to load regional empires" detail={overview.error} />
+            : (
         <>
           <div className="stats-grid">
-            <MiniStat icon={<Landmark />} label="Regional empires" value={overview.loading && !overview.data ? "..." : formatNumber(overviewSummary.empires)} />
+            <MiniStat icon={<Landmark />} label="Regional empires" value={formatNumber(overviewSummary.empires)} />
             <MiniStat icon={<Castle />} label="Empire claims" value={formatNumber(overviewSummary.regionalClaims)} />
             <MiniStat icon={<Users />} label="Total members" value={formatNumber(overviewSummary.totalMembers)} />
             <MiniStat icon={<Crown />} label="Largest empire" value={largestEmpire} />
           </div>
-          {overview.error ? <div className="error-card"><AlertTriangle /> {overview.error}</div> : null}
+          {overview.loading && overview.data ? <AsyncState kind="loading" title="Refreshing regional empires" detail="Current empire rows remain visible." compact /> : null}
+          {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
-            <DataTable rows={overviewRows} columns={overviewColumns} />
+            <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>
+            )
       ) : (
+        watchtowers.loading && !watchtowers.data
+          ? <AppSkeleton />
+          : watchtowers.error && !watchtowers.data
+            ? <AsyncState kind="error" title="Unable to load claimed watchtowers" detail={watchtowers.error} />
+            : (
         <>
           <div className="stats-grid">
-            <MiniStat icon={<RadioTower />} label="Towers found" value={watchtowers.loading && !watchtowers.data ? "..." : formatNumber(towerSummary.towerCount)} />
+            <MiniStat icon={<RadioTower />} label="Towers found" value={formatNumber(towerSummary.towerCount)} />
             <MiniStat icon={<Clock />} label="Inactive-risk empires" value={formatNumber(towerSummary.inactiveRiskEmpires)} />
             <MiniStat icon={<Shield />} label="Under siege" value={formatNumber(towerSummary.underSiege)} />
             <MiniStat icon={<Zap />} label="Active towers" value={formatNumber(towerSummary.activeTowers)} />
@@ -372,7 +398,8 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
             </div>
             <label className="field compact-field"><span>Days offline</span><input value={inactiveDays} onChange={(event) => setInactiveDays(event.target.value.replace(/\D/g, "").slice(0, 3) || "1")} /></label>
           </section>
-          {watchtowers.error ? <div className="error-card"><AlertTriangle /> {watchtowers.error}</div> : null}
+          {watchtowers.loading && watchtowers.data ? <AsyncState kind="loading" title="Refreshing claimed watchtowers" detail="Current tower rows remain visible." compact /> : null}
+          {watchtowers.error ? <AsyncState kind="error" title="Unable to refresh claimed watchtowers" detail={watchtowers.error} compact /> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel" data-tour="watchtower-card">
             <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
@@ -391,12 +418,12 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
                 <small>{formatNumber(selectedEmpireRiskCount)}</small>
               </label>
             </div>
-            <DataTable rows={visibleTowerRows} columns={towerColumns} onRowClick={(row) => setSelectedTower({ ...row, members: membersByEmpire.get(String(row.empireId ?? "")) ?? [], claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [] })} rowClassName={() => "clickable-row"} />
+            <DataTable rows={visibleTowerRows} columns={towerColumns} scrollLabel="Watchtowers table" emptyKind="no-match" emptyState="No claimed watchtowers match these filters." onRowClick={openTowerDetails} rowClassName={() => "clickable-row"} />
           </section>
         </>
+            )
       )}
       {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
     </div>
   );
 }
-

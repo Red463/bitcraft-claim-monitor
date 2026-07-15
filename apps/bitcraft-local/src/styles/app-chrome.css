@@ -1,4 +1,35 @@
 /* Shared app chrome overlays, legal dialogs, cookie consent, command palette, and floating tools. */
+:where(.dialog-backdrop) {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+  background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.74);
+  backdrop-filter: blur(7px);
+  animation: overlay-enter .18s ease-out;
+}
+:where(.dialog-surface) {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 40px);
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  animation: dialog-enter .2s ease-out;
+}
+:where(.dialog-surface):focus { outline: none; }
+.dialog-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (max-height: 640px), (max-width: 560px) {
+  :where(.dialog-backdrop) { padding: 10px; }
+  :where(.dialog-surface) { max-height: calc(100dvh - 20px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.dialog-backdrop),
+  :where(.dialog-surface) { animation: none !important; }
+}
 .floating-actions {
   --floating-actions-shift: translateX(0);
   position: fixed;
@@ -74,6 +105,35 @@ body:has(.admin-loading-panel) .floating-actions {
   transform: var(--floating-actions-shift) scale(.96);
 }
 .floating-help:hover { color: var(--active-color); border-color: var(--hover-border); background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--active-bg) 38%, transparent), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--card-top) 92%, transparent), color-mix(in srgb, var(--card-bottom) 98%, transparent)); }
+@media (max-width: 920px) {
+  .floating-actions {
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+  .floating-actions.floating-actions-collapsed {
+    pointer-events: none;
+    width: 44px;
+    height: 42px;
+    padding: 0;
+    top: 5px;
+    right: calc(60px + env(safe-area-inset-right));
+    bottom: auto;
+    z-index: calc(var(--z-sticky) + 2);
+    transform: none;
+  }
+  body:not(:has(.admin-loading-panel)) .floating-actions.floating-actions-collapsed .floating-actions-toggle {
+    pointer-events: auto;
+    width: 44px;
+    height: 42px;
+    left: 0;
+    top: 0;
+    transform: none;
+  }
+  .floating-actions.floating-actions-collapsed .floating-actions-toggle:hover,
+  .floating-actions.floating-actions-collapsed .floating-actions-toggle:focus-visible {
+    transform: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .floating-actions,
   .floating-actions .floating-action-item,
@@ -183,5 +243,4 @@ body:has(.admin-loading-panel) .floating-actions {
 
 @media (max-width: 900px) {
   .cookie-banner, .cookie-actions { display: grid; }
-  .floating-actions { right: 12px; bottom: 72px; }
 }

@@ -1,8 +1,16 @@
-export function Segmented({ options, value, onChange, label }: { options: string[]; value: string; onChange: (value: string) => void; label?: string }) {
+type SegmentedOption<T extends string> = { id: T; label: string; count?: number };
+type SegmentedProps<T extends string> = {
+  label: string;
+  value: T;
+  options: readonly SegmentedOption<T>[];
+  onChange: (value: T) => void;
+};
+
+export function Segmented<T extends string>({ options, value, onChange, label }: SegmentedProps<T>) {
   return (
-    <div className="segmented" aria-label={label}>
-      {label ? <span>{label}:</span> : null}
-      {options.map((option) => <button key={option} className={value === option ? "active" : ""} onClick={() => onChange(option)}>{option}</button>)}
+    <div className="segmented" role="group" aria-label={label}>
+      <span>{label}:</span>
+      {options.map((option) => <button key={option.id} type="button" className={value === option.id ? "active" : ""} aria-pressed={value === option.id} onClick={() => onChange(option.id)}>{option.label}{option.count == null ? null : ` (${option.count})`}</button>)}
     </div>
   );
 }

@@ -52,7 +52,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 4px 14px;
@@ -73,11 +73,16 @@
   letter-spacing: .08em;
 }
 .production-page .mini-stat strong {
+  min-width: 0;
   color: #fff;
   font-family: Outfit, system-ui, sans-serif;
   font-size: 28px;
   line-height: 1;
   font-weight: 800;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .production-page .crafter-pills {
@@ -226,7 +231,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   min-height: 260px;
 }
 .production-page .production-card:hover {
@@ -235,7 +240,7 @@
 }
 .production-page .production-card.active-work {
   border-color: rgba(99,235,165,.42);
-  box-shadow: inset 0 0 0 1px rgba(99,235,165,.08), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 0 0 1px rgba(99,235,165,.08);
 }
 .production-page .production-card.can-craft {
   border-color: rgba(99,235,165,.5);
@@ -371,7 +376,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
 .dashboard-section-heading {
@@ -432,9 +437,16 @@
 
 @media (max-width: 900px) {
   .production-page .contributors { grid-template-columns: 1fr; }
-  .production-grid { grid-template-columns: 1fr; }
+  .production-page .production-grid { grid-template-columns: 1fr; }
   .production-member-banner { flex-wrap: wrap; }
   .production-member-banner small { margin-left: 0; width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .production-page .production-summary { grid-template-columns: 1fr; }
+  .production-controls { align-items: stretch; flex-direction: column; }
+  .production-controls .select-control { width: 100%; min-width: 0; }
+  .production-crafter-line { flex-wrap: wrap; }
 }
 
 

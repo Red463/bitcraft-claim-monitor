@@ -30,6 +30,7 @@ import {
   THEME_GRADIENT_RANGE_FIELDS,
   THEME_PRESETS,
   THEME_RANGE_FIELD_CONFIG,
+  validateThemeContrast,
   type ThemeColorKey,
   type ThemeRangeKey,
   type ThemeSettings,
@@ -37,6 +38,7 @@ import {
 import type { AppSettings, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
 import { memberDisplayName } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
+import { Dialog } from "./Dialog";
 
 /**
  * Browser-local preferences dialog.
@@ -70,6 +72,7 @@ export type UserSettingsDialogProps = {
   onOpenAdmin: () => void;
   onResetSettings: () => void;
   onClose: () => void;
+  modal?: boolean;
 };
 
 export function UserSettingsDialog({
@@ -90,15 +93,9 @@ export function UserSettingsDialog({
   onOpenAdmin,
   onResetSettings,
   onClose,
+  modal = true,
 }: UserSettingsDialogProps) {
   const [settingsSection, setSettingsSection] = React.useState<"account" | "theme" | "preferences" | "data">("account");
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
   const [themeExpanded, setThemeExpanded] = React.useState(false);
   const [themeShareOpen, setThemeShareOpen] = React.useState(false);
   const [themeImportText, setThemeImportText] = React.useState("");
@@ -126,6 +123,12 @@ export function UserSettingsDialog({
   const previewGradient = `linear-gradient(180deg, ${theme.gradientTop} ${theme.gradientTopStop}%, ${theme.gradientMid} ${theme.gradientMidStop}%, ${theme.gradientBase} ${theme.gradientFadeStop}%)`;
   const themePayload = React.useMemo(() => JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }, null, 2), [theme]);
   const saveCustomTheme = () => {
+    const contrast = validateThemeContrast(theme);
+    if (!contrast.valid) {
+      onThemeChange(customTheme);
+      setCustomThemeStatus(`Theme not saved. Improve contrast for: ${contrast.failures.map((failure) => `${failure.role} (${failure.ratio}:1; needs ${failure.minimum}:1)`).join(", ")}. The last valid custom theme is active.`);
+      return;
+    }
     localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify({ schema: "timbersteel-local-theme", version: 2, theme }));
     setCustomTheme(theme);
     setLastThemeChoice("custom");
@@ -169,6 +172,8 @@ export function UserSettingsDialog({
       const parsed = JSON.parse(themeImportText);
       const result = normalizeThemeCandidate(parsed);
       if (!result) throw new Error("No recognised colour fields were found.");
+      const contrast = validateThemeContrast(result.theme);
+      if (!contrast.valid) throw new Error(`Theme not imported. Improve contrast for: ${contrast.failures.map((failure) => `${failure.role} (${failure.ratio}:1; needs ${failure.minimum}:1)`).join(", ")}.`);
       onThemeChange(result.theme);
       setLastThemeChoice("custom-editing");
       setThemeExpanded(true);
@@ -207,8 +212,7 @@ export function UserSettingsDialog({
     }
   }
   return (
-    <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog settings-dialog" data-tour="user-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="User Settings" modal={modal} onClose={onClose} className="help-dialog settings-dialog" backdropClassName="help-overlay" dataTour="user-settings">
         <header>
           <div>
             <Settings size={19} />
@@ -234,7 +238,7 @@ export function UserSettingsDialog({
             <div className="settings-section-heading">
               <div>
                 <h3>Discord Account</h3>
-                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and save settings beyond this browser.</p>
+                <p className="legend">Optional sign-in lets you link your Discord account to a BitCraft character and synchronize supported preferences across browsers.</p>
               </div>
               {auth.user ? <button className="toolbar-button" onClick={() => runAccountAction(onDiscordLogout, "Signed out of Discord.")}><LogOut size={14} /> Sign out</button> : null}
             </div>
@@ -275,12 +279,12 @@ export function UserSettingsDialog({
           </section> : null}
           {settingsSection === "account" ? <section>
             <h3>This Browser</h3>
-            <p className="legend">When signed in with Discord, your page, filters, density and notification preferences sync to your account. Local storage is still used on this device for signed-out browsing and instant loading.</p>
+            <p className="legend">Density, toast preferences, theme, sidebar state and groups, and your selected production member sync automatically while you are signed in with Discord. Page and filter choices stay in this browser. Local storage is still used on this device for signed-out browsing and instant loading.</p>
           </section> : null}
-          {settingsSection === "account" && showAdminTools ? <section>
-            <h3>Admin Tools</h3>
-            <p className="legend">For settlement monitor administrators. Opens the admin console where configuration, database, accounts and diagnostics are managed.</p>
-            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> Open Admin Console</button>
+          {settingsSection === "account" ? <section>
+            <h3>Administrator Access</h3>
+            <p className="legend">For approved settlement monitor administrators. Administrator sign-in and tools open in the protected console.</p>
+            <button className="toolbar-button" onClick={onOpenAdmin}><KeyRound size={14} /> {showAdminTools ? "Open Admin Console" : "Administrator sign-in"}</button>
           </section> : null}
           {settingsSection === "theme" ? <section className={`settings-theme-section ${themeExpanded ? "expanded" : ""}`}>
             <div className="settings-section-heading">
@@ -495,8 +499,7 @@ export function UserSettingsDialog({
           </section> : null}
           </div>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 

@@ -115,6 +115,10 @@ The palette is a dark operational shell with a restrained gold command accent an
 
 **The Data Honesty Rule.** If a value depends on BitJita availability or local cache freshness, the UI must label uncertainty plainly instead of over-styling it as exact truth.
 
+**The Theme Safety Rule.** Browser themes may customize operational surfaces, text, focus, and status roles only when their representative pairs meet WCAG contrast. The current dashboard supports dark command surfaces: some dense tables, domain-fidelity panels, and operational labels intentionally retain fixed dark or light colours for rapid scanning. Imported or saved light-surface themes are therefore rejected before activation when those real UI pairs fail contrast. Invalid imports and saves must leave the last valid theme active and name every failing role with its measured and required contrast.
+
+**The Domain Fidelity Rule.** Rarity, tier, chart-series, and Discord identity colours are game or platform data. Keep them as dedicated domain tokens; do not derive them from, or overwrite them with, browser theme colours.
+
 ## 3. Typography
 
 **Display Font:** Rajdhani with Outfit and system fallbacks
@@ -141,11 +145,19 @@ The app relies on tonal layering and borders more than drop shadows. Surfaces sh
 
 Use shadows only for floating controls, toasts, and modal focus where they help separate a temporary layer from busy data behind it.
 
+The shared layer order is dropdown, help, toast, sticky chrome, overlay/modal, tooltip, then cookie consent. Use the semantic z-index token for the layer instead of a new large numeric value.
+
+State transitions should normally run for 150–250ms and animate transform, opacity, colour, or border. Avoid layout-property transitions; preserve the global reduced-motion override.
+
 ## 5. Components
 
 ### App Shell
 
 The sidebar is compact and persistent. Active navigation uses a left accent line, subtle gold treatment, and readable text. Keep row heights tight but avoid cramped hit targets.
+
+### Page Header
+
+Use the shared `PageHeader` structure for a route title, operational description, metadata, and actions. The title must match the navigation label; settlement or workflow detail belongs in description and metadata. Dashboard, Members, Professions, Production, Inventory, Research, and Construction are the first migrated routes.
 
 ### Cards and Panels
 

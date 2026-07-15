@@ -1,8 +1,11 @@
 import React from "react";
+import "../styles/public-craft.css";
 import { ArrowDown, ArrowUp, ArrowUpDown, Factory, Globe2, GraduationCap, MapPin, Search, TrendingUp } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { MiniStat } from "../components/main/Stats";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
@@ -115,6 +118,8 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     ["XP Available", "availableXp", (job) => formatNumber(job.availableXp)],
     ["Owner", "owner", (job) => <TrackedOwnerName name={job.ownerUsername ?? "-"} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
   ];
+  if (state.loading && !state.data) return <AppSkeleton />;
+  if (state.error && !state.data) return <AsyncState kind="error" title="Unable to load public craft jobs" detail={state.error} />;
   return (
     <section className="public-craft-finder" data-tour="publiccrafts-page">
       <header className="members-topbar public-craft-topbar">
@@ -162,9 +167,10 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
           <span>Click a settlement location to open it on the map. Column headings sort the results.</span>
         </div>
       </div>
-      {state.error ? <div className="error">Failed to load public crafts: {state.error}</div> : null}
-      {!state.loading && !state.error && visibleJobs.length === 0 ? <div className="empty-state"><Factory />No public {skillName.toLowerCase()} jobs found.</div> : null}
-      {visibleJobs.length ? <div className="table-wrap"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr className="data-row" key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
+      {state.loading ? <AsyncState kind="loading" title="Refreshing public craft jobs" detail="Current results remain visible while BitJita refreshes." compact /> : null}
+      {state.error ? <AsyncState kind="error" title="Public crafts refresh failed" detail={`Current results are retained. ${state.error}`} compact /> : null}
+      {!state.loading && visibleJobs.length === 0 ? <AsyncState kind={publicJobs.length ? "no-match" : "empty"} title={publicJobs.length ? "No public crafts match these filters" : "No public craft jobs are open"} detail={publicJobs.length ? "Choose another skill or region to broaden the results." : "Public jobs will appear here when settlements expose incomplete crafts."} /> : null}
+      {visibleJobs.length ? <div className="table-wrap" tabIndex={0} aria-label="Public craft jobs table"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr className="data-row" key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
     </section>
   );
 }

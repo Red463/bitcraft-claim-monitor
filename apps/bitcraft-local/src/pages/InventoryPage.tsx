@@ -1,9 +1,12 @@
 import React from "react";
+import "../styles/inventory.css";
 import { Box, Building2, CircleDollarSign, Factory, Lock, Package, Search, TrendingUp, Wrench, X } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
 import { ItemIcon, TierMaterialIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -121,12 +124,10 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
   const uniqueVisibleItems = unique(rows.map((row: AnyRecord) => String(row.name))).length;
   return (
     <div className="panel inventory-page" data-tour="inventory-page">
-      <header className="members-topbar inventory-topbar">
-        <div>
-          <h2>Inventory & Storage</h2>
-          <p>{containers.length} containers - {rows.length} visible stacks</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Inventory"
+        description={`${containers.length} containers - ${rows.length} visible stacks`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Package size={14} /> {formatNumber(totalItems)} visible items</span>
             <span>{formatNumber(uniqueVisibleItems)} unique</span>
@@ -135,8 +136,8 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
             <span className="status-pill">{formatNumber(occupiedContainers)}</span>
             <span>Occupied containers</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid inventory-summary">
         <MiniStat icon={<Package />} label="Total Items" value={formatNumber(totalItems)} />
         <MiniStat icon={<Box />} label="Unique Items" value={uniqueVisibleItems} />
@@ -196,8 +197,8 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
           </div>
         </div>
         <div className="inventory-filter-grid">
-          <label className="inventory-filter-field"><span>Item</span><SearchBox value={q} onChange={setQ} placeholder="Search items" /></label>
-          <label className="inventory-filter-field"><span>Container</span><SearchBox value={containerQ} onChange={setContainerQ} placeholder="Search containers" /></label>
+          <div className="inventory-filter-field"><span>Item</span><SearchBox label="Search inventory items" value={q} onChange={setQ} placeholder="Search items" /></div>
+          <div className="inventory-filter-field"><span>Container</span><SearchBox label="Search inventory containers" value={containerQ} onChange={setContainerQ} placeholder="Search containers" /></div>
           <label className="inventory-filter-field"><span>Type</span>
             <select className="select-control" value={type} onChange={(event) => setType(event.target.value)}>
               <option>All</option><option>Item</option><option>Cargo</option>
@@ -221,7 +222,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
         </div>
       </div>
       <div className="container-list">
-        {selectedCoreMaterial && filteredContainers.length === 0 ? <div className="empty-state"><Package />No containers match the {selectedCoreMaterial.label.toLowerCase()} filter.</div> : null}
+        {filteredContainers.length === 0 ? <AsyncState kind={containers.length ? "no-match" : "empty"} title={containers.length ? "No containers match these filters" : "No storage containers available"} detail={containers.length ? "Clear a material, item, container, tier, rarity, or storage filter to broaden the results." : "Containers appear when BitJita returns settlement storage data."} /> : null}
         {filteredContainers.map((container) => {
           const quantity = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.quantity), 0);
           return (
@@ -230,7 +231,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
                 <span><Package size={16} /> <strong>{container.name}</strong>{container.locked ? <Lock size={13} /> : null}</span>
                 <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
               </summary>
-              <DataTable rows={container.items} columns={[
+              <DataTable rows={container.items} scrollLabel="Storage container items table" emptyState="No matching items are stored in this container." columns={[
                 ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
                 ["Qty", (r) => formatNumber(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],

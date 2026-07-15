@@ -1,8 +1,11 @@
 import React from "react";
+import "../styles/leaderboard.css";
 import { Activity, CircleDollarSign, Clock, Factory, GraduationCap, RefreshCw, ShoppingBag, TrendingUp, Trophy, Users } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime, timeAgo, timestampMs } from "../utils/format";
@@ -12,6 +15,7 @@ import { normalizeData } from "../utils/normalize";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_NAMES } from "../utils/professions";
 import type { LoadState } from "../types/app";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
+import { resolveAllowedView } from "../navigation/routeState.ts";
 
 const LOCAL_API = "/api/local";
 
@@ -45,10 +49,10 @@ export function Leaderboard({
   const [activitySort, setActivitySort] = React.useState("totalEvents");
   const [marketSort, setMarketSort] = React.useState("confirmedSaleValue");
   const visibleTabs = React.useMemo(() => LEADERBOARD_TABS.filter((tab) => effectiveTargetAllowed(access, targetIdForTab("leaderboard", tab.id))), [access]);
+  const resolvedTab = resolveAllowedView(activeTab, visibleTabs.map((tab) => tab.id));
   React.useEffect(() => {
-    if (!visibleTabs.length) return;
-    if (!visibleTabs.some((tab) => tab.id === activeTab)) setActiveTab(visibleTabs[0].id);
-  }, [activeTab, setActiveTab, visibleTabs]);
+    if (resolvedTab && resolvedTab !== activeTab) setActiveTab(resolvedTab);
+  }, [activeTab, resolvedTab, setActiveTab]);
   React.useEffect(() => {
     const controller = new AbortController();
     setState((current) => ({ ...current, loading: true, error: null }));
@@ -56,7 +60,7 @@ export function Leaderboard({
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`leaderboard HTTP ${response.status}`)))
       .then((payload) => setState({ data: payload, error: null, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted) setState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+        if (!controller.signal.aborted) setState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error), loading: false }));
       });
     return () => controller.abort();
   }, [claimId, refreshToken]);
@@ -173,23 +177,24 @@ export function Leaderboard({
   }, [data.members, playerById, playerByName]);
   const mostPlayedRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.timePlayedSeconds) > toNumber(best?.timePlayedSeconds) ? row : best, null);
   const longestSessionRow = onlineRows.reduce<AnyRecord | null>((best, row) => toNumber(row.sessionSeconds) > toNumber(best?.sessionSeconds) ? row : best, null);
-  const activeTabMeta = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0] ?? LEADERBOARD_TABS[0];
-  const tabSummary = activeTab === "professions" ? [
+  const currentTab = resolvedTab ?? activeTab;
+  const activeTabMeta = visibleTabs.find((tab) => tab.id === currentTab) ?? LEADERBOARD_TABS[0];
+  const tabSummary = currentTab === "professions" ? [
     <MiniStat key="members" icon={<Users />} label="Members Compared" value={formatNumber(sortedProfessionRows.length)} />,
     <MiniStat key="total" icon={<GraduationCap />} label="Total Profession Levels" value={formatNumber(sortedProfessionRows.reduce((total, row) => total + toNumber(row.totalLevel), 0))} />,
     <MiniStat key="highest" icon={<TrendingUp />} label="Highest Level" value={formatNumber(Math.max(...sortedProfessionRows.map((row) => toNumber(row.highestLevel)), 0))} />,
     <MiniStat key="top" icon={<Trophy />} label="Top Member" value={sortedProfessionRows[0]?.name ?? "None yet"} />,
-  ] : activeTab === "activity" ? [
+  ] : currentTab === "activity" ? [
     <MiniStat key="members" icon={<Users />} label="Members With Activity" value={formatNumber(sortedActivityRows.length)} />,
     <MiniStat key="events" icon={<Activity />} label="Recorded Events" value={formatNumber(sortedActivityRows.reduce((total, row) => total + toNumber(row.totalEvents), 0))} />,
     <MiniStat key="top" icon={<Trophy />} label="Most Recorded" value={sortedActivityRows[0]?.name ?? "None yet"} />,
     <MiniStat key="updated" icon={<Clock />} label="Latest Activity" value={leaderboard.activity?.summary?.lastActivityAt ? timeAgo(leaderboard.activity.summary.lastActivityAt) : "No history"} />,
-  ] : activeTab === "market" ? [
+  ] : currentTab === "market" ? [
     <MiniStat key="members" icon={<Users />} label="Market Members" value={formatNumber(sortedMarketRows.length)} />,
     <MiniStat key="listings" icon={<ShoppingBag />} label="Active Listings" value={formatNumber(leaderboard.market?.summary?.activeListings)} />,
     <MiniStat key="sales" icon={<CircleDollarSign />} label="Confirmed Sales Value" value={formatCompactNumber(leaderboard.market?.summary?.confirmedSaleValue)} />,
     <MiniStat key="top" icon={<Trophy />} label="Top Seller" value={sortedMarketRows[0]?.name ?? "None yet"} />,
-  ] : activeTab === "online" ? [
+  ] : currentTab === "online" ? [
     <MiniStat key="online" icon={<Users />} label="Online Now" value={formatNumber(onlineRows.filter((row) => row.signedIn).length)} />,
     <MiniStat key="members" icon={<Users />} label="Tracked Members" value={formatNumber(onlineRows.length)} />,
     <MiniStat key="played" icon={<Trophy />} label="Most Played" value={mostPlayedRow?.timePlayedSeconds ? `${mostPlayedRow.name} - ${formatPlaytime(mostPlayedRow.timePlayedSeconds)}` : "Unavailable"} />,
@@ -200,6 +205,13 @@ export function Leaderboard({
     <MiniStat key="top" icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />,
     <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
   ];
+  if (!resolvedTab) return (
+    <div className="panel restricted-access-panel">
+      <AsyncState kind="restricted" title="Leaderboard is restricted" detail="No leaderboard categories are available for your account." />
+    </div>
+  );
+  if (state.loading && !state.data) return <AppSkeleton />;
+  if (state.error && !state.data) return <AsyncState kind="error" title="Unable to load leaderboard" detail={state.error} />;
   return (
     <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">
@@ -217,7 +229,7 @@ export function Leaderboard({
       </header>
       <nav className="leaderboard-tabs" aria-label="Leaderboard categories">
         {visibleTabs.map((tab) => (
-          <button key={tab.id} className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>
+          <button key={tab.id} className={currentTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>
             {tab.icon}
             <span>{tab.label}</span>
           </button>
@@ -228,9 +240,9 @@ export function Leaderboard({
       </div>
       <section className="dashboard-card leaderboard-card leaderboard-context">
         <header className="dashboard-card-title"><span>{activeTabMeta.icon} {activeTabMeta.label}</span></header>
-        <p>{activeTab === "activity" || activeTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : activeTab === "professions" ? "This tab uses current BitJita citizen profession data for the monitored settlement." : activeTab === "online" ? "This tab uses current member and player detail data when BitJita provides it." : "This tab uses recorded BitJita craft contribution data observed by the app."}</p>
+        <p>{currentTab === "activity" || currentTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : currentTab === "professions" ? "This tab uses current BitJita citizen profession data for the monitored settlement." : currentTab === "online" ? "This tab uses current member and player detail data when BitJita provides it." : "This tab uses recorded BitJita craft contribution data observed by the app."}</p>
       </section>
-      {activeTab === "contribution" ? (
+      {currentTab === "contribution" ? (
       <section className="dashboard-card leaderboard-card">
         <header className="dashboard-card-title">
           <span><Trophy size={14} /> Member standings</span>
@@ -241,13 +253,15 @@ export function Leaderboard({
             </select>
           </label>
         </header>
-        {state.loading ? <div className="empty-state"><RefreshCw /> Loading contribution history...</div> : null}
-        {state.error ? <div className="error">Failed to load leaderboard: {state.error}</div> : null}
-        {!state.loading && !state.error && !contributors.length ? (
-          <div className="empty-state"><Trophy />No craft contributions have been recorded yet. The leaderboard starts filling as settlement craft contribution data is observed during refreshes.</div>
+        {state.loading ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
+        {state.error ? <AsyncState kind="error" title="Leaderboard refresh failed" detail={`Current standings are retained. ${state.error}`} compact /> : null}
+        {!state.loading && !contributors.length ? (
+          <AsyncState kind="empty" title="No craft contributions recorded yet" detail="The leaderboard fills as settlement craft contribution data is observed during refreshes." />
         ) : null}
         {filteredContributors.length ? (
           <DataTable
+            scrollLabel="Craft contributions table"
+            emptyState="No settlement summary rows were returned."
             rows={filteredContributors}
             columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
@@ -265,7 +279,7 @@ export function Leaderboard({
         ) : null}
       </section>
       ) : null}
-      {activeTab === "professions" ? (
+      {currentTab === "professions" ? (
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title">
             <span><GraduationCap size={14} /> Profession comparison</span>
@@ -286,8 +300,8 @@ export function Leaderboard({
               </label>
             </div>
           </header>
-          {!sortedProfessionRows.length ? <div className="empty-state"><GraduationCap />No citizen profession data is available for tracked settlement members.</div> : (
-            <DataTable rows={sortedProfessionRows} columns={[
+          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when BitJita returns citizen skill data." : "Choose another profession or show all professions."} /> : (
+            <DataTable rows={sortedProfessionRows} scrollLabel="Profession leaderboard table" emptyState="No profession leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],
               ["Total levels", (entry) => formatNumber(entry.totalLevel)],
@@ -298,7 +312,7 @@ export function Leaderboard({
           )}
         </section>
       ) : null}
-      {activeTab === "activity" ? (
+      {currentTab === "activity" ? (
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title">
             <span><Activity size={14} /> Recorded activity</span>
@@ -313,7 +327,7 @@ export function Leaderboard({
             </label>
           </header>
           {!sortedActivityRows.length ? <div className="empty-state"><Activity />No member activity has been recorded with identifiable member names yet.</div> : (
-            <DataTable rows={sortedActivityRows} columns={[
+            <DataTable rows={sortedActivityRows} scrollLabel="Activity leaderboard table" emptyState="No activity leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Total events", (entry) => formatNumber(entry.totalEvents)],
               ["Market", (entry) => formatNumber(entry.marketEvents)],
@@ -325,7 +339,7 @@ export function Leaderboard({
           )}
         </section>
       ) : null}
-      {activeTab === "market" ? (
+      {currentTab === "market" ? (
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title">
             <span><CircleDollarSign size={14} /> Market comparison</span>
@@ -340,7 +354,7 @@ export function Leaderboard({
             </label>
           </header>
           {!sortedMarketRows.length ? <div className="empty-state"><CircleDollarSign />No settlement market listings or confirmed sales have been recorded yet.</div> : (
-            <DataTable rows={sortedMarketRows} columns={[
+            <DataTable rows={sortedMarketRows} scrollLabel="Market leaderboard table" emptyState="No market leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Active listings", (entry) => formatNumber(entry.activeListings)],
               ["Listing value", (entry) => `${formatNumber(entry.activeListingValue)}g`],
@@ -352,11 +366,11 @@ export function Leaderboard({
           )}
         </section>
       ) : null}
-      {activeTab === "online" ? (
+      {currentTab === "online" ? (
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title"><span><Users size={14} /> Online and sessions</span></header>
           {!onlineRows.length ? <div className="empty-state"><Users />No tracked settlement members are available.</div> : (
-            <DataTable rows={onlineRows} columns={[
+            <DataTable rows={onlineRows} scrollLabel="Online members table" emptyState="No members are currently online." columns={[
               ["Member", (entry) => <strong><TrackedOwnerName name={entry.name} claim={data.claim} members={data.members} /></strong>],
               ["Status", (entry) => entry.signedIn ? <span className="online-text">Online</span> : <span className="muted-cell">Offline</span>],
               ["Current session", (entry) => {
@@ -370,7 +384,7 @@ export function Leaderboard({
           )}
         </section>
       ) : null}
-      {activeTab === "contribution" ? (
+      {currentTab === "contribution" ? (
       <div className="leaderboard-grid">
         <section className="dashboard-card leaderboard-card">
           <header className="dashboard-card-title"><span><GraduationCap size={14} /> Profession totals</span></header>
@@ -410,4 +424,3 @@ export function Leaderboard({
     </div>
   );
 }
-

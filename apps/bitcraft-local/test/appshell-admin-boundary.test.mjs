@@ -9,7 +9,7 @@ test("AppShell delegates admin console rendering to a focused admin component", 
   assert.equal(existsSync(adminPanelUrl), true, "AdminPanel component should exist");
   const adminPanel = readFileSync(adminPanelUrl, "utf8");
 
-  assert.match(appShell, /import \{ AdminPanel \} from "\.\/components\/admin\/AdminPanel";/);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/components\/admin\/AdminPanel"\)/);
   assert.doesNotMatch(appShell, /function AdminPanel\b/);
   assert.doesNotMatch(appShell, /type AdminTab\b/);
   assert.match(adminPanel, /export function AdminPanel\b/);
@@ -28,16 +28,22 @@ test("AdminPanel groups admin tabs by operational purpose", () => {
 });
 test("AdminPanel keeps sensitive admin controls explicit", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const accessUrl = new URL("../src/components/admin/AdminAccessSection.tsx", import.meta.url);
+  const analyticsUrl = new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url);
+  const dataUrl = new URL("../src/components/admin/AdminDataSection.tsx", import.meta.url);
+  const access = existsSync(accessUrl) ? readFileSync(accessUrl, "utf8") : "";
+  const analytics = existsSync(analyticsUrl) ? readFileSync(analyticsUrl, "utf8") : "";
+  const data = existsSync(dataUrl) ? readFileSync(dataUrl, "utf8") : "";
 
-  assert.match(adminPanel, /Delete all opt-in usage analytics records/);
+  assert.match(analytics, /Delete all opt-in usage analytics records/);
   assert.match(adminPanel, /Start this background job now without changing its saved schedule/);
   assert.match(adminPanel, /Save this job schedule\. It does not run the job immediately/);
-  assert.match(adminPanel, /Create an admin allow-list entry/);
-  assert.match(adminPanel, /Sign this administrator out of all active sessions/);
-  assert.match(adminPanel, /Create a downloadable SQLite backup/);
-  assert.match(adminPanel, /No administrator accounts are configured yet/);
-  assert.match(adminPanel, /No administrator actions have been recorded yet/);
-  assert.match(adminPanel, /No database backups have been created yet/);
+  assert.match(access, /Create an admin allow-list entry/);
+  assert.match(access, /Sign this administrator out of all active sessions/);
+  assert.match(data, /Create a downloadable SQLite backup/);
+  assert.match(access, /No administrator accounts are configured yet/);
+  assert.match(analytics, /No administrator actions have been recorded yet/);
+  assert.match(data, /No database backups have been created yet/);
 });
 test("Admin diagnostics and collector settings stay bounded", () => {
   const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
@@ -51,15 +57,17 @@ test("Admin diagnostics and collector settings stay bounded", () => {
 });
 test("Admin console uses compact navigation and bounded audit tools", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const analyticsUrl = new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url);
+  const analytics = existsSync(analyticsUrl) ? readFileSync(analyticsUrl, "utf8") : "";
   const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
 
   assert.match(adminPanel, /admin-section-tabs/);
   assert.match(adminPanel, /admin-tab-overview/);
   assert.match(adminCss, /admin-nav-divider/);
-  assert.match(adminPanel, /setAuditFilter/);
-  assert.match(adminPanel, /filteredAuditLog/);
-  assert.match(adminPanel, /auditData\.auditLog\.length > auditVisibleCount/);
-  assert.match(adminPanel, /Load more actions/);
+  assert.match(analytics, /onAuditFilterChange/);
+  assert.match(analytics, /filteredAuditLog/);
+  assert.match(analytics, /data\.auditData\.auditLog\.length > data\.auditVisibleCount/);
+  assert.match(analytics, /Load more actions/);
   assert.match(adminCss, /\.admin-tab-groups\s*\{[\s\S]*display:\s*flex/);
   assert.doesNotMatch(adminCss, /\.admin-section-tabs\s*\{[^}]*overflow-x:\s*auto/);
   assert.match(adminCss, /\.audit-table/);
@@ -82,9 +90,8 @@ test("App popup admin uses a compact list and modal editor", () => {
   assert.match(popupsSection, /popupEditorOpen/);
   assert.match(popupsSection, /openPopupEditor/);
   assert.match(popupsSection, /Save Popup/);
-  assert.match(popupsSection, /import \{ createPortal \} from "react-dom";/);
-  assert.match(popupsSection, /createPortal\(/);
-  assert.match(popupsSection, /document\.body/);
+  assert.match(popupsSection, /import \{ Dialog \} from "\.\.\/main\/Dialog";/);
+  assert.match(popupsSection, /<Dialog[\s\S]*className="admin-modal"[\s\S]*backdropClassName="admin-modal-backdrop"/);
   assert.match(popupsSection, /admin-modal-backdrop/);
   assert.match(popupsSection, /popup-admin-table/);
   assert.doesNotMatch(popupsSection, /popup-builder-grid/);

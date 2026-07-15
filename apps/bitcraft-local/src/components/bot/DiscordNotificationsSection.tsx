@@ -1,17 +1,10 @@
 import React from "react";
 import { Bell } from "lucide-react";
 import { DiscordCraftPlanReportsSection } from "./DiscordCraftPlanReportsSection";
+import { ActionButton } from "../main/ActionButton";
+import { BotStatusInfo } from "./BotStatusInfo";
 
 type DiscordSettings = Record<string, any>;
-
-function StatusInfo({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
 
 export function DiscordNotificationsSection({
   channelSelect,
@@ -22,6 +15,7 @@ export function DiscordNotificationsSection({
   channelIdSelect,
   roleIdSelect,
   onTestCraftPlanReport,
+  isPending,
 }: {
   channelSelect: (key: string, value: string, professionChannel?: boolean) => React.ReactNode;
   discord: DiscordSettings;
@@ -31,6 +25,7 @@ export function DiscordNotificationsSection({
   channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   roleIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   onTestCraftPlanReport: (rule: Record<string, any>) => Promise<void> | void;
+  isPending: (key: string) => boolean;
 }) {
   return (
     <section className="form-card discord-preview-card">
@@ -206,18 +201,20 @@ export function DiscordNotificationsSection({
         roleIdSelect={roleIdSelect}
         onChange={(craftPlanReports) => updateDiscord({ craftPlanReports })}
         onTest={onTestCraftPlanReport}
+        renderTestAction={(rule) => <ActionButton className="toolbar-button" pending={isPending(`discord-craft-report-test:${rule.id}`)} pendingLabel="Sending report..." disabled={!rule.channelId} onClick={() => void onTestCraftPlanReport(rule)}>Send test</ActionButton>}
       />
       <div className="status-detail discord-notification-status">
-        <StatusInfo
+        <BotStatusInfo
           label="Interaction endpoint"
-          value={discord.interactionUrl ? `${window.location.origin}${discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`}
+          content={discord.interactionUrl ? `${window.location.origin}${discord.interactionUrl}` : `${window.location.origin}/api/discord/interactions`}
         />
-        <StatusInfo label="Slash commands" value="/help, /supplies, /online, /crafts, /price, /craftwatch, /craft-plan" />
-        <StatusInfo
+        <BotStatusInfo label="Slash commands" content="/help, /supplies, /online, /crafts, /price, /craftwatch, /craft-plan" />
+        <BotStatusInfo
           label="Token status"
-          value={discord.botTokenConfigured ? `Configured via ${discord.botTokenSource ?? "server"}` : "Not configured"}
+          content={discord.botTokenConfigured ? `Configured via ${discord.botTokenSource ?? "server"}` : "Not configured"}
+          tone={discord.botTokenConfigured ? "success" : "warning"}
         />
-        <StatusInfo label="Last Discord delivery" value={discordDeliveryLabel} />
+        <BotStatusInfo label="Last Discord delivery" content={discordDeliveryLabel} />
       </div>
     </section>
   );

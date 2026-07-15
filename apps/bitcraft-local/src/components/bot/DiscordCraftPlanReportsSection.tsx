@@ -31,12 +31,14 @@ export function DiscordCraftPlanReportsSection({
   roleIdSelect,
   onChange,
   onTest,
+  renderTestAction,
 }: {
   settings: AnyRecord;
   channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   roleIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   onChange: (value: AnyRecord) => void;
   onTest: (rule: AnyRecord) => Promise<void> | void;
+  renderTestAction?: (rule: AnyRecord) => React.ReactNode;
 }) {
   const value = settings ?? { scheduledEnabled: false, commandRoleId: "", timezone: "Europe/London", rules: [] };
   const rules: AnyRecord[] = Array.isArray(value.rules) ? value.rules : [];
@@ -93,7 +95,7 @@ export function DiscordCraftPlanReportsSection({
               {rule.lastOccurrence?.error ? <small className="error-text">{rule.lastOccurrence.error}</small> : null}
             </div>
             <div className="discord-craft-plan-rule-actions">
-              <button className="toolbar-button" type="button" disabled={!rule.channelId} onClick={() => void onTest(rule)}><Send size={13} /> Send test</button>
+              {renderTestAction?.(rule) ?? <button className="toolbar-button" type="button" disabled={!rule.channelId} onClick={() => void onTest(rule)}><Send size={13} /> Send test</button>}
               <button className="toolbar-button" type="button" onClick={() => addRule(rule)}><Copy size={13} /> Duplicate</button>
               <button className="toolbar-button danger" type="button" onClick={() => patch({ rules: rules.filter((entry) => entry.id !== rule.id) })}><Trash2 size={13} /> Delete</button>
             </div>

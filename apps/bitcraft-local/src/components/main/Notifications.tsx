@@ -5,6 +5,7 @@ import { dedupeNotifications, formatToastMetaLine, type ToastNotice } from "../.
 import { timeAgo } from "../../utils/format";
 import { bitjitaIconUrl } from "../../utils/items";
 import { ItemIcon } from "./ItemDisplay";
+import { Dialog } from "./Dialog";
 
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
@@ -43,8 +44,7 @@ export function ToastStack({ notices, onDismiss }: { notices: ToastNotice[]; onD
 export function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices: ToastNotice[]; onClose: () => void; onOpenNotice: (notice: ToastNotice) => void }) {
   const displayNotices = dedupeNotifications(notices);
   return (
-    <div className="drawer-overlay" onClick={onClose}>
-      <aside className="notice-drawer" role="dialog" aria-modal="true" aria-label="Recent notifications" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Recent notifications" modal={false} onClose={onClose} className="notice-drawer" backdropClassName="drawer-overlay">
         <header><h2><Bell size={18} /> Notifications</h2><button onClick={onClose} aria-label="Close notifications"><X size={16} /></button></header>
         {displayNotices.length ? <div className="notice-list">{displayNotices.map((notice) => {
           const eventMeta = formatToastMetaLine(notice);
@@ -57,7 +57,6 @@ export function NotificationDrawer({ notices, onClose, onOpenNotice }: { notices
             </button>
           );
         })}</div> : <p className="legend">Notifications for sales, listings and production will appear here.</p>}
-      </aside>
-    </div>
+    </Dialog>
   );
 }

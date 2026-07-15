@@ -2,20 +2,40 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+const empiresPage = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
+
+test("Empires renders a restricted state when every view is denied", () => {
+  assert.match(empiresPage, /resolveAllowedView\(tab, empireTabs\.map\(\(entry\) => entry\.id\)\)/);
+  assert.match(empiresPage, /No empire views are available for your account\./);
+});
+
+test("Empires contains wide tables on phones and names their keyboard scrollers", () => {
+  const dataTable = readFileSync(new URL("../src/components/main/DataTable.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.empires-page\s*\{[^}]*min-width:\s*0/s);
+  assert.match(css, /\.empires-page\s*>\s*\*\s*\{[^}]*min-width:\s*0/s);
+  assert.match(css, /\.empires-page \.table-wrap\s*\{[^}]*max-width:\s*100%/s);
+  assert.match(empiresPage, /scrollLabel="Regional empires table"/);
+  assert.match(empiresPage, /scrollLabel="Watchtowers table"/);
+  assert.match(dataTable, /scrollLabel:\s*string/);
+  assert.match(dataTable, /tabIndex=\{0\}/);
+  assert.match(dataTable, /aria-label=\{scrollLabel\}/);
+});
+
 test("watchtower dialog stays viewport bounded and renders all empire members", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
 
-  assert.match(page, /import \{ createPortal \} from "react-dom";/);
-  assert.match(page, /return createPortal\(/);
-  assert.match(page, /document\.body/);
+  assert.match(page, /import \{ Dialog \} from "\.\.\/components\/main\/Dialog";/);
+  assert.match(page, /<Dialog[\s\S]*tower-access-dialog[\s\S]*empires-watchtower-overlay/);
   assert.match(page, /rankFilters/);
   assert.match(page, /visibleMembers/);
   assert.match(page, /tower-rank-filter/);
   assert.match(page, /aria-label="Show all ranks"/);
   assert.match(page, /rankTitle \?\? "Citizen"/);
   assert.match(page, /const members:[\s\S]*tower\.members/);
-  assert.match(page, /setSelectedTower\(\{ \.\.\.row, members:/);
+  assert.match(page, /const openTowerDetails[\s\S]*setSelectedTower\([\s\S]*members:/);
   assert.doesNotMatch(page, /No storage or hexite-capable members were returned/);
   assert.match(css, /\.empires-watchtower-overlay \{/);
   assert.match(css, /\.tower-rank-filter \{/);
@@ -35,6 +55,7 @@ test("watchtower table exposes empire and risk filters with open-map actions", (
   assert.match(page, /watchtower-risk-toggle/);
   assert.match(page, /At risk only/);
   assert.match(page, /Open on map/);
+  assert.match(page, /View tower details/);
   assert.match(page, /\["Map",/);
   assert.doesNotMatch(page, /\["Coordinates"/);
   assert.doesNotMatch(page, /\["Map coords"/);

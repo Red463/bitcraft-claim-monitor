@@ -2,21 +2,17 @@ import React from "react";
 import { CheckCircle2, CircleHelp, ExternalLink, FileText, MessageCircle, Settings, Shield, X } from "lucide-react";
 
 import packageJson from "../../../package.json";
+import { Dialog } from "./Dialog";
+import type { ActivePanel } from "../../types/app";
+import { routeHelpFor } from "../../navigation/routeHelp";
 
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const APP_VERSION = packageJson.version;
 type AnalyticsConsent = "accepted" | "declined" | null;
-export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }: { version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+export function HelpCenter({ activePage, version, onClose, onPrivacy, onTerms, onStartTour }: { activePage: ActivePanel; version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
+  const routeHelp = routeHelpFor(activePage);
   return (
-    <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Claim Monitor Help" onClose={onClose} className="help-dialog" backdropClassName="help-overlay">
         <header>
           <div>
             <CircleHelp size={19} />
@@ -26,6 +22,7 @@ export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }
         </header>
         <div className="beta-notice"><strong>Beta - Work in progress</strong><span>This application is actively being developed. Data display and features may change as accuracy and coverage improve.</span></div>
         <p className="help-intro">Track settlement operations, production opportunities, member professions and skills, storage, regional context, and market history using public BitCraft data.</p>
+        {routeHelp ? <section className="terms-section"><h3>On this page</h3><p><strong>{routeHelp.purpose}</strong> {routeHelp.nextAction}</p></section> : null}
         <div className="help-links">
           <a href={`${GITHUB_REPOSITORY}#readme`} target="_blank" rel="noreferrer">
             <strong>Application Guide</strong>
@@ -58,8 +55,7 @@ export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }
             <FileText size={14} />
           </button>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 
@@ -117,16 +113,8 @@ export function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
 }
 
 export function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPrivacy: () => void }) {
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
   return (
-    <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog terms-dialog" role="dialog" aria-modal="true" aria-labelledby="terms-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Legal & Bot Terms" onClose={onClose} className="help-dialog terms-dialog" backdropClassName="help-overlay">
         <header>
           <div>
             <FileText size={19} />
@@ -139,22 +127,13 @@ export function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPri
           <a className="toolbar-button primary" href="/terms" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open dedicated page</a>
           <button className="toolbar-button" onClick={() => { onClose(); onPrivacy(); }}><Shield size={14} /> Privacy details</button>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 
 export function PrivacyDialog({ consent, onConsent, onClose }: { consent: AnalyticsConsent; onConsent: (choice: Exclude<AnalyticsConsent, null>) => void; onClose: () => void }) {
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
   return (
-    <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog privacy-dialog" role="dialog" aria-modal="true" aria-labelledby="privacy-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Privacy & Analytics" onClose={onClose} className="help-dialog privacy-dialog" backdropClassName="help-overlay">
         <header>
           <div>
             <Shield size={19} />
@@ -172,15 +151,13 @@ export function PrivacyDialog({ consent, onConsent, onClose }: { consent: Analyt
           <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
           <a className="toolbar-button" href="/privacy" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open dedicated page</a>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 
 export function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exclude<AnalyticsConsent, null>) => void; onPrivacy: () => void }) {
   return (
-    <div className="cookie-consent-overlay" role="presentation">
-      <section className="cookie-banner" role="dialog" aria-modal="true" aria-labelledby="cookie-consent-title">
+    <Dialog open title="Help improve Claim Monitor" closeOnBackdrop={false} onClose={() => {}} className="cookie-banner" backdropClassName="cookie-consent-overlay">
         <div>
           <strong id="cookie-consent-title">Help improve Claim Monitor</strong>
           <p>We use optional anonymous analytics to understand which pages, tools, and features are used most. This helps prioritise development and improve the app without collecting your name, Discord account, character identity, or personal messages.</p>
@@ -191,15 +168,13 @@ export function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exc
           <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Anonymous Analytics</button>
           <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 
 export function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSettings }: { authHref: string; onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
   return (
-    <div className="help-overlay discord-signin-overlay" onClick={onClose}>
-      <section className="help-dialog discord-signin-dialog" role="dialog" aria-modal="true" aria-labelledby="discord-signin-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Sign in with Discord" onClose={onClose} className="help-dialog discord-signin-dialog" backdropClassName="help-overlay discord-signin-overlay">
         <header>
           <div>
             <MessageCircle size={19} />
@@ -221,7 +196,6 @@ export function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSetti
           <button className="toolbar-button" onClick={onSettings}><Settings size={14} /> Open settings</button>
           <button className="toolbar-button" onClick={onClose}>Maybe later</button>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }

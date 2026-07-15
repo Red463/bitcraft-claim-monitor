@@ -2,7 +2,6 @@
 .toast {
   pointer-events: auto;
   border: 1px solid rgba(108,123,145,.28);
-  border-left: 3px solid var(--active-color);
   border-radius: 9px;
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 40%),
@@ -16,7 +15,6 @@
   animation: toast-enter .18s ease-out;
   backdrop-filter: blur(12px);
 }
-.toast.production { border-left-color: var(--good); }
 .toast-icon,
 .toast-item-icon {
   width: 38px;
@@ -39,7 +37,7 @@
 .toast button { width: 27px; height: 27px; border: 1px solid transparent; border-radius: 7px; color: #8793a4; background: transparent; display: grid; place-items: center; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
 
-.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 900; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
+.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 800; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
 
 .notification-sound-settings { gap: 12px; }
 .notification-sound-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr); gap: 12px; align-items: end; }
@@ -58,8 +56,8 @@
 .notification-sound-type-row span { color: var(--muted); font-size: var(--font-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notification-sound-type-row select { min-width: 0; }
 
-.drawer-overlay { position: fixed; inset: 0; z-index: 29; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }
-.notice-drawer { margin-left: auto; width: min(430px, 100vw); min-height: 100vh; border-left: 1px solid var(--border); background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 34%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 20px; display: grid; align-content: start; gap: 16px; animation: drawer-enter .2s ease-out; box-shadow: -24px 0 70px rgba(0,0,0,.46); }
+.drawer-overlay { position: fixed; inset: 0; z-index: 29; padding: 0; overflow: hidden; align-items: stretch; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }
+.notice-drawer { margin-left: auto; width: min(430px, 100vw); height: 100dvh; max-height: 100dvh; overflow: auto; border-left: 1px solid var(--border); background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 34%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 20px; display: grid; align-content: start; gap: 16px; animation: drawer-enter .2s ease-out; box-shadow: -24px 0 70px rgba(0,0,0,.46); }
 .notice-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notice-drawer h2 { display: flex; gap: 9px; align-items: center; color: var(--active-color); font-size: 24px; }
 .notice-drawer h2 svg { width: 34px; height: 34px; padding: 8px; border: 1px solid var(--active-border); border-radius: 9px; background: var(--gold-dim); }

@@ -12,7 +12,7 @@ test("Production page lives outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, /export function MemberPassiveCrafts\b/);
   assert.match(productionPage, /export function Production\b/);
   assert.match(productionPage, /export function MemberPassiveCrafts\b/);
-  assert.match(appShell, /from "\.\/pages\/ProductionPage"/);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/ProductionPage"\)/);
   assert.doesNotMatch(appShell, /import \{ Market, Production \} from "\.\/pages\/MainPages"/);
 });
 test("Production contributors render as a wrapping grid", () => {
@@ -38,4 +38,33 @@ test("Production current crafter pills filter by that member", () => {
   assert.match(productionPage, /onSelectMember\(selectedMemberName === name \? "All" : crafterMemberIdByName\[name\]/);
   assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill/);
   assert.match(productionCss, /\.production-page \.crafter-pills > \.crafter-pill\.active/);
+});
+
+test("Production summary values wrap instead of truncating on phones", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+  const valueRule = css.match(/\.production-page \.mini-stat strong\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+  assert.match(valueRule, /overflow:\s*visible/);
+  assert.match(valueRule, /text-overflow:\s*clip/);
+  assert.match(valueRule, /white-space:\s*normal/);
+  assert.match(valueRule, /overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.production-page \.production-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});
+
+test("Production cards collapse to one contained column below the tablet breakpoint", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+
+  assert.match(
+    css,
+    /@media \(max-width:\s*900px\)[\s\S]*\.production-page \.production-grid\s*\{[^}]*grid-template-columns:\s*1fr/s,
+  );
+});
+
+test("Production crafter filters wrap within phone-width control panels", () => {
+  const css = readFileSync(new URL("../src/styles/production.css", import.meta.url), "utf8");
+
+  assert.match(
+    css,
+    /@media \(max-width:\s*560px\)[\s\S]*\.production-crafter-line\s*\{[^}]*flex-wrap:\s*wrap/s,
+  );
 });

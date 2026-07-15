@@ -1,4 +1,5 @@
-.first-run-tour-overlay { position: fixed; inset: 0; z-index: calc(var(--z-overlay) + 12); pointer-events: auto; background: transparent; }
+.first-run-tour-overlay { position: fixed; inset: 0; z-index: calc(var(--z-overlay) + 12); pointer-events: auto; background: transparent; backdrop-filter: none; }
+.first-run-tour-spotlight-layer { pointer-events: none; }
 .first-run-tour-prompt-overlay, .first-run-tour-overlay.is-centered { display: grid; place-items: center; padding: 20px; background: rgba(2, 4, 8, .58); backdrop-filter: blur(3px); }
 .first-run-tour-overlay.is-card-centered { display: grid; place-items: center; padding: 20px; }
 .first-run-tour-prompt, .first-run-tour-card { width: min(380px, calc(100vw - 32px)); border: 1px solid rgba(108,123,145,.34); border-radius: 10px; background: linear-gradient(180deg, rgba(21,26,34,.98), rgba(8,11,17,.98)); box-shadow: 0 28px 80px rgba(0,0,0,.52); }
@@ -11,7 +12,7 @@
 .first-run-tour-card { position: fixed; z-index: 2; padding: 14px; }
 .first-run-tour-overlay.is-centered .first-run-tour-card, .first-run-tour-overlay.is-card-centered .first-run-tour-card { position: static; }
 .first-run-tour-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.first-run-tour-card header span { color: #92a0b5; font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.first-run-tour-card header span { color: #92a0b5; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .first-run-tour-card header button { width: 32px; height: 32px; border: 1px solid rgba(108,123,145,.28); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--muted); display: grid; place-items: center; }
 .first-run-tour-card small { display: block; margin-top: 8px; color: #8f9bad; font-size: 12px; line-height: 1.4; }
 

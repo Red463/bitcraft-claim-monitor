@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/members.css";
 import {
   Activity,
   Factory,
@@ -14,7 +15,9 @@ import {
 } from "lucide-react";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { Dialog } from "../components/main/Dialog";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -65,6 +68,10 @@ export function Members({
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
   const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
   const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
+  const openMemberDetails = (member: AnyRecord) => {
+    setSelectedId(String(member.playerEntityId));
+    onMemberDetailsOpened?.();
+  };
   React.useEffect(() => {
     if (!selectedId) {
       setProfile(null);
@@ -98,19 +105,17 @@ export function Members({
 
   return (
     <div className="panel members-page" data-tour="members-page">
-      <header className="members-topbar">
-        <div>
-          <h2>Settlement Roster</h2>
-          <p>Member permissions and online status</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Members"
+        description="Settlement roster, permissions, and online status"
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span className="dashboard-region-line"><Globe2 size={15} /> {data.claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{data.claim.regionId ?? "?"}</span></span>
             <span className="dashboard-refresh-line"><span className="online-dot is-online" /> {onlineCount} online / {merged.length} members</span>
           </div>
           <span className="dashboard-claim-link"><TierBadge tier={data.claim.tier} /> {data.claim.name ?? "Monitored Settlement"}</span>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="members-summary-grid">
         <article><Users /><span>Members</span><strong>{merged.length}</strong><small>{onlineCount} online now</small></article>
         <article><Activity /><span>Total Levels</span><strong>{formatNumber(totalMemberLevels)}</strong><small>Across visible citizens</small></article>
@@ -118,13 +123,15 @@ export function Members({
         <article><Shield /><span>Storage Access</span><strong>{merged.filter((member) => member.inventoryPermission).length}</strong><small>Members with inventory rights</small></article>
       </div>
       <div className="toolbar-row members-toolbar">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
+        <SearchBox label="Search settlement members" value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
         <span>{filtered.length} members found</span>
       </div>
       <div className="members-roster-table">
         <DataTable
+          scrollLabel="Settlement roster table"
           rows={filtered}
-          onRowClick={(member) => { setSelectedId(String(member.playerEntityId)); onMemberDetailsOpened?.(); }}
+          emptyState={searchTerm ? "No members match this search." : "No settlement members were returned."}
+          onRowClick={openMemberDetails}
           rowClassName={(member) => String(member.playerEntityId) === selectedId ? "selected-row" : "clickable-row"}
           columns={[
             ["Username", (m) => (
@@ -142,12 +149,22 @@ export function Members({
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
               return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
             }],
-            ["Permissions", (m) => <span className="permission-icons"><Hammer className={m.buildPermission ? "enabled" : ""} /><Package className={m.inventoryPermission ? "enabled blue" : ""} /></span>],
+            ["Permissions", (m) => (
+              <span
+                className="permission-icons"
+                role="img"
+                aria-label={`Build permission ${m.buildPermission ? "granted" : "not granted"}; Inventory permission ${m.inventoryPermission ? "granted" : "not granted"}`}
+              >
+                <Hammer aria-hidden="true" className={m.buildPermission ? "enabled" : ""} />
+                <Package aria-hidden="true" className={m.inventoryPermission ? "enabled blue" : ""} />
+              </span>
+            )],
+            ["Details", (m) => <button className="mini-action" type="button" aria-label={`View ${String(m.username ?? "member")} details`} onClick={(event) => { event.stopPropagation(); openMemberDetails(m); }}>View details</button>],
           ]}
         />
       </div>
       {selectedMember ? (
-        <section className="member-detail">
+        <Dialog open title={`${String(selectedMember.username ?? "Member")} public profile`} onClose={() => setSelectedId(null)} className="member-detail member-detail-dialog" backdropClassName="member-detail-dialog-backdrop">
           <div className="split-header">
             <h3><User size={17} /> {selectedMember.username} Public Profile</h3>
             <div className="profile-actions">
@@ -251,7 +268,7 @@ export function Members({
                 </section>
                 <section className="profile-history-panel">
                   <h3><Star size={17} /> Quests</h3>
-                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} columns={[
+                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} scrollLabel="Member quests table" emptyState="No recent quests were returned for this member." columns={[
                     ["Quest", (row) => row.description ?? "-"],
                     ["Status", (row) => row.completed ? "Complete" : "Open"],
                   ]} />
@@ -259,9 +276,8 @@ export function Members({
               </div>
             </>
           ) : null}
-        </section>
+        </Dialog>
       ) : null}
     </div>
   );
 }
-

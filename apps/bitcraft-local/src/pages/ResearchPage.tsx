@@ -1,6 +1,8 @@
 import React from "react";
+import "../styles/research.css";
 import { Box, CheckCircle2, Circle, Crown, Lock, MapPin, Search } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
@@ -45,12 +47,10 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
   );
   return (
     <div className="panel research-panel" data-tour="research-page">
-      <header className="members-topbar research-topbar">
-        <div>
-          <h2>Research & Technology</h2>
-          <p>Technology progression and the next available unlocks</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Research"
+        description="Technology progression and the next available unlocks"
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><CheckCircle2 size={14} /> {formatNumber(totalResearched)} researched</span>
             <span>{formatNumber(totalAvailable)} available</span>
@@ -59,8 +59,8 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
             <span className="status-pill">{completion}%</span>
             <span>Research complete</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid research-summary">
         <MiniStat icon={<CheckCircle2 />} label="Researched" value={formatNumber(totalResearched)} />
         <MiniStat icon={<Lock />} label="Available" value={formatNumber(totalAvailable)} />
@@ -83,7 +83,7 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
         <div className="research-filter-grid">
           <label className="research-filter-field">
             <span>Technology</span>
-            <SearchBox value={query} onChange={setQuery} placeholder="Search technologies" />
+            <SearchBox label="Search research technologies" value={query} onChange={setQuery} placeholder="Search technologies" />
           </label>
           <label className="research-filter-field">
             <span>Tier</span>

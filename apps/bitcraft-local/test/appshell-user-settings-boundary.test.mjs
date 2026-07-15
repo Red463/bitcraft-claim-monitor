@@ -36,6 +36,9 @@ test("signed-in Discord settings autosync without manual save and load buttons",
   assert.doesNotMatch(dialog, /Save settings to account/);
   assert.doesNotMatch(dialog, /Load saved settings/);
   assert.match(dialog, /Settings sync automatically while you are signed in with Discord/);
+  assert.match(dialog, /Density, toast preferences, theme, sidebar state and groups, and your selected production member sync automatically/);
+  assert.doesNotMatch(dialog, /your page, filters/);
+  assert.match(dialog, /Page and filter choices stay in this browser\./);
 });
 
 test("approved Discord character links require unlink before relink", () => {
@@ -66,4 +69,13 @@ test("User settings exposes per-notification sound selectors", () => {
   assert.match(dialog, /dealAlerts/);
   assert.match(dialog, /soundByType/);
   assert.match(dialog, /previewNotificationSound\(\{ soundId: soundId, soundVolume: toastSettings\.soundVolume \}\)/);
+});
+
+test("User settings keeps tabs fixed and gives content the bounded scroll region", () => {
+  const css = readFileSync(new URL("../src/styles/user-settings.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.settings-shell\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);[^}]*overflow:\s*hidden;/s);
+  assert.match(css, /\.settings-shell\s*\{[^}]*align-items:\s*stretch;/s);
+  assert.match(css, /\.settings-grid\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none;[^}]*overflow:\s*auto;/s);
+  assert.doesNotMatch(css, /\.settings-grid\s*\{[^}]*max-height:\s*calc\(100vh - 170px\)/s);
 });

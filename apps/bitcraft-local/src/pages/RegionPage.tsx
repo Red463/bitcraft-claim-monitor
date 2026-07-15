@@ -1,4 +1,5 @@
 import React from "react";
+import "../styles/region.css";
 import {
   ArrowDown,
   ArrowUp,
@@ -149,7 +150,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
           <span className="command-filter-title"><Globe2 size={15} /> Regional rankings</span>
           <span>Default sort uses weighted score: 90% tier, 7% treasury, 3% tiles</span>
         </div>
-        <div className="table-wrap">
+        <div className="table-wrap" tabIndex={0} aria-label="Regional rankings table">
           <table>
             <thead>
               <tr>{columns.map(([label, key]) => <th key={label}><button className="sort-button" title={key === "score" ? scoreFormulaTitle : undefined} onClick={() => key !== "rank" && changeSort(key)} disabled={key === "rank"}>{label}{key !== "rank" ? (sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />) : null}</button></th>)}</tr>
@@ -163,4 +164,3 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
     </div>
   );
 }
-

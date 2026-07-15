@@ -1,6 +1,8 @@
 import React from "react";
+import "../styles/skills.css";
 import { Activity, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, GraduationCap, ShieldCheck, Target, TriangleAlert } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
+import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
@@ -99,15 +101,14 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   });
   const outlookLabel = (capability: ProfessionCapability) => capability.nextOutlook === "ready" ? `T${capability.nextTier} capability ready` : capability.nextOutlook === "developing" ? `Developing for T${capability.nextTier}` : capability.nextOutlook === "maximum-tier" ? "Maximum tier" : "Tier unavailable";
   const sortIcon = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc") => activeSortKey !== key ? <ArrowUpDown size={11} /> : activeSortDir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />;
+  const sortAria = (key: SortKey, activeSortKey: SortKey, activeSortDir: "asc" | "desc"): "ascending" | "descending" | "none" => activeSortKey !== key ? "none" : activeSortDir === "asc" ? "ascending" : "descending";
 
   return (
     <div className="panel skills-page" data-tour="skills-page">
-      <header className="skills-topbar">
-        <div>
-          <h2>Settlement Capability</h2>
-          <p>Can the settlement support T{settlementTier || "-"} now, and what needs attention before T{nextSettlementTier ?? (settlementTier || "-")}?</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Professions"
+        description={`Settlement Capability at T${settlementTier || "-"} and readiness for T${nextSettlementTier ?? (settlementTier || "-")}`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><GraduationCap size={14} /> {professionIds.length} professions assessed</span>
             <span>{citizens.length} citizens</span>
@@ -116,8 +117,8 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             {settlementTier ? <TierBadge tier={settlementTier} /> : <span className="status-pill muted">Tier unavailable</span>}
             <span>Settlement tier</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid skills-summary">
         <MiniStat icon={<Target />} label="Settlement Tier" value={settlementTier ? `T${settlementTier}` : "Unavailable"} />
         <MiniStat icon={<ShieldCheck />} label="Current Baseline" value={settlementTier ? `${currentReadyCount}/${capabilities.length}` : "-"} />
@@ -195,7 +196,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       </div> : null}
       </section>
       <div className="toolbar-row skills-toolbar">
-        <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
+        <SearchBox label="Search members by name" value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />
         <span>{sorted.length} shown</span>
       </div>
       <section className="skills-table-section">
@@ -203,16 +204,16 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <h3><GraduationCap size={17} /> Professions</h3>
           <p className="legend">Professions are the main crafting and gathering disciplines.</p>
         </div>
-      <div className="heatmap-wrap">
+      <div className="heatmap-wrap" tabIndex={0} aria-label="Profession skill levels table">
         <table className="skill-table">
           <thead>
             <tr>
-              <th className="sticky-col clickable" onClick={() => toggleSort("name", sortKey, setSortKey, setSortDir)}>Member {sortIcon("name", sortKey, sortDir)}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("total", sortKey, setSortKey, setSortDir)}><span>Total Levels</span>{sortIcon("total", sortKey, sortDir)}</th>
-              <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", sortKey, setSortKey, setSortDir)}><span>Best Level</span>{sortIcon("highest", sortKey, sortDir)}</th>
+              <th className="sticky-col" aria-sort={sortAria("name", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by member" onClick={() => toggleSort("name", sortKey, setSortKey, setSortDir)}>Member {sortIcon("name", sortKey, sortDir)}</button></th>
+              <th className="numeric summary-header" aria-sort={sortAria("total", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by total levels" onClick={() => toggleSort("total", sortKey, setSortKey, setSortDir)}><span>Total Levels</span>{sortIcon("total", sortKey, sortDir)}</button></th>
+              <th className="numeric summary-header" aria-sort={sortAria("highest", sortKey, sortDir)}><button type="button" className="skill-sort-button" aria-label="Sort by best level" onClick={() => toggleSort("highest", sortKey, setSortKey, setSortDir)}><span>Best Level</span>{sortIcon("highest", sortKey, sortDir)}</button></th>
               {professionIds.map((id) => (
-                <th key={id} className={`clickable profession-header ${sortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, sortKey, setSortKey, setSortDir)}>
-                  <span>{skillLabel(id)}</span>{sortIcon(id, sortKey, sortDir)}
+                <th key={id} className={`profession-header ${sortKey === id ? "sorted" : ""}`} aria-sort={sortAria(id, sortKey, sortDir)}>
+                  <button type="button" className="skill-sort-button" aria-label={`Sort by ${skillLabel(id)}`} onClick={() => toggleSort(id, sortKey, setSortKey, setSortDir)}><span>{skillLabel(id)}</span>{sortIcon(id, sortKey, sortDir)}</button>
                 </th>
               ))}
             </tr>
@@ -253,16 +254,16 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <h3><Activity size={17} /> Skills</h3>
           <p className="legend">Adventure skills are tracked separately from professions.</p>
         </div>
-        <div className="heatmap-wrap">
+        <div className="heatmap-wrap" tabIndex={0} aria-label="Adventure skill levels table">
           <table className="skill-table">
             <thead>
               <tr>
-                <th className="sticky-col clickable" onClick={() => toggleSort("name", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>Member {sortIcon("name", adventureSortKey, adventureSortDir)}</th>
-                <th className="clickable numeric summary-header" onClick={() => toggleSort("total", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Total Levels</span>{sortIcon("total", adventureSortKey, adventureSortDir)}</th>
-                <th className="clickable numeric summary-header" onClick={() => toggleSort("highest", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Best Level</span>{sortIcon("highest", adventureSortKey, adventureSortDir)}</th>
+                <th className="sticky-col" aria-sort={sortAria("name", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by member" onClick={() => toggleSort("name", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>Member {sortIcon("name", adventureSortKey, adventureSortDir)}</button></th>
+                <th className="numeric summary-header" aria-sort={sortAria("total", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by total levels" onClick={() => toggleSort("total", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Total Levels</span>{sortIcon("total", adventureSortKey, adventureSortDir)}</button></th>
+                <th className="numeric summary-header" aria-sort={sortAria("highest", adventureSortKey, adventureSortDir)}><button type="button" className="skill-sort-button" aria-label="Sort skills by best level" onClick={() => toggleSort("highest", adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>Best Level</span>{sortIcon("highest", adventureSortKey, adventureSortDir)}</button></th>
                 {adventureSkillIds.map((id) => (
-                  <th key={id} className={`clickable profession-header ${adventureSortKey === id ? "sorted" : ""}`} onClick={() => toggleSort(id, adventureSortKey, setAdventureSortKey, setAdventureSortDir)}>
-                    <span>{skillLabel(id)}</span>{sortIcon(id, adventureSortKey, adventureSortDir)}
+                  <th key={id} className={`profession-header ${adventureSortKey === id ? "sorted" : ""}`} aria-sort={sortAria(id, adventureSortKey, adventureSortDir)}>
+                    <button type="button" className="skill-sort-button" aria-label={`Sort by ${skillLabel(id)}`} onClick={() => toggleSort(id, adventureSortKey, setAdventureSortKey, setAdventureSortDir)}><span>{skillLabel(id)}</span>{sortIcon(id, adventureSortKey, adventureSortDir)}</button>
                   </th>
                 ))}
               </tr>

@@ -1,8 +1,150 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const setupWorkflowCss = readFileSync(new URL("../src/styles/setup-workflow.css", import.meta.url), "utf8");
+
+function collectSourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const url = new URL(entry.name + (entry.isDirectory() ? "/" : ""), directory);
+    if (entry.isDirectory()) return collectSourceFiles(url);
+    return entry.name.endsWith(".tsx") ? [url] : [];
+  });
+}
+
+function extractMediaBody(css, condition) {
+  const mediaStart = css.indexOf(`@media ${condition}`);
+  assert.notEqual(mediaStart, -1, `Expected ${condition} media query`);
+  const bodyStart = css.indexOf("{", mediaStart);
+  let depth = 1;
+  for (let index = bodyStart + 1; index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    if (css[index] === "}") depth -= 1;
+    if (depth === 0) return css.slice(bodyStart + 1, index);
+  }
+  assert.fail(`Unclosed ${condition} media query`);
+}
+
+test("confirmed legacy selector families are absent from active markup and global CSS", () => {
+  const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const source = collectSourceFiles(new URL("../src/", import.meta.url))
+    .map((url) => readFileSync(url, "utf8"))
+    .join("\n");
+  const deadClassTokens = [...source.matchAll(/["'`]([^"'`\r\n]+)["'`]/g)]
+    .flatMap((match) => match[1].split(/\s+/))
+    .filter((token) => /^(?:overview-|command-centre-|row-enter$)/.test(token));
+
+  const legacyFamilySelector = /\.(?:overview|command-centre)-[a-z0-9-]+/;
+  assert.match("button.overview-card.is-active", legacyFamilySelector);
+  assert.match(".panel.command-centre-toolbar:hover", legacyFamilySelector);
+  assert.doesNotMatch(globalCss, legacyFamilySelector);
+  assert.doesNotMatch(globalCss, /@keyframes\s+row-enter\b/);
+  assert.doesNotMatch(globalCss, /@media\s*\(max-width:\s*520px\)\s*\{\s*\}/);
+  assert.doesNotMatch(globalCss, /\.sidebar-auth-cta\b/);
+  assert.deepEqual([...new Set(deadClassTokens)].sort(), []);
+});
+
+test("map mobile queries do not duplicate desktop player-control declarations", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  const mobile = extractMediaBody(mapCss, "(max-width: 700px)");
+  const duplicatedDesktopSelectors = [
+    ".map-player-tracking",
+    ".map-player-tracking-summary",
+    ".map-player-tracking-summary svg",
+    ".map-player-tracking-summary div",
+    ".map-player-tracking-summary strong",
+    ".map-player-tracking-summary span",
+    ".map-player-tracking-actions",
+    ".map-player-bulk-actions",
+    ".map-player-tabs",
+    ".map-player-tracking-actions button",
+    ".map-player-bulk-actions button",
+    ".map-player-tabs button",
+    ".map-player-tracking-actions button:hover",
+    ".map-player-bulk-actions button:hover",
+    ".map-player-tabs button:hover",
+    ".map-player-tracking-actions button.active",
+    ".map-player-tabs button.active",
+    ".map-player-dialog-overlay",
+    ".map-player-dialog",
+    ".map-player-dialog header",
+    ".map-player-dialog h3",
+    ".map-player-dialog p",
+    ".map-player-dialog .icon-button",
+    ".map-player-manager-controls",
+    ".map-player-manager-controls .search",
+    ".map-player-list",
+    ".map-player-list label",
+    ".map-player-list label:hover",
+    ".map-player-list label.active",
+    ".map-player-list input",
+    ".map-player-list .online-dot",
+    ".map-player-list label > span:last-child",
+    ".map-player-list strong",
+    ".map-player-list small",
+  ];
+
+  for (const selector of duplicatedDesktopSelectors) {
+    assert.equal(mobile.includes(selector), false, `${selector} belongs to the desktop owning block`);
+  }
+  assert.match(mobile, /\.map-frame\s*\{[^}]*min-height:\s*420px;[^}]*height:\s*58dvh;/s);
+});
+
+test("Bot Setup, Notifications, and Diagnostics share one semantic status info row", () => {
+  const sharedUrl = new URL("../src/components/bot/BotStatusInfo.tsx", import.meta.url);
+  assert.equal(existsSync(sharedUrl), true, "BotStatusInfo should own the shared Bot status/info vocabulary");
+  const consumers = [
+    "../src/components/bot/DiscordSetupSection.tsx",
+    "../src/components/bot/DiscordNotificationsSection.tsx",
+    "../src/components/bot/DiscordDiagnosticsPanel.tsx",
+  ];
+
+  for (const relativePath of consumers) {
+    const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+    assert.match(source, /import \{ BotStatusInfo \} from "\.\/BotStatusInfo";/);
+    assert.match(source, /<BotStatusInfo\b/);
+    assert.doesNotMatch(source, /function\s+(?:StatusInfo|Info)\s*\(/);
+  }
+
+  const shared = readFileSync(sharedUrl, "utf8");
+  assert.match(shared, /className="info-row bot-status-info"/);
+  assert.match(shared, /export type BotStatusTone = "neutral" \| "success" \| "warning" \| "danger"/);
+  assert.doesNotMatch(shared, /\| "info"/);
+  assert.match(shared, /content: ReactNode/);
+  assert.match(shared, /tone\?: BotStatusTone/);
+  assert.match(shared, /role\?: "status" \| "alert"/);
+  assert.match(shared, /data-tone=\{tone\}/);
+  assert.match(shared, /content \?\? "-"/);
+
+  const setup = readFileSync(new URL(consumers[0], import.meta.url), "utf8");
+  const notifications = readFileSync(new URL(consumers[1], import.meta.url), "utf8");
+  const diagnostics = readFileSync(new URL(consumers[2], import.meta.url), "utf8");
+  const discordCss = readFileSync(new URL("../src/styles/discord-admin.css", import.meta.url), "utf8");
+  assert.match(setup, /tone=\{[^}]*\? "success" : "warning"\}/);
+  assert.match(notifications, /tone=\{[^}]*\? "success" : "warning"\}/);
+  assert.match(diagnostics, /tone="success"/);
+  assert.match(diagnostics, /tone="danger"/);
+  assert.doesNotMatch(discordCss, /\.bot-status-info\[data-tone="info"\]/);
+});
+
+test("routine toast decoration is tonal while Discord and diagnostic status accents remain encoded", () => {
+  const notificationsCss = readFileSync(new URL("../src/styles/notifications.css", import.meta.url), "utf8");
+  const discordCss = readFileSync(new URL("../src/styles/discord-admin.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(notificationsCss, /\.toast[^{}]*\{[^}]*border-left(?:-color)?:/s);
+  assert.match(discordCss, /\.discord-preview-embed\s*\{[^}]*border-left:\s*4px\s+solid/s);
+  assert.match(discordCss, /\.discord-diagnostic-card\s*\{[^}]*border-left:\s*3px\s+solid/s);
+  assert.match(discordCss, /\.discord-diagnostic-card\.failed\s*\{[^}]*border-left-color:\s*var\(--danger\)/s);
+});
+
+test("Admin status summaries do not contain confirmed mojibake separators", () => {
+  const adminSources = [
+    "../src/components/admin/AdminPanel.tsx",
+    "../src/components/admin/AdminAnalyticsSection.tsx",
+  ].map((relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8"));
+
+  for (const source of adminSources) assert.doesNotMatch(source, /Â·/);
+});
 
 test("application shell uses a compact drawer at narrow widths", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -14,6 +156,9 @@ test("application shell uses a compact drawer at narrow widths", () => {
     assert.match(css, new RegExp(`\\${selector}[^\\{]*\\{[^}]*display:\\s*none\\b`, "s"));
   }
   assert.match(narrow, /\.mobile-shell-bar\s*\{[^}]*position:\s*fixed\b[^}]*height:\s*52px\b/s);
+  assert.match(narrow, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid\b/s);
+  assert.match(narrow, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis\b/s);
+  assert.match(narrow, /\.mobile-shell-bar\s*>\s*button\s*\{[^}]*min-width:\s*44px\b[^}]*min-height:\s*44px\b/s);
   assert.match(narrow, /\.mobile-navigation-backdrop\s*\{[^}]*position:\s*fixed\b[^}]*inset:\s*0\b/s);
   assert.match(narrow, /\.app-sidebar\s*\{[^}]*position:\s*fixed\b[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*44px\)\)/s);
   assert.match(narrow, /\.app-sidebar\.mobile-open\s*\{[^}]*transform:\s*translateX\(0\)/s);
@@ -60,7 +205,7 @@ test("collapsed navigation tooltip escapes the vertically scrolling nav", () => 
 
 test("sidebar decoration stays neutral outside active and primary states", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  for (const selector of ["aside", ".brand", ".brand svg", ".brand h1", ".sidebar-account-avatar", ".sidebar-auth-cta", ".discord-cta", ".nav-tools-menu", ".refresh-breakdown", ".app-footer", "button.sidebar-account-main:hover", ".sidebar-toggle:hover", ".sidebar-account-action:hover", ".sidebar-auth-cta:hover"]) {
+  for (const selector of ["aside", ".brand", ".brand svg", ".brand h1", ".sidebar-account-avatar", ".discord-cta", ".nav-tools-menu", ".refresh-breakdown", ".app-footer", "button.sidebar-account-main:hover", ".sidebar-toggle:hover", ".sidebar-account-action:hover"]) {
     const escaped = selector.replaceAll(".", "\\.").replaceAll(" ", "\\s+");
     const rule = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`))?.groups?.body ?? "";
     assert.notEqual(rule, "", `${selector} should have a shell rule`);
@@ -234,7 +379,7 @@ test("dashboard page styles live in the dashboard stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/dashboard\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/dashboard\.css";/);
   for (const selector of dashboardSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(dashboardCss.includes(selector), true, `${selector} should live in dashboard.css`);
@@ -259,7 +404,7 @@ test("dashboard page styles live in the dashboard stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/leaderboard\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/LeaderboardPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/leaderboard\.css";/);
   for (const selector of leaderboardSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(leaderboardCss.includes(selector), true, `${selector} should live in leaderboard.css`);
@@ -289,7 +434,7 @@ test("production page styles live in the production stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/production\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/production\.css";/);
   for (const selector of productionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(productionCss.includes(selector), true, `${selector} should live in production.css`);
@@ -315,7 +460,7 @@ test("public craft finder page styles live in the public craft stylesheet", () =
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/public-craft\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/PublicCraftFinderPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/public-craft\.css";/);
   for (const selector of publicCraftSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(publicCraftCss.includes(selector), true, `${selector} should live in public-craft.css`);
@@ -359,7 +504,7 @@ test("market page styles live in the market stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/market\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/market\.css";/);
   for (const selector of marketSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(marketCss.includes(selector), true, `${selector} should live in market.css`);
@@ -396,7 +541,7 @@ test("craft calculator page styles live in the craft calculator stylesheet", () 
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/craftcalc\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/CraftCalculatorPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/craftcalc\.css";/);
   for (const selector of craftcalcSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(craftcalcCss.includes(selector), true, `${selector} should live in craftcalc.css`);
@@ -433,7 +578,7 @@ test("skills page styles live in the skills stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/skills\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/SkillsPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/skills\.css";/);
   for (const selector of skillsSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(skillsCss.includes(selector), true, `${selector} should live in skills.css`);
@@ -478,7 +623,7 @@ test("members page styles live in the members stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/members\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/members\.css";/);
   for (const selector of membersSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(membersCss.includes(selector), true, `${selector} should live in members.css`);
@@ -505,7 +650,7 @@ test("inventory page styles live in the inventory stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/inventory\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/InventoryPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/inventory\.css";/);
   for (const selector of inventorySelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(inventoryCss.includes(selector), true, `${selector} should live in inventory.css`);
@@ -534,7 +679,7 @@ test("construction page styles live in the construction stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/construction\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ConstructionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/construction\.css";/);
   for (const selector of constructionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(constructionCss.includes(selector), true, `${selector} should live in construction.css`);
@@ -562,7 +707,7 @@ test("research page styles live in the research stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/research\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ResearchPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/research\.css";/);
   for (const selector of researchSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(researchCss.includes(selector), true, `${selector} should live in research.css`);
@@ -593,7 +738,7 @@ test("activity page styles live in the activity stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/activity\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/ActivityPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/activity\.css";/);
   for (const selector of activitySelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(activityCss.includes(selector), true, `${selector} should live in activity.css`);
@@ -623,7 +768,7 @@ test("region page styles live in the region stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/region\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/RegionPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/region\.css";/);
   for (const selector of regionSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(regionCss.includes(selector), true, `${selector} should live in region.css`);
@@ -645,7 +790,7 @@ test("sync page styles live in the sync stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/sync\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/SyncPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/sync\.css";/);
   for (const selector of syncSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(syncCss.includes(selector), true, `${selector} should live in sync.css`);
@@ -675,7 +820,7 @@ test("map page styles live in the map stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/map\.css";/);
+  assert.match(readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8"), /import "\.\.\/styles\/map\.css";/);
   for (const selector of mapSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(mapCss.includes(selector), true, `${selector} should live in map.css`);
@@ -720,7 +865,7 @@ test("admin page and loader styles live in the admin stylesheet", () => {
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/admin\.css";/);
+  assert.match(readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8"), /import "\.\.\/\.\.\/styles\/admin\.css";/);
   for (const selector of adminSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(adminCss.includes(selector), true, `${selector} should live in admin.css`);
@@ -757,7 +902,7 @@ test("Discord admin and bot section styles live in the Discord admin stylesheet"
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${selector} {`) || line.trim().startsWith(`${selector},`));
 
-  assert.match(mainTsx, /import "\.\/styles\/discord-admin\.css";/);
+  assert.match(readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8"), /import "\.\.\/\.\.\/styles\/discord-admin\.css";/);
   for (const selector of discordAdminSelectors) {
     assert.equal(startsOwnedSelector(globalCss, selector), false, `${selector} standalone styles should not live in styles.css`);
     assert.equal(discordAdminCss.includes(selector), true, `${selector} should live in discord-admin.css`);

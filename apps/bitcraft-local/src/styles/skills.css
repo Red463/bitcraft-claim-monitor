@@ -72,7 +72,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 12px 16px;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 2px 12px;
@@ -147,7 +147,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
 .skills-page .focus-panel h3,
@@ -168,8 +168,8 @@
 }
 .skills-page .select-control,
 .skills-page .skills-toolbar .search {
-  border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  border-color: var(--border);
+  background: var(--panel-2);
 }
 .skills-page .focus-metrics {
   border-color: rgba(154,168,190,.14);
@@ -268,7 +268,7 @@
     linear-gradient(to right, rgba(0,0,0,.32), transparent),
     linear-gradient(to left, rgba(0,0,0,.32), transparent) 100% 0;
   background-color: #090e15;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
 }
 .skills-page .skill-table thead th {
   height: 48px;
@@ -302,7 +302,7 @@
   padding: 0 9px;
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 800;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
 .skills-page .skill-table tbody tr:hover td,
@@ -351,7 +351,7 @@
 }
 
 @media (max-width: 900px) {
-  .skills-summary,
+  .skills-page .summary-grid.skills-summary { grid-template-columns: 1fr; }
   .skills-dashboard,
   .coverage-list,
   .adventure-skill-grid { grid-template-columns: 1fr; }
@@ -370,3 +370,19 @@
   .skills-page .focus-tier-strip { grid-template-columns: repeat(5, minmax(42px, 1fr)); }
   .capability-grid { grid-template-columns: 1fr; }.capability-card-metrics { grid-template-columns: repeat(3, minmax(70px, 1fr)); }
 }
+.skill-sort-button {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  gap: 5px;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.skill-sort-button:focus-visible { outline: 2px solid var(--focus-border); outline-offset: -2px; }

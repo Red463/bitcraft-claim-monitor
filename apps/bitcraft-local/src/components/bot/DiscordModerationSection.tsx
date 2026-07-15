@@ -1,5 +1,6 @@
 import React from "react";
 import { Ban, CheckCircle2, Clock, RefreshCw, Shield, Trash2, User, Users } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type ModerationDraft = Record<string, string>;
 
@@ -10,6 +11,7 @@ export function DiscordModerationSection({
   discoveredMemberCount,
   memberIdSelect,
   moderationDraft,
+  isPending,
   onBan,
   onKick,
   onLoadBans,
@@ -28,6 +30,7 @@ export function DiscordModerationSection({
   discoveredMemberCount: number;
   memberIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   moderationDraft: ModerationDraft;
+  isPending: (key: string) => boolean;
   onBan: () => void;
   onKick: () => void;
   onLoadBans: () => void;
@@ -49,9 +52,9 @@ export function DiscordModerationSection({
           </h3>
           <p className="legend">Admin-only Discord actions for member timeouts, kicks, bans, unbans and channel cleanup.</p>
         </div>
-        <button className="toolbar-button" onClick={onSync}>
+        <ActionButton className="toolbar-button" pending={isPending("discord-moderation-sync")} pendingLabel="Syncing server..." onClick={onSync}>
           <RefreshCw size={15} /> Sync Server
-        </button>
+        </ActionButton>
       </div>
       {!discoveredMemberCount ? (
         <div className="error">No Discord members synced yet. Use Setup &gt; Sync Discord Server. You can still paste a user ID manually below.</div>
@@ -93,19 +96,21 @@ export function DiscordModerationSection({
                 onChange={(event) => setModerationDraft((current) => ({ ...current, timeoutMinutes: event.target.value }))}
               />
             </label>
-            <button className="toolbar-button primary" disabled={!moderationDraft.userId.trim()} onClick={onTimeout}>
+            <ActionButton className="toolbar-button primary" pending={isPending("discord-moderation-timeout")} pendingLabel="Applying timeout..." disabled={!moderationDraft.userId.trim()} onClick={onTimeout}>
               <Clock size={14} /> Timeout
-            </button>
-            <button className="toolbar-button" disabled={!moderationDraft.userId.trim()} onClick={onRemoveTimeout}>
+            </ActionButton>
+            <ActionButton className="toolbar-button" pending={isPending("discord-moderation-timeout-remove")} pendingLabel="Removing timeout..." disabled={!moderationDraft.userId.trim()} onClick={onRemoveTimeout}>
               <Clock size={14} /> Remove Timeout
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               className="toolbar-button danger"
+              pending={isPending("discord-moderation-kick")}
+              pendingLabel="Kicking member..."
               disabled={!moderationDraft.userId.trim()}
               onClick={() => confirmModeration("Kick this Discord member from the server?") && onKick()}
             >
               <User size={14} /> Kick
-            </button>
+            </ActionButton>
             <label className="field">
               <span>Delete message seconds</span>
               <input
@@ -116,13 +121,15 @@ export function DiscordModerationSection({
                 onChange={(event) => setModerationDraft((current) => ({ ...current, deleteMessageSeconds: event.target.value }))}
               />
             </label>
-            <button
+            <ActionButton
               className="toolbar-button danger"
+              pending={isPending("discord-moderation-ban")}
+              pendingLabel="Banning member..."
               disabled={!moderationDraft.userId.trim()}
               onClick={() => confirmModeration("Ban this Discord member from the server?") && onBan()}
             >
               <Ban size={14} /> Ban
-            </button>
+            </ActionButton>
             <label className="field">
               <span>Temporary ban hours</span>
               <input
@@ -133,13 +140,15 @@ export function DiscordModerationSection({
                 onChange={(event) => setModerationDraft((current) => ({ ...current, timeoutMinutes: event.target.value }))}
               />
             </label>
-            <button
+            <ActionButton
               className="toolbar-button danger"
+              pending={isPending("discord-moderation-temp-ban")}
+              pendingLabel="Recording ban..."
               disabled={!moderationDraft.userId.trim()}
               onClick={() => confirmModeration("Temporarily ban this Discord member?") && onTempBan()}
             >
               <Ban size={14} /> Temp Ban
-            </button>
+            </ActionButton>
           </div>
         </div>
         <div className="discord-panel-editor moderation-panel">
@@ -161,13 +170,15 @@ export function DiscordModerationSection({
               onChange={(event) => setModerationDraft((current) => ({ ...current, purgeLimit: event.target.value }))}
             />
           </label>
-          <button
+          <ActionButton
             className="toolbar-button danger"
+            pending={isPending("discord-moderation-purge")}
+            pendingLabel="Purging messages..."
             disabled={!moderationDraft.channelId.trim()}
             onClick={() => confirmModeration("Delete the newest messages from this Discord channel?") && onPurge()}
           >
             <Trash2 size={14} /> Purge Messages
-          </button>
+          </ActionButton>
         </div>
         <div className="discord-panel-editor moderation-panel">
           <h4>
@@ -182,16 +193,18 @@ export function DiscordModerationSection({
               placeholder="Discord user ID"
             />
           </label>
-          <button className="toolbar-button" onClick={onLoadBans}>
+          <ActionButton className="toolbar-button" pending={isPending("discord-moderation-bans-load")} pendingLabel="Loading bans..." onClick={onLoadBans}>
             <RefreshCw size={14} /> Load Ban List
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             className="toolbar-button danger"
+            pending={isPending("discord-moderation-unban")}
+            pendingLabel="Removing ban..."
             disabled={!(moderationDraft.unbanUserId || moderationDraft.userId).trim()}
             onClick={() => confirmModeration("Remove this Discord server ban?") && onUnban()}
           >
             <CheckCircle2 size={14} /> Unban User
-          </button>
+          </ActionButton>
         </div>
       </div>
       {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}

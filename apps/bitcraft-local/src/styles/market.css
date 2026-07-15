@@ -5,7 +5,8 @@
   align-content: start;
   color: #f4f7fb;
 }
-.market-topbar { align-items: center; }
+.market-page > * { min-width: 0; }
+.market-topbar { min-width: 0; align-items: center; }
 .market-page .dashboard-top-meta {
   min-height: 52px;
   display: flex;
@@ -315,7 +316,7 @@
   background: rgba(255,255,255,.035);
   color: #c8d2df;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: .03em;
 }
 
@@ -448,6 +449,23 @@
 }
 
 @media (max-width: 900px) {
+  .market-page .dashboard-top-meta { flex-wrap: wrap; }
+  .market-tool-row { min-width: 0; }
+  .market-member-field { min-width: 0; grid-template-columns: 1fr; }
+  .market-member-field .select-control { min-width: 0; width: 100%; }
+  .market-tabs {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+  .market-tabs button {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    padding: 8px 10px;
+    white-space: normal;
+  }
   .market-best-row.compact .market-best-stats {
     grid-column: 1 / -1;
   }
@@ -686,6 +704,13 @@
 }
 
 @media (max-width: 700px) {
+  .market-summary,
+  .market-live-grid,
+  .market-analytics-metrics,
+  .market-page .price-finder .metric-grid,
+  .market-filter-grid,
+  .opportunity-strip { grid-template-columns: 1fr; }
+  .market-member-placeholder { justify-content: flex-start; white-space: normal; }
   .price-finder-controls,
   .price-finder-heading { display: grid; }
   .price-finder-controls .field { min-width: 0; }

@@ -1,10 +1,18 @@
 import { Search } from "lucide-react";
 
-export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+type SearchBoxProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  resultsId?: string;
+};
+
+export function SearchBox({ label, value, onChange, placeholder, resultsId }: SearchBoxProps) {
   return (
     <label className="search">
       <Search size={16} />
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      <input aria-label={label} aria-controls={resultsId} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
     </label>
   );
 }

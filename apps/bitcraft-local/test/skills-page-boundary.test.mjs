@@ -34,10 +34,24 @@ test("Capability dashboard keeps controls and expandable member detail", () => {
   assert.match(page, /className="skill-table"/);
 });
 
+test("Profession and skill columns expose named sort buttons on sortable headers", () => {
+  assert.match(page, /aria-sort=\{sortAria\(/);
+  assert.match(page, /aria-label=\{`Sort by \$\{skillLabel\(id\)\}`\}/);
+  assert.match(page, /<button[^>]*className="skill-sort-button"/);
+  assert.doesNotMatch(page, /<th[^>]*onClick=/);
+});
+
 test("Profession summary and expanded insights use compact responsive boundaries", () => {
   assert.match(css, /\.skills-page \.mini-stat\s*\{[^}]*min-height:\s*76px/);
   assert.match(css, /\.profession-insights-content\s*\{[^}]*grid-template-columns:\s*minmax\(360px, \.95fr\) minmax\(440px, 1\.05fr\)/);
   assert.match(css, /@media \(max-width: 1250px\)[\s\S]*\.profession-insights-content\s*\{[^}]*grid-template-columns:\s*1fr/);
   assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.focus-tier-strip/);
   assert.match(css, /\.capability-grid/);
+});
+
+test("Profession summary collapses below the tablet breakpoint without losing selector priority", () => {
+  assert.match(
+    css,
+    /@media \(max-width:\s*900px\)[\s\S]*\.skills-page \.summary-grid\.skills-summary\s*\{[^}]*grid-template-columns:\s*1fr/s,
+  );
 });

@@ -6,8 +6,11 @@ test("floating action rail can be collapsed with persisted state and accessible 
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
 
   assert.match(appShell, /usePersistedState\("layout\.floatingActionsCollapsed", false\)/);
+  assert.match(appShell, /useState\(false\).*mobileFloatingActionsOpen|mobileFloatingActionsOpen.*useState\(false\)/s);
+  assert.match(appShell, /isNarrowViewport\s*\?\s*!mobileFloatingActionsOpen\s*:\s*floatingActionsCollapsed/);
+  assert.match(appShell, /isNarrowViewport\s*\?\s*setMobileFloatingActionsOpen/);
   assert.match(appShell, /floating-actions-collapsed/);
-  assert.match(appShell, /aria-expanded=\{!floatingActionsCollapsed\}/);
+  assert.match(appShell, /aria-expanded=\{!narrowAwareFloatingActionsCollapsed\}/);
   assert.match(appShell, /Hide tools/);
   assert.match(appShell, /Show tools/);
 });

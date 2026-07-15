@@ -1,4 +1,9 @@
 import React from "react";
+import "./styles/app-chrome.css";
+import "./styles/user-settings.css";
+import "./styles/notifications.css";
+import "./styles/app-popups.css";
+import "./styles/first-run-tour.css";
 import {
   ArrowDown,
   Bell,
@@ -19,7 +24,6 @@ import {
 import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
-import { AdminPanel } from "./components/admin/AdminPanel";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
@@ -45,23 +49,6 @@ import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
 import type { ActivePanel } from "./types/app";
 import type { AppSettings, UserAuthState, UserToastSettings } from "./types/settings";
-import { Construction } from "./pages/ConstructionPage";
-import { Empires } from "./pages/EmpiresPage";
-import { CraftCalculatorPage } from "./pages/CraftCalculatorPage";
-import { CraftPlanningPage } from "./pages/CraftPlanningPage";
-import { Members } from "./pages/MembersPage";
-import { Research } from "./pages/ResearchPage";
-import { Region } from "./pages/RegionPage";
-import { Skills } from "./pages/SkillsPage";
-import { SyncPanel } from "./pages/SyncPage";
-import { Dashboard } from "./pages/DashboardPage";
-import { ActivityPanel } from "./pages/ActivityPage";
-import { Inventory } from "./pages/InventoryPage";
-import { Leaderboard } from "./pages/LeaderboardPage";
-import { MapPanel } from "./pages/MapPage";
-import { PublicCraftFinder } from "./pages/PublicCraftFinderPage";
-import { Production } from "./pages/ProductionPage";
-import { Market } from "./pages/MarketPage";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
@@ -81,6 +68,53 @@ const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
+const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
+
+const Dashboard = React.lazy(() => import("./pages/DashboardPage").then(({ Dashboard }) => ({ default: Dashboard })));
+const Leaderboard = React.lazy(() => import("./pages/LeaderboardPage").then(({ Leaderboard }) => ({ default: Leaderboard })));
+const Members = React.lazy(() => import("./pages/MembersPage").then(({ Members }) => ({ default: Members })));
+const Skills = React.lazy(() => import("./pages/SkillsPage").then(({ Skills }) => ({ default: Skills })));
+const Production = React.lazy(() => import("./pages/ProductionPage").then(({ Production }) => ({ default: Production })));
+const CraftPlanningPage = React.lazy(() => import("./pages/CraftPlanningPage").then(({ CraftPlanningPage }) => ({ default: CraftPlanningPage })));
+const Inventory = React.lazy(() => import("./pages/InventoryPage").then(({ Inventory }) => ({ default: Inventory })));
+const Construction = React.lazy(() => import("./pages/ConstructionPage").then(({ Construction }) => ({ default: Construction })));
+const Research = React.lazy(() => import("./pages/ResearchPage").then(({ Research }) => ({ default: Research })));
+const Market = React.lazy(() => import("./pages/MarketPage").then(({ Market }) => ({ default: Market })));
+const Region = React.lazy(() => import("./pages/RegionPage").then(({ Region }) => ({ default: Region })));
+const Empires = React.lazy(() => import("./pages/EmpiresPage").then(({ Empires }) => ({ default: Empires })));
+const ActivityPanel = React.lazy(() => import("./pages/ActivityPage").then(({ ActivityPanel }) => ({ default: ActivityPanel })));
+const PublicCraftFinder = React.lazy(() => import("./pages/PublicCraftFinderPage").then(({ PublicCraftFinder }) => ({ default: PublicCraftFinder })));
+const CraftCalculatorPage = React.lazy(() => import("./pages/CraftCalculatorPage").then(({ CraftCalculatorPage }) => ({ default: CraftCalculatorPage })));
+const MapPanel = React.lazy(() => import("./pages/MapPage").then(({ MapPanel }) => ({ default: MapPanel })));
+const SyncPanel = React.lazy(() => import("./pages/SyncPage").then(({ SyncPanel }) => ({ default: SyncPanel })));
+const AdminPanel = React.lazy(() => import("./components/admin/AdminPanel").then(({ AdminPanel }) => ({ default: AdminPanel })));
+
+class RouteErrorBoundary extends React.Component<{ routeKey: string; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidUpdate(previousProps: { routeKey: string }) {
+    if (this.state.failed && previousProps.routeKey !== this.props.routeKey) this.setState({ failed: false });
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <section className="empty-state route-error-state" role="alert">
+        <strong>This page could not be loaded.</strong>
+        <span>Check your connection, then try again.</span>
+        <button className="toolbar-button primary" onClick={() => window.location.reload()}>Try again</button>
+      </section>
+    );
+  }
+}
+
+function RouteLoadingState() {
+  return <section className="empty-state route-loading-state" aria-live="polite">Loading page...</section>;
+}
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
@@ -121,16 +155,22 @@ function accountDisplayName(user: UserAuthState["user"]): string {
  */
 function DashboardApp() {
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
+  const [routeSearch, setRouteSearch] = React.useState(() => window.location.search);
   const mainRef = React.useRef<HTMLElement | null>(null);
   const navigationRef = React.useRef<HTMLElement | null>(null);
   const mobileNavigationTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const mobileNavigationWasOpenRef = React.useRef(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = React.useState(false);
+  const [mobileFloatingActionsOpen, setMobileFloatingActionsOpen] = React.useState(false);
+  const [routeStatus, setRouteStatus] = React.useState("");
   const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
   const [collapsedNavTooltip, setCollapsedNavTooltip] = React.useState<{ label: string; left: number; top: number } | null>(null);
   React.useEffect(() => {
     const narrowViewport = window.matchMedia("(max-width: 920px)");
-    const updateNarrowViewport = () => setIsNarrowViewport(narrowViewport.matches);
+    const updateNarrowViewport = () => {
+      setIsNarrowViewport(narrowViewport.matches);
+      if (narrowViewport.matches) setMobileFloatingActionsOpen(false);
+    };
     narrowViewport.addEventListener("change", updateNarrowViewport);
     return () => narrowViewport.removeEventListener("change", updateNarrowViewport);
   }, []);
@@ -322,6 +362,8 @@ function DashboardApp() {
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
+  const visibleNavigationItems = React.useMemo(() => NAV.filter(([id]) => isPageAllowed(id)), [isPageAllowed]);
+  const syncRouteSearch = React.useCallback(() => setRouteSearch(window.location.search), []);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
@@ -339,6 +381,15 @@ function DashboardApp() {
       mapName: activeMapFocus?.name ?? null,
       mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
       mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
+    }, "push");
+    setRouteSearch(window.location.search);
+    const label = NAV.find(([id]) => id === panel)?.[1] ?? "Dashboard";
+    setRouteStatus("");
+    window.requestAnimationFrame(() => {
+      if (mainRef.current) mainRef.current.scrollTop = 0;
+      window.scrollTo(0, 0);
+      mainRef.current?.focus();
+      setRouteStatus(`${label} page loaded`);
     });
   }, [mapFocus, setActive]);
   useBrowserNotificationSmoke({ active, pushToast });
@@ -357,7 +408,13 @@ function DashboardApp() {
     const requestedMapFocus = urlMapFocus();
     if (requestedMapFocus) setMapFocus(requestedMapFocus);
     if (requested) setActive(requested);
+    else if (rawPanel) {
+      setActive("dashboard");
+      updateQueryState({ page: "dashboard" });
+    }
     function restoreFromHistory() {
+      setRouteStatus("");
+      setRouteSearch(window.location.search);
       const panel = urlPanel();
       const historyMapFocus = urlMapFocus();
       if (historyMapFocus) setMapFocus(historyMapFocus);
@@ -427,6 +484,7 @@ function DashboardApp() {
         if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
           defaultPageAppliedRef.current = true;
           setActive(next.defaultPage);
+          updateQueryState({ page: next.defaultPage });
         }
       })
       .catch(() => undefined);
@@ -460,8 +518,8 @@ function DashboardApp() {
     };
   }, [active, consent]);
   React.useEffect(() => {
-    if (mainRef.current) mainRef.current.scrollTop = 0;
-    window.scrollTo(0, 0);
+    const label = NAV.find(([id]) => id === active)?.[1] ?? "Dashboard";
+    document.title = `${label} — BitCraft Claim Monitor`;
   }, [active]);
   React.useEffect(() => {
     const intervalMs = appSettings.refreshSeconds * 1000;
@@ -546,7 +604,7 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} />,
     empire: <Region data={data} />,
     empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
@@ -595,10 +653,11 @@ function DashboardApp() {
   const sidebarAccountStatus = accountCharacterStatusLabel(userAuth.user);
   const sidebarAccountInitial = sidebarAccountName.slice(0, 1).toUpperCase();
   const mobileNavigationUnavailable = isNarrowViewport && !mobileNavigationOpen;
+  const narrowAwareFloatingActionsCollapsed = isNarrowViewport ? !mobileFloatingActionsOpen : floatingActionsCollapsed;
   return (
     <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <header className="mobile-shell-bar">
-        <span><strong>Claim Monitor</strong><small>{activePageLabel}</small></span>
+        <span><strong className="mobile-shell-brand">Claim Monitor</strong><small className="mobile-shell-route">{activePageLabel}</small></span>
         <button ref={mobileNavigationTriggerRef} type="button" aria-label="Open navigation" aria-controls="mobile-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
           <Menu size={18} />
         </button>
@@ -687,11 +746,16 @@ function DashboardApp() {
       </aside>
       {collapsedNavTooltip ? <span className="collapsed-nav-tooltip" aria-hidden="true" style={{ left: collapsedNavTooltip.left, top: collapsedNavTooltip.top }}>{collapsedNavTooltip.label}</span> : null}
       <main ref={mainRef} tabIndex={-1}>
+        <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <div className={`page-refresh-line ${state.loading ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
-            <div className="page-view" key={active}>{activePanel}</div>
+            <div className="page-view" key={active}>
+              <RouteErrorBoundary routeKey={active}>
+                <React.Suspense fallback={<RouteLoadingState />}>{activePanel}</React.Suspense>
+              </RouteErrorBoundary>
+            </div>
           </>
         )}
       <footer className="app-footer">
@@ -713,15 +777,15 @@ function DashboardApp() {
         </footer>
       </main>
       {releaseUpdateBuildId ? <div className="release-update-banner" role="status" aria-live="polite"><div><strong>Update available</strong><span>A newer version is ready. Refresh to use the latest app.</span></div><button className="toolbar-button primary" onClick={() => window.location.reload()}><RefreshCw size={14} /> Refresh now</button></div> : null}
-      <div className={`floating-actions ${floatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
+      <div className={`floating-actions ${narrowAwareFloatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
         <button
           className="floating-actions-toggle"
-          onClick={() => setFloatingActionsCollapsed((current) => !current)}
-          aria-expanded={!floatingActionsCollapsed}
-          aria-label={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
-          title={floatingActionsCollapsed ? "Show tools" : "Hide tools"}
+          onClick={() => isNarrowViewport ? setMobileFloatingActionsOpen((current) => !current) : setFloatingActionsCollapsed((current) => !current)}
+          aria-expanded={!narrowAwareFloatingActionsCollapsed}
+          aria-label={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
+          title={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
         >
-          {floatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          {narrowAwareFloatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
         </button>
         {adminAuth.authenticated ? <a
           className={`floating-action-item ${active === "admin" ? "active" : ""}`}
@@ -743,17 +807,24 @@ function DashboardApp() {
       </div>
       {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
-      {commandOpen ? <CommandPalette navItems={NAV} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} onClose={() => setUserSettingsOpen(false)} /> : null}
-      {helpOpen ? <HelpCenter version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
+      {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
+      {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
+      {helpOpen ? <HelpCenter activePage={active} version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
       {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
-      <FirstRunTourManager activePage={active} enabled={active !== "admin" && consent != null && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen && !(!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user)} replayToken={tourReplayToken} onNavigate={(panel) => navigate(panel)} onOpenUserSettings={() => setUserSettingsOpen(true)} onCloseUserSettings={() => setUserSettingsOpen(false)} onVisibilityChange={setTourVisible} />
+      <FirstRunTourManager activePage={active} enabled={active !== "admin" && consent != null && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen && !(!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user)} showAccountStep={userAuth.discordLoginEnabled} replayToken={tourReplayToken} onNavigate={(panel) => navigate(panel)} onVisibilityChange={setTourVisible} />
       <AppPopupManager activePage={active} enabled={active !== "admin" && !tourVisible && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen} />
     </div>
   );
+}
+
+function DedicatedLegalApp({ type }: { type: "terms" | "privacy" }) {
+  React.useEffect(() => {
+    document.title = `${type === "terms" ? "Terms & Discord Bot Use" : "Privacy Policy"} — BitCraft Claim Monitor`;
+  }, [type]);
+  return <DedicatedLegalPage type={type} />;
 }
 
 /**
@@ -766,6 +837,7 @@ function BotControlApp() {
   const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = React.useState(true);
   React.useEffect(() => {
+    document.title = "Discord Bot Control — BitCraft Claim Monitor";
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
@@ -781,7 +853,7 @@ function BotControlApp() {
       <AdminPanel settings={settings} onSettingsSaved={(next) => {
         setSettings(next);
         applyTheme(next.theme);
-      }} botOnly />
+      }} botOnly headingLevel={1} />
     </main>
   );
 }
@@ -791,7 +863,7 @@ export default function App() {
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
   // Route-level branching happens before mounting DashboardApp so legal pages
   // and the bot console do not initialise public page data unnecessarily.
-  if (dedicatedLegalPath) return <DedicatedLegalPage type={dedicatedLegalPath} />;
+  if (dedicatedLegalPath) return <DedicatedLegalApp type={dedicatedLegalPath} />;
   if (dedicatedBotPath) return <BotControlApp />;
   return <DashboardApp />;
 }

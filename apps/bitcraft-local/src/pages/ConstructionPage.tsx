@@ -1,7 +1,9 @@
 import React from "react";
+import "../styles/construction.css";
 import { AlertTriangle, Box, CheckCircle2, ChevronDown, Hammer, Package, Search } from "lucide-react";
 import { TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { MiniStat } from "../components/main/Stats";
 import {
   buildConstructionProjects,
@@ -82,12 +84,10 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
     });
   return (
     <div className="panel construction-page" data-tour="construction-page">
-      <header className="members-topbar construction-topbar">
-        <div>
-          <h2>Construction Projects</h2>
-          <p>{projects.length} active project{projects.length === 1 ? "" : "s"}</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Construction"
+        description={`${projects.length} active project${projects.length === 1 ? "" : "s"}`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Hammer size={14} /> {formatNumber(projects.length)} active</span>
             <span>{formatNumber(needed.length)} material types needed</span>
@@ -96,8 +96,8 @@ export function Construction({ data }: { data: ReturnType<typeof normalizeData> 
             <span className="status-pill">{materialsAddedPct}%</span>
             <span>Materials added</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid construction-summary">
         <MiniStat icon={<Hammer />} label="Active Projects" value={formatNumber(projects.length)} />
         <MiniStat icon={<Package />} label="Materials Added" value={formatNumber(totalMaterialsContributed)} />

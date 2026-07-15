@@ -10,8 +10,8 @@ test("AppShell wires first-run tour manager and suppresses app popups while tour
   assert.match(appShell, /<FirstRunTourManager/);
   assert.match(appShell, /onNavigate=\{\(panel\) => navigate\(panel\)\}/);
   assert.match(appShell, /onVisibilityChange=\{setTourVisible\}/);
-  assert.match(appShell, /onOpenUserSettings=\{\(\) => setUserSettingsOpen\(true\)\}/);
-  assert.match(appShell, /onCloseUserSettings=\{\(\) => setUserSettingsOpen\(false\)\}/);
+  assert.doesNotMatch(appShell, /onOpenUserSettings=/);
+  assert.doesNotMatch(appShell, /onCloseUserSettings=/);
   assert.match(appShell, /<FirstRunTourManager[\s\S]*enabled=\{[\s\S]*consent != null[\s\S]*replayToken=/);
   assert.match(appShell, /\{!tourVisible \? <ToastStack/);
   assert.match(appShell, /<AppPopupManager[\s\S]*!tourVisible/);
@@ -30,7 +30,33 @@ test("first-run tour prompt introduces Claim Monitor before offering the tour", 
 
   assert.match(manager, /Welcome to Claim Monitor/);
   assert.match(manager, /Claim Monitor helps your settlement keep track of production, members, markets, inventory, construction, research, empire activity, and map information in one place\./);
-  assert.match(manager, /Take a short tour to see where the main tools are and how to adjust notifications and browser settings\./);
+  assert.match(manager, /Take a short tour to find what needs attention, jump to a task, and know where to get help\./);
+});
+
+test("settings remains modal while a disabled tour hands visibility back", () => {
+  const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(manager, /reportedTourVisibility\(enabled, tourState\)/);
+  assert.match(appShell, /<UserSettingsDialog[\s\S]*?\bmodal\b[\s\S]*?onClose=/);
+  assert.doesNotMatch(appShell, /modal=\{!tourVisible\}/);
+});
+
+test("tour replay waits for the shared modal coordinator to clear", () => {
+  const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
+
+  assert.match(manager, /shouldHandleTourReplay\(enabled, replayToken, handledReplayTokenRef\.current\)/);
+  assert.match(manager, /handledReplayTokenRef\.current = replayToken/);
+  assert.match(manager, /if \(!enabled\) return null;/);
+  assert.doesNotMatch(manager, /if \(!enabled && !running\) return null;/);
+});
+
+test("command palette keeps locked public routes discoverable without promising access", () => {
+  const palette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
+
+  assert.match(palette, /buildPagePaletteCommands\(NAV, allowedPages\)/);
+  assert.match(palette, /activatePagePaletteCommand\(command, onNavigate\)/);
+  assert.match(palette, /aria-disabled=\{command\.locked\}/);
 });
 
 test("tour card stacks above the spotlight dim layer", () => {
@@ -43,11 +69,18 @@ test("tour card stacks above the spotlight dim layer", () => {
   assert.match(rootCss, /--z-cookie: 60;/);
 });
 
-test("settings tour step reopens settings if the dialog is closed mid-step", () => {
+test("guided tour keeps highlighted targets crisp while the welcome prompt may blur", () => {
+  const css = readFileSync(new URL("../src/styles/first-run-tour.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.first-run-tour-overlay\s*\{[^}]*backdrop-filter:\s*none;/s);
+  assert.match(css, /\.first-run-tour-prompt-overlay,\s*\.first-run-tour-overlay\.is-centered\s*\{[^}]*backdrop-filter:\s*blur\(3px\);/s);
+});
+
+test("tour does not force a settings modal open during guided steps", () => {
   const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
 
-  assert.match(manager, /if \(!nextRect && step\.action === "settings"\)/);
-  assert.match(manager, /onOpenUserSettings\?\.\(\);/);
+  assert.doesNotMatch(manager, /step\.action === "settings"/);
+  assert.doesNotMatch(manager, /onOpenUserSettings\?\.\(\);/);
 });
 test("tour anchors are stable data attributes rather than CSS selectors", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
@@ -87,6 +120,6 @@ test("tour anchors are stable data attributes rather than CSS selectors", () => 
   assert.match(publicCrafts, /data-tour="publiccrafts-page"/);
   assert.match(craftCalculator, /data-tour="craftcalc-page"/);
   assert.match(sync, /data-tour="sync-page"/);
-  assert.match(userSettingsDialog, /data-tour="user-settings"/);
+  assert.match(userSettingsDialog, /dataTour="user-settings"/);
 });
 

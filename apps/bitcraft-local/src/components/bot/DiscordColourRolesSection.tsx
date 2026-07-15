@@ -1,5 +1,6 @@
 import React from "react";
 import { MessageCircle, Palette, RefreshCw, X } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type DiscordRole = Record<string, any>;
 type ColourRole = Record<string, any>;
@@ -13,6 +14,7 @@ export function DiscordColourRolesSection({
   discordColorToHex,
   hexToDiscordColor,
   memberCountWarning,
+  isPending,
   onPostSelector,
   onSyncRoles,
   removeDiscordColourRole,
@@ -28,6 +30,7 @@ export function DiscordColourRolesSection({
   discordColorToHex: (value: unknown) => string;
   hexToDiscordColor: (value: string) => number;
   memberCountWarning: React.ReactNode;
+  isPending: (key: string) => boolean;
   onPostSelector: () => void;
   onSyncRoles: () => void;
   removeDiscordColourRole: (key: string) => void;
@@ -45,12 +48,12 @@ export function DiscordColourRolesSection({
           <button className="toolbar-button" onClick={addDiscordColourRole}>
             <Palette size={15} /> Add Colour
           </button>
-          <button className="toolbar-button" onClick={onSyncRoles}>
+          <ActionButton className="toolbar-button" pending={isPending("discord-colours-sync")} pendingLabel="Syncing roles..." onClick={onSyncRoles}>
             <RefreshCw size={15} /> Create/Sync Roles
-          </button>
-          <button className="toolbar-button primary bot-post-button" onClick={onPostSelector}>
+          </ActionButton>
+          <ActionButton className="toolbar-button primary bot-post-button" pending={isPending("discord-colours-post")} pendingLabel="Posting selector..." onClick={onPostSelector}>
             <MessageCircle size={15} /> Post Selector
-          </button>
+          </ActionButton>
         </div>
       </div>
       <p className="legend">

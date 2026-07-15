@@ -1,5 +1,6 @@
-import React from "react";
 import { Activity, RefreshCw } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
+import { BotStatusInfo } from "./BotStatusInfo";
 
 type AnyRecord = Record<string, any>;
 
@@ -19,20 +20,18 @@ function dateLabel(value: unknown): string {
   return date.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "medium" });
 }
 
-function Info({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
-  return <div className="info-row"><span>{label}</span><strong>{value ?? "-"}</strong></div>;
-}
-
 export function DiscordDiagnosticsPanel({
   filter,
   log,
   onFilterChange,
   onRefresh,
+  pending,
 }: {
   filter: string;
   log: AnyRecord[];
   onFilterChange: (value: string) => void;
   onRefresh: () => void | Promise<void>;
+  pending: boolean;
 }) {
   const safeLog = Array.isArray(log) ? log : [];
   const types = Array.from(new Set(safeLog.map((entry) => String(entry.event_type ?? "")).filter(Boolean))).sort();
@@ -53,15 +52,15 @@ export function DiscordDiagnosticsPanel({
             <option value="all">All types</option>
             {types.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
-          <button className="toolbar-button" onClick={() => void onRefresh()}><RefreshCw size={15} /> Refresh Log</button>
+          <ActionButton className="toolbar-button" pending={pending} pendingLabel="Refreshing log..." onClick={() => void onRefresh()}><RefreshCw size={15} /> Refresh Log</ActionButton>
         </div>
       </div>
       <p className="legend">Newest entries are shown first. This records sent, skipped and failed Discord notifications with routing and filter details so notification issues can be diagnosed.</p>
       <div className="discord-diagnostics-summary" aria-label="Discord diagnostics summary">
-        <Info label="Showing" value={formatNumber(counts.total)} />
-        <Info label="Sent" value={formatNumber(counts.sent)} />
-        <Info label="Skipped" value={formatNumber(counts.skipped)} />
-        <Info label="Failed" value={formatNumber(counts.failed)} />
+        <BotStatusInfo label="Showing" content={formatNumber(counts.total)} />
+        <BotStatusInfo label="Sent" content={formatNumber(counts.sent)} tone="success" />
+        <BotStatusInfo label="Skipped" content={formatNumber(counts.skipped)} tone="warning" />
+        <BotStatusInfo label="Failed" content={formatNumber(counts.failed)} tone="danger" />
       </div>
       <div className="discord-diagnostics-list" role="log" aria-label="Discord diagnostics log">
         {filteredLog.length ? filteredLog.map((entry) => {
@@ -93,7 +92,7 @@ export function DiscordDiagnosticsPanel({
                 <time>{dateLabel(entry.occurred_at)}</time>
               </div>
               <div className="discord-diagnostic-meta">
-                {detailRows.map(([label, value]) => <Info key={label} label={label} value={String(value ?? "-")} />)}
+                {detailRows.map(([label, value]) => <BotStatusInfo key={label} label={label} content={String(value ?? "-")} />)}
               </div>
               {(Array.isArray(metadata?.metadata?.crafts) && metadata.metadata.crafts.length) || entry.response ? (
                 <details className="discord-diagnostic-details">

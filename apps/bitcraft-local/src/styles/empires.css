@@ -1,4 +1,16 @@
 /* Empires page: BitJita-only scouting views for regional empires and claimed watchtowers. */
+.empires-page {
+  min-width: 0;
+}
+
+.empires-page > * {
+  min-width: 0;
+}
+
+.empires-page .table-wrap {
+  max-width: 100%;
+}
+
 .page-title-row {
   display: flex;
   justify-content: space-between;
@@ -71,7 +83,7 @@
 
 .inactivity-threshold-card input {
   text-align: center;
-  font-weight: 850;
+  font-weight: 800;
   font-size: 16px;
 }
 
@@ -143,7 +155,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 800;
   white-space: nowrap;
 }
 

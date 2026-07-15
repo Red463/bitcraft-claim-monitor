@@ -10,7 +10,19 @@ test("Map page lives outside the legacy MainPages bundle", () => {
 
   assert.equal(existsSync(mapPageUrl), true);
   assert.doesNotMatch(mainPages, new RegExp("export function MapPanel\\b"));
-  assert.equal(appShell.includes('import { MapPanel } from "./pages/MapPage";'), true);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MapPage"\)/);
+});
+
+test("Map iframe host exposes loading, timeout, failure, retry, and full-page recovery", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /type FrameState = "loading" \| "ready" \| "timed-out" \| "failed"/);
+  assert.match(mapPage, /Loading embedded map/);
+  assert.match(mapPage, /taking longer than expected/);
+  assert.match(mapPage, /onLoad=/);
+  assert.match(mapPage, /onError=/);
+  assert.match(mapPage, /Retry/);
+  assert.match(mapPage, /Open full page/);
 });
 
 test("Map page exposes compact player tracking controls", () => {
@@ -38,5 +50,14 @@ test("Map iframe URL updates when auto-online tracked players change", () => {
   assert.match(mapPage, /bitcraftMapUrl\(currentPlayerIds,/);
   assert.match(mapPage, /setCurrentFrameUrl\(\(previousUrl\) => previousUrl === mapUrl \? previousUrl : mapUrl\)/);
   assert.doesNotMatch(mapPage, /autoFramePlayerIds/);
+});
+
+test("Map player tracking controls wrap within phone-width panels", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(
+    mapCss,
+    /@media \(max-width:\s*620px\)[\s\S]*\.map-player-tracking\s*\{[^}]*flex-wrap:\s*wrap/s,
+  );
 });
 

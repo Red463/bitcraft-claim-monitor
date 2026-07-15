@@ -42,7 +42,7 @@
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 16%, transparent), transparent 38%),
     linear-gradient(180deg, var(--card-top), var(--card-bottom));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -76,8 +76,8 @@ border: 1px solid var(--border);
   padding: 12px;
 }
 .members-toolbar .search {
-  border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  border-color: var(--border);
+  background: var(--panel-2);
 }
 .members-roster-table .table-wrap {
   border-color: var(--border);
@@ -88,7 +88,7 @@ border: 1px solid var(--border);
     linear-gradient(to right, rgba(0,0,0,.32), transparent),
     linear-gradient(to left, rgba(0,0,0,.32), transparent) 100% 0;
   background-color: var(--card-bottom);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
 }
 .members-roster-table table { min-width: 840px; }
 .members-roster-table th {
@@ -124,7 +124,7 @@ border: 1px solid var(--border);
   color: #fff;
   display: grid;
   place-items: center;
-  font-weight: 900;
+  font-weight: 800;
 }
 .member-row-avatar .online-dot {
   position: absolute;
@@ -156,7 +156,7 @@ border: 1px solid var(--border);
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 16%, transparent), transparent 38%),
     linear-gradient(180deg, var(--card-top), var(--card-bottom));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 20px;
 }
 .members-page .member-detail h3 { color: var(--gold); font-size: 20px; font-weight: 800; }
@@ -172,6 +172,8 @@ border: 1px solid var(--border);
   background: rgba(5,8,12,.78);
 }
 .member-detail { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 16px; display: grid; gap: 14px; }
+.member-detail-dialog-backdrop { align-items: start; }
+.member-detail-dialog { width: min(1100px, 100%); max-height: calc(100dvh - 40px); color: #f4f7fb; background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 16%, transparent), transparent 38%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); }
 .member-detail h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 18px; margin: 0; }
 .profile-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .profile-actions .mini-action { display: inline-flex; align-items: center; gap: 6px; }

@@ -1,7 +1,9 @@
 import React from "react";
+import "../styles/map.css";
 import { ExternalLink, MapPin, PanelLeftClose, PanelLeftOpen, Search, Users, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
+import { Dialog } from "../components/main/Dialog";
 import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
@@ -16,6 +18,8 @@ import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToke
 import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 
 const LOCAL_API = "/api/local";
+const FRAME_TIMEOUT_MS = 12000;
+type FrameState = "loading" | "ready" | "timed-out" | "failed";
 
 function MapPlayerTrackingControls({
   roster,
@@ -70,8 +74,7 @@ function MapPlayerTrackingControls({
         <button onClick={onClearFilters}>Clear filters</button>
       </div>
       {managerOpen ? (
-        <div className="map-player-dialog-overlay" onClick={() => setManagerOpen(false)}>
-          <section className="map-player-dialog" role="dialog" aria-modal="true" aria-label="Manage players" onClick={(event) => event.stopPropagation()}>
+        <Dialog open title="Manage players" onClose={() => setManagerOpen(false)} className="map-player-dialog" backdropClassName="map-player-dialog-overlay">
             <header>
               <div>
                 <h3>Manage players</h3>
@@ -89,7 +92,7 @@ function MapPlayerTrackingControls({
               <div className="map-player-tabs" role="tablist" aria-label="Player filters">
                 {filterTabs.map((tab) => <button key={tab.key} className={filter === tab.key ? "active" : ""} onClick={() => setFilter(tab.key)}>{tab.label}</button>)}
               </div>
-              <SearchBox value={search} onChange={setSearch} placeholder="Find members" />
+              <SearchBox label="Find tracked members" value={search} onChange={setSearch} placeholder="Find members" />
             </div>
             <div className="map-player-list">
               {visibleRows.map((row) => (
@@ -104,8 +107,7 @@ function MapPlayerTrackingControls({
               ))}
               {!visibleRows.length ? <p className="legend">No members match these filters.</p> : null}
             </div>
-          </section>
-        </div>
+        </Dialog>
       ) : null}
     </section>
   );
@@ -204,9 +206,16 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
   const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [mapSignature]);
   const [currentFrameUrl, setCurrentFrameUrl] = React.useState(mapUrl);
+  const [frameState, setFrameState] = React.useState<FrameState>("loading");
+  const [frameAttempt, setFrameAttempt] = React.useState(0);
   React.useEffect(() => {
     setCurrentFrameUrl((previousUrl) => previousUrl === mapUrl ? previousUrl : mapUrl);
   }, [mapSignature, mapUrl]);
+  React.useEffect(() => {
+    setFrameState("loading");
+    const timeout = window.setTimeout(() => setFrameState((current) => current === "loading" ? "timed-out" : current), FRAME_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [currentFrameUrl, frameAttempt]);
   React.useEffect(() => {
     const parsed = parseBitcraftMapUrl(currentFrameUrl);
     setMapUrlLog((currentLog) => [{
@@ -336,7 +345,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             })}</select></label>
             <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
             <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-            <SearchBox value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
+            <SearchBox label="Find map resources" value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
           </div>
           {selectedResources.length ? (
             <div className="map-selected-resources">
@@ -363,7 +372,16 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
           </div></> : null}
         </aside>
-        <iframe className="map-frame" src={currentFrameUrl} title="BitCraft World Map" />
+        <div className={`map-frame-host is-${frameState}`}>
+          <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />
+          {frameState !== "ready" ? (
+            <section className="map-frame-state" aria-live="polite">
+              <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>
+              <span>{frameState === "loading" ? "The map will appear here when the external host responds." : "You can retry the embed or open the full page. This does not affect Claim Monitor data."}</span>
+              {frameState !== "loading" ? <div><button className="toolbar-button primary" onClick={() => setFrameAttempt((current) => current + 1)}>Retry</button><a className="toolbar-button" href={currentFrameUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full page</a></div> : null}
+            </section>
+          ) : null}
+        </div>
       </div>
     </div>
   );

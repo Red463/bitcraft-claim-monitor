@@ -2,6 +2,7 @@ import React from "react";
 import { ClipboardList, LoaderCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
+import { Dialog } from "../components/main/Dialog";
 import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
 
@@ -194,6 +195,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [activeTab, setActiveTab] = React.useState<ManagerTab>("targets");
   const [query, setQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState<AnyRecord[]>([]);
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(-1);
   const [status, setStatus] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -273,11 +275,40 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const timer = window.setTimeout(() => {
       fetch(`${BITJITA_API}/market?search=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then((response) => response.ok ? response.json() : { items: [], cargos: [] })
-        .then((body) => setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16)))
+        .then((body) => {
+          setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
+          setActiveSearchResultIndex(-1);
+        })
         .catch(() => setSearchResults([]));
     }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [query]);
+
+  function selectSearchResult(item: AnyRecord) {
+    addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`);
+    setQuery("");
+    setSearchResults([]);
+    setActiveSearchResultIndex(-1);
+  }
+
+  function handleSearchResultKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSearchResults([]);
+      setActiveSearchResultIndex(-1);
+      return;
+    }
+    if (!searchResults.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSearchResultIndex((current) => current >= searchResults.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSearchResultIndex((current) => current <= 0 ? searchResults.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSearchResultIndex >= 0) {
+      event.preventDefault();
+      selectSearchResult(searchResults[activeSearchResultIndex]);
+    }
+  }
 
   function patchConfig(patch: Partial<CraftPlanConfig>) {
     setConfig((current) => ({ ...current, ...patch }));
@@ -412,8 +443,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : catalogBusy ? "Refreshing catalog status…" : null;
 
   return (
-    <div className="modal-backdrop craft-plan-manager-backdrop" role="presentation">
-      <section className="modal craft-plan-manager" role="dialog" aria-modal="true" aria-label="Craft plan manager">
+    <Dialog open title="Craft plan manager" closeOnBackdrop={false} onClose={onClose} className="modal craft-plan-manager" backdropClassName="modal-backdrop craft-plan-manager-backdrop">
         <header className="modal-header">
           <div>
             <h2><ClipboardList size={22} /> Manage Craft Plan</h2>
@@ -488,8 +518,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
                 {workstationPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add workstation targets for ${preset.label}`} disabled={busy} key={preset.key} onClick={() => void addWorkstationPreset(preset)}>{preset.label}</button>)}
               </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>BitJita did not return compatible workstation definitions.</span></div>}
             </section>
-            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search BitJita items" /></div></label>
-            {searchResults.length ? <div className="craft-plan-search-results">{searchResults.map((item) => <button className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onClick={() => { addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`); setQuery(""); setSearchResults([]); }}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
+            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search BitJita items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
+            {searchResults.length ? <div className="craft-plan-search-results" id="craft-plan-target-suggestions" role="listbox">{searchResults.map((item, index) => <button id={`craft-plan-target-suggestion-${index}`} role="option" aria-selected={activeSearchResultIndex === index} tabIndex={-1} className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onMouseEnter={() => setActiveSearchResultIndex(index)} onClick={() => selectSearchResult(item)}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}>
                 <ItemLabel item={target} />
@@ -515,7 +545,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "buffers" ? <section className="craft-plan-manager-panel"><h3>Chance-drop safety buffers</h3><p className="legend">Add or edit a buffer from an item’s “How to get this” panel. Buffers increase planned gathering only; they do not change API drop rates or counted stock.</p>{Object.entries(config.multipliers).length ? Object.entries(config.multipliers).map(([key, value]) => { const item = [...config.targets, ...(Array.isArray(state?.plan?.materials) ? state.plan.materials : [])].find((candidate) => itemKey(candidate) === key); return <div className="admin-craft-plan-row" key={key}><strong>{item?.name ?? key}</strong><span>{formatNumber((value.multiplier - 1) * 100, 1)}% extra{value.note ? ` - ${value.note}` : ""}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.multipliers }; delete next[key]; return { ...current, multipliers: next }; })}><Trash2 size={14} /> Remove</button></div>; }) : <p className="legend">No chance-drop safety buffers are configured.</p>}</section> : null}
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }

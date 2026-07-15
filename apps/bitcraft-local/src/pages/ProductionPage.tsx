@@ -1,9 +1,11 @@
 import React from "react";
+import "../styles/production.css";
 import { Activity, AlertTriangle, CheckCircle2, Factory, Lock, Star, TrendingUp, User, Wrench } from "lucide-react";
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
 import { ItemIcon } from "../components/main/ItemDisplay";
+import { PageHeader } from "../components/main/PageHeader";
 import { Segmented } from "../components/main/Segmented";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -71,7 +73,7 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
       {state.error ? <p className="legend">{state.error}</p> : null}
       {state.loading && !state.data ? <p className="legend">Loading passive craft history...</p> : null}
       {!state.loading && rows.length === 0 ? <div className="empty-state"><Factory />No passive craft history reported for settlement members.</div> : null}
-      {rows.length ? <DataTable rows={rows} columns={[
+      {rows.length ? <DataTable rows={rows} scrollLabel="Production jobs table" emptyState="No production jobs match the current filters." columns={[
         ["Output", (row) => <strong>{row.recipe}</strong>],
         ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
         ["Member", (row) => row.memberName],
@@ -213,12 +215,10 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
 
   return (
     <div className="panel production-page">
-      <header className="members-topbar production-topbar">
-        <div>
-          <h2>Active Production</h2>
-          <p>{visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}</p>
-        </div>
-        <div className="dashboard-top-meta">
+      <PageHeader
+        title="Production"
+        description={visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}
+        meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Factory size={14} /> {formatNumber(visibleCrafts.length)} shown</span>
             {privateCrafts.length ? <span><Lock size={14} /> {formatNumber(privateCrafts.length)} private</span> : null}
@@ -228,8 +228,8 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
             {highestTier ? <TierBadge tier={highestTier} /> : <span className="status-pill">No tier</span>}
             <span>Highest craft tier</span>
           </div>
-        </div>
-      </header>
+        </div>}
+      />
       <div className="summary-grid production-summary">
         <MiniStat icon={<Factory />} label="Total Jobs" value={formatNumber(visibleCrafts.length)} />
         <MiniStat icon={<Activity />} label="Active Now" value={formatNumber(activeJobs)} />
@@ -255,7 +255,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
               <option value="name">Item Name</option>
             </select>
           </label>
-          <Segmented options={["Descending", "Ascending"]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
+          <Segmented options={[{ id: "Descending", label: "Descending" }, { id: "Ascending", label: "Ascending" }]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
           <label className="production-private-toggle"><span><Lock size={13} /> Show private crafts</span><input type="checkbox" checked={showPrivateCrafts} onChange={(event) => setShowPrivateCrafts(event.target.checked)} /></label>
         </div>
         {Object.keys(crafterCounts).length ? (
@@ -330,4 +330,3 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     </div>
   );
 }
-

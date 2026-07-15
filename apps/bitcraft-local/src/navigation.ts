@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ActivePanel } from "./types/app";
+import { writeQueryLocation, type NavigationMode } from "./navigation/routeState.ts";
 
 /*
  * Main app navigation model.
@@ -77,13 +78,8 @@ export function urlPanel(): ActivePanel | null {
   return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
 }
 
-export function updateQueryState(values: Record<string, string | null>) {
-  const url = new URL(window.location.href);
-  for (const [key, value] of Object.entries(values)) {
-    if (value) url.searchParams.set(key, value);
-    else url.searchParams.delete(key);
-  }
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+export function updateQueryState(values: Record<string, string | null>, mode: NavigationMode = "replace") {
+  writeQueryLocation(values, mode);
 }
 
 export function panelHref(panel: ActivePanel): string {

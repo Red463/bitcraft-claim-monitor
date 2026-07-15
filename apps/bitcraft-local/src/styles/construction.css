@@ -21,7 +21,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 4px 14px;
@@ -54,7 +54,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(240,198,79,.1), transparent 34%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
 .construction-section-heading {
@@ -116,7 +116,7 @@
   min-width: 40px;
   color: #f0c64f;
   font-size: 24px;
-  font-weight: 850;
+  font-weight: 800;
   text-align: right;
 }
 .construction-need-card small {
@@ -191,7 +191,7 @@
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
     linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 15px;
   align-content: start;
 }
@@ -314,7 +314,7 @@
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: .055em;
   text-transform: uppercase;
 }
@@ -384,7 +384,19 @@
 }
 
 @media (max-width: 1250px) {
+  .construction-summary,
+  .construction-page .gather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .construction-page .project-list { grid-template-columns: 1fr; }
   .construction-material-row { grid-template-columns: 34px minmax(0, 1fr); }
   .construction-material-numbers { grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: start; }
+}
+
+@media (max-width: 560px) {
+  .construction-summary,
+  .construction-page .gather-grid { grid-template-columns: 1fr; }
+  .construction-controls { align-items: stretch; flex-direction: column; }
+  .construction-controls > div:first-child { margin-right: 0; }
+  .construction-controls .toggle-row { width: 100%; }
+  .construction-sort-field { width: 100%; grid-template-columns: 1fr; }
+  .construction-sort-field select { width: 100%; min-width: 0; }
 }

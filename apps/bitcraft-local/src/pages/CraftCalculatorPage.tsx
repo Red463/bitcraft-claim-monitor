@@ -1,10 +1,13 @@
 import React from "react";
+import "../styles/craftcalc.css";
 import { Calculator, CheckCircle2, ClipboardList, Factory, Package, Search, Workflow } from "lucide-react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { MiniStat } from "../components/main/Stats";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
 import { formatNumber } from "../utils/format";
 import { itemTypeFromKind, isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
@@ -204,6 +207,7 @@ function recipeRouteMeta(recipe: AnyRecord) {
 export function CraftCalculatorPage() {
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(-1);
   const [selectedTarget, setSelectedTarget] = React.useState<RecipeTarget | null>(null);
   const [amount, setAmount] = React.useState(1);
   const [recipeSelections, setRecipeSelections] = React.useState<RecipeSelections>({});
@@ -225,6 +229,7 @@ export function CraftCalculatorPage() {
         .then((payload) => {
           const items: AnyRecord[] = payload.data?.items ?? [];
           setSuggestions(items.filter((item) => String(item.name ?? "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10));
+          setActiveSuggestionIndex(-1);
           setSearchState("idle");
         })
         .catch(() => {
@@ -261,6 +266,26 @@ export function CraftCalculatorPage() {
     setRecipeSelections({});
     setQuery(target.name);
     setSuggestions([]);
+    setActiveSuggestionIndex(-1);
+  }
+
+  function handleSuggestionKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSuggestions([]);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (!suggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSuggestionIndex >= 0) {
+      event.preventDefault();
+      chooseItem(suggestions[activeSuggestionIndex]);
+    }
   }
 
   const recipeChoices = React.useMemo(() => {
@@ -303,12 +328,12 @@ export function CraftCalculatorPage() {
           <span>Item and cargo recipes are resolved recursively where BitJita exposes the chain.</span>
         </div>
         <div className="craftcalc-control-grid">
-          <label className="research-filter-field">
-            <span>Item or cargo</span>
+          <div className="research-filter-field">
+            <label htmlFor="craftcalc-item-search">Item or cargo</label>
             <div className="suggestion-anchor">
-              <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedTarget(null); }} placeholder="Start typing an item name" />
-              {suggestions.length ? <div className="suggestion-menu">{suggestions.map((item) => (
-                <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+              <input id="craftcalc-item-search" value={query} role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls="craftcalc-item-suggestions" aria-activedescendant={activeSuggestionIndex >= 0 ? `craftcalc-item-suggestion-${activeSuggestionIndex}` : undefined} autoComplete="off" onKeyDown={handleSuggestionKeyDown} onChange={(event) => { setQuery(event.target.value); setSelectedTarget(null); setActiveSuggestionIndex(-1); }} placeholder="Start typing an item name" />
+              {suggestions.length ? <div className="suggestion-menu" id="craftcalc-item-suggestions" role="listbox">{suggestions.map((item, index) => (
+                <button id={`craftcalc-item-suggestion-${index}`} role="option" aria-selected={activeSuggestionIndex === index} tabIndex={-1} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestionIndex(index)} onClick={() => chooseItem(item)}>
                   <ItemIcon item={item} />
                   <strong>{item.name}</strong>
                   {item.tier ? <TierBadge tier={item.tier} /> : null}
@@ -316,9 +341,8 @@ export function CraftCalculatorPage() {
                 </button>
               ))}</div> : null}
             </div>
-            {searchState === "loading" ? <small className="legend">Searching BitJita item catalogue...</small> : null}
-            {searchState === "error" ? <small className="legend">Unable to search items right now.</small> : null}
-          </label>
+            <small className="legend" role="status" aria-live="polite">{searchState === "loading" ? "Searching BitJita item catalogue..." : searchState === "error" ? "Unable to search items right now." : query.trim().length >= 2 ? `${suggestions.length} results available.` : "Type at least two characters to search."}</small>
+          </div>
           <label className="research-filter-field">
             <span>Amount to make</span>
             <input type="number" min={1} step={1} value={amount} onChange={(event) => setAmount(Math.max(1, Math.floor(toNumber(event.target.value) || 1)))} />
@@ -363,9 +387,11 @@ export function CraftCalculatorPage() {
         </section>
       ) : null}
 
-      {!selectedTarget ? <div className="empty-state craftcalc-empty"><Search />Choose an item or cargo to calculate its recipe chain.</div> : null}
-      {selectedTarget && state.loading ? <div className="loading">Loading recipe chain for {selectedTarget.name}...</div> : null}
-      {state.error ? <div className="error">Unable to build recipe plan: {state.error}</div> : null}
+      {!selectedTarget && query.trim().length >= 2 && searchState !== "loading" && !suggestions.length ? <AsyncState kind="no-match" title="No catalogue items match this search" detail="Check the spelling or try a shorter item name." /> : null}
+      {!selectedTarget && (query.trim().length < 2 || suggestions.length > 0) ? <AsyncState kind="empty" title="Choose an item or cargo" detail="Select a catalogue result to calculate its recipe chain." /> : null}
+      {selectedTarget && state.loading && !state.plan ? <AppSkeleton /> : null}
+      {selectedTarget && state.loading && state.plan ? <AsyncState kind="loading" title={`Refreshing recipe chain for ${selectedTarget.name}`} detail="The current plan remains visible while recipes refresh." compact /> : null}
+      {state.error ? <AsyncState kind="error" title="Unable to build this recipe plan" detail={state.error} /> : null}
 
       {state.plan ? (
         <>
@@ -387,7 +413,7 @@ export function CraftCalculatorPage() {
             <div className="craftcalc-material-grid">
               {state.plan.directMaterials.length
                 ? state.plan.directMaterials.map((material) => <MaterialRow key={`${material.kind}-${material.id}`} material={material} />)
-                : <div className="empty-state">No direct recipe materials were exposed by BitJita for this item.</div>}
+                : <AsyncState kind="empty" title="No direct recipe materials available" detail="BitJita did not expose direct inputs for this item." compact />}
             </div>
           </section>
           <section className="craftcalc-section">

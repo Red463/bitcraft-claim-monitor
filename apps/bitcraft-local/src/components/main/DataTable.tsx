@@ -1,6 +1,7 @@
 import React from "react";
 import type { AnyRecord } from "../../main-app-data";
 import { sortIndexedRows, type SortDirection } from "../../utils/tableSort";
+import { AsyncState, type AsyncStateKind } from "./AsyncState";
 
 type DataTableColumn = [
   label: string,
@@ -27,13 +28,19 @@ function cellSortText(value: React.ReactNode): string {
 export function DataTable({
   rows,
   columns,
+  emptyState,
+  emptyKind = "empty",
   onRowClick,
   rowClassName,
+  scrollLabel,
 }: {
   rows: AnyRecord[];
   columns: DataTableColumn[];
+  emptyState: React.ReactNode;
+  emptyKind?: Extract<AsyncStateKind, "empty" | "no-match">;
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
+  scrollLabel: string;
 }) {
   const [sort, setSort] = React.useState<{ column: number; direction: SortDirection } | null>(null);
   const indexedRows = React.useMemo(() => rows.map((row, index) => ({ row, index })), [rows]);
@@ -55,16 +62,15 @@ export function DataTable({
     });
   };
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" tabIndex={0} aria-label={scrollLabel}>
       <table>
         <thead><tr>{columns.map(([label], columnIndex) => (
-          <th key={label}>
+          <th key={label} aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
             <button
               type="button"
               className={`table-sort-button ${sort?.column === columnIndex ? "is-sorted" : ""}`}
               onClick={() => toggleSort(columnIndex)}
               aria-label={`Sort by ${label}`}
-              aria-sort={sort?.column === columnIndex ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
             >
               <span>{label}</span>
               <span className="table-sort-indicator">{sort?.column === columnIndex ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
@@ -80,7 +86,7 @@ export function DataTable({
             >
               {columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}
             </tr>
-          )) : <tr><td colSpan={columns.length}>No data returned.</td></tr>}
+          )) : <tr><td colSpan={columns.length}>{typeof emptyState === "string" ? <AsyncState kind={emptyKind} title={emptyState} compact /> : emptyState}</td></tr>}
         </tbody>
       </table>
     </div>
