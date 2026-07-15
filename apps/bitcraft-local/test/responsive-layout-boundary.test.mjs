@@ -10,11 +10,13 @@ const dashboardCss = readFileSync(new URL("../src/styles/dashboard.css", import.
 test("narrow shell separates brand from route and reserves no expanded tool rail", () => {
   assert.match(appShell, /className="mobile-shell-brand"/);
   assert.match(appShell, /className="mobile-shell-route"/);
-  assert.match(shellCss, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid/s);
+  assert.match(shellCss, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid[^}]*margin-right:\s*44px/s);
   assert.match(shellCss, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis/s);
   assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions/s);
   assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-right\)/s);
   assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-bottom\)/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions\.floating-actions-collapsed\s*\{[^}]*pointer-events:\s*none[^}]*width:\s*44px[^}]*height:\s*42px[^}]*top:\s*5px[^}]*bottom:\s*auto[^}]*transform:\s*none/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions\.floating-actions-collapsed\s+\.floating-actions-toggle\s*\{[^}]*pointer-events:\s*auto[^}]*width:\s*44px[^}]*height:\s*42px/s);
 });
 
 test("Dashboard reduces five KPI columns before the expanded sidebar causes collisions", () => {

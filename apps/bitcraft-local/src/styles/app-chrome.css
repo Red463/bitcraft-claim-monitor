@@ -79,6 +79,29 @@ body:has(.admin-loading-panel) .floating-actions {
     right: calc(12px + env(safe-area-inset-right));
     bottom: calc(72px + env(safe-area-inset-bottom));
   }
+  .floating-actions.floating-actions-collapsed {
+    pointer-events: none;
+    width: 44px;
+    height: 42px;
+    padding: 0;
+    top: 5px;
+    right: calc(60px + env(safe-area-inset-right));
+    bottom: auto;
+    z-index: calc(var(--z-sticky) + 2);
+    transform: none;
+  }
+  body:not(:has(.admin-loading-panel)) .floating-actions.floating-actions-collapsed .floating-actions-toggle {
+    pointer-events: auto;
+    width: 44px;
+    height: 42px;
+    left: 0;
+    top: 0;
+    transform: none;
+  }
+  .floating-actions.floating-actions-collapsed .floating-actions-toggle:hover,
+  .floating-actions.floating-actions-collapsed .floating-actions-toggle:focus-visible {
+    transform: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .floating-actions,
