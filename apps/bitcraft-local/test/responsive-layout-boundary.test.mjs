@@ -35,6 +35,7 @@ test("remaining operational summaries and lookup controls own their phone layout
   assert.match(constructionCss, /@media \(max-width:\s*560px\)[\s\S]*\.construction-summary,\s*\.construction-page \.gather-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(researchCss, /@media \(max-width:\s*1250px\)[\s\S]*\.research-summary\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(researchCss, /@media \(max-width:\s*560px\)[\s\S]*\.research-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(researchCss, /@media \(max-width:\s*700px\)[\s\S]*\.research-panel \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(craftcalcCss, /@media \(max-width:\s*700px\)[\s\S]*\.craftcalc-control-grid[\s\S]*grid-template-columns:\s*1fr/s);
   assert.match(craftcalcCss, /@media \(max-width:\s*700px\)[\s\S]*\.craftcalc-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
 });

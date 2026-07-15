@@ -275,7 +275,7 @@
 }
 
 @media (max-width: 700px) {
-  .research-panel .dashboard-top-meta { min-width: 0; width: 100%; }
+  .research-panel .dashboard-top-meta { min-width: 0; width: 100%; flex-wrap: wrap; }
   .research-filter-grid { grid-template-columns: 1fr; }
 }
 
