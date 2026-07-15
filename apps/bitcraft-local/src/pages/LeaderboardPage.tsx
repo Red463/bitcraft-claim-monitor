@@ -210,6 +210,7 @@ export function Leaderboard({
     </div>
   );
   if (state.loading && !state.data) return <AppSkeleton />;
+  if (state.error && !state.data) return <AsyncState kind="error" title="Unable to load leaderboard" detail={state.error} />;
   return (
     <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">

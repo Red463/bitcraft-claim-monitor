@@ -118,6 +118,7 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     ["Owner", "owner", (job) => <TrackedOwnerName name={job.ownerUsername ?? "-"} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
   ];
   if (state.loading && !state.data) return <AppSkeleton />;
+  if (state.error && !state.data) return <AsyncState kind="error" title="Unable to load public craft jobs" detail={state.error} />;
   return (
     <section className="public-craft-finder" data-tour="publiccrafts-page">
       <header className="members-topbar public-craft-topbar">

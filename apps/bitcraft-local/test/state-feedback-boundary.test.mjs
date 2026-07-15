@@ -88,3 +88,37 @@ test("listed Discord mutation surfaces render pending-aware action buttons", () 
     assert.match(file, /pendingLabel=/);
   }
 });
+
+test("YouTube monitor gives every external action stable pending ownership", () => {
+  const youtube = source("../src/components/bot/DiscordYouTubeMonitorSection.tsx");
+  const admin = source("../src/components/admin/AdminPanel.tsx");
+
+  assert.match(youtube, /import \{ ActionButton \}/);
+  assert.match(youtube, /isPending: \(key: string\) => boolean/);
+  for (const key of [
+    "youtube-refresh",
+    "youtube-add",
+    "youtube-target:${channel.channelId}",
+    "youtube-check:${channel.channelId}",
+    "youtube-toggle:${channel.channelId}",
+    "youtube-remove:${channel.channelId}",
+  ]) {
+    assert.ok(youtube.includes(key), `missing stable pending key ${key}`);
+  }
+  assert.equal((youtube.match(/<ActionButton/g) ?? []).length, 5);
+  assert.equal((youtube.match(/pending=\{isPending\(/g) ?? []).length, 5);
+  assert.match(youtube, /optionalChannelIdSelect\([\s\S]*?isPending\(`youtube-target:\$\{channel\.channelId\}`\)/);
+  assert.match(youtube, /Updating channel\.\.\./);
+  assert.match(admin, /<DiscordYouTubeMonitorSection[\s\S]*?isPending=\{isBusyAction\}/);
+});
+
+test("initial route failures and skeletons are exclusive from empty operational content", () => {
+  const leaderboard = source("../src/pages/LeaderboardPage.tsx");
+  const publicCrafts = source("../src/pages/PublicCraftFinderPage.tsx");
+  const empires = source("../src/pages/EmpiresPage.tsx");
+
+  assert.match(leaderboard, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
+  assert.match(publicCrafts, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
+  assert.match(empires, /overview\.loading && !overview\.data\s*\? <AppSkeleton \/>\s*:\s*overview\.error && !overview\.data\s*\? <AsyncState kind="error"/);
+  assert.match(empires, /watchtowers\.loading && !watchtowers\.data\s*\? <AppSkeleton \/>\s*:\s*watchtowers\.error && !watchtowers\.data\s*\? <AsyncState kind="error"/);
+});

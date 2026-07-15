@@ -2,21 +2,22 @@ import React from "react";
 import { ExternalLink, Plus, RefreshCw, Trash2, Youtube } from "lucide-react";
 import { dateLabel, formatNumber } from "../../utils/format";
 import type { AnyRecord } from "../../main-app-data";
+import { ActionButton } from "../main/ActionButton";
 
 type Api = (path: string, options?: RequestInit) => Promise<AnyRecord>;
 
 type Props = {
   api: Api;
-  busyButtonClass: (key: string, className?: string) => string;
   channelIdSelect: (key: string, value: string) => React.ReactNode;
-  optionalChannelIdSelect: (value: string, onChange: (value: string) => void, defaultLabel?: string) => React.ReactNode;
+  optionalChannelIdSelect: (value: string, onChange: (value: string) => void, defaultLabel?: string, disabled?: boolean) => React.ReactNode;
   discord: AnyRecord;
-  run: (task: () => Promise<unknown>, success?: string, busyKey?: string) => Promise<void>;
+  isPending: (key: string) => boolean;
+  run: (task: () => Promise<unknown>, success: string | undefined, busyKey: string) => Promise<void>;
   updateDiscord: (patch: Partial<AnyRecord>) => void;
   updateDiscordNotify: (key: string, value: boolean) => void;
 };
 
-export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSelect, optionalChannelIdSelect, discord, run, updateDiscord, updateDiscordNotify }: Props) {
+export function DiscordYouTubeMonitorSection({ api, channelIdSelect, optionalChannelIdSelect, discord, isPending, run, updateDiscord, updateDiscordNotify }: Props) {
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [input, setInput] = React.useState("");
 
@@ -44,7 +45,7 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
           <h3><Youtube size={17} /> YouTube Monitor</h3>
           <p className="legend">Watch YouTube RSS feeds and post new videos to the configured announcements channel.</p>
         </div>
-        <button className={busyButtonClass("youtube-refresh")} onClick={() => run(refresh, undefined, "youtube-refresh")}><RefreshCw size={15} /> Refresh</button>
+        <ActionButton className="toolbar-button" pending={isPending("youtube-refresh")} pendingLabel="Refreshing..." onClick={() => run(refresh, undefined, "youtube-refresh")}><RefreshCw size={15} /> Refresh</ActionButton>
       </div>
       <div className="discord-rule-grid youtube-monitor-settings">
         <div className="discord-rule-card">
@@ -78,11 +79,11 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
           <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="https://www.youtube.com/@channel or UC..." />
         </label>
         <p className="legend">Existing videos are marked as seen when a channel is added. Only videos published after setup are announced.</p>
-        <button className="toolbar-button primary" disabled={!input.trim()} onClick={() => run(async () => {
+        <ActionButton className="toolbar-button primary" disabled={!input.trim()} pending={isPending("youtube-add")} pendingLabel="Adding channel..." onClick={() => run(async () => {
           const result = await api("/admin/discord/youtube/channels", { method: "POST", body: JSON.stringify({ input }) });
           setStatus(result);
           setInput("");
-        }, "YouTube channel added and seeded.", "youtube-add")}><Plus size={14} /> Add Channel</button>
+        }, "YouTube channel added and seeded.", "youtube-add")}><Plus size={14} /> Add Channel</ActionButton>
       </div>
       <div className="discord-report-list youtube-channel-list">
         {channels.length ? channels.map((channel) => (
@@ -95,14 +96,15 @@ export function DiscordYouTubeMonitorSection({ api, busyButtonClass, channelIdSe
               {channel.lastError ? <small className="error">{channel.lastError}</small> : null}
               <label className="field youtube-channel-target">
                 <span>Announcement channel</span>
-                {optionalChannelIdSelect(channel.discordChannelId ?? "", (value) => run(async () => setStatus(await api("/admin/discord/youtube/channels", { method: "PUT", body: JSON.stringify({ channelId: channel.channelId, discordChannelId: value }) })), "YouTube announcement channel updated."), "Use default")}
+                {optionalChannelIdSelect(channel.discordChannelId ?? "", (value) => run(async () => setStatus(await api("/admin/discord/youtube/channels", { method: "PUT", body: JSON.stringify({ channelId: channel.channelId, discordChannelId: value }) })), "YouTube announcement channel updated.", `youtube-target:${channel.channelId}`), "Use default", isPending(`youtube-target:${channel.channelId}`))}
+                {isPending(`youtube-target:${channel.channelId}`) ? <small role="status">Updating channel...</small> : null}
               </label>
             </div>
             <div className="toolbar youtube-channel-actions">
               {channel.url ? <a className="toolbar-button" href={channel.url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open</a> : null}
-              <button className="toolbar-button" onClick={() => run(async () => setStatus(await api("/admin/discord/youtube/check", { method: "POST", body: JSON.stringify({ channelId: channel.channelId }) })), "YouTube channel checked.", `youtube-check:${channel.channelId}`)}><RefreshCw size={14} /> Check</button>
-              <button className="toolbar-button" onClick={() => run(async () => setStatus(await api("/admin/discord/youtube/channels", { method: "PUT", body: JSON.stringify({ channelId: channel.channelId, enabled: !channel.enabled }) })), `YouTube channel ${channel.enabled ? "disabled" : "enabled"}.`)}>{channel.enabled ? "Disable" : "Enable"}</button>
-              <button className="toolbar-button danger" onClick={() => run(async () => setStatus(await api(`/admin/discord/youtube/channels?channelId=${encodeURIComponent(channel.channelId)}`, { method: "DELETE" })), "YouTube channel removed.")}><Trash2 size={14} /> Remove</button>
+              <ActionButton className="toolbar-button" pending={isPending(`youtube-check:${channel.channelId}`)} pendingLabel="Checking..." onClick={() => run(async () => setStatus(await api("/admin/discord/youtube/check", { method: "POST", body: JSON.stringify({ channelId: channel.channelId }) })), "YouTube channel checked.", `youtube-check:${channel.channelId}`)}><RefreshCw size={14} /> Check</ActionButton>
+              <ActionButton className="toolbar-button" pending={isPending(`youtube-toggle:${channel.channelId}`)} pendingLabel={channel.enabled ? "Disabling..." : "Enabling..."} onClick={() => run(async () => setStatus(await api("/admin/discord/youtube/channels", { method: "PUT", body: JSON.stringify({ channelId: channel.channelId, enabled: !channel.enabled }) })), `YouTube channel ${channel.enabled ? "disabled" : "enabled"}.`, `youtube-toggle:${channel.channelId}`)}>{channel.enabled ? "Disable" : "Enable"}</ActionButton>
+              <ActionButton className="toolbar-button danger" pending={isPending(`youtube-remove:${channel.channelId}`)} pendingLabel="Removing..." onClick={() => run(async () => setStatus(await api(`/admin/discord/youtube/channels?channelId=${encodeURIComponent(channel.channelId)}`, { method: "DELETE" })), "YouTube channel removed.", `youtube-remove:${channel.channelId}`)}><Trash2 size={14} /> Remove</ActionButton>
             </div>
           </article>
         )) : <p className="legend">No YouTube channels are monitored yet.</p>}

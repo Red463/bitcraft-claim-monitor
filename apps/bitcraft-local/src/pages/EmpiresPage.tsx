@@ -357,10 +357,14 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
       </div>
 
       {currentTab === "overview" ? (
+        overview.loading && !overview.data
+          ? <AppSkeleton />
+          : overview.error && !overview.data
+            ? <AsyncState kind="error" title="Unable to load regional empires" detail={overview.error} />
+            : (
         <>
-          {overview.loading && !overview.data ? <AppSkeleton /> : null}
           <div className="stats-grid">
-            <MiniStat icon={<Landmark />} label="Regional empires" value={overview.loading && !overview.data ? "..." : formatNumber(overviewSummary.empires)} />
+            <MiniStat icon={<Landmark />} label="Regional empires" value={formatNumber(overviewSummary.empires)} />
             <MiniStat icon={<Castle />} label="Empire claims" value={formatNumber(overviewSummary.regionalClaims)} />
             <MiniStat icon={<Users />} label="Total members" value={formatNumber(overviewSummary.totalMembers)} />
             <MiniStat icon={<Crown />} label="Largest empire" value={largestEmpire} />
@@ -372,11 +376,16 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
             <DataTable rows={overviewRows} columns={overviewColumns} emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>
+            )
       ) : (
+        watchtowers.loading && !watchtowers.data
+          ? <AppSkeleton />
+          : watchtowers.error && !watchtowers.data
+            ? <AsyncState kind="error" title="Unable to load claimed watchtowers" detail={watchtowers.error} />
+            : (
         <>
-          {watchtowers.loading && !watchtowers.data ? <AppSkeleton /> : null}
           <div className="stats-grid">
-            <MiniStat icon={<RadioTower />} label="Towers found" value={watchtowers.loading && !watchtowers.data ? "..." : formatNumber(towerSummary.towerCount)} />
+            <MiniStat icon={<RadioTower />} label="Towers found" value={formatNumber(towerSummary.towerCount)} />
             <MiniStat icon={<Clock />} label="Inactive-risk empires" value={formatNumber(towerSummary.inactiveRiskEmpires)} />
             <MiniStat icon={<Shield />} label="Under siege" value={formatNumber(towerSummary.underSiege)} />
             <MiniStat icon={<Zap />} label="Active towers" value={formatNumber(towerSummary.activeTowers)} />
@@ -411,6 +420,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
             <DataTable rows={visibleTowerRows} columns={towerColumns} emptyKind="no-match" emptyState="No claimed watchtowers match these filters." onRowClick={openTowerDetails} rowClassName={() => "clickable-row"} />
           </section>
         </>
+            )
       )}
       {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
     </div>
