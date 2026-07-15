@@ -48,3 +48,10 @@ test("Profession summary and expanded insights use compact responsive boundaries
   assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.focus-tier-strip/);
   assert.match(css, /\.capability-grid/);
 });
+
+test("Profession summary collapses below the tablet breakpoint without losing selector priority", () => {
+  assert.match(
+    css,
+    /@media \(max-width:\s*900px\)[\s\S]*\.skills-page \.summary-grid\.skills-summary\s*\{[^}]*grid-template-columns:\s*1fr/s,
+  );
+});
