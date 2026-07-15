@@ -149,10 +149,16 @@ export function Members({
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
               return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
             }],
-            ["Permissions", (m) => {
-              const canManage = Boolean(m.coOwnerPermission || m.officerPermission || m.buildPermission || m.inventoryPermission);
-              return <span className="permission-icons"><Hammer aria-hidden="true" className={m.buildPermission ? "enabled" : ""} /><Package aria-hidden="true" className={m.inventoryPermission ? "enabled blue" : ""} /><span className={`status-pill ${canManage ? "good" : "muted"}`}>{canManage ? "Can manage settlement" : "Standard member"}</span></span>;
-            }],
+            ["Permissions", (m) => (
+              <span
+                className="permission-icons"
+                role="img"
+                aria-label={`Build permission ${m.buildPermission ? "granted" : "not granted"}; Inventory permission ${m.inventoryPermission ? "granted" : "not granted"}`}
+              >
+                <Hammer aria-hidden="true" className={m.buildPermission ? "enabled" : ""} />
+                <Package aria-hidden="true" className={m.inventoryPermission ? "enabled blue" : ""} />
+              </span>
+            )],
             ["Details", (m) => <button className="mini-action" type="button" aria-label={`View ${String(m.username ?? "member")} details`} onClick={(event) => { event.stopPropagation(); openMemberDetails(m); }}>View details</button>],
           ]}
         />

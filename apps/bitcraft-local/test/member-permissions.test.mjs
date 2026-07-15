@@ -45,11 +45,13 @@ test("parseMemberPermissions handles permission name lists", () => {
   });
 });
 
-test("Members exposes textual permission status and a keyboard detail action", () => {
+test("Members exposes direct permission indicators without inferred role pills", () => {
   const page = readFileSync(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /Can manage settlement/);
-  assert.match(page, /Standard member/);
+  assert.doesNotMatch(page, /Can manage settlement/);
+  assert.doesNotMatch(page, /Standard member/);
+  assert.match(page, /Build permission .*granted.*not granted/);
+  assert.match(page, /Inventory permission .*granted.*not granted/);
   assert.match(page, /View .* details/);
   assert.match(page, /type="button"/);
 });
