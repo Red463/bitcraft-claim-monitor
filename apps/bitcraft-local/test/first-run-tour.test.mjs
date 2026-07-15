@@ -67,6 +67,13 @@ test("tour transitions keep prompt, run, skip, and replay visibility determinist
   assert.deepEqual(state, { mode: "running" });
 });
 
+test("a replay token is handled once across modal suspension and only a newer token replays", () => {
+  assert.equal(firstRunTourModule.shouldHandleTourReplay(true, 1, 0), true);
+  assert.equal(firstRunTourModule.shouldHandleTourReplay(false, 1, 0), false);
+  assert.equal(firstRunTourModule.shouldHandleTourReplay(true, 1, 1), false);
+  assert.equal(firstRunTourModule.shouldHandleTourReplay(true, 2, 1), true);
+});
+
 test("missing tour targets are safe and return no spotlight rectangle", () => {
   const documentLike = { querySelector: () => null };
   assert.equal(tourTargetRect(documentLike, FIRST_RUN_TOUR_STEPS[0]), null);

@@ -45,7 +45,8 @@ test("settings remains modal while a disabled tour hands visibility back", () =>
 test("tour replay waits for the shared modal coordinator to clear", () => {
   const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
 
-  assert.match(manager, /if \(replayToken <= 0 \|\| !enabled\) return;/);
+  assert.match(manager, /shouldHandleTourReplay\(enabled, replayToken, handledReplayTokenRef\.current\)/);
+  assert.match(manager, /handledReplayTokenRef\.current = replayToken/);
   assert.match(manager, /if \(!enabled\) return null;/);
   assert.doesNotMatch(manager, /if \(!enabled && !running\) return null;/);
 });

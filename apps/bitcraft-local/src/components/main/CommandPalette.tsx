@@ -32,8 +32,8 @@ export function CommandPalette({
   const allowedPages = new Set(navItems.map(([id]) => id));
   const marketViewAllowed = (tab: "pricing" | "dealWatchlist" | "buyOrders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
   const commands = [
-    ...buildPagePaletteCommands(NAV, allowedPages).map((command, index) => {
-      const Icon = NAV[index][2];
+    ...buildPagePaletteCommands(NAV, allowedPages).map((command) => {
+      const Icon = command.icon;
       return {
         ...command,
         icon: <Icon size={15} />,

@@ -14,29 +14,24 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import type { BotSection } from "./botSectionState";
+import { BOT_SECTION_DEFINITIONS, BOT_SECTION_GROUPS, type BotSection, type BotSectionIcon } from "./botSectionState";
 export type { BotSection } from "./botSectionState";
 
-export const BOT_SECTIONS = [
-  ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs", "Setup"],
-  ["notifications", "Notifications", <Bell size={15} />, "Market, craft, supply and update rules", "Automation"],
-  ["youtube", "YouTube Monitor", <Youtube size={15} />, "New videos and announcements", "Automation"],
-  ["channels", "Channels", <Hash size={15} />, "Discord channel IDs and routing", "Setup"],
-  ["roleManager", "Role Manager", <Users size={15} />, "Create and inspect Discord roles", "Roles & Onboarding"],
-  ["roles", "Craft Watch", <Bell size={15} />, "Profession notification roles", "Roles & Onboarding"],
-  ["colours", "Colour Roles", <Palette size={15} />, "One-click name colour roles", "Roles & Onboarding"],
-  ["community", "Role Panels", <UserPlus size={15} />, "Self-assign roles and welcome flow", "Roles & Onboarding"],
-  ["moderation", "Moderation", <Shield size={15} />, "Timeouts, bans, purge and ban list", "Moderation"],
-  ["safety", "Safety Rules", <Lock size={15} />, "Auto-mod, slowmode, lockdown and nicknames", "Moderation"],
-  ["records", "Member Records", <FileText size={15} />, "Warnings, notes, cases and profiles", "Moderation"],
-  ["content", "Posts & Events", <MessageCircle size={15} />, "Polls, RSVPs and event posts", "Community Content"],
-  ["commands", "Commands", <Command size={15} />, "Custom slash command responses", "Community Content"],
-  ["tools", "Community Tools", <Wrench size={15} />, "Reports and one-off announcements", "Community Content"],
-  ["tests", "Command Tests", <Command size={15} />, "Preview commands before publishing; compare Diagnostics when delivery fails", "Troubleshooting"],
-  ["diagnostics", "Delivery Diagnostics", <Activity size={15} />, "Inspect delivery logs; use Tests to reproduce command issues", "Troubleshooting"],
-] as const;
-
-const BOT_SECTION_GROUPS = Array.from(new Set(BOT_SECTIONS.map((section) => section[4])));
+const BOT_SECTION_ICONS = {
+  activity: <Activity size={15} />,
+  bell: <Bell size={15} />,
+  command: <Command size={15} />,
+  youtube: <Youtube size={15} />,
+  file: <FileText size={15} />,
+  hash: <Hash size={15} />,
+  lock: <Lock size={15} />,
+  message: <MessageCircle size={15} />,
+  palette: <Palette size={15} />,
+  shield: <Shield size={15} />,
+  userPlus: <UserPlus size={15} />,
+  users: <Users size={15} />,
+  wrench: <Wrench size={15} />,
+} satisfies Record<BotSectionIcon, React.ReactNode>;
 
 export function BotSectionNav({ active, onSelect }: { active: BotSection; onSelect: (section: BotSection) => void }) {
   return (
@@ -48,9 +43,9 @@ export function BotSectionNav({ active, onSelect }: { active: BotSection; onSele
       {BOT_SECTION_GROUPS.map((group) => (
         <div className="bot-nav-group" key={group}>
           <p>{group}</p>
-          {BOT_SECTIONS.filter((section) => section[4] === group).map(([key, label, icon, description]) => (
-            <button key={key} className={active === key ? "active" : ""} onClick={() => onSelect(key)}>
-              {icon}
+          {BOT_SECTION_DEFINITIONS.filter((section) => section.group === group).map(({ id, label, icon, description }) => (
+            <button key={id} className={active === id ? "active" : ""} onClick={() => onSelect(id)}>
+              {BOT_SECTION_ICONS[icon]}
               <span>
                 <strong>{label}</strong>
                 <small>{description}</small>

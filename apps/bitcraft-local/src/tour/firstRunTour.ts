@@ -81,6 +81,10 @@ export function reportedTourVisibility(enabled: boolean, state: FirstRunTourStat
   return enabled && state.mode !== "idle";
 }
 
+export function shouldHandleTourReplay(enabled: boolean, replayToken: number, handledReplayToken: number) {
+  return enabled && replayToken > handledReplayToken;
+}
+
 export function shouldShowFirstRunTourPrompt({ seen, blocked, active = false }: { seen: boolean; blocked: boolean; active?: boolean }) {
   return !seen && !blocked && !active;
 }

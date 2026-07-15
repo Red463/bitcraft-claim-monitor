@@ -9,6 +9,7 @@ import {
   firstRunTourTransition,
   firstRunTourSeenAfterAction,
   reportedTourVisibility,
+  shouldHandleTourReplay,
   shouldShowFirstRunTourPrompt,
   tourTargetRect,
   type FirstRunTourAction,
@@ -49,6 +50,7 @@ function spotlightStyle(rect: ReturnType<typeof tourTargetRect>): React.CSSPrope
 export function FirstRunTourManager({ activePage, enabled, showAccountStep, replayToken, onNavigate, onVisibilityChange }: FirstRunTourManagerProps) {
   const [seen, setSeen] = usePersistedState(FIRST_RUN_TOUR_SEEN_KEY, false);
   const [tourState, dispatchTour] = React.useReducer(firstRunTourTransition, { mode: "idle" } as FirstRunTourState);
+  const handledReplayTokenRef = React.useRef(0);
   const [stepIndex, setStepIndex] = React.useState(0);
   const [targetRect, setTargetRect] = React.useState<ReturnType<typeof tourTargetRect>>(null);
 
@@ -64,7 +66,8 @@ export function FirstRunTourManager({ activePage, enabled, showAccountStep, repl
   }, [blocked, promptOpen, running, seen]);
 
   React.useEffect(() => {
-    if (replayToken <= 0 || !enabled) return;
+    if (!shouldHandleTourReplay(enabled, replayToken, handledReplayTokenRef.current)) return;
+    handledReplayTokenRef.current = replayToken;
     setSeen(true);
     setStepIndex(0);
     dispatchTour({ type: "replay" });

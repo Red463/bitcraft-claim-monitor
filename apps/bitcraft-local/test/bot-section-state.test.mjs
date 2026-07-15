@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-let botSectionState = {};
-try {
-  botSectionState = await import("../src/components/bot/botSectionState.ts");
-} catch {
-  // RED starts before the executable persistence seam exists.
-}
+import * as botSectionState from "../src/components/bot/botSectionState.ts";
 
 test("Bot section persistence uses a stable key and restores only stable section IDs", () => {
   assert.equal(botSectionState.BOT_SECTION_STORAGE_KEY, "bot.section");

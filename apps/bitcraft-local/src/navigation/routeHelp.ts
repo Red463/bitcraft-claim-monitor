@@ -19,7 +19,7 @@ export const ROUTE_HELP = {
   empire: { purpose: "Inspect the selected region and its settlement context.", nextAction: "Review the regional summary, then open a related settlement or map location." },
   empires: { purpose: "Compare empire-wide settlement and regional activity.", nextAction: "Select an empire or region to inspect its current details." },
   map: { purpose: "Locate settlements, players, resources, and tracked activity.", nextAction: "Choose a map layer or search target to focus the view." },
-  sync: { purpose: "Check data freshness and refresh supported local datasets.", nextAction: "Review sync status, then refresh any stale source you need." },
+  sync: { purpose: "Open the configured BitCraft Sync materials and goals board.", nextAction: "Use the embedded board here, or open the full page if the embed is unavailable or you need more space." },
   activity: { purpose: "Review recent settlement events and operational changes.", nextAction: "Filter the timeline to investigate the activity that matters." },
 } satisfies Record<PublicPanel, RouteHelp>;
 
