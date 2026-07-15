@@ -58,7 +58,7 @@
 .notification-sound-type-row span { color: var(--muted); font-size: var(--font-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notification-sound-type-row select { min-width: 0; }
 
-.drawer-overlay { position: fixed; inset: 0; z-index: 29; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }
+.drawer-overlay { position: fixed; inset: 0; z-index: 29; padding: 0; overflow: hidden; align-items: stretch; background: radial-gradient(circle at top right, rgba(15,60,180,.13), transparent 36%), rgba(2,5,10,.72); display: flex; animation: overlay-enter .16s ease-out; backdrop-filter: blur(7px); }
 .notice-drawer { margin-left: auto; width: min(430px, 100vw); height: 100dvh; max-height: 100dvh; overflow: auto; border-left: 1px solid var(--border); background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 34%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 20px; display: grid; align-content: start; gap: 16px; animation: drawer-enter .2s ease-out; box-shadow: -24px 0 70px rgba(0,0,0,.46); }
 .notice-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notice-drawer h2 { display: flex; gap: 9px; align-items: center; color: var(--active-color); font-size: 24px; }

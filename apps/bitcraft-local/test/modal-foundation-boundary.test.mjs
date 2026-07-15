@@ -57,9 +57,14 @@ test("global and feature overlays delegate dialog semantics to the primitive", (
 test("the notification drawer remains non-modal while blocking dialogs opt into modal behavior", () => {
   const notifications = readFileSync(new URL("../src/components/main/Notifications.tsx", import.meta.url), "utf8");
   const legal = readFileSync(new URL("../src/components/main/LegalDialogs.tsx", import.meta.url), "utf8");
+  const notificationCss = readFileSync(new URL("../src/styles/notifications.css", import.meta.url), "utf8");
 
   assert.match(notifications, /<Dialog[\s\S]*modal=\{false\}/);
   assert.match(legal, /<Dialog[\s\S]*title="Help improve Claim Monitor"/);
+  assert.match(notificationCss, /\.drawer-overlay\s*\{[^}]*padding:\s*0;/s);
+  assert.match(notificationCss, /\.drawer-overlay\s*\{[^}]*align-items:\s*stretch;/s);
+  assert.match(notificationCss, /\.drawer-overlay\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(notificationCss, /\.notice-drawer\s*\{[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;[^}]*overflow:\s*auto;/s);
 });
 
 test("AppShell resolves consent before mounting optional Discord identity", () => {
