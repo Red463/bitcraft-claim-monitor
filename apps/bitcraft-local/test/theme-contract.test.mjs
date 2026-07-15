@@ -10,16 +10,36 @@ async function loadThemeModule() {
   return import("../src/theme.ts");
 }
 
-test("default and deliberately extreme valid themes meet the public contrast contract", async () => {
+test("default and deliberately extreme dark themes meet the public contrast contract", async () => {
   const { DEFAULT_THEME, THEME_PRESETS, validateThemeContrast } = await loadThemeModule();
   const validThemes = [
     DEFAULT_THEME,
     { ...DEFAULT_THEME, bg: "#000000", sidebar: "#050505", panel: "#101010", panel2: "#171717", cardTop: "#121212", cardBottom: "#050505", text: "#ffffff", muted: "#b8b8b8", cardTitle: "#d0d0d0", cardValue: "#ffffff", activeColor: "#ffe66d", activeBg: "#332b00", activeBorder: "#9d8500" },
-    { ...DEFAULT_THEME, bg: "#f7f9fc", sidebar: "#ffffff", panel: "#eef2f7", panel2: "#e5eaf1", cardTop: "#eef2f7", cardBottom: "#e4e9f0", text: "#101828", muted: "#475467", cardTitle: "#344054", cardValue: "#101828", activeColor: "#5235a8", activeBg: "#eee9ff", activeBorder: "#6941c6", gold: "#5235a8", good: "#067647", danger: "#b42318" },
+    { ...DEFAULT_THEME, bg: "#060018", sidebar: "#02000d", panel: "#160a2b", panel2: "#0c031a", border: "#6d4e99", cardTop: "#1d0d38", cardBottom: "#070010", iconBg: "#16072c", text: "#ffffff", muted: "#c7b5df", cardTitle: "#dfc8ff", cardValue: "#ffffff", activeColor: "#ffd84d", activeBg: "#3b2d00", activeBorder: "#a77f00", hoverBorder: "#b38b00", gold: "#ffd84d", good: "#60f0a0", danger: "#ff7b85", gradientTop: "#241047", gradientMid: "#0c0220", gradientBase: "#020008" },
   ];
 
   for (const theme of validThemes) assert.deepEqual(validateThemeContrast(theme), { valid: true, failures: [] });
   for (const preset of THEME_PRESETS) assert.deepEqual(validateThemeContrast(preset.theme), { valid: true, failures: [] }, `${preset.id} preset`);
+});
+
+test("light operational surfaces are rejected with representative named contrast failures", async () => {
+  const { DEFAULT_THEME, validateThemeContrast } = await loadThemeModule();
+  const result = validateThemeContrast({
+    ...DEFAULT_THEME,
+    bg: "#f7f9fc", sidebar: "#ffffff", panel: "#eef2f7", panel2: "#e5eaf1", border: "#667085",
+    cardTop: "#eef2f7", cardBottom: "#e4e9f0", iconBg: "#d0d5dd", text: "#101828", muted: "#475467",
+    cardTitle: "#344054", cardValue: "#101828", activeColor: "#5235a8", activeBg: "#eee9ff",
+    activeBorder: "#6941c6", hoverBorder: "#6941c6", gold: "#5235a8", good: "#067647", danger: "#b42318",
+    gradientTop: "#ffffff", gradientMid: "#f7f9fc", gradientBase: "#f7f9fc",
+  });
+
+  assert.equal(result.valid, false);
+  for (const role of [
+    "fixed operational label on themed panel",
+    "themed text on fixed dark inset",
+    "fixed navigation copy on themed sidebar",
+  ]) assert.ok(result.failures.some((failure) => failure.role === role), role);
+  assert.ok(result.failures.every((failure) => Number.isFinite(failure.ratio)));
 });
 
 test("unsafe themes report role-specific failures", async () => {

@@ -102,7 +102,28 @@ export function validateThemeContrast(theme: BrowserTheme): ThemeContrastResult 
     const ratio = contrastRatio(theme[foreground], theme[background]);
     return ratio < minimum ? [{ role, ratio: Number(ratio.toFixed(2)), minimum }] : [];
   });
-  return { valid: formatFailures.length === 0 && failures.length === 0, failures: [...formatFailures, ...failures] };
+  const supportedSurfaceChecks: Array<{
+    role: string;
+    foreground: string;
+    background: string;
+    minimum: number;
+    themeKeys: ThemeColorKey[];
+  }> = [
+    { role: "fixed operational label on themed panel", foreground: "#f4f7fb", background: theme.panel, minimum: 4.5, themeKeys: ["panel"] },
+    { role: "fixed operational value on themed card top", foreground: "#ffffff", background: theme.cardTop, minimum: 4.5, themeKeys: ["cardTop"] },
+    { role: "fixed operational value on themed card bottom", foreground: "#ffffff", background: theme.cardBottom, minimum: 4.5, themeKeys: ["cardBottom"] },
+    { role: "themed text on fixed dark inset", foreground: theme.text, background: "#080d14", minimum: 4.5, themeKeys: ["text"] },
+    { role: "themed muted copy on fixed dark table", foreground: theme.muted, background: "#090e15", minimum: 4.5, themeKeys: ["muted"] },
+    { role: "fixed navigation copy on themed sidebar", foreground: "#aab5c4", background: theme.sidebar, minimum: 4.5, themeKeys: ["sidebar"] },
+    { role: "fixed shell meta copy on themed page", foreground: "#8f9aaa", background: theme.bg, minimum: 4.5, themeKeys: ["bg"] },
+  ];
+  const supportedSurfaceFailures = supportedSurfaceChecks.flatMap(({ role, foreground, background, minimum, themeKeys }) => {
+    if (themeKeys.some((key) => invalidColors.has(key))) return [];
+    const ratio = contrastRatio(foreground, background);
+    return ratio < minimum ? [{ role, ratio: Number(ratio.toFixed(2)), minimum }] : [];
+  });
+  const allFailures = [...formatFailures, ...failures, ...supportedSurfaceFailures];
+  return { valid: allFailures.length === 0, failures: allFailures };
 }
 
 export function clampThemeNumber(value: unknown, min: number, max: number, fallback: string) {

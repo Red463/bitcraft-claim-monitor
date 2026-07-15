@@ -115,7 +115,7 @@ The palette is a dark operational shell with a restrained gold command accent an
 
 **The Data Honesty Rule.** If a value depends on BitJita availability or local cache freshness, the UI must label uncertainty plainly instead of over-styling it as exact truth.
 
-**The Theme Safety Rule.** Browser themes may customize operational surfaces, text, focus, and status roles only when their representative pairs meet WCAG contrast. Invalid imports and saves must leave the last valid theme active and name every failing role.
+**The Theme Safety Rule.** Browser themes may customize operational surfaces, text, focus, and status roles only when their representative pairs meet WCAG contrast. The current dashboard supports dark command surfaces: some dense tables, domain-fidelity panels, and operational labels intentionally retain fixed dark or light colours for rapid scanning. Imported or saved light-surface themes are therefore rejected before activation when those real UI pairs fail contrast. Invalid imports and saves must leave the last valid theme active and name every failing role with its measured and required contrast.
 
 **The Domain Fidelity Rule.** Rarity, tier, chart-series, and Discord identity colours are game or platform data. Keep them as dedicated domain tokens; do not derive them from, or overwrite them with, browser theme colours.
 
