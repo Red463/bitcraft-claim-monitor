@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type BotStatusTone = "neutral" | "success" | "warning" | "danger" | "info";
+export type BotStatusTone = "neutral" | "success" | "warning" | "danger";
 
 type BotStatusInfoProps = {
   label: ReactNode;

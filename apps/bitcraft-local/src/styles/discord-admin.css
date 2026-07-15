@@ -69,7 +69,6 @@
 .bot-status-info[data-tone="success"] strong { color: var(--good); }
 .bot-status-info[data-tone="warning"] strong { color: var(--gold); }
 .bot-status-info[data-tone="danger"] strong { color: var(--danger); }
-.bot-status-info[data-tone="info"] strong { color: var(--copper); }
 .discord-admin .info { min-width: 0; }
 .bot-section-notifications .status-detail { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .bot-section-notifications .status-detail .info { overflow: hidden; }

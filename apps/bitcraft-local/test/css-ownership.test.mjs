@@ -12,6 +12,19 @@ function collectSourceFiles(directory) {
   });
 }
 
+function extractMediaBody(css, condition) {
+  const mediaStart = css.indexOf(`@media ${condition}`);
+  assert.notEqual(mediaStart, -1, `Expected ${condition} media query`);
+  const bodyStart = css.indexOf("{", mediaStart);
+  let depth = 1;
+  for (let index = bodyStart + 1; index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    if (css[index] === "}") depth -= 1;
+    if (depth === 0) return css.slice(bodyStart + 1, index);
+  }
+  assert.fail(`Unclosed ${condition} media query`);
+}
+
 test("confirmed legacy selector families are absent from active markup and global CSS", () => {
   const globalCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const source = collectSourceFiles(new URL("../src/", import.meta.url))
@@ -21,8 +34,10 @@ test("confirmed legacy selector families are absent from active markup and globa
     .flatMap((match) => match[1].split(/\s+/))
     .filter((token) => /^(?:overview-|command-centre-|row-enter$)/.test(token));
 
-  assert.doesNotMatch(globalCss, /(?:^|[,\s])\.overview-[a-z0-9-]+/m);
-  assert.doesNotMatch(globalCss, /\.command-centre-[a-z0-9-]+/);
+  const legacyFamilySelector = /\.(?:overview|command-centre)-[a-z0-9-]+/;
+  assert.match("button.overview-card.is-active", legacyFamilySelector);
+  assert.match(".panel.command-centre-toolbar:hover", legacyFamilySelector);
+  assert.doesNotMatch(globalCss, legacyFamilySelector);
   assert.doesNotMatch(globalCss, /@keyframes\s+row-enter\b/);
   assert.doesNotMatch(globalCss, /@media\s*\(max-width:\s*520px\)\s*\{\s*\}/);
   assert.doesNotMatch(globalCss, /\.sidebar-auth-cta\b/);
@@ -31,17 +46,48 @@ test("confirmed legacy selector families are absent from active markup and globa
 
 test("map mobile queries do not duplicate desktop player-control declarations", () => {
   const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
-  const desktopOnlyRules = [
-    /\.map-player-tracking\s*\{[^}]*min-height:\s*58px;/g,
-    /\.map-player-dialog-overlay\s*\{[^}]*position:\s*fixed;/g,
-    /\.map-player-dialog\s*\{[^}]*width:\s*min\(560px,/g,
-    /\.map-player-manager-controls\s*\{[^}]*display:\s*grid;/g,
-    /\.map-player-list\s*\{[^}]*min-height:\s*180px;/g,
+  const mobile = extractMediaBody(mapCss, "(max-width: 700px)");
+  const duplicatedDesktopSelectors = [
+    ".map-player-tracking",
+    ".map-player-tracking-summary",
+    ".map-player-tracking-summary svg",
+    ".map-player-tracking-summary div",
+    ".map-player-tracking-summary strong",
+    ".map-player-tracking-summary span",
+    ".map-player-tracking-actions",
+    ".map-player-bulk-actions",
+    ".map-player-tabs",
+    ".map-player-tracking-actions button",
+    ".map-player-bulk-actions button",
+    ".map-player-tabs button",
+    ".map-player-tracking-actions button:hover",
+    ".map-player-bulk-actions button:hover",
+    ".map-player-tabs button:hover",
+    ".map-player-tracking-actions button.active",
+    ".map-player-tabs button.active",
+    ".map-player-dialog-overlay",
+    ".map-player-dialog",
+    ".map-player-dialog header",
+    ".map-player-dialog h3",
+    ".map-player-dialog p",
+    ".map-player-dialog .icon-button",
+    ".map-player-manager-controls",
+    ".map-player-manager-controls .search",
+    ".map-player-list",
+    ".map-player-list label",
+    ".map-player-list label:hover",
+    ".map-player-list label.active",
+    ".map-player-list input",
+    ".map-player-list .online-dot",
+    ".map-player-list label > span:last-child",
+    ".map-player-list strong",
+    ".map-player-list small",
   ];
 
-  for (const rule of desktopOnlyRules) {
-    assert.equal([...mapCss.matchAll(rule)].length, 1, `${rule.source} should have one owning declaration`);
+  for (const selector of duplicatedDesktopSelectors) {
+    assert.equal(mobile.includes(selector), false, `${selector} belongs to the desktop owning block`);
   }
+  assert.match(mobile, /\.map-frame\s*\{[^}]*min-height:\s*420px;[^}]*height:\s*58dvh;/s);
 });
 
 test("Bot Setup, Notifications, and Diagnostics share one semantic status info row", () => {
@@ -62,7 +108,8 @@ test("Bot Setup, Notifications, and Diagnostics share one semantic status info r
 
   const shared = readFileSync(sharedUrl, "utf8");
   assert.match(shared, /className="info-row bot-status-info"/);
-  assert.match(shared, /export type BotStatusTone = "neutral" \| "success" \| "warning" \| "danger" \| "info"/);
+  assert.match(shared, /export type BotStatusTone = "neutral" \| "success" \| "warning" \| "danger"/);
+  assert.doesNotMatch(shared, /\| "info"/);
   assert.match(shared, /content: ReactNode/);
   assert.match(shared, /tone\?: BotStatusTone/);
   assert.match(shared, /role\?: "status" \| "alert"/);
@@ -72,10 +119,12 @@ test("Bot Setup, Notifications, and Diagnostics share one semantic status info r
   const setup = readFileSync(new URL(consumers[0], import.meta.url), "utf8");
   const notifications = readFileSync(new URL(consumers[1], import.meta.url), "utf8");
   const diagnostics = readFileSync(new URL(consumers[2], import.meta.url), "utf8");
+  const discordCss = readFileSync(new URL("../src/styles/discord-admin.css", import.meta.url), "utf8");
   assert.match(setup, /tone=\{[^}]*\? "success" : "warning"\}/);
   assert.match(notifications, /tone=\{[^}]*\? "success" : "warning"\}/);
   assert.match(diagnostics, /tone="success"/);
   assert.match(diagnostics, /tone="danger"/);
+  assert.doesNotMatch(discordCss, /\.bot-status-info\[data-tone="info"\]/);
 });
 
 test("routine toast decoration is tonal while Discord and diagnostic status accents remain encoded", () => {
