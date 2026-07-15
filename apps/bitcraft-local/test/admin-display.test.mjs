@@ -25,3 +25,20 @@ test("admin display helpers live outside the AdminPanel component", async () => 
   assert.equal(helpers.discordAuditUserLabel([{ id: "1", username: "red" }], "1"), "red");
   assert.equal(helpers.discordChangeLabel({ key: "allow_list", new_value: ["a", "b"] }), "allow list: 2 items");
 });
+
+test("extracted admin sections retain explicit safety and empty-state copy", () => {
+  const accessUrl = new URL("../src/components/admin/AdminAccessSection.tsx", import.meta.url);
+  const analyticsUrl = new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url);
+  const dataUrl = new URL("../src/components/admin/AdminDataSection.tsx", import.meta.url);
+  const access = existsSync(accessUrl) ? readFileSync(accessUrl, "utf8") : "";
+  const analytics = existsSync(analyticsUrl) ? readFileSync(analyticsUrl, "utf8") : "";
+  const data = existsSync(dataUrl) ? readFileSync(dataUrl, "utf8") : "";
+
+  assert.match(access, /Create an admin allow-list entry/);
+  assert.match(access, /Sign this administrator out of all active sessions/);
+  assert.match(access, /No administrator accounts are configured yet/);
+  assert.match(analytics, /Delete all opt-in usage analytics records/);
+  assert.match(analytics, /No administrator actions have been recorded yet/);
+  assert.match(data, /Create a downloadable SQLite backup/);
+  assert.match(data, /No database backups have been created yet/);
+});

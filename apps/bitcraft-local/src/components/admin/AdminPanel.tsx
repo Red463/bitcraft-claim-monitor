@@ -19,12 +19,8 @@ import {
   Command,
   Crown,
   Database,
-  Download,
   ExternalLink,
-  Factory,
   FileText,
-  Globe2,
-  HardDrive,
   KeyRound,
   Lock,
   LogOut,
@@ -42,9 +38,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Trash2,
-  TrendingUp,
   Upload,
-  UserPlus,
   Users,
   Wrench,
   X,
@@ -68,7 +62,10 @@ import {
 } from "../bot/lazySections";
 import { TablePanel, ToolbarButton } from "../main/AppChrome";
 import { AdminPopupsSection } from "./AdminPopupsSection";
+import { AdminAccessSection } from "./AdminAccessSection";
+import { AdminAnalyticsSection } from "./AdminAnalyticsSection";
 import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
+import { AdminDataSection } from "./AdminDataSection";
 import { ServerHealthSection } from "./ServerHealthSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
@@ -104,7 +101,7 @@ import { buyOrderAgeDays, normalizeBuyOrder, sortBuyOrdersByBestPrice } from "..
 import { unique } from "../../utils/array";
 import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "../../utils/memberTracking";
 import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey } from "../../utils/appSettings";
-import { listingTrackingKey, safeDisplayJson } from "../../utils/displayHelpers";
+import { listingTrackingKey } from "../../utils/displayHelpers";
 import { NAV } from "../../navigation";
 import { ACCESS_RULE_MODES, normalizeAccessControlConfig, pageAccessTargets, tabAccessTargets, type AccessControlConfig, type AccessRuleMode } from "../../access/accessControl.mjs";
 import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../../utils/professions";
@@ -753,14 +750,10 @@ export function AdminPanel({
   const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : visibleTabGroups.flatMap((group) => group.tabs), [botOnly, visibleTabGroups]);
   const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
   const activeTabGroup = activeTabMeta ? visibleTabGroups.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
+  const extractedTabOwnsMessage = tab === "analytics" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
   React.useEffect(() => { if (tab === "server-health" && !canViewServerHealth) setTab("status"); }, [tab, canViewServerHealth, setTab]);
   const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
   const loginRows: AnyRecord[] = Array.isArray(auditData.logins) ? auditData.logins : [];
-  const normalizedAuditFilter = auditFilter.trim().toLowerCase();
-  const filteredAuditLog = normalizedAuditFilter ? auditRows.filter((entry) => `${entry.action ?? ""} ${entry.username ?? ""} ${entry.details ?? ""}`.toLowerCase().includes(normalizedAuditFilter)) : auditRows;
-  const filteredLoginRows = normalizedAuditFilter ? loginRows.filter((entry) => `${entry.username ?? ""} ${entry.remote_address ?? ""} ${entry.successful ? "successful" : "failed"}`.toLowerCase().includes(normalizedAuditFilter)) : loginRows;
-  const visibleAuditLog = filteredAuditLog.slice(0, auditVisibleCount);
-  const visibleLoginRows = filteredLoginRows.slice(0, auditVisibleCount);
   React.useEffect(() => {
     if (botOnly) {
       if (tab !== "discord") setTab("discord");
@@ -822,20 +815,6 @@ export function AdminPanel({
     );
   }
 
-  const activeTableResult = tableResult.table === selectedTable ? tableResult : { table: selectedTable, rows: [], columns: [], total: 0, offset: tableOffset, limit: 50 };
-  const tableRows: AnyRecord[] = activeTableResult.rows ?? [];
-  const tableColumns = activeTableResult.columns ?? Object.keys(tableRows[0] ?? {});
-  const selectedTableInfo = tables.find((table) => table.name === selectedTable);
-  const tableRangeStart = activeTableResult.total ? tableOffset + 1 : 0;
-  const tableRangeEnd = Math.min(tableOffset + tableRows.length, toNumber(activeTableResult.total));
-  const securityRecent = visitorSecurityData?.recent ?? {};
-  const securityEventRows: AnyRecord[] = Array.isArray(securityRecent) ? securityRecent : securityRecent.rows ?? [];
-  const securityEventTotal = Array.isArray(securityRecent) ? securityEventRows.length : toNumber(securityRecent.total);
-  const securityEventActivePage = Array.isArray(securityRecent) ? 1 : toNumber(securityRecent.page) || securityEventPage;
-  const securityEventActivePageSize = Array.isArray(securityRecent) ? securityEventRows.length || securityEventPageSize : toNumber(securityRecent.pageSize) || securityEventPageSize;
-  const securityEventPageCount = Math.max(1, Math.ceil(securityEventTotal / Math.max(securityEventActivePageSize, 1)));
-  const securityEventRangeStart = securityEventTotal ? (securityEventActivePage - 1) * securityEventActivePageSize + 1 : 0;
-  const securityEventRangeEnd = securityEventTotal ? Math.min(securityEventRangeStart + securityEventRows.length - 1, securityEventTotal) : 0;
   const endpointChecks = [...diagnostics].sort((a, b) => {
     if (Boolean(a.ok) !== Boolean(b.ok)) return a.ok ? 1 : -1;
     return toNumber(b.durationMs) - toNumber(a.durationMs);
@@ -1161,7 +1140,7 @@ export function AdminPanel({
           </div>
         </nav>
       ) : null}
-      {message ? <div className={`admin-message ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live={messageKind === "error" ? "assertive" : "polite"}>{message}</div> : null}
+      {message && !extractedTabOwnsMessage ? <div className={`admin-message ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live={messageKind === "error" ? "assertive" : "polite"}>{message}</div> : null}
 
       {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
 
@@ -1391,108 +1370,21 @@ export function AdminPanel({
 
       {tab === "analytics" ? (
         <div className="admin-section analytics-admin">
-          <section className="form-card">
-            <div className="split-header">
-              <h3><TrendingUp size={17} /> Usage Analytics</h3>
-              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" disabled={isBusyAction("analytics-clear")} title="Delete all opt-in usage analytics records. Security request logs are separate." onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted.", "analytics-clear"); }}><X size={14} /> Clear Data</button></div>
-            </div>
-            <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
-            <div className="metric-grid analytics-metrics">
-              <Stat icon={<Users />} label="Visitors" value={formatNumber(analyticsData?.totals?.visitors)} />
-              <Stat icon={<Globe2 />} label="Sessions" value={formatNumber(analyticsData?.totals?.sessions)} />
-              <Stat icon={<Activity />} label="Page Views" value={formatNumber(analyticsData?.totals?.pageViews)} />
-              <Stat icon={<Command />} label="Feature Uses" value={formatNumber(analyticsData?.totals?.interactions)} />
-              <Stat icon={<RefreshCw />} label="Time Recorded" value={formatDuration(toNumber(analyticsData?.totals?.durationSeconds))} />
-            </div>
-          </section>
-          <div className="admin-grid">
-            <section className="form-card">
-              <h3><Globe2 size={17} /> Most Used Pages</h3>
-              <DataTable rows={analyticsData?.pages ?? []} emptyState="No page analytics were recorded for this period." columns={[
-                ["Page", (row) => String(row.page).replaceAll("publiccrafts", "Public Craft Finder")],
-                ["Views", (row) => formatNumber(row.pageViews)],
-                ["Visitors", (row) => formatNumber(row.visitors)],
-                ["Time", (row) => formatDuration(toNumber(row.durationSeconds))],
-              ]} />
-            </section>
-            <section className="form-card">
-              <h3><Factory size={17} /> Feature Usage</h3>
-              <DataTable rows={analyticsData?.features ?? []} emptyState="No feature analytics were recorded for this period." columns={[
-                ["Feature", (row) => String(row.eventName).replaceAll("_", " ")],
-                ["Uses", (row) => formatNumber(row.uses)],
-                ["Visitors", (row) => formatNumber(row.visitors)],
-              ]} />
-            </section>
-          </div>
-          <section className="form-card">
-            <div className="split-header">
-              <div>
-                <h3><Shield size={17} /> Visitor Security & Location</h3>
-                <p className="legend">Server-side request logging for security and abuse prevention. This runs independently of optional analytics cookies. Full IPs are retained for {visitorSecurityData?.retention?.fullIpDays ?? 7} days, then anonymised stats remain.</p>
-              </div>
-            </div>
-            <div className="metric-grid analytics-metrics">
-              <Stat icon={<Activity />} label="Requests" value={formatNumber(visitorSecurityData?.totals?.requests)} />
-              <Stat icon={<Users />} label="Unique Visitors" value={formatNumber(visitorSecurityData?.totals?.uniqueVisitors)} />
-              <Stat icon={<AlertTriangle />} label="Error Responses" value={formatNumber(visitorSecurityData?.totals?.errors)} />
-              <Stat icon={<MapPin />} label="GeoIP Status" value={visitorSecurityData?.geoip?.configured ? `${visitorSecurityData?.geoip?.provider === "ipapi" ? "ipapi cache" : "local"} Â· ${formatNumber(visitorSecurityData?.geoip?.entries)} records` : "Not configured"} />
-              <Stat icon={<Clock />} label="Full IP Retention" value={`${formatNumber(visitorSecurityData?.retention?.fullIpDays ?? 7)} days`} />
-            </div>
-          </section>
-          <div className="admin-grid">
-            <section className="form-card">
-              <h3><Globe2 size={17} /> Location Summary</h3>
-              <DataTable rows={visitorSecurityData?.locations ?? []} emptyState="No visitor locations were recorded for this period." columns={[
-                ["Country", (row) => row.country || "Unknown"],
-                ["City", (row) => row.city || "-"],
-                ["Requests", (row) => formatNumber(row.requests)],
-                ["Visitors", (row) => formatNumber(row.visitors)],
-              ]} />
-            </section>
-            <section className="form-card">
-              <h3><Server size={17} /> Route Groups</h3>
-              <DataTable rows={visitorSecurityData?.routes ?? []} emptyState="No route visits were recorded for this period." columns={[
-                ["Group", (row) => row.routeGroup],
-                ["Requests", (row) => formatNumber(row.requests)],
-                ["Errors", (row) => formatNumber(row.errors)],
-              ]} />
-            </section>
-          </div>
-          <section className="form-card">
-            <div className="split-header">
-              <div>
-                <h3><Database size={17} /> Recent Security Events</h3>
-                <p className="legend">Search and page through retained server-side request logs for security and abuse investigation.</p>
-              </div>
-              <label className="inline-field">
-                <span>Rows</span>
-                <select className="select-control" value={securityEventPageSize} onChange={(event) => { setSecurityEventPageSize(Number(event.target.value)); setSecurityEventPage(1); }}>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={250}>250</option>
-                </select>
-              </label>
-            </div>
-            <div className="database-toolbar">
-              <SearchBox label="Search visitor security events" value={securityEventSearch} onChange={(value) => { setSecurityEventSearch(value); setSecurityEventPage(1); }} placeholder="Search time, group, status, IP, country or city" />
-              <span className="legend">{formatNumber(securityEventTotal)} matching events</span>
-            </div>
-            <DataTable rows={securityEventRows} emptyState="No security events match the current search and filters." columns={[
-              ["Time", (row) => dateLabel(row.occurredAt)],
-              ["Method", (row) => row.method],
-              ["Group", (row) => row.routeGroup],
-              ["Status", (row) => row.statusCode],
-              ["IP", (row) => row.ipAddress ?? row.ipAnonymized ?? "-"],
-              ["Location", (row) => [row.city, row.country].filter(Boolean).join(", ") || "Unknown"],
-            ]} />
-            <div className="pager">
-              <span>Showing {formatNumber(securityEventRangeStart)}-{formatNumber(securityEventRangeEnd)} of {formatNumber(securityEventTotal)} events</span>
-              <button className="toolbar-button" disabled={securityEventActivePage <= 1} onClick={() => setSecurityEventPage(Math.max(1, securityEventActivePage - 1))}>Previous</button>
-              <span className="legend">Page {formatNumber(securityEventActivePage)} of {formatNumber(securityEventPageCount)}</span>
-              <button className="toolbar-button" disabled={securityEventActivePage >= securityEventPageCount} onClick={() => setSecurityEventPage(securityEventActivePage + 1)}>Next</button>
-            </div>
-          </section>
+          <AdminAnalyticsSection
+            tab="analytics"
+            data={{ analyticsDays, analyticsData, visitorSecurityData, securityEventSearch, securityEventPage, securityEventPageSize, auditData, auditFilter, auditVisibleCount }}
+            pending={isBusyAction}
+            error={messageKind === "error" ? message : null}
+            result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
+            onAnalyticsDaysChange={(days) => { setAnalyticsDays(days); setSecurityEventPage(1); }}
+            onClearAnalytics={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted.", "analytics-clear"); }}
+            onSecurityEventSearchChange={(search) => { setSecurityEventSearch(search); setSecurityEventPage(1); }}
+            onSecurityEventPageChange={setSecurityEventPage}
+            onSecurityEventPageSizeChange={(pageSize) => { setSecurityEventPageSize(pageSize); setSecurityEventPage(1); }}
+            onAuditFilterChange={(filter) => { setAuditFilter(filter); setAuditVisibleCount(30); }}
+            onLoadMoreAudit={() => setAuditVisibleCount((count) => count + 30)}
+            onRefreshAudit={() => run(refreshAudit, undefined, "audit-refresh")}
+          />
         </div>
       ) : null}
 
@@ -2161,160 +2053,76 @@ export function AdminPanel({
       ) : null}
 
       {tab === "database" ? (
-        <section className="form-card database-browser">
-          <div className="database-browser-header">
-            <div>
-              <h3><Database size={17} /> Database Browser</h3>
-              <p className="legend">Inspect SQLite tables and export filtered records. Use this for support and diagnostics, not normal settlement operations.</p>
-            </div>
-            <label className="field database-table-select">
-              <span>Table</span>
-              <select className="select-control" value={selectedTable} onChange={(event) => { setSelectedTable(event.target.value); setTableOffset(0); }}>{tables.map((table) => <option key={table.name} value={table.name}>{table.name} ({formatNumber(table.rows)})</option>)}</select>
-            </label>
-          </div>
-          <div className="database-inspector-stats">
-            <Info label="Selected table" value={selectedTable || "-"} />
-            <Info label="Total rows" value={formatNumber(selectedTableInfo?.rows ?? activeTableResult.total)} />
-            <Info label="Columns" value={formatNumber(tableColumns.length)} />
-            <Info label="Showing" value={`${formatNumber(tableRangeStart)}-${formatNumber(tableRangeEnd)}`} />
-          </div>
-          <div className="database-toolbar">
-            <SearchBox label="Search visible database records" value={tableSearch} onChange={(value) => { setTableSearch(value); setTableOffset(0); }} placeholder="Search across visible table records" />
-            <div className="database-export-actions">
-              <a className="toolbar-button" title="Download the selected table with the current search filter as CSV." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=csv&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export CSV</a>
-              <a className="toolbar-button" title="Download the selected table with the current search filter as JSON." href={`${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=json&search=${encodeURIComponent(tableSearch)}`}><Download size={14} /> Export JSON</a>
-            </div>
-          </div>
-          {tableColumns.length ? <DataTable rows={tableRows} emptyState="No database records match the current search." columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
-          <div className="pager"><span>{formatNumber(activeTableResult.total)} matching records</span><button className="toolbar-button" disabled={!tableOffset} onClick={() => setTableOffset(Math.max(0, tableOffset - 50))}>Previous</button><button className="toolbar-button" disabled={tableOffset + 50 >= activeTableResult.total} onClick={() => setTableOffset(tableOffset + 50)}>Next</button></div>
-        </section>
+        <AdminDataSection
+          tab="database"
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, snapshotRetentionDays: draft.snapshotRetentionDays }}
+          pending={isBusyAction}
+          error={messageKind === "error" ? message : null}
+          result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
+          onSelectTable={(value) => { setSelectedTable(value); setTableOffset(0); }}
+          onTableSearchChange={(value) => { setTableSearch(value); setTableOffset(0); }}
+          onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
+          onNextTablePage={() => setTableOffset(tableOffset + 50)}
+          onCreateBackup={() => undefined}
+          onPruneSnapshots={() => undefined}
+          tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
+          backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
+        />
       ) : null}
 
-      {tab === "users" ? (
-        <div className="admin-grid">
-          <section className="form-card">
-            <h3><UserPlus size={17} /> Add Discord Administrator</h3>
-            {!canManageAdmins ? <p className="legend">Your administrator role can view this page but cannot create or change administrator accounts.</p> : null}
-            <p className="legend">Add the user's Discord ID and choose the app admin role they should receive when signing in with Discord.</p>
-            <label className="field"><span>Discord user ID</span><input value={newUser.discordId} onChange={(event) => setNewUser({ ...newUser, discordId: event.target.value })} placeholder="145544610234630144" /></label>
-            <label className="field"><span>Display name</span><input value={newUser.displayName} onChange={(event) => setNewUser({ ...newUser, displayName: event.target.value })} placeholder="red463" /></label>
-            <label className="field"><span>Role</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
-            <button className="toolbar-button primary" title="Create an admin allow-list entry for this Discord user." disabled={!canManageAdmins || isBusyAction("admin-user-add")} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.", "admin-user-add")}><UserPlus size={15} /> Add Administrator</button>
-          </section>
-          <section className="form-card">
-            <h3><Users size={17} /> Administrators</h3>
-            <div className="admin-users">{users.length ? users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | Discord ID {entry.discord_id || "not linked"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id || isBusyAction(`admin-user-role:${entry.id}`)} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" title="Sign this administrator out of all active sessions." disabled={!canManageAdmins || isBusyAction(`admin-user-sessions:${entry.id}`)} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}>Clear Sessions</button><button className="toolbar-button" title={entry.active ? "Disable this administrator account." : "Re-enable this administrator account."} disabled={!canManageAdmins || entry.id === auth.user?.id || isBusyAction(`admin-user-status:${entry.id}`)} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}>{entry.active ? "Disable" : "Enable"}</button></div></div>) : <p className="legend">No administrator accounts are configured yet.</p>}</div>
-          </section>
-        </div>
-      ) : null}
-
-      {tab === "accounts" ? (
-        <section className="form-card linked-accounts-card">
-          <div className="split-header">
-            <h3><MessageCircle size={17} /> Discord Linked Accounts</h3>
-            <button className={busyButtonClass("linked-accounts-refresh")} disabled={isBusyAction("linked-accounts-refresh")} onClick={() => run(refreshLinkedAccounts, undefined, "linked-accounts-refresh")}><RefreshCw size={14} /> {isBusyAction("linked-accounts-refresh") ? "Refreshing..." : "Refresh"}</button>
-          </div>
-          <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
-          <div className="linked-account-list">
-            {linkedAccounts.length ? linkedAccounts.map((account) => (
-              <div className="linked-account-row" key={account.id}>
-                <div className="linked-account-user">
-                  {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : <span>{(account.globalName || account.username || "?").slice(0, 1).toUpperCase()}</span>}
-                  <div>
-                    <strong>{account.globalName || account.username || "Discord user"}</strong>
-                    <small>{account.username ? `@${account.username}` : account.discordId} | Last login {dateLabel(account.lastLoginAt)}</small>
-                  </div>
-                </div>
-                <div>
-                  <strong>{account.characterName || "No character selected"}</strong>
-                  <small>{account.characterPlayerId || "No BitCraft player ID"}</small>
-                </div>
-                <em className={`link-status ${account.characterStatus}`}>{account.characterStatus || "unlinked"}</em>
-                <div className="toolbar">
-                  {(["approved", "pending", "rejected"] as const).map((status) => (
-                    <button
-                      className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
-                      disabled={!account.characterPlayerId || isBusyAction(`account-approval:${account.id}`)}
-                      title={`Mark this character link as ${status}.`}
-                      key={status}
-                      onClick={() => run(async () => {
-                        const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) });
-                        setLinkedAccounts(result.accounts ?? []);
-                      }, `Account marked ${status}.`, `account-approval:${account.id}`)}
-                    >
-                      {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
-                      {status[0].toUpperCase() + status.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )) : <p className="legend">No Discord users have signed in yet.</p>}
-          </div>
-        </section>
+      {tab === "users" || tab === "accounts" ? (
+        <AdminAccessSection
+          tab={tab}
+          data={{ users, linkedAccounts, newUser, adminRoles, canManageAdmins, currentUserId: auth.user?.id }}
+          pending={isBusyAction}
+          error={messageKind === "error" ? message : null}
+          result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
+          onNewUserChange={setNewUser}
+          onAddUser={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.", "admin-user-add")}
+          onRoleChange={(entry, role) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}
+          onClearSessions={(entry) => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}
+          onToggleStatus={(entry) => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
+          onRefreshLinkedAccounts={() => run(refreshLinkedAccounts, undefined, "linked-accounts-refresh")}
+          onAccountApproval={(account, status) => run(async () => { const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) }); setLinkedAccounts(result.accounts ?? []); }, `Account marked ${status}.`, `account-approval:${account.id}`)}
+        />
       ) : null}
 
       {tab === "audit" ? (
         <div className="admin-section audit-section">
-          <section className="form-card audit-console-card">
-            <div className="split-header">
-              <div>
-                <h3><Activity size={17} /> Audit Trail</h3>
-                <p className="legend">Search recent administrator actions and sign-ins. Results are bounded so the page stays usable.</p>
-              </div>
-              <button className={busyButtonClass("audit-refresh")} disabled={isBusyAction("audit-refresh")} onClick={() => run(refreshAudit, undefined, "audit-refresh")}><RefreshCw size={15} /> Refresh</button>
-            </div>
-            <div className="audit-toolbar">
-              <label className="field"><span>Search audit records</span><input value={auditFilter} onChange={(event) => { setAuditFilter(event.target.value); setAuditVisibleCount(30); }} placeholder="Action, admin, IP, result" /></label>
-              <div className="audit-summary-strip">
-                <Info label="Actions shown" value={`${formatNumber(Math.min(visibleAuditLog.length, filteredAuditLog.length))} of ${formatNumber(filteredAuditLog.length)}`} />
-                <Info label="Sign-ins shown" value={`${formatNumber(Math.min(visibleLoginRows.length, filteredLoginRows.length))} of ${formatNumber(filteredLoginRows.length)}`} />
-              </div>
-            </div>
-            <div className="audit-table" role="table" aria-label="Admin actions">
-              <div className="audit-table-row header" role="row"><span>Action</span><span>Admin</span><span>When</span><span>Details</span></div>
-              {visibleAuditLog.length ? visibleAuditLog.map((entry: AnyRecord) => (
-                <div className="audit-table-row" role="row" key={entry.id}>
-                  <strong>{entry.action}</strong>
-                  <span>{entry.username ?? "Unknown"}</span>
-                  <time>{dateLabel(entry.occurred_at)}</time>
-                  <small>{entry.details ? String(safeDisplayJson(entry.details)) : "-"}</small>
-                </div>
-              )) : <p className="legend">{normalizedAuditFilter ? "No administrator actions match this filter." : "No administrator actions have been recorded yet."}</p>}
-            </div>
-            {auditData.auditLog.length > auditVisibleCount || filteredAuditLog.length > visibleAuditLog.length ? (
-              <button className="toolbar-button audit-load-more" onClick={() => setAuditVisibleCount((count) => count + 30)}>Load more actions</button>
-            ) : null}
-          </section>
-          <section className="form-card audit-console-card">
-            <h3><Lock size={17} /> Sign-in History</h3>
-            <div className="audit-table compact" role="table" aria-label="Admin sign-in history">
-              <div className="audit-table-row header" role="row"><span>Result</span><span>Admin</span><span>When</span><span>Remote address</span></div>
-              {visibleLoginRows.length ? visibleLoginRows.map((entry: AnyRecord) => (
-                <div key={entry.id} className={`audit-table-row ${entry.successful ? "" : "failed"}`} role="row">
-                  <strong>{entry.successful ? "Successful sign-in" : "Failed sign-in"}</strong>
-                  <span>{entry.username ?? "Unknown"}</span>
-                  <time>{dateLabel(entry.occurred_at)}</time>
-                  <small>{entry.remote_address ?? "-"}</small>
-                </div>
-              )) : <p className="legend">No administrator sign-ins match this filter.</p>}
-            </div>
-          </section>
+          <AdminAnalyticsSection
+            tab="audit"
+            data={{ analyticsDays, analyticsData, visitorSecurityData, securityEventSearch, securityEventPage, securityEventPageSize, auditData, auditFilter, auditVisibleCount }}
+            pending={isBusyAction}
+            error={messageKind === "error" ? message : null}
+            result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
+            onAnalyticsDaysChange={(days) => { setAnalyticsDays(days); setSecurityEventPage(1); }}
+            onClearAnalytics={() => undefined}
+            onSecurityEventSearchChange={(search) => { setSecurityEventSearch(search); setSecurityEventPage(1); }}
+            onSecurityEventPageChange={setSecurityEventPage}
+            onSecurityEventPageSizeChange={(pageSize) => { setSecurityEventPageSize(pageSize); setSecurityEventPage(1); }}
+            onAuditFilterChange={(filter) => { setAuditFilter(filter); setAuditVisibleCount(30); }}
+            onLoadMoreAudit={() => setAuditVisibleCount((count) => count + 30)}
+            onRefreshAudit={() => run(refreshAudit, undefined, "audit-refresh")}
+          />
         </div>
       ) : null}
 
       {tab === "backups" ? (
-        <div className="admin-section">
-          <section className="form-card">
-            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" disabled={isBusyAction("backup-create")} title="Create a downloadable SQLite backup on the server." onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.", "backup-create")}><Save size={15} /> Create Backup</button></div>
-            <p className="legend">Downloadable SQLite copies are stored on the server. Restore them manually on the VPS while services are stopped.</p>
-            <div className="backup-list">{backups.length ? backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" title="Download this database backup file." href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>) : <p className="legend">No database backups have been created yet.</p>}</div>
-          </section>
-          <section className="form-card maintenance-card">
-            <h3><Database size={17} /> Retention Maintenance</h3>
-            <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
-            <button className="toolbar-button" disabled={isBusyAction("snapshots-prune")} title="Remove expired snapshot rows only. Market trades and activity history are retained." onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); }, undefined, "snapshots-prune")}><RefreshCw size={15} /> Remove Expired Snapshots</button>
-          </section>
-        </div>
+        <AdminDataSection
+          tab="backups"
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, snapshotRetentionDays: draft.snapshotRetentionDays }}
+          pending={isBusyAction}
+          error={messageKind === "error" ? message : null}
+          result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
+          onSelectTable={(value) => { setSelectedTable(value); setTableOffset(0); }}
+          onTableSearchChange={(value) => { setTableSearch(value); setTableOffset(0); }}
+          onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
+          onNextTablePage={() => setTableOffset(tableOffset + 50)}
+          onCreateBackup={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.", "backup-create")}
+          onPruneSnapshots={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); }, undefined, "snapshots-prune")}
+          tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
+          backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
+        />
       ) : null}
       {hasUnsavedSettings ? (
         <div className="floating-save">
