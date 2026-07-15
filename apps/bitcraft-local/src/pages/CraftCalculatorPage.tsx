@@ -5,6 +5,8 @@ import { toNumber, type AnyRecord } from "../main-app-data";
 import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { MiniStat } from "../components/main/Stats";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
 import { formatNumber } from "../utils/format";
 import { itemTypeFromKind, isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
@@ -384,9 +386,11 @@ export function CraftCalculatorPage() {
         </section>
       ) : null}
 
-      {!selectedTarget ? <div className="empty-state craftcalc-empty"><Search />Choose an item or cargo to calculate its recipe chain.</div> : null}
-      {selectedTarget && state.loading ? <div className="loading">Loading recipe chain for {selectedTarget.name}...</div> : null}
-      {state.error ? <div className="error">Unable to build recipe plan: {state.error}</div> : null}
+      {!selectedTarget && query.trim().length >= 2 && searchState !== "loading" && !suggestions.length ? <AsyncState kind="no-match" title="No catalogue items match this search" detail="Check the spelling or try a shorter item name." /> : null}
+      {!selectedTarget && (query.trim().length < 2 || suggestions.length > 0) ? <AsyncState kind="empty" title="Choose an item or cargo" detail="Select a catalogue result to calculate its recipe chain." /> : null}
+      {selectedTarget && state.loading && !state.plan ? <AppSkeleton /> : null}
+      {selectedTarget && state.loading && state.plan ? <AsyncState kind="loading" title={`Refreshing recipe chain for ${selectedTarget.name}`} detail="The current plan remains visible while recipes refresh." compact /> : null}
+      {state.error ? <AsyncState kind="error" title="Unable to build this recipe plan" detail={state.error} /> : null}
 
       {state.plan ? (
         <>
@@ -408,7 +412,7 @@ export function CraftCalculatorPage() {
             <div className="craftcalc-material-grid">
               {state.plan.directMaterials.length
                 ? state.plan.directMaterials.map((material) => <MaterialRow key={`${material.kind}-${material.id}`} material={material} />)
-                : <div className="empty-state">No direct recipe materials were exposed by BitJita for this item.</div>}
+                : <AsyncState kind="empty" title="No direct recipe materials available" detail="BitJita did not expose direct inputs for this item." compact />}
             </div>
           </section>
           <section className="craftcalc-section">

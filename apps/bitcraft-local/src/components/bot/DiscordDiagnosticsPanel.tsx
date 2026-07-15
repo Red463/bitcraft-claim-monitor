@@ -1,5 +1,6 @@
 import React from "react";
 import { Activity, RefreshCw } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type AnyRecord = Record<string, any>;
 
@@ -28,11 +29,13 @@ export function DiscordDiagnosticsPanel({
   log,
   onFilterChange,
   onRefresh,
+  pending,
 }: {
   filter: string;
   log: AnyRecord[];
   onFilterChange: (value: string) => void;
   onRefresh: () => void | Promise<void>;
+  pending: boolean;
 }) {
   const safeLog = Array.isArray(log) ? log : [];
   const types = Array.from(new Set(safeLog.map((entry) => String(entry.event_type ?? "")).filter(Boolean))).sort();
@@ -53,7 +56,7 @@ export function DiscordDiagnosticsPanel({
             <option value="all">All types</option>
             {types.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
-          <button className="toolbar-button" onClick={() => void onRefresh()}><RefreshCw size={15} /> Refresh Log</button>
+          <ActionButton className="toolbar-button" pending={pending} pendingLabel="Refreshing log..." onClick={() => void onRefresh()}><RefreshCw size={15} /> Refresh Log</ActionButton>
         </div>
       </div>
       <p className="legend">Newest entries are shown first. This records sent, skipped and failed Discord notifications with routing and filter details so notification issues can be diagnosed.</p>

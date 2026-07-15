@@ -1,11 +1,10 @@
 import React from "react";
-import { AlertTriangle } from "lucide-react";
-
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data";
 import { unique } from "../../utils/array";
 import { formatNumber } from "../../utils/format";
 import { DataTable } from "./DataTable";
 import { Info } from "./Stats";
+import { AsyncState } from "./AsyncState";
 
 /*
  * Shared chrome for the public app: page headers, loading/error states, the
@@ -32,7 +31,7 @@ export function TablePanel({ title, subtitle, rows, columns }: { title: string; 
 }
 
 export function AppSkeleton() {
-  return <div className="panel app-skeleton"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
+  return <div className="panel app-skeleton" role="status" aria-live="polite" aria-busy="true" aria-label="Loading page data"><div className="skeleton-line title" /><div className="skeleton-grid">{[0, 1, 2, 3].map((id) => <div key={id} />)}</div><div className="skeleton-block" /><div className="skeleton-block short" /></div>;
 }
 
 export type ApiStatusDiagnostics = {
@@ -52,13 +51,9 @@ export function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnin
   if (!uniqueWarnings.length) return null;
   const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: uniqueWarnings }, null, 2);
   return (
-    <section className="api-status-banner" role="status" aria-live="polite">
+    <section className="api-status-banner">
       <div className="api-status-main">
-        <span className="api-status-icon"><AlertTriangle size={16} /></span>
-        <div className="api-status-copy">
-          <strong>BitJita refresh issue</strong>
-          <span>Showing latest saved data. Some live details may be stale.</span>
-        </div>
+        <AsyncState kind="stale" title="BitJita refresh issue" detail="Showing latest saved data. Some live details may be stale." compact />
         <small className="api-status-meta">{lastUpdated ? `Last successful refresh: ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
       </div>
       <details className="api-status-details">
@@ -145,16 +140,16 @@ export function RefreshStatus({
 
 export function ApiErrorState({ message }: { message: string }) {
   return (
-    <section className="api-error-state" role="alert">
-      <span className="api-error-icon"><AlertTriangle size={22} /></span>
-      <div>
-        <h2>Unable to refresh BitJita data</h2>
-        <p>BitJita may be having a temporary issue. The app will recover automatically when the next refresh succeeds.</p>
-        <details>
+    <section className="api-error-state">
+      <AsyncState
+        kind="error"
+        title="Unable to refresh BitJita data"
+        detail="BitJita may be having a temporary issue. The app will recover automatically when the next refresh succeeds."
+        action={<details>
           <summary>Technical detail</summary>
           <code>{message}</code>
-        </details>
-      </div>
+        </details>}
+      />
     </section>
   );
 }

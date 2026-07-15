@@ -115,6 +115,7 @@ import type {
 } from "../../types/settings";
 import type { ActivePanel } from "../../types/app";
 import { COLLECTOR_PURPOSES, bytesLabel, collectorStatusValue, discordAuditActionLabel, discordAuditUserLabel, discordChangeLabel, discordSnowflakeDate, scheduledJobProgressText } from "./adminDisplay";
+import { claimPendingAction, releasePendingAction } from "../../utils/pendingActions";
 
 const LOCAL_API = "/api/local";
 
@@ -210,7 +211,8 @@ export function AdminPanel({
   const [botSection, setBotSection] = React.useState<BotSection>("setup");
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
-  const [busyAction, setBusyAction] = React.useState<string | null>(null);
+  const pendingActionsRef = React.useRef(new Set<string>());
+  const [pendingActions, setPendingActions] = React.useState<Set<string>>(() => new Set());
   const [draft, setDraft] = React.useState<AppSettings>(settings);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [scheduledJobs, setScheduledJobs] = React.useState<AnyRecord | null>(null);
@@ -288,13 +290,14 @@ export function AdminPanel({
     return body;
   }
 
-  const isBusyAction = React.useCallback((key: string) => busyAction === key, [busyAction]);
-  const busyButtonClass = React.useCallback((key: string, className = "toolbar-button") => `${className}${busyAction === key ? " is-loading" : ""}`, [busyAction]);
+  const isBusyAction = React.useCallback((key: string) => pendingActions.has(key), [pendingActions]);
+  const busyButtonClass = React.useCallback((key: string, className = "toolbar-button") => `${className}${pendingActions.has(key) ? " is-loading" : ""}`, [pendingActions]);
 
-  async function run(task: () => Promise<unknown>, success?: string, busyKey?: string) {
+  async function run(task: () => Promise<unknown>, success: string | undefined, busyKey: string) {
+    if (!claimPendingAction(pendingActionsRef.current, busyKey)) return;
+    setPendingActions(new Set(pendingActionsRef.current));
     setMessage(null);
     setMessageKind("info");
-    if (busyKey) setBusyAction(busyKey);
     try {
       await task();
       if (success) {
@@ -305,7 +308,8 @@ export function AdminPanel({
       setMessageKind("error");
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      if (busyKey) setBusyAction((current) => current === busyKey ? null : current);
+      releasePendingAction(pendingActionsRef.current, busyKey);
+      setPendingActions(new Set(pendingActionsRef.current));
     }
   }
 
@@ -464,7 +468,7 @@ export function AdminPanel({
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
       if (tab === "backups") await refreshBackups();
-    });
+    }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}`);
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize]);
   const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
   React.useEffect(() => {
@@ -482,7 +486,7 @@ export function AdminPanel({
       run(async () => {
         const result = await api(`/admin/table?name=${encodeURIComponent(requestedTable)}&limit=50&offset=${tableOffset}&search=${encodeURIComponent(tableSearch)}`);
         if (!stale) setTableResult({ ...result, table: requestedTable });
-      });
+      }, undefined, `table-load:${requestedTable}:${tableOffset}:${tableSearch}`);
     }, 150);
     return () => {
       stale = true;
@@ -496,7 +500,7 @@ export function AdminPanel({
       const next = normalizeAppSettings(result);
       setDraft(next);
       onSettingsSaved(next);
-    }, "Settings saved and applied.");
+    }, "Settings saved and applied.", "settings-save");
   }
 
   function revertSettings() {
@@ -725,7 +729,7 @@ export function AdminPanel({
       const next = { ...draft, branding: result.branding };
       setDraft(next);
       onSettingsSaved(next);
-    }, `${type === "logo" ? "Logo" : "Favicon"} uploaded.`);
+    }, `${type === "logo" ? "Logo" : "Favicon"} uploaded.`, `branding-upload:${type}`);
   }
 
   async function removeBrand(type: "logo" | "favicon") {
@@ -734,7 +738,7 @@ export function AdminPanel({
       const next = { ...draft, branding: result.branding };
       setDraft(next);
       onSettingsSaved(next);
-    }, `${type === "logo" ? "Logo" : "Favicon"} removed.`);
+    }, `${type === "logo" ? "Logo" : "Favicon"} removed.`, `branding-remove:${type}`);
   }
 
   const canViewServerHealth = Boolean(auth?.user?.permissions?.includes("*"));
@@ -805,7 +809,7 @@ export function AdminPanel({
           <h3><MessageCircle size={17} /> Discord Administrator Sign-In</h3>
           <p className="legend">Discord proves identity; administrator access is controlled by the owner-managed admin list.</p>
           {auth?.discordLoginEnabled ? <a className="toolbar-button primary" href={adminDiscordLogin}><MessageCircle size={15} /> Sign in with Discord</a> : <p className="error">Discord login is not configured on this server.</p>}
-          {message ? <p className="legend">{message}</p> : null}
+          {message ? <p className="legend" role={messageKind === "error" ? "alert" : "status"} aria-live={messageKind === "error" ? "assertive" : "polite"}>{message}</p> : null}
         </section>
       </div>
     );
@@ -1106,7 +1110,7 @@ export function AdminPanel({
           <div className="section-header"><div><Heading>Discord Bot Control</Heading><p>Manage bot setup, notifications, self-assign roles, tools and diagnostics</p></div></div>
           <div className="toolbar">
             <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>
-            <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+            <button className="toolbar-button" disabled={isBusyAction("logout")} onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); }, undefined, "logout")}><LogOut size={15} /> Sign out</button>
           </div>
         </div>
       ) : (
@@ -1122,7 +1126,7 @@ export function AdminPanel({
             </div>
             <div className="toolbar">
               <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a>
-              <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); })}><LogOut size={15} /> Sign out</button>
+              <button className="toolbar-button" disabled={isBusyAction("logout")} onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); }, undefined, "logout")}><LogOut size={15} /> Sign out</button>
             </div>
           </div>
         </header>
@@ -1150,7 +1154,7 @@ export function AdminPanel({
           </div>
         </nav>
       ) : null}
-      {message ? <div className={`admin-message ${messageKind}`}>{message}</div> : null}
+      {message ? <div className={`admin-message ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live={messageKind === "error" ? "assertive" : "polite"}>{message}</div> : null}
 
       {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
 
@@ -1256,9 +1260,10 @@ export function AdminPanel({
                         <input
                           type="checkbox"
                           checked={Boolean(job.enabled)}
+                          disabled={isBusyAction(`job-toggle:${job.key}`)}
                           onChange={(event) => run(async () => {
                             setScheduledJobs(await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: event.target.checked }) }));
-                          }, `Scheduled job ${event.target.checked ? "enabled" : "disabled"}.`)}
+                          }, `Scheduled job ${event.target.checked ? "enabled" : "disabled"}.`, `job-toggle:${job.key}`)}
                         />
                       </label>
                       <button
@@ -1322,6 +1327,7 @@ export function AdminPanel({
                           <button
                             className="toolbar-button primary"
                             title="Save this job schedule. It does not run the job immediately."
+                            disabled={isBusyAction(`job-save:${job.key}`)}
                             onClick={() => run(async () => {
                               const result = await api("/admin/jobs", { method: "PUT", body: JSON.stringify({ key: job.key, enabled: Boolean(job.enabled), scheduleConfig: scheduledJobConfig(job) }) });
                               setScheduledJobs(result);
@@ -1330,7 +1336,7 @@ export function AdminPanel({
                                 delete next[String(job.key)];
                                 return next;
                               });
-                            }, "Scheduled job settings saved.")}
+                            }, "Scheduled job settings saved.", `job-save:${job.key}`)}
                           >
                             <Save size={14} /> Save Schedule
                           </button>
@@ -1381,7 +1387,7 @@ export function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <h3><TrendingUp size={17} /> Usage Analytics</h3>
-              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" title="Delete all opt-in usage analytics records. Security request logs are separate." onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted."); }}><X size={14} /> Clear Data</button></div>
+              <div className="toolbar"><label className="inline-field"><span>Period</span><select className="select-control" value={analyticsDays} onChange={(event) => { setAnalyticsDays(event.target.value); setSecurityEventPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button className="toolbar-button danger" disabled={isBusyAction("analytics-clear")} title="Delete all opt-in usage analytics records. Security request logs are separate." onClick={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted.", "analytics-clear"); }}><X size={14} /> Clear Data</button></div>
             </div>
             <p className="legend">First-party analytics collected only from visitors who accept analytics cookies. Browser identifiers are random, reporting is aggregate, and raw events are retained for up to {analyticsData?.retentionDays ?? 90} days.</p>
             <div className="metric-grid analytics-metrics">
@@ -1493,7 +1499,7 @@ export function AdminPanel({
               </div>
               <div className="toolbar">
                 <button className={busyButtonClass("diagnostics-refresh")} disabled={isBusyAction("diagnostics-refresh")} onClick={() => run(async () => { await refreshStatus(); await refreshPopupDiagnostics(); }, "Diagnostics refreshed.", "diagnostics-refresh")}><RefreshCw size={15} /> Refresh</button>
-                <button className="toolbar-button" onClick={() => run(copySupportSnapshot, undefined, "copy-support-snapshot")}><Save size={15} /> Copy Support Snapshot</button>
+                <button className="toolbar-button" disabled={isBusyAction("copy-support-snapshot")} onClick={() => run(copySupportSnapshot, undefined, "copy-support-snapshot")}><Save size={15} /> Copy Support Snapshot</button>
               </div>
             </div>
             <div className="status-detail diagnostics-health-grid">
@@ -1615,7 +1621,7 @@ export function AdminPanel({
                   <p className="legend">Restrict public app pages and first-level tabs by Discord sign-in, character verification, or selected Discord users. Admin pages stay separate.</p>
                 </div>
                 <div className="toolbar-row">
-                  <button className="toolbar-button" type="button" onClick={() => run(refreshAccessControl, undefined, "access-control-refresh")}><RefreshCw size={14} /> Refresh</button>
+                  <button className="toolbar-button" type="button" disabled={isBusyAction("access-control-refresh")} onClick={() => run(refreshAccessControl, undefined, "access-control-refresh")}><RefreshCw size={14} /> Refresh</button>
                   <button className="toolbar-button primary" type="button" disabled={!accessControlState || isBusyAction("access-control-save")} onClick={saveAccessControl}><Save size={14} /> Save Access</button>
                 </div>
               </div>
@@ -1853,7 +1859,7 @@ export function AdminPanel({
               discoveredChannelCount={discoveredChannels.length}
               discoveredRoleCount={discoveredRoles.length}
               formatNumber={formatNumber}
-              onSync={() => run(refreshDiscordDiscovery, "Discord server data synced.")}
+              onSync={() => run(refreshDiscordDiscovery, "Discord server data synced.", "discord-setup-sync")}
               status={status}
               updateDiscord={updateDiscord}
               updateDiscordPresence={updateDiscordPresence}
@@ -1875,8 +1881,9 @@ export function AdminPanel({
               discoveredRoles={discoveredRoles}
               formatNumber={formatNumber}
               memberCountWarning={memberCountWarning}
-              onCreateRole={() => run(createDiscordRoleFromDashboard, "Discord role created.")}
-              onSyncRoles={() => run(refreshDiscordDiscovery, "Discord roles synced.")}
+              isPending={isBusyAction}
+              onCreateRole={() => run(createDiscordRoleFromDashboard, "Discord role created.", "discord-role-create")}
+              onSyncRoles={() => run(refreshDiscordDiscovery, "Discord roles synced.", "discord-role-sync")}
               roleDraft={roleDraft}
               roleStatusText={roleStatusText}
               setRoleDraft={setRoleDraft}
@@ -1908,8 +1915,9 @@ export function AdminPanel({
               discordColorToHex={discordColorToHex}
               hexToDiscordColor={hexToDiscordColor}
               memberCountWarning={memberCountWarning}
-              onPostSelector={() => run(async () => { await api("/admin/discord/colour-roles/post", { method: "POST", body: "{}" }); }, "Colour role selector posted.")}
-              onSyncRoles={() => run(syncDiscordColourRoles, "Colour roles created and synced.")}
+              isPending={isBusyAction}
+              onPostSelector={() => run(async () => { await api("/admin/discord/colour-roles/post", { method: "POST", body: "{}" }); }, "Colour role selector posted.", "discord-colours-post")}
+              onSyncRoles={() => run(syncDiscordColourRoles, "Colour roles created and synced.", "discord-colours-sync")}
               removeDiscordColourRole={removeDiscordColourRole}
               roleStatusText={roleStatusText}
               updateDiscord={updateDiscord}
@@ -1923,8 +1931,9 @@ export function AdminPanel({
             rolePanels={draft.discord.rolePanels}
             channelIdSelect={channelIdSelect}
             onAddOption={addDiscordRolePanelOption}
-            onPostPanel={(panelKey, panelLabel) => run(async () => postRolePanel(panelKey), `${panelLabel} posted or updated.`)}
-            onPostWelcome={() => run(postWelcomeFlow, "Welcome message posted or updated.")}
+            isPending={isBusyAction}
+            onPostPanel={(panelKey, panelLabel) => run(async () => postRolePanel(panelKey), `${panelLabel} posted or updated.`, `discord-role-panel:${panelKey}`)}
+            onPostWelcome={() => run(postWelcomeFlow, "Welcome message posted or updated.", "discord-welcome-post")}
             onRemoveOption={removeDiscordRolePanelOption}
             onSetExpandedRoleOption={setExpandedRoleOption}
             onUpdateOption={updateDiscordRolePanelOption}
@@ -1941,15 +1950,16 @@ export function AdminPanel({
               discoveredMemberCount={discoveredMembers.length}
               memberIdSelect={memberIdSelect}
               moderationDraft={moderationDraft}
-              onBan={() => run(async () => runModerationAction("ban"), "Ban sent to Discord.")}
-              onKick={() => run(async () => runModerationAction("kick"), "Kick sent to Discord.")}
-              onLoadBans={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/bans"), __type: "moderationBans" }), "Ban list loaded.")}
-              onPurge={() => run(async () => runModerationAction("purge"), "Channel cleanup sent to Discord.")}
-              onRemoveTimeout={() => run(async () => { setModerationDraft((current) => ({ ...current, timeoutMinutes: "0" })); const result = await api("/admin/discord/moderation/timeout", { method: "POST", body: JSON.stringify({ userId: moderationDraft.userId, minutes: 0, reason: moderationDraft.reason }) }); setDiscordToolResult({ ...result, __type: "moderationAction" }); }, "Timeout removed.")}
-              onSync={() => run(refreshDiscordDiscovery, "Discord members, channels and roles synced.")}
-              onTempBan={() => run(async () => runBotEndpoint("/admin/discord/moderation/temp-ban", { userId: moderationDraft.userId, hours: Number(moderationDraft.timeoutMinutes), reason: moderationDraft.reason, deleteMessageSeconds: Number(moderationDraft.deleteMessageSeconds) }, "moderationAction"), "Temporary ban recorded.")}
-              onTimeout={() => run(async () => runModerationAction("timeout"), "Timeout action sent to Discord.")}
-              onUnban={() => run(async () => runModerationAction("unban"), "Unban sent to Discord.")}
+              isPending={isBusyAction}
+              onBan={() => run(async () => runModerationAction("ban"), "Ban sent to Discord.", "discord-moderation-ban")}
+              onKick={() => run(async () => runModerationAction("kick"), "Kick sent to Discord.", "discord-moderation-kick")}
+              onLoadBans={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/bans"), __type: "moderationBans" }), "Ban list loaded.", "discord-moderation-bans-load")}
+              onPurge={() => run(async () => runModerationAction("purge"), "Channel cleanup sent to Discord.", "discord-moderation-purge")}
+              onRemoveTimeout={() => run(async () => { setModerationDraft((current) => ({ ...current, timeoutMinutes: "0" })); const result = await api("/admin/discord/moderation/timeout", { method: "POST", body: JSON.stringify({ userId: moderationDraft.userId, minutes: 0, reason: moderationDraft.reason }) }); setDiscordToolResult({ ...result, __type: "moderationAction" }); }, "Timeout removed.", "discord-moderation-timeout-remove")}
+              onSync={() => run(refreshDiscordDiscovery, "Discord members, channels and roles synced.", "discord-moderation-sync")}
+              onTempBan={() => run(async () => runBotEndpoint("/admin/discord/moderation/temp-ban", { userId: moderationDraft.userId, hours: Number(moderationDraft.timeoutMinutes), reason: moderationDraft.reason, deleteMessageSeconds: Number(moderationDraft.deleteMessageSeconds) }, "moderationAction"), "Temporary ban recorded.", "discord-moderation-temp-ban")}
+              onTimeout={() => run(async () => runModerationAction("timeout"), "Timeout action sent to Discord.", "discord-moderation-timeout")}
+              onUnban={() => run(async () => runModerationAction("unban"), "Unban sent to Discord.", "discord-moderation-unban")}
               renderDiscordToolResult={renderDiscordToolResult}
               setModerationDraft={setModerationDraft}
             />
@@ -1959,13 +1969,14 @@ export function AdminPanel({
               channelIdSelect={channelIdSelect}
               confirmModeration={confirmModeration}
               discordToolResult={discordToolResult}
-              onApplySlowmode={() => run(async () => runBotEndpoint("/admin/discord/moderation/slowmode", { channelId: safetyDraft.lockdownChannelId, seconds: Number(safetyDraft.slowmodeSeconds) }, "botAction"), "Slowmode updated.")}
-              onCreateAutomodRule={() => run(async () => runBotEndpoint("/admin/discord/moderation/automod", { name: safetyDraft.ruleName, blockedWords: safetyDraft.blockedWords }, "botAction"), "Auto-moderation rule created.")}
-              onLoadAutomodRules={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/automod"), __type: "botReport" }), "Auto-moderation rules loaded.")}
-              onLockChannel={() => run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: true }, "botAction"), "Channel locked.")}
-              onNicknameReport={() => run(async () => runBotEndpoint("/admin/discord/moderation/nickname-report", { pattern: safetyDraft.nicknamePattern }, "botReport"), "Nickname report loaded.")}
-              onSync={() => run(refreshDiscordDiscovery, "Discord server data synced.")}
-              onUnlockChannel={() => run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: false }, "botAction"), "Channel unlocked.")}
+              isPending={isBusyAction}
+              onApplySlowmode={() => run(async () => runBotEndpoint("/admin/discord/moderation/slowmode", { channelId: safetyDraft.lockdownChannelId, seconds: Number(safetyDraft.slowmodeSeconds) }, "botAction"), "Slowmode updated.", "discord-slowmode")}
+              onCreateAutomodRule={() => run(async () => runBotEndpoint("/admin/discord/moderation/automod", { name: safetyDraft.ruleName, blockedWords: safetyDraft.blockedWords }, "botAction"), "Auto-moderation rule created.", "discord-automod-create")}
+              onLoadAutomodRules={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/automod"), __type: "botReport" }), "Auto-moderation rules loaded.", "discord-automod-load")}
+              onLockChannel={() => run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: true }, "botAction"), "Channel locked.", "discord-channel-lock")}
+              onNicknameReport={() => run(async () => runBotEndpoint("/admin/discord/moderation/nickname-report", { pattern: safetyDraft.nicknamePattern }, "botReport"), "Nickname report loaded.", "discord-nickname-report")}
+              onSync={() => run(refreshDiscordDiscovery, "Discord server data synced.", "discord-safety-sync")}
+              onUnlockChannel={() => run(async () => runBotEndpoint("/admin/discord/moderation/lockdown", { channelId: safetyDraft.lockdownChannelId, locked: false }, "botAction"), "Channel unlocked.", "discord-channel-unlock")}
               renderDiscordToolResult={renderDiscordToolResult}
               safetyDraft={safetyDraft}
               setSafetyDraft={setSafetyDraft}
@@ -1976,14 +1987,14 @@ export function AdminPanel({
               confirmModeration={confirmModeration}
               discordToolResult={discordToolResult}
               memberIdSelect={memberIdSelect}
-              onAddNote={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes", recordsDraft, "botAction"), "Mod note saved.")}
-              onAddWarning={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings", recordsDraft, "botAction"), "Warning recorded.")}
-              onClearWarnings={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings/clear", recordsDraft, "botAction"), "Warnings cleared.")}
-              onLoadCaseLog={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/cases"), __type: "botReport" }), "Case log loaded.")}
-              onLoadNotes={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes/list", recordsDraft, "botReport"), "Mod notes loaded.")}
-              onLoadProfile={() => run(async () => runBotEndpoint("/admin/discord/moderation/profile", recordsDraft, "botReport"), "Member profile loaded.")}
-              onLoadWarnings={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings/list", recordsDraft, "botReport"), "Warnings loaded.")}
-              onSync={() => run(refreshDiscordDiscovery, "Discord members synced.")}
+              onAddNote={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes", recordsDraft, "botAction"), "Mod note saved.", "discord-record-note")}
+              onAddWarning={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings", recordsDraft, "botAction"), "Warning recorded.", "discord-record-warning")}
+              onClearWarnings={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings/clear", recordsDraft, "botAction"), "Warnings cleared.", "discord-record-warnings-clear")}
+              onLoadCaseLog={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/moderation/cases"), __type: "botReport" }), "Case log loaded.", "discord-record-cases")}
+              onLoadNotes={() => run(async () => runBotEndpoint("/admin/discord/moderation/notes/list", recordsDraft, "botReport"), "Mod notes loaded.", "discord-record-notes")}
+              onLoadProfile={() => run(async () => runBotEndpoint("/admin/discord/moderation/profile", recordsDraft, "botReport"), "Member profile loaded.", "discord-record-profile")}
+              onLoadWarnings={() => run(async () => runBotEndpoint("/admin/discord/moderation/warnings/list", recordsDraft, "botReport"), "Warnings loaded.", "discord-record-warnings")}
+              onSync={() => run(refreshDiscordDiscovery, "Discord members synced.", "discord-records-sync")}
               recordsDraft={recordsDraft}
               renderDiscordToolResult={renderDiscordToolResult}
               setRecordsDraft={setRecordsDraft}
@@ -1992,9 +2003,9 @@ export function AdminPanel({
           {(!botOnly || botSection === "content") ? <section className="form-card discord-channel-card bot-tools-card">
             <div className="split-header"><div><h3><MessageCircle size={17} /> Posts & Events</h3><p className="legend">Create polls, RSVP posts and clean embeds for Discord-only community management.</p></div></div>
             <div className="discord-tool-forms">
-              <div className="discord-tool-form-card"><h4><CircleHelp size={15} /> Poll</h4><label className="field"><span>Channel</span>{channelIdSelect(pollDraft.channelId, (value) => setPollDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={pollDraft.title} onChange={(event) => setPollDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Options</span><textarea value={pollDraft.options} onChange={(event) => setPollDraft((current) => ({ ...current, options: event.target.value }))} placeholder="One option per line" /></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/poll", pollDraft, "botAction"), "Poll posted.")}><MessageCircle size={14} /> Post Poll</button></div>
-              <div className="discord-tool-form-card"><h4><Bell size={15} /> Event RSVP</h4><label className="field"><span>Channel</span>{channelIdSelect(rsvpDraft.channelId, (value) => setRsvpDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={rsvpDraft.title} onChange={(event) => setRsvpDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Description</span><textarea value={rsvpDraft.description} onChange={(event) => setRsvpDraft((current) => ({ ...current, description: event.target.value }))} /></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/rsvp", rsvpDraft, "botAction"), "RSVP posted.")}><Bell size={14} /> Post RSVP</button></div>
-              <div className="discord-tool-form-card"><h4><Star size={15} /> Clean Embed Builder</h4><label className="field"><span>Channel</span>{channelIdSelect(embedDraft.channelId, (value) => setEmbedDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={embedDraft.title} onChange={(event) => setEmbedDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Message</span><textarea value={embedDraft.description} onChange={(event) => setEmbedDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="colour-picker-field"><input type="color" value={embedDraft.color} onChange={(event) => setEmbedDraft((current) => ({ ...current, color: event.target.value }))} /><code>{embedDraft.color}</code></label><button className="toolbar-button primary bot-post-button" onClick={() => run(async () => runBotEndpoint("/admin/discord/embed", embedDraft, "botAction"), "Embed posted.")}><Star size={14} /> Post Embed</button></div>
+              <div className="discord-tool-form-card"><h4><CircleHelp size={15} /> Poll</h4><label className="field"><span>Channel</span>{channelIdSelect(pollDraft.channelId, (value) => setPollDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={pollDraft.title} onChange={(event) => setPollDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Options</span><textarea value={pollDraft.options} onChange={(event) => setPollDraft((current) => ({ ...current, options: event.target.value }))} placeholder="One option per line" /></label><button className="toolbar-button primary bot-post-button" disabled={isBusyAction("discord-poll-post")} onClick={() => run(async () => runBotEndpoint("/admin/discord/poll", pollDraft, "botAction"), "Poll posted.", "discord-poll-post")}><MessageCircle size={14} /> Post Poll</button></div>
+              <div className="discord-tool-form-card"><h4><Bell size={15} /> Event RSVP</h4><label className="field"><span>Channel</span>{channelIdSelect(rsvpDraft.channelId, (value) => setRsvpDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={rsvpDraft.title} onChange={(event) => setRsvpDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Description</span><textarea value={rsvpDraft.description} onChange={(event) => setRsvpDraft((current) => ({ ...current, description: event.target.value }))} /></label><button className="toolbar-button primary bot-post-button" disabled={isBusyAction("discord-rsvp-post")} onClick={() => run(async () => runBotEndpoint("/admin/discord/rsvp", rsvpDraft, "botAction"), "RSVP posted.", "discord-rsvp-post")}><Bell size={14} /> Post RSVP</button></div>
+              <div className="discord-tool-form-card"><h4><Star size={15} /> Clean Embed Builder</h4><label className="field"><span>Channel</span>{channelIdSelect(embedDraft.channelId, (value) => setEmbedDraft((current) => ({ ...current, channelId: value })))}</label><label className="field"><span>Title</span><input value={embedDraft.title} onChange={(event) => setEmbedDraft((current) => ({ ...current, title: event.target.value }))} /></label><label className="field"><span>Message</span><textarea value={embedDraft.description} onChange={(event) => setEmbedDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="colour-picker-field"><input type="color" value={embedDraft.color} onChange={(event) => setEmbedDraft((current) => ({ ...current, color: event.target.value }))} /><code>{embedDraft.color}</code></label><button className="toolbar-button primary bot-post-button" disabled={isBusyAction("discord-embed-post")} onClick={() => run(async () => runBotEndpoint("/admin/discord/embed", embedDraft, "botAction"), "Embed posted.", "discord-embed-post")}><Star size={14} /> Post Embed</button></div>
             </div>
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
           </section> : null}
@@ -2007,10 +2018,10 @@ export function AdminPanel({
                 <label className="field"><span>Description</span><input value={commandDraft.description} onChange={(event) => setCommandDraft((current) => ({ ...current, description: event.target.value }))} /></label>
                 <label className="field"><span>Response</span><textarea value={commandDraft.response} onChange={(event) => setCommandDraft((current) => ({ ...current, response: event.target.value }))} /></label>
                 <div className="toolbar">
-                  <button className="toolbar-button primary" disabled={!commandDraft.name.trim() || !commandDraft.response.trim()} onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); await refreshCustomCommands(); }, "Custom command saved. Re-register slash commands to publish it.")}><Save size={14} /> Save Command</button>
+                  <button className="toolbar-button primary" disabled={!commandDraft.name.trim() || !commandDraft.response.trim() || isBusyAction("discord-command-save")} onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); await refreshCustomCommands(); }, "Custom command saved. Re-register slash commands to publish it.", "discord-command-save")}><Save size={14} /> Save Command</button>
                   <button className="toolbar-button" onClick={() => setCommandDraft({ name: "", description: "", response: "" })}><Plus size={14} /> New</button>
-                  <button className="toolbar-button danger" disabled={!commandDraft.name.trim()} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setCommandDraft({ name: "", description: "", response: "" }); await refreshCustomCommands(); }, "Custom command deleted.")}><X size={14} /> Delete</button>
-                  <button className="toolbar-button bot-post-button" onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.")}><Command size={14} /> Register Slash Commands</button>
+                  <button className="toolbar-button danger" disabled={!commandDraft.name.trim() || isBusyAction("discord-command-delete")} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setCommandDraft({ name: "", description: "", response: "" }); await refreshCustomCommands(); }, "Custom command deleted.", "discord-command-delete")}><X size={14} /> Delete</button>
+                  <button className="toolbar-button bot-post-button" disabled={isBusyAction("discord-commands-register")} onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.", "discord-commands-register")}><Command size={14} /> Register Slash Commands</button>
                 </div>
               </div>
               <div className="discord-tool-form-card">
@@ -2034,19 +2045,19 @@ export function AdminPanel({
               </div>
             </div>
             <div className="discord-tool-actions">
-              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/audit-log"), __type: "auditLog" }), "Audit log loaded.")}>
+              <button className="discord-tool-action" disabled={isBusyAction("discord-audit-report")} onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/audit-log"), __type: "auditLog" }), "Audit log loaded.", "discord-audit-report")}>
                 <span className="discord-tool-action-icon"><FileText size={18} /></span>
                 <span><strong>Audit Log</strong><small>Review recent bot and Discord management actions in a readable timeline.</small><em>Run report</em></span>
               </button>
-              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/role-cleanup"), __type: "roleCleanup" }), "Role cleanup report loaded.")}>
+              <button className="discord-tool-action" disabled={isBusyAction("discord-role-cleanup")} onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/role-cleanup"), __type: "roleCleanup" }), "Role cleanup report loaded.", "discord-role-cleanup")}>
                 <span className="discord-tool-action-icon"><Users size={18} /></span>
                 <span><strong>Role Cleanup</strong><small>Find unused roles, duplicate colours and role manageability problems.</small><em>Run report</em></span>
               </button>
-              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/channel-permissions"), __type: "channelPermissions" }), "Channel permission report loaded.")}>
+              <button className="discord-tool-action" disabled={isBusyAction("discord-channel-report")} onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/channel-permissions"), __type: "channelPermissions" }), "Channel permission report loaded.", "discord-channel-report")}>
                 <span className="discord-tool-action-icon"><Lock size={18} /></span>
                 <span><strong>Channel Checks</strong><small>Check whether key roles can read and post in important channels.</small><em>Run report</em></span>
               </button>
-              <button className="discord-tool-action" onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/inactive-report", { method: "POST", body: JSON.stringify({ days: 30 }) }), __type: "inactiveReport" }), "Inactive member report loaded.")}>
+              <button className="discord-tool-action" disabled={isBusyAction("discord-inactive-report")} onClick={() => run(async () => setDiscordToolResult({ ...await api("/admin/discord/inactive-report", { method: "POST", body: JSON.stringify({ days: 30 }) }), __type: "inactiveReport" }), "Inactive member report loaded.", "discord-inactive-report")}>
                 <span className="discord-tool-action-icon"><Activity size={18} /></span>
                 <span><strong>Inactive Members</strong><small>List synced Discord members with no recent observed activity.</small><em>Run 30 day report</em></span>
               </button>
@@ -2064,7 +2075,7 @@ export function AdminPanel({
                 <label className="field"><span>Channel</span>{channelIdSelect(announcementDraft.channelId, (value) => setAnnouncementDraft((current) => ({ ...current, channelId: value })))}</label>
                 <label className="field"><span>Title</span><input value={announcementDraft.title} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={announcementDraft.message} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, message: event.target.value }))} /></label>
-                <button className="toolbar-button primary bot-post-button" onClick={() => run(async () => { await api("/admin/discord/announcement", { method: "POST", body: JSON.stringify(announcementDraft) }); }, "Announcement posted.")}><MessageCircle size={14} /> Post Announcement</button>
+                <button className="toolbar-button primary bot-post-button" disabled={isBusyAction("discord-announcement-post")} onClick={() => run(async () => { await api("/admin/discord/announcement", { method: "POST", body: JSON.stringify(announcementDraft) }); }, "Announcement posted.", "discord-announcement-post")}><MessageCircle size={14} /> Post Announcement</button>
               </div>
               <div className="discord-tool-form-card">
                 <h4><Pin size={15} /> Pinned Info Updater</h4>
@@ -2073,7 +2084,7 @@ export function AdminPanel({
                 <label className="field"><span>Existing message ID</span><input value={pinnedDraft.messageId} onChange={(event) => setPinnedDraft((current) => ({ ...current, messageId: event.target.value }))} placeholder="Blank posts a new pinned message" /></label>
                 <label className="field"><span>Title</span><input value={pinnedDraft.title} onChange={(event) => setPinnedDraft((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="field"><span>Message</span><textarea value={pinnedDraft.message} onChange={(event) => setPinnedDraft((current) => ({ ...current, message: event.target.value }))} /></label>
-                <button className="toolbar-button bot-post-button" onClick={() => run(async () => { const result = await api("/admin/discord/pinned-info", { method: "POST", body: JSON.stringify(pinnedDraft) }); setPinnedDraft((current) => ({ ...current, messageId: String(result.response?.id ?? current.messageId) })); }, "Pinned info posted or updated.")}><Pin size={14} /> Post/Update Pin</button>
+                <button className="toolbar-button bot-post-button" disabled={isBusyAction("discord-pin-post")} onClick={() => run(async () => { const result = await api("/admin/discord/pinned-info", { method: "POST", body: JSON.stringify(pinnedDraft) }); setPinnedDraft((current) => ({ ...current, messageId: String(result.response?.id ?? current.messageId) })); }, "Pinned info posted or updated.", "discord-pin-post")}><Pin size={14} /> Post/Update Pin</button>
               </div>
               <div className="discord-tool-form-card">
                 <h4><Bell size={15} /> Event Scheduler</h4>
@@ -2083,7 +2094,7 @@ export function AdminPanel({
                 <label className="field"><span>Start</span><input type="datetime-local" value={eventDraft.startTime} onChange={(event) => setEventDraft((current) => ({ ...current, startTime: event.target.value }))} /></label>
                 <label className="field"><span>End</span><input type="datetime-local" value={eventDraft.endTime} onChange={(event) => setEventDraft((current) => ({ ...current, endTime: event.target.value }))} /></label>
                 <label className="field"><span>Description</span><textarea value={eventDraft.description} onChange={(event) => setEventDraft((current) => ({ ...current, description: event.target.value }))} /></label>
-                <button className="toolbar-button" onClick={() => run(async () => { await api("/admin/discord/scheduled-event", { method: "POST", body: JSON.stringify(eventDraft) }); }, "Discord event created.")}><Bell size={14} /> Create Event</button>
+                <button className="toolbar-button" disabled={isBusyAction("discord-event-create")} onClick={() => run(async () => { await api("/admin/discord/scheduled-event", { method: "POST", body: JSON.stringify(eventDraft) }); }, "Discord event created.", "discord-event-create")}><Bell size={14} /> Create Event</button>
               </div>
             </div>
             {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
@@ -2106,10 +2117,11 @@ export function AdminPanel({
               channelIdSelect={channelIdSelect}
               discord={draft.discord}
               discordDeliveryLabel={discordDeliveryLabel}
+              isPending={isBusyAction}
               roleIdSelect={roleIdSelect}
               onTestCraftPlanReport={(rule) => run(async () => {
                 await api("/admin/discord/craft-plan-report/test", { method: "POST", body: JSON.stringify(rule) });
-              }, "Craft Planner report sent.")}
+              }, "Craft Planner report sent.", `discord-craft-report-test:${rule.id}`)}
               updateDiscord={updateDiscord}
               updateDiscordNotify={updateDiscordNotify}
             />
@@ -2118,22 +2130,23 @@ export function AdminPanel({
             <DiscordTestsPanel
               botOnly={botOnly}
               discordTestButtons={discordTestButtons}
+              isPending={isBusyAction}
               onRegisterCommands={() =>
                 run(async () => {
                   const result = await api("/admin/discord/register-commands", { method: "POST", body: "{}" });
                   setMessageKind("success");
                   setMessage(`Registered ${formatNumber(result.commands?.length)} Discord slash commands.`);
-                })
+                }, undefined, "discord-commands-register")
               }
               onSendTest={(kind, label) =>
                 run(async () => {
                   const result = await api("/admin/discord/test", { method: "POST", body: JSON.stringify({ kind }) });
                   setDiscordToolResults((current) => ({ ...current, tests: { ...result, __type: "botAction" } }));
-                }, `${label} Discord test sent.`)
+                }, `${label} Discord test sent.`, `discord-test:${kind}`)
               }
             />
           ) : null}
-          {(!botOnly || botSection === "diagnostics") ? <DiscordDiagnosticsPanel filter={discordDiagnosticsFilter} log={discordLog} onFilterChange={setDiscordDiagnosticsFilter} onRefresh={() => run(refreshStatus)} /> : null}
+          {(!botOnly || botSection === "diagnostics") ? <DiscordDiagnosticsPanel filter={discordDiagnosticsFilter} log={discordLog} onFilterChange={setDiscordDiagnosticsFilter} pending={isBusyAction("discord-diagnostics-refresh")} onRefresh={() => run(refreshStatus, undefined, "discord-diagnostics-refresh")} /> : null}
         </div>
         </React.Suspense>
         </div>
@@ -2179,11 +2192,11 @@ export function AdminPanel({
             <label className="field"><span>Discord user ID</span><input value={newUser.discordId} onChange={(event) => setNewUser({ ...newUser, discordId: event.target.value })} placeholder="145544610234630144" /></label>
             <label className="field"><span>Display name</span><input value={newUser.displayName} onChange={(event) => setNewUser({ ...newUser, displayName: event.target.value })} placeholder="red463" /></label>
             <label className="field"><span>Role</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>
-            <button className="toolbar-button primary" title="Create an admin allow-list entry for this Discord user." disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.")}><UserPlus size={15} /> Add Administrator</button>
+            <button className="toolbar-button primary" title="Create an admin allow-list entry for this Discord user." disabled={!canManageAdmins || isBusyAction("admin-user-add")} onClick={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.", "admin-user-add")}><UserPlus size={15} /> Add Administrator</button>
           </section>
           <section className="form-card">
             <h3><Users size={17} /> Administrators</h3>
-            <div className="admin-users">{users.length ? users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | Discord ID {entry.discord_id || "not linked"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.")}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" title="Sign this administrator out of all active sessions." disabled={!canManageAdmins} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.")}>Clear Sessions</button><button className="toolbar-button" title={entry.active ? "Disable this administrator account." : "Re-enable this administrator account."} disabled={!canManageAdmins || entry.id === auth.user?.id} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.")}>{entry.active ? "Disable" : "Enable"}</button></div></div>) : <p className="legend">No administrator accounts are configured yet.</p>}</div>
+            <div className="admin-users">{users.length ? users.map((entry) => <div key={entry.id}><strong>{entry.username}</strong><span>{entry.active ? "Active" : "Disabled"} | Discord ID {entry.discord_id || "not linked"} | {entry.roleLabel ?? adminRoles[entry.role] ?? entry.role ?? "Viewer"} | {formatNumber(entry.sessions)} sessions | Last login {dateLabel(entry.last_login_at)}</span><label className="field compact-field"><span>Role</span><select value={entry.role ?? "viewer"} disabled={!canManageAdmins || entry.id === auth.user?.id || isBusyAction(`admin-user-role:${entry.id}`)} onChange={(event) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role: event.target.value }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}>{Object.entries(adminRoles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label><div className="toolbar"><button className="toolbar-button" title="Sign this administrator out of all active sessions." disabled={!canManageAdmins || isBusyAction(`admin-user-sessions:${entry.id}`)} onClick={() => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}>Clear Sessions</button><button className="toolbar-button" title={entry.active ? "Disable this administrator account." : "Re-enable this administrator account."} disabled={!canManageAdmins || entry.id === auth.user?.id || isBusyAction(`admin-user-status:${entry.id}`)} onClick={() => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}>{entry.active ? "Disable" : "Enable"}</button></div></div>) : <p className="legend">No administrator accounts are configured yet.</p>}</div>
           </section>
         </div>
       ) : null}
@@ -2214,13 +2227,13 @@ export function AdminPanel({
                   {(["approved", "pending", "rejected"] as const).map((status) => (
                     <button
                       className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
-                      disabled={!account.characterPlayerId}
+                      disabled={!account.characterPlayerId || isBusyAction(`account-approval:${account.id}`)}
                       title={`Mark this character link as ${status}.`}
                       key={status}
                       onClick={() => run(async () => {
                         const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) });
                         setLinkedAccounts(result.accounts ?? []);
-                      }, `Account marked ${status}.`)}
+                      }, `Account marked ${status}.`, `account-approval:${account.id}`)}
                     >
                       {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
                       {status[0].toUpperCase() + status.slice(1)}
@@ -2285,14 +2298,14 @@ export function AdminPanel({
       {tab === "backups" ? (
         <div className="admin-section">
           <section className="form-card">
-            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" title="Create a downloadable SQLite backup on the server." onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.")}><Save size={15} /> Create Backup</button></div>
+            <div className="split-header"><h3><HardDrive size={17} /> Database Backups</h3><button className="toolbar-button primary" disabled={isBusyAction("backup-create")} title="Create a downloadable SQLite backup on the server." onClick={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.", "backup-create")}><Save size={15} /> Create Backup</button></div>
             <p className="legend">Downloadable SQLite copies are stored on the server. Restore them manually on the VPS while services are stopped.</p>
             <div className="backup-list">{backups.length ? backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" title="Download this database backup file." href={`${LOCAL_API}/admin/backup?name=${encodeURIComponent(backup.name)}`}><Download size={14} /> Download</a></div>) : <p className="legend">No database backups have been created yet.</p>}</div>
           </section>
           <section className="form-card maintenance-card">
             <h3><Database size={17} /> Retention Maintenance</h3>
             <p className="legend">Removes snapshots older than the configured {draft.snapshotRetentionDays}-day retention window. Market and activity history are retained.</p>
-            <button className="toolbar-button" title="Remove expired snapshot rows only. Market trades and activity history are retained." onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); })}><RefreshCw size={15} /> Remove Expired Snapshots</button>
+            <button className="toolbar-button" disabled={isBusyAction("snapshots-prune")} title="Remove expired snapshot rows only. Market trades and activity history are retained." onClick={() => run(async () => { const result = await api("/admin/maintenance/prune", { method: "POST", body: "{}" }); await refreshStatus(); setMessageKind("success"); setMessage(`Removed ${formatNumber(result.removed)} expired snapshots.`); }, undefined, "snapshots-prune")}><RefreshCw size={15} /> Remove Expired Snapshots</button>
           </section>
         </div>
       ) : null}
@@ -2300,7 +2313,7 @@ export function AdminPanel({
         <div className="floating-save">
           <div><strong>Unsaved changes</strong><span>Save to apply these settings.</span></div>
           <button className="toolbar-button" onClick={revertSettings}><RefreshCw size={14} /> Revert</button>
-          <button className="toolbar-button primary" onClick={saveSettings}><Save size={14} /> Save Changes</button>
+          <button className="toolbar-button primary" disabled={isBusyAction("settings-save")} onClick={saveSettings}><Save size={14} /> Save Changes</button>
         </div>
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Hash, MessageCircle, Settings, UserPlus, X } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type AnyRecord = Record<string, any>;
 type DiscordRoleOption = { key: string; label: string; roleId: string; emoji: string };
@@ -48,6 +49,7 @@ export function DiscordRolePanelsSection({
   onUpdateOption,
   onUpdatePanel,
   onUpdateWelcomeFlow,
+  isPending,
   welcomeFlow,
 }: {
   expandedRoleOption: string | null;
@@ -63,6 +65,7 @@ export function DiscordRolePanelsSection({
   onUpdateOption: (panelKey: string, optionKey: string, patch: Partial<DiscordRoleOption>) => void;
   onUpdatePanel: (panelKey: string, patch: Partial<DiscordRolePanel>) => void;
   onUpdateWelcomeFlow: (patch: Partial<DiscordWelcomeFlow>) => void;
+  isPending: (key: string) => boolean;
   roleStatusText: (role: AnyRecord | undefined | null) => string;
   welcomeFlow: DiscordWelcomeFlow;
 }) {
@@ -81,7 +84,7 @@ export function DiscordRolePanelsSection({
           <div className="discord-panel-editor-body">
             <div className="split-header">
               <h4>{panel.label}</h4>
-              <button className="toolbar-button bot-post-button" onClick={() => onPostPanel(panel.key, panel.label)}><MessageCircle size={14} /> Post/Update</button>
+              <ActionButton className="toolbar-button bot-post-button" pending={isPending(`discord-role-panel:${panel.key}`)} pendingLabel="Posting panel..." onClick={() => onPostPanel(panel.key, panel.label)}><MessageCircle size={14} /> Post/Update</ActionButton>
             </div>
             <label className="field"><span>Channel</span>{channelIdSelect(panel.channelId, (value) => onUpdatePanel(panel.key, { channelId: value }))}</label>
             <label className="field"><span>Title</span><input value={panel.title} onChange={(event) => onUpdatePanel(panel.key, { title: event.target.value })} /></label>
@@ -153,7 +156,7 @@ export function DiscordRolePanelsSection({
           </span>
         </summary>
         <div className="discord-panel-editor-body">
-          <div className="split-header"><h4>Welcome Flow</h4><button className="toolbar-button bot-post-button" onClick={onPostWelcome}><MessageCircle size={14} /> Post/Update</button></div>
+          <div className="split-header"><h4>Welcome Flow</h4><ActionButton className="toolbar-button bot-post-button" pending={isPending("discord-welcome-post")} pendingLabel="Posting welcome..." onClick={onPostWelcome}><MessageCircle size={14} /> Post/Update</ActionButton></div>
           <label className="field"><span>Welcome channel</span>{channelIdSelect(welcomeFlow.channelId, (value) => onUpdateWelcomeFlow({ channelId: value }))}</label>
           <label className="field"><span>Title</span><input value={welcomeFlow.title} onChange={(event) => onUpdateWelcomeFlow({ title: event.target.value })} /></label>
           <label className="field"><span>Message</span><textarea value={welcomeFlow.message} onChange={(event) => onUpdateWelcomeFlow({ message: event.target.value })} /></label>

@@ -3,6 +3,8 @@ import { Activity, CircleDollarSign, Clock, Factory, GraduationCap, RefreshCw, S
 
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
+import { AppSkeleton } from "../components/main/AppChrome";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime, timeAgo } from "../utils/format";
@@ -57,7 +59,7 @@ export function Leaderboard({
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`leaderboard HTTP ${response.status}`)))
       .then((payload) => setState({ data: payload, error: null, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted) setState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+        if (!controller.signal.aborted) setState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error), loading: false }));
       });
     return () => controller.abort();
   }, [claimId, refreshToken]);
@@ -204,13 +206,10 @@ export function Leaderboard({
   ];
   if (!resolvedTab) return (
     <div className="panel restricted-access-panel">
-      <section className="empty-state restricted-access-state">
-        <Trophy size={34} />
-        <strong>Leaderboard is restricted</strong>
-        <span>No leaderboard categories are available for your account.</span>
-      </section>
+      <AsyncState kind="restricted" title="Leaderboard is restricted" detail="No leaderboard categories are available for your account." />
     </div>
   );
+  if (state.loading && !state.data) return <AppSkeleton />;
   return (
     <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">
@@ -252,10 +251,10 @@ export function Leaderboard({
             </select>
           </label>
         </header>
-        {state.loading ? <div className="empty-state"><RefreshCw /> Loading contribution history...</div> : null}
-        {state.error ? <div className="error">Failed to load leaderboard: {state.error}</div> : null}
-        {!state.loading && !state.error && !contributors.length ? (
-          <div className="empty-state"><Trophy />No craft contributions have been recorded yet. The leaderboard starts filling as settlement craft contribution data is observed during refreshes.</div>
+        {state.loading ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
+        {state.error ? <AsyncState kind="error" title="Leaderboard refresh failed" detail={`Current standings are retained. ${state.error}`} compact /> : null}
+        {!state.loading && !contributors.length ? (
+          <AsyncState kind="empty" title="No craft contributions recorded yet" detail="The leaderboard fills as settlement craft contribution data is observed during refreshes." />
         ) : null}
         {filteredContributors.length ? (
           <DataTable
@@ -298,7 +297,7 @@ export function Leaderboard({
               </label>
             </div>
           </header>
-          {!sortedProfessionRows.length ? <div className="empty-state"><GraduationCap />No citizen profession data is available for tracked settlement members.</div> : (
+          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when BitJita returns citizen skill data." : "Choose another profession or show all professions."} /> : (
             <DataTable rows={sortedProfessionRows} emptyState="No profession leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],

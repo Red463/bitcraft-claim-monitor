@@ -1,6 +1,7 @@
 import React from "react";
 import type { AnyRecord } from "../../main-app-data";
 import { compareSortValues, type SortDirection } from "../../utils/tableSort";
+import { AsyncState, type AsyncStateKind } from "./AsyncState";
 
 /*
  * Small generic sortable table used by several operational pages.
@@ -22,12 +23,14 @@ export function DataTable({
   rows,
   columns,
   emptyState,
+  emptyKind = "empty",
   onRowClick,
   rowClassName,
 }: {
   rows: AnyRecord[];
   columns: Array<[string, (row: AnyRecord, index: number) => React.ReactNode]>;
   emptyState: React.ReactNode;
+  emptyKind?: Extract<AsyncStateKind, "empty" | "no-match">;
   onRowClick?: (row: AnyRecord) => void;
   rowClassName?: (row: AnyRecord) => string;
 }) {
@@ -74,7 +77,7 @@ export function DataTable({
             >
               {columns.map(([label, render]) => <td key={label}>{render(row, index) ?? "-"}</td>)}
             </tr>
-          )) : <tr><td colSpan={columns.length}>{emptyState}</td></tr>}
+          )) : <tr><td colSpan={columns.length}>{typeof emptyState === "string" ? <AsyncState kind={emptyKind} title={emptyState} compact /> : emptyState}</td></tr>}
         </tbody>
       </table>
     </div>

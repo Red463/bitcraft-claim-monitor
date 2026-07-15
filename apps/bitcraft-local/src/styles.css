@@ -367,6 +367,14 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
   align-items: center;
   gap: 10px;
 }
+.api-status-main > .async-state {
+  grid-column: span 2;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  grid-template-columns: 30px minmax(0, auto);
+}
 .api-status-icon {
   width: 30px;
   height: 30px;
@@ -1124,6 +1132,18 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .refreshing-label { color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .empty-state { border: 1px solid var(--border); border-radius: 8px; min-height: 170px; display: grid; place-items: center; gap: 10px; color: var(--muted); background: var(--panel); }
 .empty-state svg { width: 40px; height: 40px; opacity: .3; }
+.async-state { grid-template-columns: auto minmax(0, 1fr) auto; justify-items: stretch; align-items: center; text-align: left; }
+.async-state-icon { display: inline-flex; color: var(--muted); }
+.async-state-icon svg { width: 24px; height: 24px; opacity: .72; }
+.async-state-copy { display: grid; gap: 3px; min-width: 0; }
+.async-state-copy strong { color: var(--text); }
+.async-state-copy small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.async-state-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.async-state-error .async-state-icon, .async-state-error .async-state-copy strong { color: var(--danger); }
+.async-state-stale { border-color: color-mix(in srgb, var(--gold) 45%, var(--border)); background: var(--gold-dim); }
+.async-state-restricted .async-state-icon { color: var(--gold); }
+.async-state.compact { min-height: 64px; padding: 10px 12px; }
+.async-state.compact .async-state-action { justify-self: end; }
 .select-control { min-height: var(--control-height); height: var(--control-height); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); color: var(--text); padding: 0 10px; }
 .check-control { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .check-control input { accent-color: var(--gold); }

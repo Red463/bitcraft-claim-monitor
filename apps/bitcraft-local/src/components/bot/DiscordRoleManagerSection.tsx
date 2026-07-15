@@ -1,5 +1,6 @@
 import React from "react";
 import { RefreshCw, Users } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type DiscordRole = Record<string, any>;
 
@@ -7,6 +8,7 @@ export function DiscordRoleManagerSection({
   discoveredRoles,
   formatNumber,
   memberCountWarning,
+  isPending,
   onCreateRole,
   onSyncRoles,
   roleDraft,
@@ -16,6 +18,7 @@ export function DiscordRoleManagerSection({
   discoveredRoles: DiscordRole[];
   formatNumber: (value: unknown) => string;
   memberCountWarning: React.ReactNode;
+  isPending: (key: string) => boolean;
   onCreateRole: () => void;
   onSyncRoles: () => void;
   roleDraft: { name: string; color: string; hoist: boolean; mentionable: boolean };
@@ -28,9 +31,9 @@ export function DiscordRoleManagerSection({
         <h3>
           <Users size={17} /> Role Manager
         </h3>
-        <button className="toolbar-button" onClick={onSyncRoles}>
+        <ActionButton className="toolbar-button" pending={isPending("discord-role-sync")} pendingLabel="Syncing roles..." onClick={onSyncRoles}>
           <RefreshCw size={15} /> Sync Roles
-        </button>
+        </ActionButton>
       </div>
       <p className="legend">Create Discord roles directly from the app, then use them in craft watches, colour selectors, role panels or welcome flows.</p>
       <div className="role-manager-layout">
@@ -60,9 +63,9 @@ export function DiscordRoleManagerSection({
             />
             <span>Allow members to mention this role</span>
           </label>
-          <button className="toolbar-button primary" disabled={!roleDraft.name.trim()} onClick={onCreateRole}>
+          <ActionButton className="toolbar-button primary" pending={isPending("discord-role-create")} pendingLabel="Creating role..." disabled={!roleDraft.name.trim()} onClick={onCreateRole}>
             <Users size={15} /> Create Role
-          </button>
+          </ActionButton>
         </div>
         <div className="role-directory role-directory-large">
           <div className="split-header">

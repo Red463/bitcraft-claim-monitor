@@ -3,6 +3,7 @@ import { Box, Building2, CircleDollarSign, Factory, Lock, Package, Search, Trend
 
 import { RarityBadge, TierBadge } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
 import { ItemIcon, TierMaterialIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
@@ -221,7 +222,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
         </div>
       </div>
       <div className="container-list">
-        {selectedCoreMaterial && filteredContainers.length === 0 ? <div className="empty-state"><Package />No containers match the {selectedCoreMaterial.label.toLowerCase()} filter.</div> : null}
+        {filteredContainers.length === 0 ? <AsyncState kind={containers.length ? "no-match" : "empty"} title={containers.length ? "No containers match these filters" : "No storage containers available"} detail={containers.length ? "Clear a material, item, container, tier, rarity, or storage filter to broaden the results." : "Containers appear when BitJita returns settlement storage data."} /> : null}
         {filteredContainers.map((container) => {
           const quantity = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.quantity), 0);
           return (

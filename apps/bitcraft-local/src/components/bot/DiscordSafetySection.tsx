@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, CheckCircle2, Clock, Lock, RefreshCw, Search, Shield, Users } from "lucide-react";
+import { ActionButton } from "../main/ActionButton";
 
 type SafetyDraft = Record<string, string>;
 
@@ -7,6 +8,7 @@ export function DiscordSafetySection({
   channelIdSelect,
   confirmModeration,
   discordToolResult,
+  isPending,
   onApplySlowmode,
   onCreateAutomodRule,
   onLoadAutomodRules,
@@ -21,6 +23,7 @@ export function DiscordSafetySection({
   channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   confirmModeration: (message: string) => boolean;
   discordToolResult: Record<string, any> | null;
+  isPending: (key: string) => boolean;
   onApplySlowmode: () => void;
   onCreateAutomodRule: () => void;
   onLoadAutomodRules: () => void;
@@ -41,9 +44,9 @@ export function DiscordSafetySection({
           </h3>
           <p className="legend">Configure Discord-native auto moderation, slowmode, lockdown and nickname checks.</p>
         </div>
-        <button className="toolbar-button" onClick={onSync}>
+        <ActionButton className="toolbar-button" pending={isPending("discord-safety-sync")} pendingLabel="Syncing server..." onClick={onSync}>
           <RefreshCw size={15} /> Sync Server
-        </button>
+        </ActionButton>
       </div>
       <div className="moderation-grid">
         <div className="discord-panel-editor moderation-panel moderation-member-panel">
@@ -67,12 +70,12 @@ export function DiscordSafetySection({
             />
           </label>
           <div className="toolbar">
-            <button className="toolbar-button primary" onClick={onCreateAutomodRule}>
+            <ActionButton className="toolbar-button primary" pending={isPending("discord-automod-create")} pendingLabel="Creating rule..." onClick={onCreateAutomodRule}>
               <Shield size={14} /> Create Rule
-            </button>
-            <button className="toolbar-button" onClick={onLoadAutomodRules}>
+            </ActionButton>
+            <ActionButton className="toolbar-button" pending={isPending("discord-automod-load")} pendingLabel="Loading rules..." onClick={onLoadAutomodRules}>
               <RefreshCw size={14} /> Load Rules
-            </button>
+            </ActionButton>
           </div>
         </div>
         <div className="discord-panel-editor moderation-panel">
@@ -93,9 +96,9 @@ export function DiscordSafetySection({
               onChange={(event) => setSafetyDraft((current) => ({ ...current, slowmodeSeconds: event.target.value }))}
             />
           </label>
-          <button className="toolbar-button primary" disabled={!safetyDraft.lockdownChannelId} onClick={onApplySlowmode}>
+          <ActionButton className="toolbar-button primary" pending={isPending("discord-slowmode")} pendingLabel="Applying slowmode..." disabled={!safetyDraft.lockdownChannelId} onClick={onApplySlowmode}>
             <Clock size={14} /> Apply Slowmode
-          </button>
+          </ActionButton>
         </div>
         <div className="discord-panel-editor moderation-panel">
           <h4>
@@ -106,20 +109,24 @@ export function DiscordSafetySection({
             <span>Channel</span>
             {channelIdSelect(safetyDraft.lockdownChannelId, (value) => setSafetyDraft((current) => ({ ...current, lockdownChannelId: value })))}
           </label>
-          <button
+          <ActionButton
             className="toolbar-button danger"
+            pending={isPending("discord-channel-lock")}
+            pendingLabel="Locking channel..."
             disabled={!safetyDraft.lockdownChannelId}
             onClick={() => confirmModeration("Lock this channel for @everyone?") && onLockChannel()}
           >
             <Lock size={14} /> Lock Channel
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             className="toolbar-button"
+            pending={isPending("discord-channel-unlock")}
+            pendingLabel="Unlocking channel..."
             disabled={!safetyDraft.lockdownChannelId}
             onClick={() => confirmModeration("Unlock this channel for @everyone?") && onUnlockChannel()}
           >
             <CheckCircle2 size={14} /> Unlock Channel
-          </button>
+          </ActionButton>
         </div>
       </div>
       <div className="discord-panel-editor moderation-panel">
@@ -134,9 +141,9 @@ export function DiscordSafetySection({
             onChange={(event) => setSafetyDraft((current) => ({ ...current, nicknamePattern: event.target.value }))}
           />
         </label>
-        <button className="toolbar-button" onClick={onNicknameReport}>
+        <ActionButton className="toolbar-button" pending={isPending("discord-nickname-report")} pendingLabel="Running report..." onClick={onNicknameReport}>
           <Search size={14} /> Run Nickname Report
-        </button>
+        </ActionButton>
       </div>
       {discordToolResult ? <div className="discord-tool-output">{renderDiscordToolResult(discordToolResult)}</div> : null}
     </section>
