@@ -9,6 +9,30 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.35.0-beta.1] - 2026-07-15
+
+### Added
+
+- Added consistent loading, empty, error, stale, restricted, and action-progress states across operational pages.
+- Added shared accessible dialogs, sortable data tables, page headers, route orientation, and keyboard-reachable horizontal data regions.
+
+### Changed
+
+- Improved the application shell, public routes, admin console, bot dashboard, theme system, and first-run tour for clearer hierarchy and more consistent controls.
+- Improved responsive behavior across the public application, including narrow navigation, dense tables, dashboards, planning boards, and fixed overlays.
+- Improved keyboard, screen-reader, forced-colour, reduced-motion, focus, contrast, and touch-target support throughout the interface.
+
+### Removed
+
+- Removed inaccurate inferred member labels such as “Can manage settlement” and “Standard member”.
+
+### Fixed
+
+- Fixed guided-tour highlighting blurring the interface being explained.
+- Fixed Leaderboard cards changing size and position when switching categories.
+- Fixed the Custom Theme editor being cut off before its final controls could be reached.
+- Fixed route layouts and metadata overflowing under supported mobile and text-scaling conditions.
+
 ## [0.34.1-beta.2] - 2026-07-15
 
 ### Changed
