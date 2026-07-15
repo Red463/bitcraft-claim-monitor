@@ -5,11 +5,14 @@ import { usePersistedState } from "../../hooks/usePersistedState";
 import { Dialog } from "./Dialog";
 import {
   FIRST_RUN_TOUR_SEEN_KEY,
-  FIRST_RUN_TOUR_STEPS,
+  effectiveTourSteps,
+  firstRunTourTransition,
   firstRunTourSeenAfterAction,
+  reportedTourVisibility,
   shouldShowFirstRunTourPrompt,
   tourTargetRect,
   type FirstRunTourAction,
+  type FirstRunTourState,
   type FirstRunTourStep,
 } from "../../tour/firstRunTour";
 
@@ -19,8 +22,6 @@ type FirstRunTourManagerProps = {
   showAccountStep: boolean;
   replayToken: number;
   onNavigate: (panel: ActivePanel) => void;
-  onOpenUserSettings?: () => void;
-  onCloseUserSettings?: () => void;
   onVisibilityChange?: (visible: boolean) => void;
 };
 
@@ -47,26 +48,26 @@ function spotlightStyle(rect: ReturnType<typeof tourTargetRect>): React.CSSPrope
 
 export function FirstRunTourManager({ activePage, enabled, showAccountStep, replayToken, onNavigate, onVisibilityChange }: FirstRunTourManagerProps) {
   const [seen, setSeen] = usePersistedState(FIRST_RUN_TOUR_SEEN_KEY, false);
-  const [promptOpen, setPromptOpen] = React.useState(false);
-  const [running, setRunning] = React.useState(false);
+  const [tourState, dispatchTour] = React.useReducer(firstRunTourTransition, { mode: "idle" } as FirstRunTourState);
   const [stepIndex, setStepIndex] = React.useState(0);
   const [targetRect, setTargetRect] = React.useState<ReturnType<typeof tourTargetRect>>(null);
 
   const blocked = !enabled;
-  const steps = FIRST_RUN_TOUR_STEPS.filter((candidate) => showAccountStep || candidate.id !== "account-access");
+  const steps = effectiveTourSteps(showAccountStep);
   const step = steps[stepIndex] ?? steps[0];
-  const visible = promptOpen || running;
+  const promptOpen = tourState.mode === "prompt";
+  const running = tourState.mode === "running";
+  const visible = reportedTourVisibility(enabled, tourState);
 
   React.useEffect(() => {
-    if (shouldShowFirstRunTourPrompt({ seen, blocked, active: promptOpen || running })) setPromptOpen(true);
+    if (shouldShowFirstRunTourPrompt({ seen, blocked, active: promptOpen || running })) dispatchTour({ type: "prompt" });
   }, [blocked, promptOpen, running, seen]);
 
   React.useEffect(() => {
     if (replayToken <= 0 || !enabled) return;
     setSeen(true);
-    setPromptOpen(false);
     setStepIndex(0);
-    setRunning(true);
+    dispatchTour({ type: "replay" });
   }, [enabled, replayToken, setSeen]);
 
   React.useEffect(() => {
@@ -101,20 +102,18 @@ export function FirstRunTourManager({ activePage, enabled, showAccountStep, repl
 
   function decline() {
     markSeen("decline");
-    setPromptOpen(false);
+    dispatchTour({ type: "decline" });
   }
 
   function start() {
     markSeen("start");
-    setPromptOpen(false);
     setStepIndex(0);
-    setRunning(true);
+    dispatchTour({ type: "start" });
   }
 
   function close(action: "skip" | "close" | "complete") {
     markSeen(action);
-    setPromptOpen(false);
-    setRunning(false);
+    dispatchTour({ type: action });
   }
 
   function next() {

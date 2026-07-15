@@ -10,8 +10,8 @@ test("AppShell wires first-run tour manager and suppresses app popups while tour
   assert.match(appShell, /<FirstRunTourManager/);
   assert.match(appShell, /onNavigate=\{\(panel\) => navigate\(panel\)\}/);
   assert.match(appShell, /onVisibilityChange=\{setTourVisible\}/);
-  assert.match(appShell, /onOpenUserSettings=\{\(\) => setUserSettingsOpen\(true\)\}/);
-  assert.match(appShell, /onCloseUserSettings=\{\(\) => setUserSettingsOpen\(false\)\}/);
+  assert.doesNotMatch(appShell, /onOpenUserSettings=/);
+  assert.doesNotMatch(appShell, /onCloseUserSettings=/);
   assert.match(appShell, /<FirstRunTourManager[\s\S]*enabled=\{[\s\S]*consent != null[\s\S]*replayToken=/);
   assert.match(appShell, /\{!tourVisible \? <ToastStack/);
   assert.match(appShell, /<AppPopupManager[\s\S]*!tourVisible/);
@@ -33,6 +33,15 @@ test("first-run tour prompt introduces Claim Monitor before offering the tour", 
   assert.match(manager, /Take a short tour to find what needs attention, jump to a task, and know where to get help\./);
 });
 
+test("settings remains modal while a disabled tour hands visibility back", () => {
+  const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(manager, /reportedTourVisibility\(enabled, tourState\)/);
+  assert.match(appShell, /<UserSettingsDialog[\s\S]*?\bmodal\b[\s\S]*?onClose=/);
+  assert.doesNotMatch(appShell, /modal=\{!tourVisible\}/);
+});
+
 test("tour replay waits for the shared modal coordinator to clear", () => {
   const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
 
@@ -44,9 +53,8 @@ test("tour replay waits for the shared modal coordinator to clear", () => {
 test("command palette keeps locked public routes discoverable without promising access", () => {
   const palette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 
-  assert.match(palette, /NAV\.map/);
-  assert.match(palette, /Unavailable for your current access/);
-  assert.match(palette, /Signing in or verifying your character does not guarantee access\./);
+  assert.match(palette, /buildPagePaletteCommands\(NAV, allowedPages\)/);
+  assert.match(palette, /activatePagePaletteCommand\(command, onNavigate\)/);
   assert.match(palette, /aria-disabled=\{command\.locked\}/);
 });
 

@@ -3,6 +3,8 @@ import type { ActivePanel } from "../types/app";
 export const FIRST_RUN_TOUR_SEEN_KEY = "onboarding.firstTourSeen";
 
 export type FirstRunTourAction = "decline" | "start" | "skip" | "close" | "complete";
+export type FirstRunTourState = { mode: "idle" | "prompt" | "running" };
+export type FirstRunTourTransitionAction = { type: FirstRunTourAction | "prompt" | "replay" };
 export type TourPlacement = "center" | "top" | "right" | "bottom" | "left";
 
 export type FirstRunTourStep = {
@@ -64,6 +66,20 @@ export const FIRST_RUN_TOUR_STEPS: FirstRunTourStep[] = [
     placement: "center",
   },
 ];
+
+export function effectiveTourSteps(showAccountStep: boolean) {
+  return FIRST_RUN_TOUR_STEPS.filter((step) => showAccountStep || step.id !== "account-access");
+}
+
+export function firstRunTourTransition(_state: FirstRunTourState, action: FirstRunTourTransitionAction): FirstRunTourState {
+  if (action.type === "prompt") return { mode: "prompt" };
+  if (action.type === "start" || action.type === "replay") return { mode: "running" };
+  return { mode: "idle" };
+}
+
+export function reportedTourVisibility(enabled: boolean, state: FirstRunTourState) {
+  return enabled && state.mode !== "idle";
+}
 
 export function shouldShowFirstRunTourPrompt({ seen, blocked, active = false }: { seen: boolean; blocked: boolean; active?: boolean }) {
   return !seen && !blocked && !active;

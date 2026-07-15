@@ -3,11 +3,14 @@ import { CheckCircle2, CircleHelp, ExternalLink, FileText, MessageCircle, Settin
 
 import packageJson from "../../../package.json";
 import { Dialog } from "./Dialog";
+import type { ActivePanel } from "../../types/app";
+import { routeHelpFor } from "../../navigation/routeHelp";
 
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const APP_VERSION = packageJson.version;
 type AnalyticsConsent = "accepted" | "declined" | null;
-export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }: { version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
+export function HelpCenter({ activePage, version, onClose, onPrivacy, onTerms, onStartTour }: { activePage: ActivePanel; version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
+  const routeHelp = routeHelpFor(activePage);
   return (
     <Dialog open title="Claim Monitor Help" onClose={onClose} className="help-dialog" backdropClassName="help-overlay">
         <header>
@@ -19,6 +22,7 @@ export function HelpCenter({ version, onClose, onPrivacy, onTerms, onStartTour }
         </header>
         <div className="beta-notice"><strong>Beta - Work in progress</strong><span>This application is actively being developed. Data display and features may change as accuracy and coverage improve.</span></div>
         <p className="help-intro">Track settlement operations, production opportunities, member professions and skills, storage, regional context, and market history using public BitCraft data.</p>
+        {routeHelp ? <section className="terms-section"><h3>On this page</h3><p><strong>{routeHelp.purpose}</strong> {routeHelp.nextAction}</p></section> : null}
         <div className="help-links">
           <a href={`${GITHUB_REPOSITORY}#readme`} target="_blank" rel="noreferrer">
             <strong>Application Guide</strong>

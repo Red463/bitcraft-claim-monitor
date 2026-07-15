@@ -9,6 +9,7 @@ import {
   shouldShowFirstRunTourPrompt,
   tourTargetRect,
 } from "../src/tour/firstRunTour.ts";
+import * as firstRunTourModule from "../src/tour/firstRunTour.ts";
 
 test("first-run tour prompt appears only when unseen and app modals are clear", () => {
   assert.equal(FIRST_RUN_TOUR_SEEN_KEY, "onboarding.firstTourSeen");
@@ -45,9 +46,25 @@ test("first-run tour is a short task-based path to useful settlement context", (
 });
 
 test("account and verification guidance appears only when Discord access is useful", () => {
-  const manager = readFileSync(new URL("../src/components/main/FirstRunTourManager.tsx", import.meta.url), "utf8");
-  assert.match(manager, /showAccountStep/);
-  assert.match(manager, /FIRST_RUN_TOUR_STEPS\.filter\(\(candidate\) => showAccountStep \|\| candidate\.id !== "account-access"\)/);
+  assert.equal(typeof firstRunTourModule.effectiveTourSteps, "function");
+  assert.equal(firstRunTourModule.effectiveTourSteps(false).some((step) => step.id === "account-access"), false);
+  assert.equal(firstRunTourModule.effectiveTourSteps(true).some((step) => step.id === "account-access"), true);
+});
+
+test("tour transitions keep prompt, run, skip, and replay visibility deterministic", () => {
+  assert.equal(typeof firstRunTourModule.firstRunTourTransition, "function");
+  assert.equal(typeof firstRunTourModule.reportedTourVisibility, "function");
+  let state = { mode: "idle" };
+  state = firstRunTourModule.firstRunTourTransition(state, { type: "prompt" });
+  assert.deepEqual(state, { mode: "prompt" });
+  state = firstRunTourModule.firstRunTourTransition(state, { type: "start" });
+  assert.deepEqual(state, { mode: "running" });
+  assert.equal(firstRunTourModule.reportedTourVisibility(true, state), true);
+  assert.equal(firstRunTourModule.reportedTourVisibility(false, state), false, "a suspended tour must not keep settings non-modal");
+  state = firstRunTourModule.firstRunTourTransition(state, { type: "skip" });
+  assert.deepEqual(state, { mode: "idle" });
+  state = firstRunTourModule.firstRunTourTransition(state, { type: "replay" });
+  assert.deepEqual(state, { mode: "running" });
 });
 
 test("missing tour targets are safe and return no spotlight rectangle", () => {

@@ -73,7 +73,8 @@ test("AppShell resolves consent before mounting optional Discord identity", () =
   assert.match(shell, /consent != null && !discordPromptDismissed && userAuth\.discordLoginEnabled && !userAuth\.user/);
 });
 
-test("settings becomes non-modal while the guided tour owns the active decision", () => {
+test("settings remains modal when the guided tour yields the active decision", () => {
   const shell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
-  assert.match(shell, /<UserSettingsDialog[\s\S]*modal=\{!tourVisible\}/);
+  assert.match(shell, /<UserSettingsDialog[\s\S]*\bmodal\b[\s\S]*onClose=/);
+  assert.doesNotMatch(shell, /modal=\{!tourVisible\}/);
 });

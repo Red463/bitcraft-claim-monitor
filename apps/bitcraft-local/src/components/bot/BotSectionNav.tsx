@@ -14,6 +14,8 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
+import type { BotSection } from "./botSectionState";
+export type { BotSection } from "./botSectionState";
 
 export const BOT_SECTIONS = [
   ["setup", "Setup", <MessageCircle size={15} />, "Token, application and guild IDs", "Setup"],
@@ -33,8 +35,6 @@ export const BOT_SECTIONS = [
   ["tests", "Command Tests", <Command size={15} />, "Preview commands before publishing; compare Diagnostics when delivery fails", "Troubleshooting"],
   ["diagnostics", "Delivery Diagnostics", <Activity size={15} />, "Inspect delivery logs; use Tests to reproduce command issues", "Troubleshooting"],
 ] as const;
-
-export type BotSection = (typeof BOT_SECTIONS)[number][0];
 
 const BOT_SECTION_GROUPS = Array.from(new Set(BOT_SECTIONS.map((section) => section[4])));
 

@@ -90,6 +90,7 @@ import {
   DISCORD_CHANNEL_FIELDS,
 } from "../../settingsDefaults";
 import { usePersistedState } from "../../hooks/usePersistedState";
+import { BOT_SECTION_STORAGE_KEY, restoreBotSection } from "../bot/botSectionState";
 import {
   buildConstructionProjects,
   toNumber,
@@ -213,7 +214,8 @@ export function AdminPanel({
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authLoaderMinimumActive, setAuthLoaderMinimumActive] = React.useState(true);
   const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : "status");
-  const [botSection, setBotSection] = React.useState<BotSection>("setup");
+  const [storedBotSection, setBotSection] = usePersistedState<BotSection>(BOT_SECTION_STORAGE_KEY, "setup");
+  const botSection = restoreBotSection(storedBotSection);
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
   const pendingActionsRef = React.useRef(new Set<string>());

@@ -2,6 +2,7 @@ import React from "react";
 import { Bell, Calculator, CircleDollarSign, Search, ShoppingBag, User } from "lucide-react";
 import type { AnyRecord } from "../../main-app-data";
 import { NAV, type NavItem } from "../../navigation";
+import { activatePagePaletteCommand, buildPagePaletteCommands } from "../../navigation/paletteCommands";
 import type { ActivePanel } from "../../types/app";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../../access/accessControl.mjs";
 import { Dialog } from "./Dialog";
@@ -31,18 +32,13 @@ export function CommandPalette({
   const allowedPages = new Set(navItems.map(([id]) => id));
   const marketViewAllowed = (tab: "pricing" | "dealWatchlist" | "buyOrders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
   const commands = [
-    ...NAV.map(([id, label, Icon]) => {
-      const locked = !allowedPages.has(id);
+    ...buildPagePaletteCommands(NAV, allowedPages).map((command, index) => {
+      const Icon = NAV[index][2];
       return {
-        key: `page-${id}`,
-        label,
-        description: locked
-          ? "Unavailable for your current access. Signing in or verifying your character does not guarantee access."
-          : "Open page",
+        ...command,
         icon: <Icon size={15} />,
         allowed: true,
-        locked,
-        run: () => onNavigate(id),
+        run: () => activatePagePaletteCommand(command, onNavigate),
       };
     }),
     { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, allowed: marketViewAllowed("pricing"), locked: false, run: () => onNavigate("market", "pricing") },
