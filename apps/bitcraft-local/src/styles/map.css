@@ -198,6 +198,8 @@
 }
 
 @media (max-width: 620px) {
+  .map-player-tracking { flex-wrap: wrap; }
+  .map-player-tracking-actions { justify-content: flex-start; }
   .map-panel .player-pills button,
   .map-selected-resources button { min-height: 36px; }
 }

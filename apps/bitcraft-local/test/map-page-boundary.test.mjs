@@ -52,3 +52,12 @@ test("Map iframe URL updates when auto-online tracked players change", () => {
   assert.doesNotMatch(mapPage, /autoFramePlayerIds/);
 });
 
+test("Map player tracking controls wrap within phone-width panels", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(
+    mapCss,
+    /@media \(max-width:\s*620px\)[\s\S]*\.map-player-tracking\s*\{[^}]*flex-wrap:\s*wrap/s,
+  );
+});
+
