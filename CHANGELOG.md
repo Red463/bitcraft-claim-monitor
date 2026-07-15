@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.35.1-beta.1] - 2026-07-15
+
+### Fixed
+
+- Fixed collected Cervus and Scrofa carcasses not counting toward Craft Planner requirements that use their gendered animal variants.
+
 ## [0.35.0-beta.1] - 2026-07-15
 
 ### Added

@@ -849,6 +849,47 @@ test("computeCraftPlan counts completed uncollected Rough Plank and transitions 
   assert.equal(collectedPlank.missing, 0);
 });
 
+test("computeCraftPlan normalizes collected animal carcasses without merging distinct animals", () => {
+  const cases = [
+    { variantId: "3", variantName: "Female Cervus", stockId: "4", expectedId: "4", expectedName: "Cervus", tier: 3, expectedAvailable: 6 },
+    { variantId: "5", variantName: "Female Scrofa", stockId: "6", expectedId: "6", expectedName: "Scrofa", tier: 4, expectedAvailable: 6 },
+    { variantId: "7", variantName: "Elder Scrofa", stockId: "6", expectedId: "7", expectedName: "Elder Scrofa", tier: 8, expectedAvailable: 0 },
+  ];
+
+  for (const [index, animal] of cases.entries()) {
+    const targetId = `99000${index}`;
+    const plan = computeCraftPlan({
+      config: normalizeCraftPlanConfig({
+        enabled: true,
+        targets: [{ id: targetId, kind: "items", name: `Animal output ${index}`, quantity: 10, itemType: 0 }],
+        sourceRules: { storageContainerIds: ["hunting-storage"] },
+      }),
+      detailsByKey: new Map([[recipeKey("items", targetId), {
+        item: { id: targetId, name: `Animal output ${index}`, itemType: 0, tag: "Test output", tier: 1 },
+        craftingRecipes: [{
+          id: `process-animal-${index}`,
+          name: `Process ${animal.variantName}`,
+          craftedItemStacks: [{ item_id: targetId, item_type: "item", quantity: 1 }],
+          craftedItems: [{ id: targetId, name: `Animal output ${index}`, itemType: 0, tier: 1 }],
+          consumedItemStacks: [{ item_id: animal.variantId, item_type: "cargo", quantity: 1 }],
+          consumedItems: [{ id: animal.variantId, name: animal.variantName, itemType: 1, tag: "Animal", tier: animal.tier }],
+        }],
+      }]]),
+      storageSources: [{
+        sourceId: "hunting-storage",
+        label: "Hunting storage",
+        items: [{ id: animal.stockId, kind: "cargo", quantity: 6, name: animal.expectedName }],
+      }],
+    });
+
+    const material = plan.materials.find((entry) => entry.name === animal.expectedName);
+    assert.ok(material, `${animal.expectedName} should appear in the plan`);
+    assert.equal(material.id, animal.expectedId);
+    assert.equal(material.available, animal.expectedAvailable);
+    assert.equal(material.missing, 10 - animal.expectedAvailable);
+  }
+});
+
 test("computeCraftPlan does not credit unstarted farming co-products", () => {
   const filamentDetail = { item: { id: "1100017", name: "Rough Wispweave Filament", itemType: 0, tag: "Filament", tier: 1 } };
   const productsDetail = {

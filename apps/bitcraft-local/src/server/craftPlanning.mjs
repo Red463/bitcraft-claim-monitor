@@ -17,6 +17,11 @@ const PLAN_SECTIONS = new Set([
   "Other",
 ]);
 
+const COLLECTED_ANIMAL_CARGO_IDENTITIES = new Map([
+  ["cargo:3", { id: "4", name: "Cervus", iconAssetName: "GeneratedIcons/Cargo/Animals/DeerMale" }],
+  ["cargo:5", { id: "6", name: "Scrofa", iconAssetName: "GeneratedIcons/Cargo/Animals/BoarMale" }],
+]);
+
 export function recipeKey(kind, id) {
   const normalizedKind = String(kind) === "cargo" ? "cargo" : String(kind) === "building" ? "building" : "items";
   return `${normalizedKind}:${String(id ?? "").trim()}`;
@@ -484,7 +489,7 @@ function enrichDisplayFromDetails(display, detailsByKey) {
 function stackDisplay(stack, displays, index) {
   const display = Array.isArray(displays) ? displays[index] ?? {} : {};
   const kind = stackKind(stack);
-  return {
+  const item = {
     id: stackId(stack),
     kind,
     itemType: itemTypeFromKind(kind),
@@ -494,6 +499,8 @@ function stackDisplay(stack, displays, index) {
     tag: display.tag ?? stack.tag ?? null,
     iconAssetName: display.iconAssetName ?? stack.iconAssetName ?? null,
   };
+  const collectedIdentity = COLLECTED_ANIMAL_CARGO_IDENTITIES.get(recipeKey(item.kind, item.id));
+  return collectedIdentity ? { ...item, ...collectedIdentity } : item;
 }
 
 function addRequired(map, target, quantity, section) {
