@@ -2,6 +2,7 @@ import React from "react";
 import { ExternalLink, MapPin, PanelLeftClose, PanelLeftOpen, Search, Users, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
+import { Dialog } from "../components/main/Dialog";
 import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
@@ -70,8 +71,7 @@ function MapPlayerTrackingControls({
         <button onClick={onClearFilters}>Clear filters</button>
       </div>
       {managerOpen ? (
-        <div className="map-player-dialog-overlay" onClick={() => setManagerOpen(false)}>
-          <section className="map-player-dialog" role="dialog" aria-modal="true" aria-label="Manage players" onClick={(event) => event.stopPropagation()}>
+        <Dialog open title="Manage players" onClose={() => setManagerOpen(false)} className="map-player-dialog" backdropClassName="map-player-dialog-overlay">
             <header>
               <div>
                 <h3>Manage players</h3>
@@ -104,8 +104,7 @@ function MapPlayerTrackingControls({
               ))}
               {!visibleRows.length ? <p className="legend">No members match these filters.</p> : null}
             </div>
-          </section>
-        </div>
+        </Dialog>
       ) : null}
     </section>
   );

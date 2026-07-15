@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ActivePanel } from "../../types/app";
 import type { AnyRecord } from "../../main-app-data";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../../access/accessControl.mjs";
+import { Dialog } from "./Dialog";
 
 type NavItem = readonly [ActivePanel, string, LucideIcon];
 
@@ -27,6 +28,7 @@ export function CommandPalette({
   onSelectMember: (id: string) => void;
 }) {
   const [query, setQuery] = React.useState("");
+  const searchRef = React.useRef<HTMLInputElement | null>(null);
   const q = query.toLowerCase().trim();
   const allowedPages = new Set(navItems.map(([id]) => id));
   const marketViewAllowed = (tab: "pricing" | "dealWatchlist" | "buyOrders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
@@ -49,20 +51,11 @@ export function CommandPalette({
     })),
   ].filter((command) => command.allowed && (!q || `${command.label} ${command.description}`.toLowerCase().includes(q))).slice(0, 12);
 
-  React.useEffect(() => {
-    function keydown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, [onClose]);
-
   return (
-    <div className="command-overlay" onClick={onClose}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Quick navigation" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="Quick navigation" onClose={onClose} initialFocusRef={searchRef} className="command-palette" backdropClassName="command-overlay">
         <label>
           <Search size={17} />
-          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Navigate or find a member..." />
+          <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Navigate or find a member..." />
         </label>
         <div>
           {commands.map((command) => (
@@ -73,7 +66,6 @@ export function CommandPalette({
             </button>
           ))}
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }

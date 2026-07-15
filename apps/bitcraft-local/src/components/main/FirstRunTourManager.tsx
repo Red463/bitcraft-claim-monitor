@@ -2,6 +2,7 @@ import React from "react";
 import { Compass, X } from "lucide-react";
 import type { ActivePanel } from "../../types/app";
 import { usePersistedState } from "../../hooks/usePersistedState";
+import { Dialog } from "./Dialog";
 import {
   FIRST_RUN_TOUR_SEEN_KEY,
   FIRST_RUN_TOUR_STEPS,
@@ -145,8 +146,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
 
   if (promptOpen) {
     return (
-      <div className="first-run-tour-overlay first-run-tour-prompt-overlay" role="presentation">
-        <section className="first-run-tour-prompt" role="dialog" aria-modal="true" aria-labelledby="first-run-tour-prompt-title">
+      <Dialog open title="Welcome to Claim Monitor" closeOnBackdrop={false} onClose={decline} className="first-run-tour-prompt" backdropClassName="first-run-tour-overlay first-run-tour-prompt-overlay">
           <div className="first-run-tour-icon" aria-hidden="true"><Compass size={22} /></div>
           <div>
             <h2 id="first-run-tour-prompt-title">Welcome to Claim Monitor</h2>
@@ -157,8 +157,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
             <button className="toolbar-button" onClick={decline}>No thanks</button>
             <button className="toolbar-button primary" onClick={start}>Start tour</button>
           </div>
-        </section>
-      </div>
+      </Dialog>
     );
   }
 
@@ -167,9 +166,20 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
   const hasTarget = Boolean(targetRect);
   const centerCard = hasTarget && step.placement === "center";
   return (
-    <div className={`first-run-tour-overlay ${!hasTarget ? "is-centered" : centerCard ? "is-card-centered" : ""}`} role="presentation">
-      {hasTarget ? <div className="first-run-tour-spotlight" style={spotlightStyle(targetRect)} /> : null}
-      <section className="first-run-tour-card" style={centerCard ? undefined : cardStyle(step, targetRect)} role="dialog" aria-modal="true" aria-labelledby="first-run-tour-title">
+    <>
+      {hasTarget ? <div className="first-run-tour-overlay first-run-tour-spotlight-layer" aria-hidden="true"><div className="first-run-tour-spotlight" style={spotlightStyle(targetRect)} /></div> : null}
+      <Dialog
+        open
+        title={step.title}
+        description={step.body}
+        modal={false}
+        closeOnBackdrop={false}
+        autoFocus={false}
+        onClose={() => close("close")}
+        className="first-run-tour-card"
+        backdropClassName={`first-run-tour-overlay ${!hasTarget ? "is-centered" : centerCard ? "is-card-centered" : ""}`}
+        style={centerCard ? undefined : cardStyle(step, targetRect)}
+      >
         <header>
           <span>{stepIndex + 1} of {FIRST_RUN_TOUR_STEPS.length}</span>
           <button type="button" onClick={() => close("close")} aria-label="Close app tour"><X size={16} /></button>
@@ -182,7 +192,7 @@ export function FirstRunTourManager({ activePage, enabled, replayToken, onNaviga
           <button className="toolbar-button" disabled={stepIndex === 0} onClick={() => setStepIndex((current) => Math.max(0, current - 1))}>Back</button>
           <button className="toolbar-button primary" onClick={next}>{stepIndex >= FIRST_RUN_TOUR_STEPS.length - 1 ? "Finish" : "Next"}</button>
         </div>
-      </section>
-    </div>
+      </Dialog>
+    </>
   );
 }

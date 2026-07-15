@@ -1,7 +1,7 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable } from "../components/main/DataTable";
+import { Dialog } from "../components/main/Dialog";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -154,9 +154,8 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
     setRankFilters((current) => current.includes(rank) ? current.filter((value) => value !== rank) : [...current, rank]);
   };
 
-  return createPortal(
-    <div className="help-overlay empires-watchtower-overlay" onClick={onClose}>
-      <section className="help-dialog tower-access-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-access-title" onClick={(event) => event.stopPropagation()}>
+  return (
+    <Dialog open title={String(selectedClaim ? selectedClaim.name ?? "Claim members" : tower.displayName ?? tower.nickname ?? "Watchtower")} onClose={onClose} className="help-dialog tower-access-dialog" backdropClassName="help-overlay empires-watchtower-overlay">
         <header>
           <div><RadioTower /><h2 id="tower-access-title">{selectedClaim ? selectedClaim.name ?? "Claim members" : tower.displayName ?? tower.nickname ?? "Watchtower"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close tower details"><X size={16} /></button>
@@ -215,9 +214,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
             )}
           </>
         )}
-      </section>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }
 export function Empires({ monitoredRegionId, access }: { monitoredRegionId: string; access?: EffectiveAccess | null }) {

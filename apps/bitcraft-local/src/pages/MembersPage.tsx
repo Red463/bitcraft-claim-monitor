@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { Dialog } from "../components/main/Dialog";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
@@ -156,7 +157,7 @@ export function Members({
         />
       </div>
       {selectedMember ? (
-        <section className="member-detail">
+        <Dialog open title={`${String(selectedMember.username ?? "Member")} public profile`} onClose={() => setSelectedId(null)} className="member-detail member-detail-dialog" backdropClassName="member-detail-dialog-backdrop">
           <div className="split-header">
             <h3><User size={17} /> {selectedMember.username} Public Profile</h3>
             <div className="profile-actions">
@@ -268,7 +269,7 @@ export function Members({
               </div>
             </>
           ) : null}
-        </section>
+        </Dialog>
       ) : null}
     </div>
   );

@@ -1,8 +1,8 @@
 import React from "react";
 import { AlertTriangle, ClipboardList, Factory, LoaderCircle, Package, Route, Search, Target, X } from "lucide-react";
-import { createPortal } from "react-dom";
 
 import { TierBadge } from "../components/main/Badges";
+import { Dialog } from "../components/main/Dialog";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
@@ -186,8 +186,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     setBufferPercent(String(Math.max(0, Math.round((selectedMultiplier - 1) * 1000) / 10)));
   }, [selectedNeedKey, selectedMultiplier]);
   const sectionOverrideDialog = selectedSectionOverride ? (
-    <div className="modal-backdrop craft-plan-section-override-backdrop" role="presentation">
-      <section className="modal craft-plan-section-override" role="dialog" aria-modal="true" aria-label="Override needs board row">
+    <Dialog open title="Override needs board row" closeOnBackdrop={false} onClose={() => setSelectedSectionOverride(null)} className="modal craft-plan-section-override" backdropClassName="modal-backdrop craft-plan-section-override-backdrop">
         <header className="modal-header">
           <div>
             <h2>Edit {selectedSectionOverride.row.name}</h2>
@@ -211,13 +210,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             <button className="toolbar-button primary" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, selectedSectionOverride.section, selectedSectionOverride.name)}>Save row</button>
           </div>
         </div>
-      </section>
-    </div>
+    </Dialog>
   ) : null;
 
   const needDetailDialog = selectedNeed ? (
-    <div className="modal-backdrop craft-plan-need-detail-backdrop" role="presentation">
-      <section className="modal craft-plan-need-detail" role="dialog" aria-modal="true" aria-label="Craft plan item details">
+    <Dialog open title="Craft plan item details" onClose={closeNeedDetail} className="modal craft-plan-need-detail" backdropClassName="modal-backdrop craft-plan-need-detail-backdrop">
         <header className="modal-header">
           <div>
             <h2>{itemNode(selectedNeed.item)}</h2>
@@ -353,8 +350,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             </section>
           </div>
         </div>
-      </section>
-    </div>
+    </Dialog>
   ) : null;
 
   React.useEffect(() => {
@@ -572,8 +568,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           ) : null}
         </>
       )}
-      {needDetailDialog ? createPortal(needDetailDialog, document.body) : null}
-      {sectionOverrideDialog ? createPortal(sectionOverrideDialog, document.body) : null}
+      {needDetailDialog}
+      {sectionOverrideDialog}
       {canManage ? <CraftPlanManagerDialog open={managerOpen} onClose={() => setManagerOpen(false)} csrfToken={String(adminAuth?.csrfToken)} onSaved={() => setManagerRefreshToken((value) => value + 1)} /> : null}
     </div>
   );

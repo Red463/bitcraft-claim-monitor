@@ -172,6 +172,8 @@ border: 1px solid var(--border);
   background: rgba(5,8,12,.78);
 }
 .member-detail { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 16px; display: grid; gap: 14px; }
+.member-detail-dialog-backdrop { align-items: start; }
+.member-detail-dialog { width: min(1100px, 100%); max-height: calc(100dvh - 40px); color: #f4f7fb; background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 16%, transparent), transparent 38%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); }
 .member-detail h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-family: Rajdhani, sans-serif; font-size: 18px; margin: 0; }
 .profile-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .profile-actions .mini-action { display: inline-flex; align-items: center; gap: 6px; }

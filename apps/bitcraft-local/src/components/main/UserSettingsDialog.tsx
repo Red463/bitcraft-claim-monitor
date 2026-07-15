@@ -37,6 +37,7 @@ import {
 import type { AppSettings, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
 import { memberDisplayName } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
+import { Dialog } from "./Dialog";
 
 /**
  * Browser-local preferences dialog.
@@ -70,6 +71,7 @@ export type UserSettingsDialogProps = {
   onOpenAdmin: () => void;
   onResetSettings: () => void;
   onClose: () => void;
+  modal?: boolean;
 };
 
 export function UserSettingsDialog({
@@ -90,15 +92,9 @@ export function UserSettingsDialog({
   onOpenAdmin,
   onResetSettings,
   onClose,
+  modal = true,
 }: UserSettingsDialogProps) {
   const [settingsSection, setSettingsSection] = React.useState<"account" | "theme" | "preferences" | "data">("account");
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
   const [themeExpanded, setThemeExpanded] = React.useState(false);
   const [themeShareOpen, setThemeShareOpen] = React.useState(false);
   const [themeImportText, setThemeImportText] = React.useState("");
@@ -207,8 +203,7 @@ export function UserSettingsDialog({
     }
   }
   return (
-    <div className="help-overlay" onClick={onClose}>
-      <section className="help-dialog settings-dialog" data-tour="user-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
+    <Dialog open title="User Settings" modal={modal} onClose={onClose} className="help-dialog settings-dialog" backdropClassName="help-overlay" dataTour="user-settings">
         <header>
           <div>
             <Settings size={19} />
@@ -495,8 +490,7 @@ export function UserSettingsDialog({
           </section> : null}
           </div>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }
 

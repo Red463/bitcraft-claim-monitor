@@ -53,8 +53,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Use API defaults/);
   assert.match(page, /Save row/);
   assert.match(page, /selectedNeed/);
-  assert.match(page, /from "react-dom"/);
-  assert.match(page, /createPortal\(needDetailDialog, document\.body\)/);
+  assert.match(page, /import \{ Dialog \} from "\.\.\/components\/main\/Dialog";/);
+  assert.match(page, /<Dialog[\s\S]*craft-plan-need-detail/);
   assert.match(page, /craft-plan-need-detail/);
   assert.match(page, /How to get this/);
   assert.match(page, /Gathering byproduct/);

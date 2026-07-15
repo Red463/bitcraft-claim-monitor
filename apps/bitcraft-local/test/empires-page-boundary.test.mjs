@@ -13,9 +13,8 @@ test("watchtower dialog stays viewport bounded and renders all empire members", 
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
 
-  assert.match(page, /import \{ createPortal \} from "react-dom";/);
-  assert.match(page, /return createPortal\(/);
-  assert.match(page, /document\.body/);
+  assert.match(page, /import \{ Dialog \} from "\.\.\/components\/main\/Dialog";/);
+  assert.match(page, /<Dialog[\s\S]*tower-access-dialog[\s\S]*empires-watchtower-overlay/);
   assert.match(page, /rankFilters/);
   assert.match(page, /visibleMembers/);
   assert.match(page, /tower-rank-filter/);

@@ -87,6 +87,6 @@ test("tour anchors are stable data attributes rather than CSS selectors", () => 
   assert.match(publicCrafts, /data-tour="publiccrafts-page"/);
   assert.match(craftCalculator, /data-tour="craftcalc-page"/);
   assert.match(sync, /data-tour="sync-page"/);
-  assert.match(userSettingsDialog, /data-tour="user-settings"/);
+  assert.match(userSettingsDialog, /dataTour="user-settings"/);
 });
 

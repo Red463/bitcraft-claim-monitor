@@ -82,9 +82,8 @@ test("App popup admin uses a compact list and modal editor", () => {
   assert.match(popupsSection, /popupEditorOpen/);
   assert.match(popupsSection, /openPopupEditor/);
   assert.match(popupsSection, /Save Popup/);
-  assert.match(popupsSection, /import \{ createPortal \} from "react-dom";/);
-  assert.match(popupsSection, /createPortal\(/);
-  assert.match(popupsSection, /document\.body/);
+  assert.match(popupsSection, /import \{ Dialog \} from "\.\.\/main\/Dialog";/);
+  assert.match(popupsSection, /<Dialog[\s\S]*className="admin-modal"[\s\S]*backdropClassName="admin-modal-backdrop"/);
   assert.match(popupsSection, /admin-modal-backdrop/);
   assert.match(popupsSection, /popup-admin-table/);
   assert.doesNotMatch(popupsSection, /popup-builder-grid/);
