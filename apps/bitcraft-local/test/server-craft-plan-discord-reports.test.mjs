@@ -139,11 +139,78 @@ test("craft planner Discord reports use the same gathered-input taxonomy as the 
   assert.equal(report.shortages[0].name, "Rough Wood Log");
 });
 
+test("Discord resolves legacy Leatherwork effort as Leatherworking progress", () => {
+  const leather = [{
+    name: "Basic Leather",
+    tag: "Leather",
+    section: "Carpentry",
+    required: 100,
+    available: 50,
+    missing: 50,
+    hasRecipeUsages: true,
+  }];
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: leather,
+    effortProgress: makeEffortProgress({ overall: 50, Leatherwork: 50 }),
+  });
+
+  assert.equal(report.state, "ready");
+  assert.deepEqual(report.professions.map(({ name, completion }) => [name, completion]), [["Leatherworking", 50]]);
+});
+
+test("Discord profession grouping respects explicit Needs Board section overrides", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: [{
+      name: "Rough Wood Log",
+      tag: "Wood Log",
+      section: "Forestry",
+      sectionOverride: "Farming",
+      required: 100,
+      available: 25,
+      missing: 75,
+      hasRecipeUsages: true,
+    }],
+    effortProgress: makeEffortProgress({ overall: 25, Farming: 25 }),
+  });
+
+  assert.deepEqual(report.professions.map(({ name, completion }) => [name, completion]), [["Farming", 25]]);
+});
+
+test("Discord reports become unavailable instead of showing false zero profession effort", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: [{ name: "Basic Leather", tag: "Leather", required: 10, available: 5, missing: 5, hasRecipeUsages: true }],
+    effortProgress: makeEffortProgress({ overall: 50, Carpentry: 50 }),
+  });
+
+  assert.equal(report.state, "unavailable");
+  assert.equal(report.overall, undefined);
+});
+
+test("Craft Planner Discord titles include the configured plan name", () => {
+  const plan = withEffort({
+    enabled: true,
+    config: { name: "  T6 Push  " },
+    materials,
+    targets: [{}],
+  });
+
+  assert.equal(buildCraftPlanDiscordReport(plan).title, "T6 Push - Crafting Progress");
+  assert.equal(buildCraftPlanDiscordReport(plan, "forestry").title, "T6 Push - Forestry Progress");
+  assert.equal(buildCraftPlanDiscordReport(plan, "leatherworking").title, "T6 Push - Leatherworking Progress");
+  assert.equal(buildCraftPlanDiscordReport({ enabled: false, config: { name: "T6 Push" } }).title, "T6 Push - Crafting Progress");
+});
+
 test("craft planner Discord reports ignore legacy planned output coverage", () => {
   const report = buildCraftPlanDiscordReport(withEffort({
     enabled: true,
     targets: [{}],
-    materials: [{ name: "Sturdy Gypsite", tag: "Gypsite", tier: 3, required: 78, available: 0, inProgress: 0, plannedOutput: 25.52, missing: 78, recipeUsages: [{}] }],
+    materials: [{ name: "Sturdy Gypsite", tag: "Gypsite", tier: 3, section: "Foraging", required: 78, available: 0, inProgress: 0, plannedOutput: 25.52, missing: 78, recipeUsages: [{}] }],
   }));
 
   assert.deepEqual(report.overall, { required: 78, covered: 0, completion: 0, completedItems: 0, totalItems: 1 });

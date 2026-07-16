@@ -21,10 +21,25 @@ export function normalizeCraftPlanReportProfession(value) {
   return professionAliases.get(key) ?? "";
 }
 
+function craftPlanReportTitle(plan = {}, profession = "") {
+  const base = profession ? `${profession} Progress` : "Crafting Progress";
+  const configuredName = String(plan?.config?.name ?? "").trim();
+  const compatibilityName = String(plan?.name ?? "").trim();
+  const planName = configuredName || compatibilityName;
+  return planName ? `${planName} - ${base}` : base;
+}
+
+function effortSectionForProfession(effort = {}, profession = "") {
+  const sections = effort?.sections && typeof effort.sections === "object" ? effort.sections : {};
+  if (sections[profession]?.completion != null) return sections[profession];
+  return Object.entries(sections).find(([name]) => normalizeCraftPlanReportProfession(name) === profession)?.[1];
+}
+
 function materialProfession(material = {}) {
   const taxonomy = plannerTaxonomyFor(material);
   if (taxonomy.hidden) return "";
-  return normalizeCraftPlanReportProfession(taxonomy.section ?? material.sectionOverride ?? material.section ?? material.profession ?? "");
+  const sectionOverride = String(material.sectionOverride ?? "").trim();
+  return normalizeCraftPlanReportProfession(sectionOverride || taxonomy.section || material.section || material.profession || "");
 }
 
 function summarize(materials) {
@@ -79,21 +94,22 @@ function relevantMaterials(plan = {}) {
 }
 
 export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "") {
-  if (!plan.enabled) return { state: "disabled", title: "Crafting Progress", message: "Craft Planner is disabled." };
-  if (!Array.isArray(plan.targets) || plan.targets.length === 0) return { state: "empty", title: "Crafting Progress", message: "Craft Planner has no configured targets." };
+  if (!plan.enabled) return { state: "disabled", title: craftPlanReportTitle(plan), message: "Craft Planner is disabled." };
+  if (!Array.isArray(plan.targets) || plan.targets.length === 0) return { state: "empty", title: craftPlanReportTitle(plan), message: "Craft Planner has no configured targets." };
   const profession = requestedProfession ? normalizeCraftPlanReportProfession(requestedProfession) : "";
-  if (requestedProfession && !profession) return { state: "unknown_profession", title: "Crafting Progress", message: "That profession is not available." };
+  if (requestedProfession && !profession) return { state: "unknown_profession", title: craftPlanReportTitle(plan), message: "That profession is not available." };
+  const title = craftPlanReportTitle(plan, profession);
 
   const all = relevantMaterials(plan);
   const selected = profession ? all.filter((material) => materialProfession(material) === profession) : all;
-  if (profession && selected.length === 0) return { state: "empty_profession", title: `${profession} Progress`, message: `${profession} has no requirements in the current plan.`, profession };
+  if (profession && selected.length === 0) return { state: "empty_profession", title, message: `${profession} has no requirements in the current plan.`, profession };
 
   const effort = plan.effortProgress?.fishingVariants?.ocean ?? plan.effortProgress;
-  const overallEffort = profession ? effort?.sections?.[profession] : effort?.overall;
+  const overallEffort = profession ? effortSectionForProfession(effort, profession) : effort?.overall;
   if (!effort || overallEffort?.completion == null) {
     return {
       state: "unavailable",
-      title: profession ? `${profession} Progress` : "Crafting Progress",
+      title,
       message: boundedEffortWarning(plan.effortProgress),
       ...(profession ? { profession } : {}),
     };
@@ -106,24 +122,34 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     if (!byProfession.has(name)) byProfession.set(name, []);
     byProfession.get(name).push(material);
   }
+  const professionEntries = [...byProfession.entries()].filter(([name]) => !profession || name === profession);
+  const unresolvedProfession = professionEntries.some(([name]) => effortSectionForProfession(effort, name)?.completion == null);
+  if (unresolvedProfession) {
+    return {
+      state: "unavailable",
+      title,
+      message: boundedEffortWarning(plan.effortProgress),
+      ...(profession ? { profession } : {}),
+    };
+  }
   const shortages = selected
     .map((material) => ({ name: String(material.name ?? material.label ?? material.itemName ?? "Unknown item").slice(0, 100), missing: Math.max(0, number(material.missing)), profession: materialProfession(material) }))
     .filter((item) => item.missing > 0)
     .sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name))
     .slice(0, profession ? 10 : 5);
   const overall = { ...summarize(selected), completion: number(overallEffort.completion) };
-  const professions = [...byProfession.entries()]
-    .map(([name, entries]) => ({ name, ...summarize(entries), completion: number(effort?.sections?.[name]?.completion) }))
+  const professions = professionEntries
+    .map(([name, entries]) => ({ name, ...summarize(entries), completion: number(effortSectionForProfession(effort, name).completion) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     state: shortages.length === 0 ? "complete" : "ready",
-    title: profession ? `${profession} Progress` : "Crafting Progress",
+    title,
     profession,
     overall,
-    professions: profession ? professions.filter((entry) => entry.name === profession) : professions,
+    professions,
     shortages,
-    ...(effort?.sections?.Fishing || plan.effortProgress?.fishingVariants?.ocean ? { fishingRoute: "ocean" } : {}),
+    ...(effortSectionForProfession(effort, "Fishing") || plan.effortProgress?.fishingVariants?.ocean ? { fishingRoute: "ocean" } : {}),
     calculatedAt: String(plan.totals?.calculatedAt ?? plan.calculatedAt ?? new Date().toISOString()),
   };
 }
