@@ -602,7 +602,6 @@ test("members page styles live in the members stylesheet", () => {
   const membersCss = readFileSync(membersCssUrl, "utf8");
   const membersSelectors = [
     ".members-page",
-    ".members-topbar",
     ".members-summary-grid",
     ".members-toolbar",
     ".members-roster-table",

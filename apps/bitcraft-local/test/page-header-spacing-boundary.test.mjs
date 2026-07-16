@@ -9,9 +9,12 @@ test("shared page headers own consistent spacing in the application stylesheet",
   const members = read("../src/styles/members.css");
   const dashboard = read("../src/styles/dashboard.css");
 
+  assert.match(app, /\.panel\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(app, /\.members-topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*gap:\s*16px;/s);
+  assert.match(app, /\.members-topbar\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(app, /\.members-topbar > \*\s*\{[^}]*min-width:\s*0;/s);
   assert.match(app, /\.members-topbar p\s*\{[^}]*margin:\s*8px 0 0;/s);
-  assert.match(app, /\.dashboard-top-meta\s*\{[^}]*column-gap:\s*12px;[^}]*row-gap:\s*8px;[^}]*flex-wrap:\s*wrap;/s);
+  assert.match(app, /\.dashboard-top-meta\s*\{[^}]*column-gap:\s*12px;[^}]*row-gap:\s*8px;[^}]*flex-wrap:\s*wrap;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
   assert.match(app, /@media \(max-width:\s*920px\)[\s\S]*\.members-topbar\s*\{\s*grid-template-columns:\s*1fr;\s*\}[\s\S]*\.dashboard-top-meta\s*\{\s*justify-content:\s*flex-start;\s*\}/s);
   assert.doesNotMatch(members, /^\.members-topbar(?:\s|\{|h2|p)/m);
   assert.doesNotMatch(dashboard, /^\.dashboard-top-meta\s*\{/m);

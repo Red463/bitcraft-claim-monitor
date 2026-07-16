@@ -273,7 +273,7 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
   opacity: 1;
 }
 .page-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; animation: page-enter .17s ease-out both; }
-.panel { padding: var(--shell-page-gutter); display: grid; gap: 20px; }
+.panel { padding: var(--shell-page-gutter); display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .app-footer { margin-top: auto; border-top: 1px solid rgba(108,123,145,.24); padding: 11px 16px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 100% 0, rgba(72,91,116,.1), transparent 34%), linear-gradient(180deg, rgba(8,12,18,.96), rgba(3,5,8,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 -12px 28px rgba(0,0,0,.24); }
 .app-footer .footer-links { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .app-footer .footer-copy { color: #d9e0ec; font-weight: 600; flex: 1; min-width: 220px; }
@@ -326,10 +326,11 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
 .page-header p { max-width: 72ch; margin: 8px 0 0; color: var(--muted); font-size: 15px; line-height: 1.4; text-wrap: pretty; }
 .page-header-aside { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .page-header-meta, .page-header-actions { min-width: 0; }
-.members-topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; }
+.members-topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; min-width: 0; }
+.members-topbar > * { min-width: 0; }
 .members-topbar h2 { margin: 0; color: #fff; font-size: clamp(28px, 2vw, 34px); line-height: 1; font-weight: 800; letter-spacing: -.02em; }
 .members-topbar p { margin: 8px 0 0; color: #b9c1ce; font-size: 16px; }
-.dashboard-top-meta { display: flex; align-items: center; justify-content: flex-end; column-gap: 12px; row-gap: 8px; flex-wrap: wrap; color: #c7ced9; font-size: 13px; }
+.dashboard-top-meta { display: flex; align-items: center; justify-content: flex-end; column-gap: 12px; row-gap: 8px; flex-wrap: wrap; min-width: 0; max-width: 100%; color: #c7ced9; font-size: 13px; }
 @media (max-width: 920px) {
   .members-topbar { grid-template-columns: 1fr; }
   .dashboard-top-meta { justify-content: flex-start; }
