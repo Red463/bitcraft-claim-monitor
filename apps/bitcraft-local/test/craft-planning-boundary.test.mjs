@@ -53,7 +53,11 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /sectionOverrides/);
   assert.match(page, /rowNameOverrides/);
   assert.match(page, /Row display name/);
-  assert.match(page, /Use API defaults/);
+  assert.match(page, /Planner default:/);
+  assert.match(page, /Use planner defaults/);
+  assert.doesNotMatch(page, /Use API defaults/);
+  assert.match(page, /section:\s*row\.sectionOverride\s*\?\?\s*row\.plannerSection/);
+  assert.doesNotMatch(page, /section:\s*row\.sectionOverride\s*\?\?\s*row\.apiSection/);
   assert.match(page, /Save row/);
   assert.match(page, /selectedNeed/);
   assert.match(page, /import \{ Dialog \} from "\.\.\/components\/main\/Dialog";/);

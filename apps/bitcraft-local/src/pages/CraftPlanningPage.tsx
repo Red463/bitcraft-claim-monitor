@@ -198,7 +198,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <header className="modal-header">
           <div>
             <h2>Edit {selectedSectionOverride.row.name}</h2>
-            <p>API default: {selectedSectionOverride.row.apiName} in {selectedSectionOverride.row.apiSection}. Overrides apply to the same row across craft goals.</p>
+            <p>Planner default: {selectedSectionOverride.row.apiName} in {selectedSectionOverride.row.plannerSection}. Overrides apply to the same row across craft goals.</p>
           </div>
           <button className="icon-button" type="button" onClick={() => setSelectedSectionOverride(null)} aria-label="Close row override"><X size={18} /></button>
         </header>
@@ -214,7 +214,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             </select>
           </label>
           <div className="modal-actions">
-            <button className="toolbar-button" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, null, null)}>Use API defaults</button>
+            <button className="toolbar-button" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, null, null)}>Use planner defaults</button>
             <button className="toolbar-button primary" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, selectedSectionOverride.section, selectedSectionOverride.name)}>Save row</button>
           </div>
         </div>
@@ -551,7 +551,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       </div> : null}</div></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
-                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.apiSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
+                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.plannerSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
                             {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), (cell) => void openNeedDetail(cell))}</td>)}
                           </tr>
                         ))}
