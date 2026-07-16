@@ -93,6 +93,7 @@ function newFishingRow(name: string): NeedRow {
     apiName: name,
     overrideKey: `tag:${name}`,
     apiSection: "Fishing",
+    plannerSection: "Fishing",
     sectionOverride: null,
     rowNameOverride: null,
     maxMissing: 0,

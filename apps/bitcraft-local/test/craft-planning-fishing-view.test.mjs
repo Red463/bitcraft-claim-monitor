@@ -124,6 +124,17 @@ test("applies the ocean route and replaces only the interchangeable fish row", (
   assert.equal(fishing.rows.find((row) => row.name === "Crushed Shells")?.cells.get("T1")?.missing, 6);
 });
 
+test("synthetic fishing rows retain the Fishing planner section", () => {
+  const board = makeBoard();
+  board[0].rows = board[0].rows.filter((row) => row.apiName !== "Ocean Fish");
+
+  const result = applyPersonalFishingView(board, makeRouteView(), "ocean");
+  const ocean = result.board[0].rows.find((row) => row.apiName === "Ocean Fish");
+
+  assert.equal(result.available, true);
+  assert.equal(ocean?.plannerSection, "Fishing");
+});
+
 test("personal fishing projection preserves authoritative stock source metadata", () => {
   const board = makeBoard();
   const oceanCell = board[0].rows.find((row) => row.apiName === "Ocean Fish").cells.get("T1");
