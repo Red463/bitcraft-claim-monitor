@@ -41,7 +41,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
   calculateCraftPlanEffortProgress,
@@ -2067,6 +2067,13 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
       workstationPresets,
     },
   };
+}
+
+function craftPlanAuditLabels(sources = {}) {
+  const storage = Object.fromEntries((sources.storage ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
+  const players = Object.fromEntries((sources.players ?? []).map((source) => [String(source.playerId), String(source.label ?? source.playerId)]));
+  const deployable = Object.fromEntries((sources.deployables ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
+  return { storage, player_inventory: players, player_crafts: players, deployable };
 }
 
 
@@ -9636,6 +9643,17 @@ const server = createServer(async (req, res) => {
           .catch((error) => console.warn(`Manual scheduled job ${key} failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 202, { ...craftPlanCatalogRefreshStatus(), result: { ok: true, key, started: true } });
       }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/audit") {
+        const limit = craftPlanAuditLimit(url.searchParams.get("limit"));
+        const rows = db.prepare(`
+          SELECT id, username, details_json, occurred_at
+          FROM admin_audit_log
+          WHERE action = ?
+          ORDER BY occurred_at DESC, id DESC
+          LIMIT ?
+        `).all("craft_plan.update", limit);
+        return send(res, 200, { auditLog: normalizeCraftPlanAuditRows(rows) });
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan") {
         return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
       }
@@ -9647,6 +9665,7 @@ const server = createServer(async (req, res) => {
         }
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/craft-plan") {
+        const previousConfig = storedCraftPlanConfig();
         const body = await readJson(req, BODY_LIMITS.settings);
         let submittedConfig = normalizeCraftPlanConfig(body);
         try {
@@ -9656,8 +9675,17 @@ const server = createServer(async (req, res) => {
           // Leave newly added building targets pending until a successful building discovery request.
         }
         const config = saveCraftPlanConfig(submittedConfig);
-        audit(user, "craft_plan.update", { targets: config.targets.length, players: config.sourceRules.playerIds.length, banks: config.sourceRules.bankPlayerIds.length, deployables: config.sourceRules.deployableContainerIds.length });
-        return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
+        const response = await craftPlanAdminResponse(getSettings().claimId);
+        const auditDetails = craftPlanAuditDetails(previousConfig, config, craftPlanAuditLabels(response.sources));
+        audit(user, "craft_plan.update", {
+          targets: config.targets.length,
+          players: config.sourceRules.playerIds.length,
+          banks: config.sourceRules.bankPlayerIds.length,
+          deployables: config.sourceRules.deployableContainerIds.length,
+          changes: auditDetails.changes,
+          otherSettingsChanged: auditDetails.otherSettingsChanged,
+        });
+        return send(res, 200, response);
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/access-control") {
         const body = await readJson(req, BODY_LIMITS.settings);
