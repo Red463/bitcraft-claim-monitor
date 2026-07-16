@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.36.1-beta.2] - 2026-07-16
+
+### Changed
+
+- Included the configured Craft Plan name in general and profession-specific Discord progress notification titles.
+
+### Fixed
+
+- Fixed Leatherworking progress incorrectly showing as 0% in Craft Planner Discord notifications.
+- Fixed the Needs Board row editor showing a conflicting raw API section instead of the planner section.
+
 ## [0.36.1-beta.1] - 2026-07-16
 
 ### Fixed
