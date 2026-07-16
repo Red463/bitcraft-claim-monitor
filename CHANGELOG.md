@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.36.0-beta.1] - 2026-07-16
+
+### Added
+
+- Added an Audit tab to Manage Plan showing who enabled or disabled plan visibility and tracked inventory sources.
+
+### Fixed
+
+- Fixed cramped and overlapping header spacing across application pages and mobile layouts.
+
 ## [0.35.1-beta.2] - 2026-07-15
 
 ### Fixed
