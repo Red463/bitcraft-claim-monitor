@@ -20,6 +20,21 @@ test("shared page headers own consistent spacing in the application stylesheet",
   assert.doesNotMatch(dashboard, /^\.dashboard-top-meta\s*\{/m);
 });
 
+test("shared header metadata groups keep their spacing without dashboard route CSS", () => {
+  const app = read("../src/styles.css");
+  const dashboard = read("../src/styles/dashboard.css");
+
+  assert.match(app, /\.dashboard-meta-cluster\s*\{[^}]*padding-right:\s*24px;[^}]*display:\s*grid;[^}]*gap:\s*8px;/s);
+  assert.match(app, /\.dashboard-settlement-pill\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*12px;/s);
+  assert.match(app, /\.dashboard-settlement-pill \.tier-badge\s*\{[^}]*min-width:\s*33px;/s);
+  assert.match(app, /\.dashboard-region-line,\s*\.dashboard-refresh-line\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*8px;/s);
+  assert.match(app, /\.dashboard-claim-link\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*12px;/s);
+  assert.doesNotMatch(dashboard, /^\.dashboard-meta-cluster\s*\{/m);
+  assert.doesNotMatch(dashboard, /^\.dashboard-settlement-pill\s*\{/m);
+  assert.doesNotMatch(dashboard, /^\.dashboard-region-line/m);
+  assert.doesNotMatch(dashboard, /^\.dashboard-claim-link/m);
+});
+
 test("distinct primary page headers follow the same spacing rhythm", () => {
   const dashboard = read("../src/styles/dashboard.css");
   const skills = read("../src/styles/skills.css");

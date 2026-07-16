@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.36.1-beta.1] - 2026-07-16
+
+### Fixed
+
+- Fixed header metadata values running together when pages such as Professions, Members, Research, and Activity were opened directly.
+
 ## [0.36.0-beta.1] - 2026-07-16
 
 ### Added

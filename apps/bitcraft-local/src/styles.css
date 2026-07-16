@@ -331,6 +331,92 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
 .members-topbar h2 { margin: 0; color: #fff; font-size: clamp(28px, 2vw, 34px); line-height: 1; font-weight: 800; letter-spacing: -.02em; }
 .members-topbar p { margin: 8px 0 0; color: #b9c1ce; font-size: 16px; }
 .dashboard-top-meta { display: flex; align-items: center; justify-content: flex-end; column-gap: 12px; row-gap: 8px; flex-wrap: wrap; min-width: 0; max-width: 100%; color: #c7ced9; font-size: 13px; }
+.dashboard-meta-cluster {
+  min-height: 48px;
+  padding-right: 24px;
+  border-right: 1px solid rgba(104,118,140,.16);
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+.dashboard-meta-cluster > span { display: inline-flex; align-items: center; gap: 8px; }
+.dashboard-region-line,
+.dashboard-refresh-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.dashboard-region-line { color: #e5e9f0; font-weight: 700; }
+.dashboard-region-line svg {
+  padding: 3px;
+  border: 1px solid rgba(110,128,155,.22);
+  border-radius: 999px;
+  background: rgba(9,13,19,.72);
+  color: #9faabd;
+  box-sizing: content-box;
+}
+.dashboard-region-badge {
+  margin-left: 5px;
+  padding: 3px 8px;
+  border: 1px solid rgba(130,143,166,.28);
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(35,42,54,.82), rgba(18,23,31,.88));
+  color: #f4f7fb;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 800;
+}
+.dashboard-refresh-line { color: #abb4c2; font-size: 12px; }
+.dashboard-top-meta .online-dot { width: 7px; height: 7px; margin: 0; box-shadow: 0 0 10px rgba(76,226,138,.55); }
+.dashboard-claim-link {
+  min-height: 48px;
+  max-width: 260px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #c4cbd7;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-claim-link .tier-badge {
+  min-width: 33px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 800;
+}
+.dashboard-settlement-pill {
+  min-height: 48px;
+  max-width: 300px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #c4cbd7;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-settlement-pill .tier-badge {
+  min-width: 33px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 800;
+}
 @media (max-width: 920px) {
   .members-topbar { grid-template-columns: 1fr; }
   .dashboard-top-meta { justify-content: flex-start; }
