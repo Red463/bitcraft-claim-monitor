@@ -44,8 +44,8 @@
 .skills-topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
-  align-items: center;
+  gap: 16px;
+  align-items: start;
 }
 .skills-topbar h2 {
   margin: 0;
@@ -55,7 +55,7 @@
   font-weight: 800;
   letter-spacing: -.02em;
 }
-.skills-topbar p { margin: 10px 0 0; color: #b9c1ce; font-size: 16px; }
+.skills-topbar p { margin: 8px 0 0; color: #b9c1ce; font-size: 16px; }
 .skills-page .dashboard-top-meta {
   min-height: 52px;
   display: flex;

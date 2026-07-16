@@ -5,21 +5,6 @@
   color: #f4f7fb;
 }
 .members-page > * { min-width: 0; }
-.members-topbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
-  align-items: start;
-}
-.members-topbar h2 {
-  margin: 0;
-  color: #fff;
-  font-size: clamp(28px, 2vw, 34px);
-  line-height: 1;
-  font-weight: 800;
-  letter-spacing: -.02em;
-}
-.members-topbar p { margin: 10px 0 0; color: #b9c1ce; font-size: 16px; }
 .members-page .online-summary {
   min-height: 40px;
   border-left: 1px solid rgba(255,255,255,.08);
@@ -213,6 +198,5 @@ border: 1px solid var(--border);
 @media (max-width: 900px) {
   .members-summary-grid,
   .equipment-grid { grid-template-columns: 1fr; }
-  .members-topbar { grid-template-columns: 1fr; }
   .members-page .online-summary { border-left: 0; border-top: 1px solid rgba(255,255,255,.08); padding: 12px 0 0; text-align: left; }
 }

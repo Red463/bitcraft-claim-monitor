@@ -14,9 +14,9 @@
 .page-title-row {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
   align-items: flex-start;
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .page-title-row h2 {
