@@ -1,6 +1,6 @@
 export const PLANNER_SECTION_ORDER = [
   "Carpentry", "Construction", "Cooking", "Farming", "Fishing", "Foraging", "Forestry", "Hunting",
-  "Leatherwork", "Masonry", "Mining", "Scholar", "Smithing", "Tailoring", "Taming", "Others",
+  "Leatherworking", "Masonry", "Mining", "Scholar", "Smithing", "Tailoring", "Taming", "Others",
 ];
 
 const ROWS = {
@@ -12,7 +12,7 @@ const ROWS = {
   Foraging: ["Berry", "Citric Berry", "Clay", "Gypsite", "Sand", "Flower", "Plant Fiber"],
   Forestry: ["Trunk", "Bark", "Resin", "Wood Log"],
   Hunting: ["Animal", "Animal Hair", "Raw Meat", "Raw Pelt"],
-  Leatherwork: ["Cleaned Pelt", "Hideworking Salt", "Tannin", "Tanned Pelt", "Leather", "Refined Leather", "Textile"],
+  Leatherworking: ["Cleaned Pelt", "Hideworking Salt", "Tannin", "Tanned Pelt", "Leather", "Refined Leather", "Textile"],
   Masonry: ["Potter's Mix", "Unfired Brick", "Brickworking Binding Ash", "Brick", "Refined Brick", "Glass", "Vial", "Pitch"],
   Mining: ["Chunk", "Braxite", "Pebbles", "Ore Chunk", "Ore"],
   Scholar: ["Ancient Hieroglyphs", "Firesand", "Leather Solvent", "Metal Solvent", "Parchment", "Pigment", "Ink", "Journal", "Cloth Research", "Leather Research", "Metal Research", "Stone Research", "Wood Research", "Codex", "Wood Polish"],

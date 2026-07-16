@@ -321,10 +321,27 @@ test("buildNeedsBoard follows Sync ordering for operational rows and sections", 
 
   assert.deepEqual(board.map((group) => [group.section, group.rows.map((row) => row.name)]), [
     ["Foraging", ["Berry", "Citric Berry"]],
-    ["Leatherwork", ["Leather"]],
+    ["Leatherworking", ["Leather"]],
     ["Tailoring", ["Cloth"]],
     ["Taming", ["Animal Food"]],
   ]);
+});
+
+test("buildNeedsBoard keeps planner and raw API sections distinct", () => {
+  const board = buildNeedsBoard([{
+    key: "items:3",
+    name: "Basic Leather",
+    tag: "Leather",
+    tier: 1,
+    section: "Carpentry",
+    apiSection: "Carpentry",
+    required: 10,
+    missing: 5,
+  }], []);
+
+  assert.equal(board[0].section, "Leatherworking");
+  assert.equal(board[0].rows[0].plannerSection, "Leatherworking");
+  assert.equal(board[0].rows[0].apiSection, "Carpentry");
 });
 
 test("buildNeedsBoard merges known cloth rows and Tailoring API fallbacks into one section", () => {
