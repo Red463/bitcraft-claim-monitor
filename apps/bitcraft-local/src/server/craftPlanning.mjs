@@ -169,6 +169,89 @@ export function normalizeCraftPlanConfig(input = {}) {
   };
 }
 
+const CRAFT_PLAN_AUDIT_SOURCE_RULES = [
+  ["storageContainerIds", "storage"],
+  ["playerIds", "player_inventory"],
+  ["craftPlayerIds", "player_crafts"],
+  ["deployableContainerIds", "deployable"],
+];
+
+const CRAFT_PLAN_AUDIT_CATEGORIES = new Set([
+  "public_board",
+  ...CRAFT_PLAN_AUDIT_SOURCE_RULES.map(([, category]) => category),
+]);
+
+const CRAFT_PLAN_OTHER_AUDIT_FIELDS = [
+  "name",
+  "targets",
+  "routeOverrides",
+  "sectionOverrides",
+  "rowNameOverrides",
+  "multipliers",
+];
+
+function auditLabel(labels, category, entityId) {
+  return String(labels?.[category]?.[entityId] ?? entityId);
+}
+
+export function craftPlanAuditDetails(previousInput = {}, nextInput = {}, labels = {}) {
+  const previous = normalizeCraftPlanConfig(previousInput);
+  const next = normalizeCraftPlanConfig(nextInput);
+  const changes = [];
+  if (previous.enabled !== next.enabled) {
+    changes.push({ category: "public_board", entityId: "public-board", label: "Public board", enabled: next.enabled });
+  }
+  for (const [ruleKey, category] of CRAFT_PLAN_AUDIT_SOURCE_RULES) {
+    const before = new Set(previous.sourceRules[ruleKey]);
+    const after = new Set(next.sourceRules[ruleKey]);
+    const ids = [...new Set([...before, ...after])].sort((left, right) => left.localeCompare(right));
+    for (const entityId of ids) {
+      if (before.has(entityId) === after.has(entityId)) continue;
+      changes.push({ category, entityId, label: auditLabel(labels, category, entityId), enabled: after.has(entityId) });
+    }
+  }
+  const otherSettingsChanged = CRAFT_PLAN_OTHER_AUDIT_FIELDS.some((field) => JSON.stringify(previous[field]) !== JSON.stringify(next[field]));
+  return { changes, otherSettingsChanged };
+}
+
+export function craftPlanAuditLimit(value) {
+  const parsed = Number(value ?? 100);
+  return Math.min(Math.max(Number.isFinite(parsed) ? Math.trunc(parsed) : 100, 1), 100);
+}
+
+export function normalizeCraftPlanAuditRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    let details = {};
+    try {
+      const parsed = JSON.parse(String(row?.details_json ?? "{}"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) details = parsed;
+    } catch {
+      details = {};
+    }
+    const changes = (Array.isArray(details.changes) ? details.changes : [])
+      .filter((change) => change && typeof change === "object" && CRAFT_PLAN_AUDIT_CATEGORIES.has(String(change.category ?? "")))
+      .map((change) => ({
+        category: String(change.category),
+        entityId: String(change.entityId ?? ""),
+        label: String(change.label ?? change.entityId ?? "Unknown source"),
+        enabled: Boolean(change.enabled),
+      }))
+      .filter((change) => change.entityId);
+    return {
+      id: Number(row?.id) || 0,
+      username: String(row?.username ?? "system"),
+      occurredAt: String(row?.occurred_at ?? ""),
+      changes,
+      otherSettingsChanged: Boolean(details.otherSettingsChanged),
+      summary: {
+        targets: Number(details.targets) || 0,
+        players: Number(details.players) || 0,
+        deployables: Number(details.deployables) || 0,
+      },
+    };
+  });
+}
+
 function claimBuildingRows(payload) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.buildings)) return payload.buildings;

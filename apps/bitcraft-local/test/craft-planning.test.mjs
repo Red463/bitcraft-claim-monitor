@@ -8,9 +8,12 @@ import {
   collectLocalCatalogCraftPlanDetails,
   compactCraftPlanResponse,
   computeCraftPlan,
+  craftPlanAuditDetails,
+  craftPlanAuditLimit,
   craftPlanDetailResponse,
   craftPlanCatalogTargets,
   normalizeCraftPlanConfig,
+  normalizeCraftPlanAuditRows,
   reconcileCraftPlanBuildingProgress,
   recipeKey,
 } from "../src/server/craftPlanning.mjs";
@@ -247,6 +250,95 @@ test("computeCraftPlan counts player bank sources as confirmed stock", () => {
   assert.deepEqual(material.sources.map((source) => [source.label, source.type, source.playerName, source.quantity]), [
     ["Town Bank — Remote Settlement", "Player bank", "Modular", 7],
   ]);
+});
+
+test("craftPlanAuditDetails records saved toggle additions and removals with labels", () => {
+  const previous = normalizeCraftPlanConfig({
+    enabled: true,
+    sourceRules: {
+      storageContainerIds: ["store-old"],
+      playerIds: ["player-1"],
+      craftPlayerIds: [],
+      deployableContainerIds: ["player-1:cart"],
+    },
+  });
+  const next = normalizeCraftPlanConfig({
+    enabled: false,
+    sourceRules: {
+      storageContainerIds: ["store-new"],
+      playerIds: ["player-1"],
+      craftPlayerIds: ["player-1"],
+      deployableContainerIds: [],
+    },
+  });
+
+  assert.deepEqual(craftPlanAuditDetails(previous, next, {
+    storage: { "store-old": "Old Warehouse", "store-new": "New Warehouse" },
+    player_inventory: { "player-1": "Alice" },
+    player_crafts: { "player-1": "Alice" },
+    deployable: { "player-1:cart": "Alice's Handcart" },
+  }), {
+    changes: [
+      { category: "public_board", entityId: "public-board", label: "Public board", enabled: false },
+      { category: "storage", entityId: "store-new", label: "New Warehouse", enabled: true },
+      { category: "storage", entityId: "store-old", label: "Old Warehouse", enabled: false },
+      { category: "player_crafts", entityId: "player-1", label: "Alice", enabled: true },
+      { category: "deployable", entityId: "player-1:cart", label: "Alice's Handcart", enabled: false },
+    ],
+    otherSettingsChanged: false,
+  });
+});
+
+test("craftPlanAuditDetails ignores source order and summarizes other editable fields", () => {
+  const previous = normalizeCraftPlanConfig({
+    name: "Plan A",
+    sourceRules: { storageContainerIds: ["2", "1"], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] },
+  });
+  const reordered = normalizeCraftPlanConfig({
+    name: "Plan B",
+    sourceRules: { storageContainerIds: ["1", "2"], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] },
+  });
+
+  assert.deepEqual(craftPlanAuditDetails(previous, reordered), {
+    changes: [],
+    otherSettingsChanged: true,
+  });
+});
+
+test("craftPlanAuditDetails falls back to the stored source identifier", () => {
+  const previous = normalizeCraftPlanConfig({ sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] } });
+  const next = normalizeCraftPlanConfig({ sourceRules: { storageContainerIds: ["missing-label"], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] } });
+  assert.equal(craftPlanAuditDetails(previous, next).changes[0].label, "missing-label");
+});
+
+test("craftPlanAuditLimit clamps requests to one through one hundred", () => {
+  assert.equal(craftPlanAuditLimit(undefined), 100);
+  assert.equal(craftPlanAuditLimit("0"), 1);
+  assert.equal(craftPlanAuditLimit("25"), 25);
+  assert.equal(craftPlanAuditLimit("999"), 100);
+});
+
+test("normalizeCraftPlanAuditRows tolerates malformed legacy details", () => {
+  const rows = normalizeCraftPlanAuditRows([
+    { id: 2, username: "Alice", occurred_at: "2026-07-16T10:00:00.000Z", details_json: JSON.stringify({ changes: [{ category: "storage", entityId: "1", label: "Warehouse", enabled: true }, { category: "unknown", entityId: "secret", label: "Ignored", enabled: true }], targets: 2, otherSettingsChanged: true }) },
+    { id: 1, username: "Legacy", occurred_at: "2026-07-15T10:00:00.000Z", details_json: "{" },
+  ]);
+  assert.deepEqual(rows[0], {
+    id: 2,
+    username: "Alice",
+    occurredAt: "2026-07-16T10:00:00.000Z",
+    changes: [{ category: "storage", entityId: "1", label: "Warehouse", enabled: true }],
+    otherSettingsChanged: true,
+    summary: { targets: 2, players: 0, deployables: 0 },
+  });
+  assert.deepEqual(rows[1], {
+    id: 1,
+    username: "Legacy",
+    occurredAt: "2026-07-15T10:00:00.000Z",
+    changes: [],
+    otherSettingsChanged: false,
+    summary: { targets: 0, players: 0, deployables: 0 },
+  });
 });
 
 test("chance metadata preserves normalized probability and expected yield", () => {
