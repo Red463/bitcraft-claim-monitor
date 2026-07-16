@@ -98,6 +98,30 @@
 .craft-plan-manager-body { position: relative; min-height: 0; overflow: auto; padding: 16px 18px 22px; background: rgba(3, 6, 10, 0.7); scrollbar-gutter: stable; }
 .craft-plan-manager-panel { display: grid; gap: 14px; }
 .craft-plan-manager-panel h3, .craft-plan-manager-panel h4 { margin: 0; }
+.craft-plan-audit-list { display: grid; gap: 10px; }
+.craft-plan-audit-entry { display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); gap: 14px; padding: 13px 14px; border: 1px solid rgba(139, 159, 184, 0.22); border-radius: 8px; background: rgba(8, 13, 20, 0.62); }
+.craft-plan-audit-meta { display: grid; align-content: start; gap: 4px; min-width: 0; }
+.craft-plan-audit-meta strong { color: var(--text); overflow-wrap: anywhere; }
+.craft-plan-audit-meta time { color: var(--muted); font-size: 0.78rem; }
+.craft-plan-audit-changes { display: grid; gap: 7px; min-width: 0; }
+.craft-plan-audit-change, .craft-plan-audit-other { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 7px 9px; border-radius: 7px; background: rgba(139, 159, 184, 0.07); }
+.craft-plan-audit-change > span, .craft-plan-audit-other > span { display: grid; gap: 2px; min-width: 0; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+.craft-plan-audit-change strong, .craft-plan-audit-other strong { color: var(--text); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.035em; }
+.craft-plan-audit-change em { border-radius: 999px; padding: 2px 7px; font-size: 0.72rem; font-style: normal; font-weight: 800; text-transform: uppercase; }
+.craft-plan-audit-change.is-enabled { color: var(--positive); background: rgba(78, 226, 138, 0.08); }
+.craft-plan-audit-change.is-enabled em { background: rgba(78, 226, 138, 0.14); color: var(--positive); }
+.craft-plan-audit-change.is-disabled { color: #ff8c89; background: rgba(239, 100, 97, 0.08); }
+.craft-plan-audit-change.is-disabled em { background: rgba(239, 100, 97, 0.14); color: #ff8c89; }
+.craft-plan-audit-other { grid-template-columns: auto minmax(0, 1fr); color: #65b7fa; }
+.craft-plan-audit-state { display: grid; place-items: center; gap: 7px; min-height: 150px; border: 1px dashed rgba(139, 159, 184, 0.26); border-radius: 8px; color: var(--muted); text-align: center; }
+.craft-plan-audit-state strong { color: var(--text); }
+.craft-plan-audit-state span { max-width: 480px; font-size: 0.82rem; }
+@media (max-width: 760px) {
+  .craft-plan-audit-entry { grid-template-columns: 1fr; gap: 10px; }
+  .craft-plan-audit-meta { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+  .craft-plan-audit-change { grid-template-columns: auto minmax(0, 1fr); }
+  .craft-plan-audit-change em { grid-column: 2; justify-self: start; }
+}
 .craft-plan-search-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .craft-plan-search-results button { justify-content: flex-start; }
 .craft-plan-target-search { width: min(520px, 100%); }

@@ -168,6 +168,22 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
 });
 
+test("Craft Planning manager exposes a lazy, resilient audit history tab", () => {
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(manager, /const TABS = \[[^\]]*"audit"/);
+  assert.match(manager, /<History size=\{15\} \/>/);
+  assert.match(manager, /\/admin\/craft-plan\/audit\?limit=100/);
+  assert.match(manager, /activeTab !== "audit" \|\| auditLoaded \|\| auditLoading/);
+  assert.match(manager, /Audit history/);
+  assert.match(manager, /No craft plan changes have been recorded yet\./);
+  assert.match(manager, /Retry audit/);
+  assert.match(manager, /Other plan settings changed/);
+  assert.match(manager, /enabled/);
+  assert.match(manager, /disabled/);
+  assert.match(manager, /setAuditLoaded\(false\)/);
+});
+
 test("Craft Planning manager renders presets as compact tier-only controls", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");

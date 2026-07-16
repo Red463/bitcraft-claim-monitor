@@ -106,6 +106,16 @@ test("Craft planning target editor keeps search and row actions visually grouped
   assert.match(css, /\.craft-plan-target-editor-actions \.compact-field input\s*\{[^}]*min-width:\s*0/);
 });
 
+test("Craft Planning audit history uses a compact responsive timeline", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.craft-plan-audit-list\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /\.craft-plan-audit-entry\s*\{[^}]*grid-template-columns:/);
+  assert.match(css, /\.craft-plan-audit-change\.is-enabled/);
+  assert.match(css, /\.craft-plan-audit-change\.is-disabled/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-audit-entry\s*\{[^}]*grid-template-columns:\s*1fr/);
+});
+
 test("Craft planning needs board row headings are allowed to wrap", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const rowHeader = css.match(/\.craft-plan-needs-table tbody th\s*\{([^}]+)\}/)?.[1] ?? "";

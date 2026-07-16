@@ -1,5 +1,5 @@
 import React from "react";
-import { ClipboardList, LoaderCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
+import { CheckCircle2, ClipboardList, History, LoaderCircle, MinusCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Dialog } from "../components/main/Dialog";
@@ -8,7 +8,7 @@ import { dateLabel, formatNumber, timeAgo } from "../utils/format";
 
 const LOCAL_API = "/api/local";
 const BITJITA_API = "/api/bitjita";
-const TABS = ["targets", "sources", "players", "routes", "buffers"] as const;
+const TABS = ["targets", "sources", "players", "routes", "buffers", "audit"] as const;
 type ManagerTab = typeof TABS[number];
 type ManagerOperation = "loading" | "refreshing" | "saving" | "preset" | null;
 
@@ -154,6 +154,14 @@ type CatalogRefreshStatus = {
   recentRuns: AnyRecord[];
 };
 
+const CRAFT_PLAN_AUDIT_CATEGORY_LABELS: Record<string, string> = {
+  public_board: "Visibility",
+  storage: "Settlement storage",
+  player_inventory: "Player inventory",
+  player_crafts: "Player crafts",
+  deployable: "Deployable",
+};
+
 function firstText(...values: unknown[]) {
   for (const value of values) {
     const text = String(value ?? "").trim();
@@ -203,6 +211,10 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [catalogStatus, setCatalogStatus] = React.useState<CatalogRefreshStatus | null>(null);
   const [catalogError, setCatalogError] = React.useState<string | null>(null);
   const [catalogBusy, setCatalogBusy] = React.useState(false);
+  const [auditRows, setAuditRows] = React.useState<AnyRecord[]>([]);
+  const [auditLoaded, setAuditLoaded] = React.useState(false);
+  const [auditLoading, setAuditLoading] = React.useState(false);
+  const [auditError, setAuditError] = React.useState<string | null>(null);
   const catalogPollingActive = Boolean(
     catalogStatus?.scheduledJob?.running
     || catalogStatus?.scheduledJob?.metadata?.complete === false
@@ -254,11 +266,39 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
   }, [csrfToken]);
 
+  const loadAudit = React.useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const result = await adminApi("/admin/craft-plan/audit?limit=100");
+      setAuditRows(Array.isArray(result.auditLog) ? result.auditLog : []);
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuditLoading(false);
+      setAuditLoaded(true);
+    }
+  }, [csrfToken]);
+
   React.useEffect(() => {
     if (!open) return;
     void load();
     void loadCatalogStatus();
   }, [open, load, loadCatalogStatus]);
+
+  React.useEffect(() => {
+    if (open) return;
+    setActiveTab("targets");
+    setAuditRows([]);
+    setAuditLoaded(false);
+    setAuditLoading(false);
+    setAuditError(null);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open || activeTab !== "audit" || auditLoaded || auditLoading) return;
+    void loadAudit();
+  }, [open, activeTab, auditLoaded, auditLoading, loadAudit]);
 
   React.useEffect(() => {
     if (!open || !catalogPollingActive) return;
@@ -382,6 +422,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       setState(result);
       setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
       setStatus("Craft plan saved.");
+      setAuditLoaded(false);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -494,6 +535,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             ["players", <Package size={15} />, "Players & Deployables"],
             ["routes", <Route size={15} />, "Routes"],
             ["buffers", <SlidersHorizontal size={15} />, "Buffers"],
+            ["audit", <History size={15} />, "Audit"],
           ].map(([id, icon, label]) => <button key={String(id)} type="button" className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id as ManagerTab)}>{icon}{label}</button>)}
         </nav>
         <div className="craft-plan-manager-body" aria-busy={busy || catalogBusy}>
@@ -544,6 +586,22 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><div className="split-header"><div><h3>Recipe routes in use</h3><p className="legend">These are the recipes currently pulled into the plan from your targets. Change a dropdown, then save the plan to recalculate needed materials.</p></div><small>{routeSteps.length ? `${routeSteps.length} recipe steps` : "No recipe steps"}</small></div>{routeSteps.length ? <div className="craft-plan-route-overview-list">{routeSteps.map((step: AnyRecord, index: number) => { const outputKey = routeOutputKey(step); const alternatives = Array.isArray(step.alternatives) ? step.alternatives : []; const selectedRecipeId = String(config.routeOverrides[outputKey] ?? step.selectedRecipeId ?? ""); return <article className="craft-plan-route-overview-card" key={`${outputKey}:${step.id ?? index}`}><div><strong><ItemLabel item={step.output ?? step} /></strong><small>{step.recipeName ?? "Selected recipe"}{step.buildingName ? ` - ${step.buildingName}` : ""}</small></div><label className="field compact-field"><span>Recipe</span><select value={selectedRecipeId} disabled={alternatives.length <= 1} onChange={(event) => setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [outputKey]: event.target.value } }))}>{alternatives.length ? alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{routeOptionLabel(recipe)}</option>) : <option value={selectedRecipeId}>{step.recipeName ?? "Default recipe"}</option>}</select></label>{config.routeOverrides[outputKey] ? <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[outputKey]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Reset</button> : <span className="legend">Default</span>}</article>; })}</div> : <p className="legend">Add targets and save the plan to see the recipe chain used for the current goals.</p>}</section> : null}
 
           {activeTab === "buffers" ? <section className="craft-plan-manager-panel"><h3>Chance-drop safety buffers</h3><p className="legend">Add or edit a buffer from an item’s “How to get this” panel. Buffers increase planned gathering only; they do not change API drop rates or counted stock.</p>{Object.entries(config.multipliers).length ? Object.entries(config.multipliers).map(([key, value]) => { const item = [...config.targets, ...(Array.isArray(state?.plan?.materials) ? state.plan.materials : [])].find((candidate) => itemKey(candidate) === key); return <div className="admin-craft-plan-row" key={key}><strong>{item?.name ?? key}</strong><span>{formatNumber((value.multiplier - 1) * 100, 1)}% extra{value.note ? ` - ${value.note}` : ""}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.multipliers }; delete next[key]; return { ...current, multipliers: next }; })}><Trash2 size={14} /> Remove</button></div>; }) : <p className="legend">No chance-drop safety buffers are configured.</p>}</section> : null}
+          {activeTab === "audit" ? <section className="craft-plan-manager-panel craft-plan-audit-panel">
+            <div className="split-header"><div><h3>Audit history</h3><p className="legend">Saved changes to plan visibility and counted inventory sources, newest first.</p></div>{auditError ? <button className="toolbar-button" type="button" onClick={() => void loadAudit()} disabled={auditLoading}><RefreshCw size={14} /> Retry audit</button> : null}</div>
+            {auditLoading ? <div className="craft-plan-audit-state" role="status"><LoaderCircle className="is-spinning" size={22} /><strong>Loading audit history</strong></div> : null}
+            {!auditLoading && auditError ? <div className="alert error">Audit history could not be loaded: {auditError}</div> : null}
+            {!auditLoading && !auditError && !auditRows.length ? <div className="craft-plan-audit-state"><History size={24} /><strong>No craft plan changes have been recorded yet.</strong><span>New saves will appear here when visibility or counted sources change.</span></div> : null}
+            {!auditLoading && !auditError && auditRows.length ? <div className="craft-plan-audit-list">
+              {auditRows.map((row) => <article className="craft-plan-audit-entry" key={row.id}>
+                <div className="craft-plan-audit-meta"><strong>{row.username || "system"}</strong><time dateTime={row.occurredAt} title={dateLabel(row.occurredAt)}>{timeAgo(row.occurredAt)}</time></div>
+                <div className="craft-plan-audit-changes">
+                  {Array.isArray(row.changes) && row.changes.length ? row.changes.map((change: AnyRecord, index: number) => <div className={`craft-plan-audit-change ${change.enabled ? "is-enabled" : "is-disabled"}`} key={`${change.category}:${change.entityId}:${index}`}>{change.enabled ? <CheckCircle2 size={16} /> : <MinusCircle size={16} />}<span><strong>{CRAFT_PLAN_AUDIT_CATEGORY_LABELS[String(change.category)] ?? "Tracked source"}</strong>{change.label}</span><em>{change.enabled ? "enabled" : "disabled"}</em></div>) : null}
+                  {row.otherSettingsChanged ? <div className="craft-plan-audit-other"><SlidersHorizontal size={16} /><span><strong>Other plan settings changed</strong>Targets, routes, names, sections, or buffers were updated.</span></div> : null}
+                  {(!Array.isArray(row.changes) || !row.changes.length) && !row.otherSettingsChanged ? <p className="legend">Legacy plan save; detailed changes were not recorded.</p> : null}
+                </div>
+              </article>)}
+            </div> : null}
+          </section> : null}
         </div>
     </Dialog>
   );
