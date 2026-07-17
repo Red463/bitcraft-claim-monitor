@@ -279,7 +279,7 @@ Before relying on routine deployment, perform one successful deployment and obse
 Use direct SSH only when GitHub Actions is unavailable. Obtain the exact current `main` SHA and run the root-owned updater:
 
 ```bash
-FULL_SHA="$(git -C /opt/bitcraft-claim-monitor/source rev-parse origin/main)"
+FULL_SHA="$(sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source rev-parse origin/main)"
 sudo /usr/local/bin/update-bitcraft-monitor --revision "$FULL_SHA"
 ```
 

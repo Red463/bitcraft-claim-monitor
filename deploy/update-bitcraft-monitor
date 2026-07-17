@@ -316,9 +316,9 @@ prune_releases() {
       continue
     fi
     run_logged "Removing old release $(basename "$path")" \
-      git -C "$SOURCE_DIR" worktree remove --force "$path"
+      sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree remove --force "$path"
   done
-  git -C "$SOURCE_DIR" worktree prune
+  sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree prune
 }
 
 print_summary() {

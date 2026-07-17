@@ -42,6 +42,8 @@ test("VPS updater retains three releases only after success", () => {
   assert.match(script, /KEEP_RELEASES="\$\{KEEP_RELEASES:-3\}"/);
   assert.match(script, /prune_releases\(\)/);
   assert.match(script, /deployment_succeeded=1[\s\S]*prune_releases "\$release_dir"/);
+  assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree remove --force/);
+  assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree prune/);
 });
 
 test("VPS updater waits for service and release health", () => {
