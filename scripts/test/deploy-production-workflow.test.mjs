@@ -25,6 +25,8 @@ test("workflow pins host identity and deploys the verified commit with system SS
   const workflow = readFileSync(workflowUrl, "utf8");
   assert.match(workflow, /VPS_KNOWN_HOSTS/);
   assert.match(workflow, /chmod 600.*known_hosts/);
+  assert.match(workflow, /StrictHostKeyChecking=yes/);
+  assert.match(workflow, /UserKnownHostsFile=.*known_hosts/);
   assert.match(workflow, /update-bitcraft-monitor --revision.*GITHUB_SHA/);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(workflow, /appleboy|ssh-action/);

@@ -59,6 +59,8 @@ jobs:
           DEPLOY_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -- "$VPS_DEPLOY_USER@$VPS_HOST" \
             "sudo /usr/local/bin/update-bitcraft-monitor --revision '$GITHUB_SHA'" 2>&1)"
           DEPLOY_STATUS=$?
