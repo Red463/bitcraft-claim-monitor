@@ -811,6 +811,16 @@ function catalogRouteId(recipe) {
   return /^[a-f0-9]{12}$/i.test(suffix) && recipe?.name ? String(recipe.name) : suffix;
 }
 
+function catalogPlannerRecipeName(repository, recipe) {
+  const rawName = String(recipe?.name ?? "Recipe").trim() || "Recipe";
+  const links = [...(recipe?.inputs ?? []), ...(recipe?.outputs ?? [])];
+  if (links.some((link) => normalizeKind(link.kind) === "cargo")) return rawName;
+  if (!/\b(pack|package|unpack|packed|transport|bundle|crate)\b/i.test(rawName)) return rawName;
+  const primary = recipe?.outputs?.find((output) => output.isPrimaryOutput) ?? recipe?.outputs?.[0];
+  const entity = primary?.outputKey ? repository.getEntity(primary.outputKey) : null;
+  return entity?.name ? `Craft ${entity.name}` : rawName;
+}
+
 function catalogStack(link = {}) {
   const kind = normalizeKind(link.kind);
   return {
@@ -833,11 +843,12 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
   const inputs = (recipe.inputs ?? []).map((input) => catalogStack(input));
   const inputDisplays = (recipe.inputs ?? []).map((input) => catalogLinkedDisplay(repository, input, warnings));
   const id = catalogRouteId(recipe);
+  const name = catalogPlannerRecipeName(repository, recipe);
   return {
     id,
     recipeKey: recipe.recipeKey,
     catalogRecipeKey: recipe.recipeKey,
-    name: String(recipe.name ?? (id || "Recipe")),
+    name,
     buildingName: recipe.stationName ?? null,
     stationName: recipe.stationName ?? null,
     skillName: recipe.skillName ?? null,

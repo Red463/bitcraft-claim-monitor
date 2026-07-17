@@ -2048,6 +2048,125 @@ test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from norm
   assert.equal(berry?.missing, 9);
 });
 
+test("local catalog recovers malformed Ferralith recipes and expands Refined Pyrelite to ore", (t) => {
+  const { db, repository } = createCatalogFixture(t);
+  const malformedFerralithDetail = {
+    item: { id: "1050001", itemType: 0, name: "Ferralith Ingot", tag: "Ingot", tier: 1 },
+    craftingRecipes: [{
+      id: "105009",
+      name: "Forge Exquisite Construction Materials Pack",
+      buildingName: "Rough Smithing Station",
+      craftedItemStacks: [{ item_id: "1050001", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "1050001", itemType: 0, name: "Exquisite Construction Materials Pack" }],
+      consumedItemStacks: [{ item_id: "1050003", item_type: "item", quantity: 1 }],
+      consumedItems: [{ id: "1050003", itemType: 0, name: "Molten Ferralith" }],
+      levelRequirements: [{ skill: { name: "Smithing" }, level: 1 }],
+    }],
+  };
+  const malformedRefinedFerralithDetail = {
+    item: { id: "181015293", itemType: 0, name: "Refined Ferralith Ingot", tag: "Refined Ingot", tier: 1 },
+    craftingRecipes: [{
+      id: "998040942",
+      name: "Refine Refined Ferralith Ingot",
+      buildingName: "Rough Smithing Station",
+      craftedItemStacks: [{ item_id: "181015293", item_type: "item", quantity: 1 }],
+      craftedItems: [{ id: "181015293", itemType: 0, name: "Refined Ferralith Ingot" }],
+      consumedItemStacks: [
+        { item_id: "1050001", item_type: "item", quantity: 5 },
+        { item_id: "1858615467", item_type: "item", quantity: 1 },
+      ],
+      consumedItems: [
+        { id: "1050001", itemType: 0, name: "Exquisite Construction Materials Pack" },
+        { id: "1858615467", itemType: 0, name: "Basic Metal Solvent" },
+      ],
+      levelRequirements: [{ skill: { name: "Smithing" }, level: 1 }],
+    }],
+  };
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "647670203", itemType: 0, name: "Refined Pyrelite Ingot", tag: "Refined Ingot", tier: 2 },
+      craftingRecipes: [{
+        id: "1810363538",
+        name: "Refine Refined Pyrelite Ingot",
+        craftedItemStacks: [{ item_id: "647670203", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "647670203", itemType: 0, name: "Refined Pyrelite Ingot", tag: "Refined Ingot", tier: 2 }],
+        consumedItemStacks: [
+          { item_id: "2050001", item_type: "item", quantity: 5 },
+          { item_id: "1537761415", item_type: "item", quantity: 1 },
+          { item_id: "181015293", item_type: "item", quantity: 2 },
+        ],
+        consumedItems: [
+          { id: "2050001", itemType: 0, name: "Pyrelite Ingot" },
+          { id: "1537761415", itemType: 0, name: "Simple Metal Solvent" },
+          { id: "181015293", itemType: 0, name: "Refined Ferralith Ingot" },
+        ],
+        levelRequirements: [{ skill: { name: "Smithing" }, level: 20 }],
+      }],
+    },
+    malformedRefinedFerralithDetail,
+    malformedFerralithDetail,
+    {
+      item: { id: "1050003", itemType: 0, name: "Molten Ferralith", tag: "Molten Ingot", tier: 1 },
+      craftingRecipes: [{
+        id: "105000",
+        name: "Smelt Molten Ferralith",
+        craftedItemStacks: [{ item_id: "1050003", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "1050003", itemType: 0, name: "Molten Ferralith" }],
+        consumedItemStacks: [{ item_id: "1040003", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "1040003", itemType: 0, name: "Ferralith Ore Concentrate" }],
+        levelRequirements: [{ skill: { name: "Smithing" }, level: 1 }],
+      }],
+    },
+    {
+      item: { id: "1040003", itemType: 0, name: "Ferralith Ore Concentrate", tag: "Ore Concentrate", tier: 1 },
+      extractionRecipes: [{
+        id: "103006",
+        name: "Extract Ferralith Ore Concentrate",
+        craftedItemStacks: [{ item_id: "1040003", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "1040003", itemType: 0, name: "Ferralith Ore Concentrate" }],
+        consumedItemStacks: [{ item_id: "1040002", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "1040002", itemType: 0, name: "Ferralith Ore Piece" }],
+        levelRequirements: [{ skill: { name: "Mining" }, level: 1 }],
+      }],
+    },
+    {
+      item: { id: "1040002", itemType: 0, name: "Ferralith Ore Piece", tag: "Ore Piece", tier: 1 },
+      extractionRecipes: [{
+        id: "103005",
+        name: "Extract Ferralith Ore Piece",
+        craftedItemStacks: [{ item_id: "1040002", item_type: "item", quantity: 4 }],
+        craftedItems: [{ id: "1040002", itemType: 0, name: "Ferralith Ore Piece" }],
+        consumedItemStacks: [{ item_id: "1001", item_type: "cargo", quantity: 1 }],
+        consumedItems: [{ id: "1001", itemType: 1, name: "Ferralith Ore Chunk" }],
+        levelRequirements: [{ skill: { name: "Mining" }, level: 1 }],
+      }],
+    },
+    { cargo: { id: "1001", itemType: 1, name: "Ferralith Ore Chunk", tag: "Ore Chunk", tier: 1 }, craftingRecipes: [] },
+    { item: { id: "2050001", itemType: 0, name: "Pyrelite Ingot", tag: "Ingot", tier: 2 }, craftingRecipes: [] },
+    { item: { id: "1537761415", itemType: 0, name: "Simple Metal Solvent", tag: "Metal Solvent", tier: 2 }, craftingRecipes: [] },
+    { item: { id: "1858615467", itemType: 0, name: "Basic Metal Solvent", tag: "Metal Solvent", tier: 1 }, craftingRecipes: [] },
+  ]);
+  db.prepare("UPDATE game_catalog_recipes SET name = ?, is_transport_route = 1 WHERE recipe_key = ?")
+    .run("Forge Exquisite Construction Materials Pack", "recipe:105009");
+  db.prepare("UPDATE game_catalog_recipes SET is_transport_route = 1 WHERE recipe_key IN (?, ?)")
+    .run("recipe:998040942", "recipe:105000");
+
+  const target = { id: "647670203", kind: "items", itemType: 0, name: "Refined Pyrelite Ingot", quantity: 196 };
+  const config = normalizeCraftPlanConfig({ enabled: true, targets: [target] });
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey, catalogWarnings: warnings });
+  const material = (key) => plan.materials.find((entry) => entry.key === key);
+
+  assert.equal(material("items:181015293")?.required, 392);
+  assert.equal(material("items:181015293")?.sourceRoutes[0]?.recipeName, "Refine Refined Ferralith Ingot");
+  assert.equal(material("items:1050001")?.required, 1960);
+  assert.equal(material("items:1050001")?.sourceRoutes[0]?.recipeName, "Craft Ferralith Ingot");
+  assert.equal(material("items:1050003")?.required, 1960);
+  assert.equal(material("items:1040003")?.required, 1960);
+  assert.equal(material("items:1040002")?.required, 3920);
+  assert.equal(material("cargo:1001")?.required, 980);
+});
+
 test("computeCraftPlan keeps direct overrides for non-gathering co-products", () => {
   const catalyst = { id: "7100", name: "Basic Catalyst", itemType: 0, tag: "Catalyst", tier: 1 };
   const batch = { id: "7200", name: "Basic Pigment Batch", itemType: 0, tag: "Pigment Output", tier: 1 };
