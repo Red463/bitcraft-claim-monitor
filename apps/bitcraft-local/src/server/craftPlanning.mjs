@@ -640,8 +640,10 @@ function routeAlternativesForUi(recipes) {
   return recipes;
 }
 
-function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
-  const detail = detailsByKey.get(recipeKey(target.kind, target.id));
+function sourceRoutesForTarget(target, detailsByKey, routeOverrides, gatheredItemKeys) {
+  const targetKey = recipeKey(target.kind, target.id);
+  if (gatheredItemKeys.has(targetKey)) return [];
+  const detail = detailsByKey.get(targetKey);
   if (!detail) return [];
   const normalizedTarget = mergeDetailTarget(detail, target);
   const key = recipeKey(normalizedTarget.kind, normalizedTarget.id);
@@ -684,7 +686,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides) {
   }];
 }
 
-function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map()) {
+function buildRequirementMapPass(targets, detailsByKey, routeOverrides, gatheredItemKeys = new Set(), multipliers = {}, effectiveStockTotals = new Map()) {
   const required = new Map();
   const steps = [];
   const warnings = [];
@@ -695,12 +697,19 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipli
     const key = recipeKey(target.kind, target.id);
     const detail = detailsByKey.get(key);
     if (stack.includes(key)) return;
+    const normalizedTarget = detail ? mergeDetailTarget(detail, target) : target;
+    if (gatheredItemKeys.has(key)) {
+      const availableSupply = remainingSupply.get(key) ?? 0;
+      const allocatedSupply = Math.min(quantity, availableSupply);
+      remainingSupply.set(key, availableSupply - allocatedSupply);
+      addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, parentRecipe));
+      return;
+    }
     if (!detail || stack.length > 14) {
       addRequired(required, target, quantity, sectionForMaterial(target, parentRecipe));
       if (!detail) warnings.push(`No recipe data was available for ${target.name}; it was treated as a source material.`);
       return;
     }
-    const normalizedTarget = mergeDetailTarget(detail, target);
     const availableSupply = remainingSupply.get(key) ?? 0;
     const allocatedSupply = Math.min(quantity, availableSupply);
     remainingSupply.set(key, availableSupply - allocatedSupply);
@@ -792,8 +801,8 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipli
   return { required, steps, usages, warnings: [...new Set(warnings)] };
 }
 
-function buildRequirementMap(targets, detailsByKey, routeOverrides, multipliers = {}, effectiveStockTotals = new Map()) {
-  return buildRequirementMapPass(targets, detailsByKey, routeOverrides, multipliers, effectiveStockTotals);
+function buildRequirementMap(targets, detailsByKey, routeOverrides, gatheredItemKeys = new Set(), multipliers = {}, effectiveStockTotals = new Map()) {
+  return buildRequirementMapPass(targets, detailsByKey, routeOverrides, gatheredItemKeys, multipliers, effectiveStockTotals);
 }
 
 
@@ -933,12 +942,13 @@ function localCatalogDetail(repository, key, fallbackTarget, byproductRows, warn
   };
 }
 
-export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 64) {
+export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 64, gatheredItemKeys = []) {
   const detailsByKey = new Map();
   const warnings = new Set();
   const byproductsByProducerKey = new Map();
   const visiting = new Set();
   const completed = new Set();
+  const gatheredKeys = new Set(gatheredItemKeys);
 
   function addByproductProducer(row) {
     if (!row?.producerKey) return;
@@ -967,6 +977,11 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
       return;
     }
     if (visiting.has(key)) return;
+    if (gatheredKeys.has(key)) {
+      setDetail(key, target);
+      completed.add(key);
+      return;
+    }
 
     const byproductProducers = repository.listByproductProducersForOutput(key);
     for (const row of byproductProducers) addByproductProducer(row);
@@ -1222,10 +1237,10 @@ function normalizeFishingAlternatives(recipes, oil, detailsByKey, availableTotal
   return routes;
 }
 
-export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals, multipliers = {}, warnings }) {
+export function buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals, gatheredItemKeys = new Set(), multipliers = {}, warnings }) {
   const fishOilMaterials = (materials ?? []).filter((item) => String(item?.tag ?? "").toLowerCase().includes("fish oil"));
   return { tiers: fishOilMaterials.map((oil) => {
-    const alternatives = recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
+    const alternatives = gatheredItemKeys.has(oil.key) ? [] : recipesForTarget(detailsByKey.get(oil.key), oil, detailsByKey);
     const routes = normalizeFishingAlternatives(alternatives, oil, detailsByKey, availableTotals, activeCraftTotals, warnings);
     const verifiedRoutes = Object.values(routes).filter((route) => route.available);
     const activeOil = activeCraftTotals.get(oil.key);
@@ -1327,8 +1342,9 @@ export function computeCraftPlan({
     const current = effectiveStockTotals.get(key) ?? { total: 0, sources: [] };
     effectiveStockTotals.set(key, { ...current, total: current.total + active.guaranteedTotal, sources: current.sources });
   }
+  const gatheredItemKeys = new Set(normalized.gatheredItemKeys);
   const calculationTargets = expandedPlanTargets(normalized.targets, normalized.buildingProgress);
-  const { required, steps, usages, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, normalized.multipliers, effectiveStockTotals);
+  const { required, steps, usages, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, gatheredItemKeys, normalized.multipliers, effectiveStockTotals);
 
   const targetKeys = new Set(normalized.targets.filter((target) => target.kind !== "building").map((target) => recipeKey(target.kind, target.id)));
   for (const target of calculationTargets) {
@@ -1337,7 +1353,7 @@ export function computeCraftPlan({
 
   const materials = [...required.values()].map((item) => {
     const enrichedItem = enrichDisplayFromDetails(item, detailsByKey);
-    const sourceRoutes = sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides);
+    const sourceRoutes = sourceRoutesForTarget({ ...item, ...enrichedItem }, detailsByKey, normalized.routeOverrides, gatheredItemKeys);
     const probabilistic = sourceRoutes.some((route) => route.isProbabilistic === true);
     const multiplier = probabilistic ? normalized.multipliers[item.key]?.multiplier ?? 1 : 1;
     const bufferedRequired = item.required;
@@ -1364,6 +1380,7 @@ export function computeCraftPlan({
       rowNameOverride,
       section: sectionOverride || apiSection,
       isTarget: targetKeys.has(item.key),
+      isGatheredOverride: gatheredItemKeys.has(item.key),
       multiplier,
       multiplierNote: normalized.multipliers[item.key]?.note ?? "",
       bufferedRequired,
@@ -1400,7 +1417,7 @@ export function computeCraftPlan({
   });
 
   const personalViews = {
-    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals: countedActiveTotals, multipliers: normalized.multipliers, warnings }),
+    fishing: buildPersonalFishingView({ materials, detailsByKey, availableTotals, activeCraftTotals: countedActiveTotals, gatheredItemKeys, multipliers: normalized.multipliers, warnings }),
   };
 
   return {

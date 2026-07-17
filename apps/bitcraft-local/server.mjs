@@ -2318,7 +2318,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     // Keep prior baselines and observed completions when BitJita building discovery is unavailable.
   }
   const catalogTargets = craftPlanCatalogTargets(config);
-  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides);
+  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides, 64, config.gatheredItemKeys);
   const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),

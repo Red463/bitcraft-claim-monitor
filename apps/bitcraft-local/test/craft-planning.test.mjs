@@ -1264,6 +1264,126 @@ test("computeCraftPlan uses an unpack route when it is the only valid option wit
   assert.equal(plan.steps.some((step) => step.selectedRecipeId === "pack-berry"), false);
 });
 
+test("computeCraftPlan keeps downstream consumers but stops producer expansion at gathered items", () => {
+  const plannedPack = { id: "500", kind: "cargo", itemType: 1, name: "Scholar Supply Pack", quantity: 1 };
+  const carvings = { id: "600", kind: "items", itemType: 0, name: "Rough Stone Carvings", tier: 1 };
+  const misleadingPack = { id: "601", kind: "cargo", itemType: 1, name: "Stone Carvings Package", tier: 1 };
+  const detailsByKey = new Map([
+    [recipeKey("cargo", "500"), {
+      cargo: plannedPack,
+      craftingRecipes: [{
+        id: "craft-scholar-pack",
+        name: "Craft Scholar Supply Pack",
+        craftedItemStacks: [{ item_id: "500", item_type: "cargo", quantity: 1 }],
+        consumedItemStacks: [{ item_id: "600", item_type: "item", quantity: 5 }],
+        consumedItems: [carvings],
+        levelRequirements: [{ skill: { name: "Scholar" }, level: 1 }],
+      }],
+    }],
+    [recipeKey("items", "600"), {
+      item: carvings,
+      craftingRecipes: [{
+        id: "unpack-carvings",
+        name: "Unpack Stone Carvings Package",
+        isTransportRoute: true,
+        craftedItemStacks: [{ item_id: "600", item_type: "item", quantity: 5 }],
+        consumedItemStacks: [{ item_id: "601", item_type: "cargo", quantity: 1 }],
+        consumedItems: [misleadingPack],
+      }],
+    }],
+    [recipeKey("cargo", "601"), { cargo: misleadingPack, craftingRecipes: [] }],
+  ]);
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [plannedPack],
+    gatheredItemKeys: [recipeKey("items", "600")],
+    routeOverrides: { [recipeKey("items", "600")]: "unpack-carvings" },
+    multipliers: { [recipeKey("items", "600")]: { multiplier: 1.5, note: "retained" } },
+  });
+
+  const plan = computeCraftPlan({
+    config,
+    detailsByKey,
+    storageSources: [{ sourceId: "store-1", label: "Scholar chest", items: [{ ...carvings, quantity: 2 }] }],
+  });
+  const carvingMaterial = plan.materials.find((item) => item.key === recipeKey("items", "600"));
+
+  assert.deepEqual(plan.steps.map((step) => step.selectedRecipeId), ["craft-scholar-pack"]);
+  assert.equal(carvingMaterial.required, 5);
+  assert.equal(carvingMaterial.available, 2);
+  assert.equal(carvingMaterial.missing, 3);
+  assert.equal(carvingMaterial.isGatheredOverride, true);
+  assert.deepEqual(carvingMaterial.sourceRoutes, []);
+  assert.equal(carvingMaterial.recipeUsages[0].output.name, "Scholar Supply Pack");
+  assert.equal(plan.materials.some((item) => item.key === recipeKey("cargo", "601")), false);
+  assert.equal(plan.config.routeOverrides[recipeKey("items", "600")], "unpack-carvings");
+  assert.equal(plan.config.multipliers[recipeKey("items", "600")].multiplier, 1.5);
+});
+
+test("computeCraftPlan retains independently targeted packages when an input is gathered", () => {
+  const carvingsKey = recipeKey("items", "600");
+  const packageKey = recipeKey("cargo", "601");
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [
+        { id: "600", kind: "items", itemType: 0, name: "Rough Stone Carvings", quantity: 5 },
+        { id: "601", kind: "cargo", itemType: 1, name: "Stone Carvings Package", quantity: 1 },
+      ],
+      gatheredItemKeys: [carvingsKey],
+    }),
+    detailsByKey: new Map([
+      [carvingsKey, { item: { id: "600", itemType: 0, name: "Rough Stone Carvings" }, craftingRecipes: [] }],
+      [packageKey, { cargo: { id: "601", itemType: 1, name: "Stone Carvings Package" }, craftingRecipes: [] }],
+    ]),
+  });
+
+  assert.equal(plan.materials.some((item) => item.key === carvingsKey), true);
+  assert.equal(plan.materials.some((item) => item.key === packageKey), true);
+});
+
+test("computeCraftPlan restores retained routes after a gathered override is removed", () => {
+  const key = recipeKey("items", "600");
+  const detailsByKey = new Map([[key, {
+    item: { id: "600", itemType: 0, name: "Rough Stone Carvings" },
+    craftingRecipes: [{
+      id: "unpack-carvings",
+      name: "Unpack Stone Carvings Package",
+      craftedItemStacks: [{ item_id: "600", item_type: "item", quantity: 5 }],
+      consumedItemStacks: [{ item_id: "601", item_type: "cargo", quantity: 1 }],
+      consumedItems: [{ id: "601", itemType: 1, name: "Stone Carvings Package" }],
+    }],
+  }]]);
+  const shared = {
+    enabled: true,
+    targets: [{ id: "600", kind: "items", itemType: 0, name: "Rough Stone Carvings", quantity: 5 }],
+    routeOverrides: { [key]: "unpack-carvings" },
+  };
+
+  const gathered = computeCraftPlan({ config: normalizeCraftPlanConfig({ ...shared, gatheredItemKeys: [key] }), detailsByKey });
+  const restored = computeCraftPlan({ config: normalizeCraftPlanConfig({ ...shared, gatheredItemKeys: [] }), detailsByKey });
+
+  assert.equal(gathered.steps.length, 0);
+  assert.equal(restored.steps[0].selectedRecipeId, "unpack-carvings");
+  assert.equal(restored.materials.some((item) => item.key === recipeKey("cargo", "601")), true);
+});
+
+test("computeCraftPlan does not reintroduce personal fishing routes for gathered fish oil", () => {
+  const key = recipeKey("items", "1900");
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "1900", kind: "items", itemType: 0, name: "Basic Fish Oil", quantity: 10 }],
+      gatheredItemKeys: [key],
+    }),
+    detailsByKey: fishingPreferenceDetails(),
+  });
+  const tier = plan.personalViews.fishing.tiers[0];
+
+  assert.equal(tier.remainingOil, 10);
+  assert.equal(Object.values(tier.routes).some((route) => route.available), false);
+});
+
 test("computeCraftPlan stops cyclic production routes at the nearest source item", () => {
   const plantDetail = {
     item: { id: "300", name: "Basic Wispweave Plant", itemType: 0, tag: "Filament Plant", tier: 1 },
@@ -2111,6 +2231,44 @@ test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from norm
   assert.equal(berry?.available, 1);
   assert.equal(berry?.inProgress, 2);
   assert.equal(berry?.missing, 9);
+});
+
+test("collectLocalCatalogCraftPlanDetails stops below gathered catalog items", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "700", itemType: 0, name: "Scholar Pack" },
+      craftingRecipes: [{
+        id: "craft-pack",
+        craftedItemStacks: [{ item_id: "700", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [{ item_id: "600", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "600", itemType: 0, name: "Stone Carvings" }],
+      }],
+    },
+    {
+      item: { id: "600", itemType: 0, name: "Stone Carvings" },
+      craftingRecipes: [{
+        id: "unpack-carvings",
+        craftedItemStacks: [{ item_id: "600", item_type: "item", quantity: 2 }],
+        consumedItemStacks: [{ item_id: "601", item_type: "cargo", quantity: 1 }],
+        consumedItems: [{ id: "601", itemType: 1, name: "Stone Carvings Package" }],
+      }],
+    },
+    { cargo: { id: "601", itemType: 1, name: "Stone Carvings Package" }, craftingRecipes: [] },
+  ]);
+
+  const result = collectLocalCatalogCraftPlanDetails(
+    repository,
+    [{ id: "700", kind: "items", itemType: 0, name: "Scholar Pack", quantity: 1 }],
+    {},
+    64,
+    [recipeKey("items", "600")],
+  );
+
+  assert.equal(result.detailsByKey.has(recipeKey("items", "700")), true);
+  assert.equal(result.detailsByKey.has(recipeKey("items", "600")), true);
+  assert.equal(result.detailsByKey.has(recipeKey("cargo", "601")), false);
+  assert.deepEqual(result.warnings, []);
 });
 
 test("local catalog recovers malformed Ferralith recipes and expands Refined Pyrelite to ore", (t) => {
