@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.37.0-beta.1] - 2026-07-17
+
+### Added
+
+- Added an admin-controlled gathered-item override to Craft Planner cell details, preserving required stock and downstream uses while stopping misleading producer and package expansion.
+- Added gathered-item enable and disable events to the Manage Plan audit history.
+- Added a Map resource-finder link for items marked as gathered.
+
 ## [0.36.1-beta.4] - 2026-07-17
 
 ### Fixed
