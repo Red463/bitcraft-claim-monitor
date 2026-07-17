@@ -15,6 +15,21 @@ test("Craft Planning page is registered in navigation, access control, and AppSh
   assert.match(appShell, /planning: <CraftPlanningPage/);
 });
 
+test("Craft Planning separates approximate requirements from estimated active output", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const cellBody = page.match(/function needCellNode[\s\S]+?function recipeOptionLabel/)?.[0] ?? "";
+
+  assert.match(page, /EqualApproximately/);
+  assert.match(cellBody, /aria-label="Approximate requirement"/);
+  assert.match(cellBody, /aria-label="Estimated active output; not counted toward progress"/);
+  assert.match(cellBody, /craft-plan-cell-indicators/);
+  assert.doesNotMatch(cellBody, /craft-plan-estimated-marker/);
+  assert.doesNotMatch(cellBody, />~<\/span>/);
+  assert.match(page, />Approximate requirement<\/span>/);
+  assert.match(page, />Estimated active output; not counted<\/span>/);
+  assert.doesNotMatch(page, />Estimated; not counted<\/span>/);
+});
+
 test("Craft Planning page renders read-only plan sections with an admin-only manager entry", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
 

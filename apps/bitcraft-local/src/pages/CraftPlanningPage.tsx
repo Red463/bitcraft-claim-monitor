@@ -1,6 +1,6 @@
 import React from "react";
 import "../styles/craft-planning.css";
-import { AlertTriangle, ClipboardList, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
+import { AlertTriangle, ClipboardList, EqualApproximately, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
@@ -41,17 +41,21 @@ function completionTone(value: number) {
 function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => void) {
   if (!cell) return <span className="craft-plan-need-empty">-</span>;
   const satisfied = cell.missing <= 0;
-  const hasActive = cell.guaranteedInProgress > 0;
-  const hasEstimated = cell.estimatedInProgress > 0;
-  const estimatedRequirement = cell.items.some((item) => item.estimatedRequirement === true);
+  const hasGuaranteedActive = cell.guaranteedInProgress > 0;
+  const hasEstimatedActive = cell.estimatedInProgress > 0;
+  const hasApproximateRequirement = cell.items.some((item) => item.estimatedRequirement === true);
+  const hasIndicators = hasGuaranteedActive || hasEstimatedActive || hasApproximateRequirement;
   const supplied = cell.available + cell.guaranteedInProgress;
   const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && supplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasActive ? " has-active" : ""}${hasEstimated || estimatedRequirement ? " has-estimate" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.guaranteedInProgress)} guaranteed active output${hasEstimated ? `, ${quantity(cell.estimatedInProgress)} estimated active output (not counted toward progress)` : ""}, ${quantity(cell.required)} required${estimatedRequirement ? "; requirement estimated from expected processing yield" : ""}`} onClick={() => onSelect(cell)}>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasGuaranteedActive ? " has-active" : ""}${hasIndicators ? " has-indicators" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.guaranteedInProgress)} guaranteed active output${hasEstimatedActive ? `, ${quantity(cell.estimatedInProgress)} estimated active output (not counted toward progress)` : ""}, ${quantity(cell.required)} required${hasApproximateRequirement ? "; requirement estimated from expected processing yield" : ""}`} onClick={() => onSelect(cell)}>
       <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
       <small>{quantity(supplied)} / {quantity(cell.required)}</small>
-      {hasActive ? <Factory size={11} aria-label="Actively being crafted" /> : null}
-      {hasEstimated || estimatedRequirement ? <span className="craft-plan-estimated-marker" aria-label="Estimated; not counted toward progress">~</span> : null}
+      {hasIndicators ? <span className="craft-plan-cell-indicators">
+        {hasGuaranteedActive ? <Factory className="is-guaranteed" size={11} role="img" aria-label="Actively being crafted" /> : null}
+        {hasEstimatedActive ? <Factory className="is-estimated" size={11} role="img" aria-label="Estimated active output; not counted toward progress" /> : null}
+        {hasApproximateRequirement ? <EqualApproximately className="is-approximate" size={12} role="img" aria-label="Approximate requirement" /> : null}
+      </span> : null}
     </button>
   );
 }
@@ -594,7 +598,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
               })}
             </div> : null}
-            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered by confirmed supply</span><span className="short">More needed</span><span className="active">Guaranteed craft counted</span><span className="estimate">Estimated; not counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
+            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered by confirmed supply</span><span className="short">More needed</span><span className="active icon-state"><Factory size={11} aria-hidden="true" />Guaranteed craft counted</span><span className="approximate icon-state"><EqualApproximately size={12} aria-hidden="true" />Approximate requirement</span><span className="estimated-output icon-state"><Factory size={11} aria-hidden="true" />Estimated active output; not counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll" tabIndex={0} aria-label="Craft plan needs board">
               <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
                 <table className="craft-plan-needs-table">
