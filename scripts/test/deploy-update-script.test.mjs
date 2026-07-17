@@ -7,11 +7,44 @@ const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8")
 const deployment = readFileSync(new URL("../../DEPLOYMENT.md", import.meta.url), "utf8");
 const gitAttributes = readFileSync(new URL("../../.gitattributes", import.meta.url), "utf8");
 
-test("VPS update script reports code changes and waits for service health", () => {
-  assert.match(script, /git -C "\$APP_DIR" rev-parse --short HEAD/);
-  assert.match(script, /Previous revision/);
-  assert.match(script, /Current revision/);
-  assert.match(script, /git -C "\$APP_DIR" diff --stat/);
+test("VPS updater validates an exact main-branch revision before preparing a release", () => {
+  assert.match(script, /--revision/);
+  assert.match(script, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(script, /merge-base --is-ancestor/);
+  assert.match(script, /origin\/main/);
+  assert.match(script, /flock/);
+});
+
+test("VPS updater builds an immutable release before cutover", () => {
+  assert.match(script, /SOURCE_DIR="\$\{SOURCE_DIR:-\$APP_ROOT\/source\}"/);
+  assert.match(script, /RELEASES_DIR="\$\{RELEASES_DIR:-\$APP_ROOT\/releases\}"/);
+  assert.match(script, /CURRENT_LINK="\$\{CURRENT_LINK:-\$APP_ROOT\/current\}"/);
+  assert.match(script, /git[^\n]+worktree add --detach/);
+  assert.match(
+    script,
+    /prepare_release "\$release_dir"[\s\S]*validate_release_config "\$release_dir"[\s\S]*create_predeploy_backup[\s\S]*atomic_switch "\$release_dir"/,
+  );
+  assert.doesNotMatch(script, /log "Stopping services"[\s\S]*Fetching latest code/);
+});
+
+test("VPS updater validates cutover and restores the previous release on failure", () => {
+  assert.match(script, /expected_version/);
+  assert.match(script, /rollback_release\(\)/);
+  assert.match(script, /atomic_switch "\$previous_release"/);
+  assert.match(script, /sqlite3[^\n]+\.backup/);
+  assert.match(
+    script,
+    /restart_service "\$WEB_SERVICE"[\s\S]*wait_for_health "\$expected_version"[\s\S]*restart_service "\$WORKER_SERVICE"/,
+  );
+});
+
+test("VPS updater retains three releases only after success", () => {
+  assert.match(script, /KEEP_RELEASES="\$\{KEEP_RELEASES:-3\}"/);
+  assert.match(script, /prune_releases\(\)/);
+  assert.match(script, /deployment_succeeded=1[\s\S]*prune_releases "\$release_dir"/);
+});
+
+test("VPS updater waits for service and release health", () => {
   assert.match(script, /wait_for_service\(\)/);
   assert.match(script, /wait_for_health\(\)/);
   assert.match(script, /curl -fsS --connect-timeout 1 --max-time 10 "\$HEALTH_URL"/);
@@ -21,12 +54,12 @@ test("VPS update script reports code changes and waits for service health", () =
 
 test("VPS update script keeps successful output compact while logging details", () => {
   assert.match(script, /LOG_FILE="\$\{LOG_FILE:-\/tmp\/bitcraft-claim-monitor-update-\$\(date \+%Y%m%d-%H%M%S\)\.log\}"/);
-  assert.match(script, /Full log: \$LOG_FILE/);
+  assert.match(script, /printf "Full log: %s\\n" "\$LOG_FILE"/);
   assert.match(script, /run_logged\(\)/);
   assert.match(script, /run_logged "Installing dependencies"/);
   assert.match(script, /run_logged "Building app"/);
-  assert.match(script, /BUILD_STARTED=/);
-  assert.match(script, /Build completed in/);
+  assert.match(script, /Preparation: %ss/);
+  assert.match(script, /Cutover: %ss/);
 });
 
 test("VPS update script exposes verbose and public-check controls", () => {
@@ -43,8 +76,11 @@ test("VPS update script prints concise readiness and failure diagnostics", () =>
   assert.match(script, /tail -n 80 "\$LOG_FILE"/);
   assert.match(script, /Health: ok=/);
   assert.match(script, /Public: /);
-  assert.match(script, /Updated from/);
-  assert.match(script, /Next: open \$PUBLIC_URL/);
+  assert.match(script, /Requested revision:/);
+  assert.match(script, /Previous revision:/);
+  assert.match(script, /Rollback:/);
+  assert.match(script, /Active release:/);
+  assert.match(script, /Failed release retained:/);
 });
 
 test("deployment docs use the tracked update helper", () => {
