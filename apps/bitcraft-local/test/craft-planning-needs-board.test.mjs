@@ -224,6 +224,9 @@ test("shared-tag family taxonomy separates every audited operational family", ()
   assert.equal(plannerTaxonomy.plannerTaxonomyFor(unmatchedSharedTag).row, "Volcanic Pebbles");
   assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unmatchedSharedTag, unmatchedSharedTag.key), "item:items:98");
 
+  const namelessSharedTag = { key: "items:97", name: "", tag: "Pebbles" };
+  assert.equal(plannerTaxonomy.plannerOverrideKeyFor(namelessSharedTag, namelessSharedTag.key), "item:items:97");
+
   const unknownTag = { key: "items:99", name: "Guild Sword", tag: "Weapon" };
   assert.equal(plannerTaxonomy.plannerTaxonomyFor(unknownTag).row, "Guild Sword");
   assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unknownTag, unknownTag.key), "item:items:99");
@@ -231,9 +234,9 @@ test("shared-tag family taxonomy separates every audited operational family", ()
 
 test("buildNeedsBoard keeps audited shared-tag families separate across tiers and sections", () => {
   const material = (key, name, tag, tier, section, required) => ({ key, name, tag, tier, section, required, missing: required });
+  const braxiteQualities = ["Rough", "Simple", "Sturdy", "Fine", "Exquisite", "Peerless", "Ornate", "Pristine", "Magnificent", "Flawless"];
   const board = buildNeedsBoard([
-    material("items:1", "Rough Braxite", "Pebbles", 1, "Mining", 7),
-    material("items:2", "Simple Braxite", "Pebbles", 2, "Mining", 5),
+    ...braxiteQualities.map((quality, index) => material(`items:braxite-${index + 1}`, `${quality} Braxite`, "Pebbles", index + 1, "Mining", index + 2)),
     material("items:3", "Rough Pebbles", "Pebbles", 1, "Mining", 11),
     material("items:4", "Simple Pebbles", "Pebbles", 2, "Mining", 13),
     material("items:5", "Sea Glass", "Glass", 2, "Masonry", 3),
@@ -248,10 +251,11 @@ test("buildNeedsBoard keeps audited shared-tag families separate across tiers an
 
   const mining = board.find((group) => group.section === "Mining");
   assert.deepEqual(mining?.rows.map((row) => row.name), ["Braxite", "Pebbles"]);
-  assert.deepEqual([...mining.rows[0].cells].map(([tier, cell]) => [tier, cell.name, cell.required]), [
-    ["T1", "Rough Braxite", 7],
-    ["T2", "Simple Braxite", 5],
-  ]);
+  assert.deepEqual([...mining.rows[0].cells].map(([tier, cell]) => [tier, cell.name, cell.required]), braxiteQualities.map((quality, index) => [
+    `T${index + 1}`,
+    `${quality} Braxite`,
+    index + 2,
+  ]));
   assert.deepEqual([...mining.rows[1].cells].map(([tier, cell]) => [tier, cell.name, cell.required]), [
     ["T1", "Rough Pebbles", 11],
     ["T2", "Simple Pebbles", 13],

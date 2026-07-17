@@ -143,7 +143,8 @@ export function plannerTaxonomyFor(item = {}) {
   let row = ALIASES.get(normalized) ?? rawIdentity;
   let known = ROW_LOOKUP.get(row.toLowerCase());
   const sharedFamilies = SHARED_TAG_FAMILIES.get(normalized);
-  if (sharedFamilies && name) {
+  if (sharedFamilies) {
+    if (!name) return { hidden: false, row, section: known?.section ?? null, order: known?.order ?? Number.MAX_SAFE_INTEGER, known: false };
     const familyRow = sharedFamilies.get(familyNameFromItemName(name));
     const family = familyRow ? ROW_LOOKUP.get(familyRow.toLowerCase()) : null;
     if (family) return { hidden: false, row: family.row, section: family.section, order: family.order, known: true };
