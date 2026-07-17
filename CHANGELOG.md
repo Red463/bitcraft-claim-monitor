@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.36.1-beta.3] - 2026-07-17
+
+### Changed
+
+- Kept Craft Planner package and unpack routes selectable while preferring standard production routes unless transport is the only valid option.
+
+### Fixed
+
+- Fixed malformed package metadata hiding Refined Ferralith, Ferralith Ingot, molten metal, and ore requirements from Smithing craft plans.
+
 ## [0.36.1-beta.2] - 2026-07-16
 
 ### Changed
