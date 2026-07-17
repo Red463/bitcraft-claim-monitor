@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { selectLowestEffortWeights } from "./craftPlanEffortProgress.mjs";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 4;
+export const GAME_CATALOG_NORMALIZATION_VERSION = 5;
 
 export function catalogNormalizationNeedsRefresh(storedVersion) {
   return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
@@ -139,13 +139,24 @@ function displayLooksTransport(value) {
   return /\b(pack|package|unpack|packed|transport|bundle|crate)\b/i.test(String(value ?? ""));
 }
 
+function recipeHasCargoLink(inputs = [], outputs = []) {
+  return [...inputs, ...outputs].some((entry) => entry?.kind === "cargo");
+}
+
 function recipeLooksTransportRoute(recipe, outputs = [], inputs = []) {
+  if (!recipeHasCargoLink(inputs, outputs)) return false;
   if (displayLooksTransport(recipe?.name)) return true;
   if (displayLooksTransport(recipeStationName(recipe))) return true;
-  for (const display of [...unwrapArray(recipe?.craftedItems), ...unwrapArray(recipe?.consumedItems)]) {
-    if (displayLooksTransport(display?.name) || displayLooksTransport(display?.tag) || displayLooksTransport(display?.itemTag)) return true;
-  }
-  return [...outputs, ...inputs].some((entry) => displayLooksTransport(entry.name) || displayLooksTransport(entry.tag));
+  const cargoEntries = [...outputs, ...inputs].filter((entry) => entry.kind === "cargo");
+  return cargoEntries.some((entry) => displayLooksTransport(entry.name) || displayLooksTransport(entry.tag));
+}
+
+function normalizedRecipeName(recipe, sourceEntity, primaryOutput, outputs, inputs) {
+  const rawName = String(recipe?.name ?? recipe?.recipeName ?? "Recipe").trim() || "Recipe";
+  if (recipeHasCargoLink(inputs, outputs)) return rawName;
+  if (!displayLooksTransport(rawName)) return rawName;
+  if (primaryOutput?.key !== sourceEntity.catalogKey) return rawName;
+  return `Craft ${sourceEntity.name}`;
 }
 
 function recipeStableKey(_sourceEntity, recipe, outputs, inputs) {
@@ -206,7 +217,7 @@ function normalizeRecipe(recipe, sourceEntity) {
     sourceKind: primaryOutput?.kind ?? sourceEntity.kind,
     sourceId: primaryOutput?.targetId ?? sourceEntity.targetId,
     actionCount: recipeActionCount(recipe),
-    name: String(recipe?.name ?? recipe?.recipeName ?? "Recipe").trim() || "Recipe",
+    name: normalizedRecipeName(recipe, sourceEntity, primaryOutput, outputs, inputs),
     stationName: recipeStationName(recipe),
     skillName: recipeSkillName(recipe),
     isPassive: recipe?.isPassive === true,
@@ -315,7 +326,7 @@ function mapRecipeRow(row, inputs, outputs) {
     stationName: row.station_name ?? null,
     skillName: row.skill_name ?? null,
     isPassive: Boolean(row.is_passive),
-    isTransportRoute: Boolean(row.is_transport_route),
+    isTransportRoute: Boolean(row.is_transport_route) && recipeHasCargoLink(inputs, outputs),
     updatedAt: row.updated_at,
     inputs,
     outputs,

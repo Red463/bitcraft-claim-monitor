@@ -158,6 +158,40 @@ const declaredOutputOnlyDetail = {
   ],
 };
 
+const malformedFerralithDetail = {
+  item: { id: "1050001", itemType: 0, name: "Ferralith Ingot", tag: "Ingot", tier: 1 },
+  craftingRecipes: [{
+    id: "105009",
+    name: "Forge Exquisite Construction Materials Pack",
+    buildingName: "Rough Smithing Station",
+    levelRequirements: [{ skill: { name: "Smithing" }, level: 1 }],
+    consumedItemStacks: [{ item_id: "1050003", item_type: "item", quantity: 1 }],
+    consumedItems: [{ id: "1050003", itemType: 0, name: "Molten Ferralith" }],
+    craftedItemStacks: [{ item_id: "1050001", item_type: "item", quantity: 1 }],
+    craftedItems: [{ id: "1050001", itemType: 0, name: "Exquisite Construction Materials Pack" }],
+  }],
+};
+
+const malformedRefinedFerralithDetail = {
+  item: { id: "181015293", itemType: 0, name: "Refined Ferralith Ingot", tag: "Refined Ingot", tier: 1 },
+  craftingRecipes: [{
+    id: "998040942",
+    name: "Refine Refined Ferralith Ingot",
+    buildingName: "Rough Smithing Station",
+    levelRequirements: [{ skill: { name: "Smithing" }, level: 1 }],
+    consumedItemStacks: [
+      { item_id: "1050001", item_type: "item", quantity: 5 },
+      { item_id: "1858615467", item_type: "item", quantity: 1 },
+    ],
+    consumedItems: [
+      { id: "1050001", itemType: 0, name: "Exquisite Construction Materials Pack" },
+      { id: "1858615467", itemType: 0, name: "Basic Metal Solvent" },
+    ],
+    craftedItemStacks: [{ item_id: "181015293", item_type: "item", quantity: 1 }],
+    craftedItems: [{ id: "181015293", itemType: 0, name: "Refined Ferralith Ingot" }],
+  }],
+};
+
 test("game catalog schema bootstraps normalized catalog tables, indexes, and cascade links", () => {
   const db = createDb();
 
@@ -266,6 +300,31 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   ]);
 });
 
+test("catalog normalization trusts typed stacks over malformed refined-ingot display metadata", () => {
+  const ingot = normalizeGameCatalogDetail(malformedFerralithDetail).recipes[0];
+  const refined = normalizeGameCatalogDetail(malformedRefinedFerralithDetail).recipes[0];
+
+  assert.equal(ingot.name, "Craft Ferralith Ingot");
+  assert.equal(ingot.isTransportRoute, false);
+  assert.equal(refined.name, "Refine Refined Ferralith Ingot");
+  assert.equal(refined.isTransportRoute, false);
+  assert.deepEqual(refined.inputs, [
+    { inputKey: "items:1050001", kind: "items", targetId: "1050001", quantity: 5 },
+    { inputKey: "items:1858615467", kind: "items", targetId: "1858615467", quantity: 1 },
+  ]);
+});
+
+test("game catalog ignores stale transport flags on recipes with no cargo links", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail(malformedRefinedFerralithDetail, { updatedAt: UPDATED_AT });
+  db.prepare("UPDATE game_catalog_recipes SET is_transport_route = 1 WHERE recipe_key = ?").run("recipe:998040942");
+
+  const recipe = repository.listProducerRecipesForOutput("items:181015293")[0];
+  assert.equal(recipe.isTransportRoute, false);
+  db.close();
+});
+
 test("normalizeGameCatalogDetail sums expected yield across an item-list probability distribution", () => {
   const normalized = normalizeGameCatalogDetail({
     item: { id: "7000", itemType: 0, name: "Rough Clay", tag: "Clay", tier: 1 },
@@ -347,7 +406,7 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 4);
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 5);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
