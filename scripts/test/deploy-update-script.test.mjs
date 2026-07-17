@@ -83,14 +83,26 @@ test("VPS update script prints concise readiness and failure diagnostics", () =>
   assert.match(script, /Failed release retained:/);
 });
 
-test("deployment docs use the tracked update helper", () => {
-  assert.match(readme, /deploy\/update-bitcraft-monitor/);
+test("deployment docs install and explain the tracked staged update helper", () => {
   assert.match(deployment, /deploy\/update-bitcraft-monitor/);
-  assert.match(deployment, /install -m 755 deploy\/update-bitcraft-monitor \/usr\/local\/bin\/update-bitcraft-monitor/);
-  assert.match(deployment, /compact success summary/);
-  assert.match(deployment, /full command output is written to/);
+  assert.match(deployment, /install -m 0755 "\$RELEASE\/deploy\/update-bitcraft-monitor" \/usr\/local\/bin\/update-bitcraft-monitor/);
+  assert.match(deployment, /concise summary/);
+  assert.match(deployment, /full VPS log/);
   assert.match(deployment, /--verbose/);
   assert.match(deployment, /--no-public-check/);
+});
+
+test("deployment docs describe the staged layout and manual GitHub release path", () => {
+  assert.match(deployment, /\/opt\/bitcraft-claim-monitor\/source/);
+  assert.match(deployment, /\/opt\/bitcraft-claim-monitor\/releases/);
+  assert.match(deployment, /current.*symbolic link/i);
+  assert.match(deployment, /Deploy production/);
+  assert.match(deployment, /production environment/);
+  assert.match(deployment, /required reviewer/i);
+  assert.match(deployment, /VPS_KNOWN_HOSTS/);
+  assert.match(deployment, /automatic rollback/i);
+  assert.match(deployment, /backward compatible/i);
+  assert.doesNotMatch(readme, /cd \/opt\/bitcraft-claim-monitor[\s\S]*update-bitcraft-monitor\n/);
 });
 
 test("VPS update script is checked out with Unix line endings", () => {

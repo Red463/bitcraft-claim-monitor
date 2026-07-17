@@ -413,15 +413,9 @@ The intended production setup is:
 - systemd running the web Node process on `127.0.0.1:18430` and a separate worker process for collectors and scheduled jobs.
 - Caddy serving `https://app.timbersteeltrade.com` as the public HTTPS domain, with `https://claim.timbersteeltrade.com` and `https://claim.hostred.co.uk` redirected to it.
 
-Full first-time instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+Full bootstrap, migration, rollback and recovery instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
-For a normal update after changes have been pushed to GitHub:
-
-```bash
-cd /opt/bitcraft-claim-monitor
-install -m 755 deploy/update-bitcraft-monitor /usr/local/bin/update-bitcraft-monitor
-update-bitcraft-monitor
-```
+For a normal release, merge the reviewed pull request, then manually run **Deploy production** from the `main` branch in GitHub Actions and approve the protected `production` environment deployment. The workflow verifies the exact commit before preparing an immutable VPS release; routine updates do not require an interactive SSH session.
 
 The database directory is outside the Git checkout, so ordinary code updates do not erase accumulated market or activity history.
 
