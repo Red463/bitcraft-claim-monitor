@@ -36,6 +36,17 @@ test("Craft planning needs board cells avoid item icons", () => {
   assert.doesNotMatch(cellBody, /craft-plan-need-icon/);
 });
 
+test("Craft Planning estimate indicators share a compact non-overlapping row", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.craft-plan-cell-indicators\s*\{[^}]*display:\s*flex[^}]*gap:/s);
+  assert.match(css, /\.craft-plan-need-cell\.has-indicators\s*\{[^}]*padding-top:/s);
+  assert.match(css, /\.craft-plan-cell-indicators \.is-guaranteed\s*\{[^}]*#65b7fa/s);
+  assert.match(css, /\.craft-plan-cell-indicators \.is-estimated[^}]*var\(--muted\)/s);
+  assert.match(css, /\.craft-plan-cell-indicators \.is-approximate[^}]*var\(--muted\)/s);
+  assert.doesNotMatch(css, /\.craft-plan-estimated-marker/);
+});
+
 test("Craft planning needs board uses one continuous compact matrix with status states", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
@@ -136,7 +147,7 @@ test("Craft planning chance controls and compact targets retain responsive bound
   assert.match(page, /saveMultiplier/);
   assert.match(page, /Counted stock exists, but source details are unavailable/);
   assert.match(page, /craft-plan-target-progress/);
-  assert.match(css, /\.craft-plan-need-cell\.has-active\s*\{[^}]*padding-top:\s*16px/);
+  assert.match(css, /\.craft-plan-need-cell\.has-indicators\s*\{[^}]*padding-top:\s*16px/);
   assert.match(css, /\.craft-plan-target-progress\s*\{/);
   assert.match(css, /\.craft-plan-target-status\s*\{/);
   assert.match(css, /\.craft-plan-manager-pending\s*\{/);

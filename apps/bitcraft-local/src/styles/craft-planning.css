@@ -273,10 +273,11 @@
 .craft-plan-need-cell.has-active::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: #65b7fa; }
 .craft-plan-need-cell.has-active::before { content: ""; position: absolute; top: 2px; right: 2px; box-sizing: border-box; width: 12px; height: 12px; border: 1px solid rgba(101, 183, 250, 0.72); border-radius: 50%; pointer-events: none; animation: craft-plan-active-pulse 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
 @keyframes craft-plan-active-pulse { 0% { opacity: 0.9; transform: scale(0.55); } 70%, 100% { opacity: 0; transform: scale(1.45); } }
-.craft-plan-need-cell.has-active svg { position: absolute; top: 4px; left: 5px; color: #65b7fa; }
-.craft-plan-need-cell.has-active { padding-top: 16px; }
-.craft-plan-need-cell.has-estimate:not(.has-active) { padding-top: 16px; }
-.craft-plan-estimated-marker { position: absolute; top: 3px; right: 5px; color: var(--muted); font-size: 0.72rem; font-weight: 800; }
+.craft-plan-cell-indicators { position: absolute; top: 4px; left: 5px; display: flex; align-items: center; gap: 3px; pointer-events: none; }
+.craft-plan-need-cell.has-indicators { padding-top: 16px; }
+.craft-plan-cell-indicators .is-guaranteed { color: #65b7fa; }
+.craft-plan-cell-indicators .is-estimated,
+.craft-plan-cell-indicators .is-approximate { color: var(--muted); }
 .craft-plan-need-cell.is-shortage { background: rgba(240, 198, 79, 0.045); }
 .craft-plan-need-cell.is-blocked { background: rgba(239, 100, 97, 0.09); }
 .craft-plan-need-cell.is-blocked strong { color: #ff8c89; }
@@ -328,7 +329,10 @@
 .craft-plan-needs-legend .covered { color: var(--good); }
 .craft-plan-needs-legend .short { color: var(--gold); }
 .craft-plan-needs-legend .active { color: #65b7fa; }
-.craft-plan-needs-legend .estimate { color: var(--muted); }
+.craft-plan-needs-legend .icon-state::before { display: none; }
+.craft-plan-needs-legend .icon-state svg { flex: 0 0 auto; }
+.craft-plan-needs-legend .approximate,
+.craft-plan-needs-legend .estimated-output { color: var(--muted); }
 .craft-plan-needs-legend .blocked { color: #ef6461; }
 .craft-plan-tracked-crafts { display: grid; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .craft-plan-tracked-crafts h3 { margin: 0 0 2px; }
