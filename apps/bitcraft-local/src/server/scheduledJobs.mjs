@@ -39,31 +39,61 @@ export function serializeScheduledJobSchedule(input = {}) {
   return `daily@${time}`;
 }
 
+const ADMIN_SCHEDULER_TIMEZONE = "Europe/London";
+const adminSchedulerFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: ADMIN_SCHEDULER_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function adminSchedulerParts(at) {
+  return Object.fromEntries(adminSchedulerFormatter.formatToParts(at)
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]));
+}
+
+function firstAdminSchedulerInstant(year, month, day, hours, minutes) {
+  const approximate = Date.UTC(year, month - 1, day, hours, minutes);
+  const cursor = new Date(approximate - 2 * 60 * 60 * 1000);
+  const limit = approximate + 2 * 60 * 60 * 1000;
+  while (cursor.getTime() <= limit) {
+    const parts = adminSchedulerParts(cursor);
+    if (parts.year === year && parts.month === month && parts.day === day && parts.hour === hours && parts.minute === minutes) {
+      return new Date(cursor);
+    }
+    cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
+  }
+  return null;
+}
+
 export function nextScheduledRunIso(schedule, from = new Date()) {
   const config = parseScheduledJobSchedule(schedule);
   if (config.frequency === "interval") return new Date(from.getTime() + (toNumber(config.intervalSeconds) || 1800) * 1000).toISOString();
   const [hours, minutes] = config.time.split(":").map((part) => Number(part));
-  const next = new Date(from);
-  next.setSeconds(0, 0);
-  if (config.frequency === "weekly") {
-    const dayDelta = (config.dayOfWeek - next.getDay() + 7) % 7;
-    next.setDate(next.getDate() + dayDelta);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) next.setDate(next.getDate() + 7);
-    return next.toISOString();
-  }
-  if (config.frequency === "monthly") {
-    next.setDate(config.dayOfMonth);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= from) {
-      next.setMonth(next.getMonth() + 1, config.dayOfMonth);
-      next.setHours(hours, minutes, 0, 0);
+  const fromParts = adminSchedulerParts(from);
+  const localDay = new Date(Date.UTC(fromParts.year, fromParts.month - 1, fromParts.day));
+  const searchDays = config.frequency === "monthly" ? 70 : config.frequency === "weekly" ? 9 : 3;
+  for (let dayOffset = 0; dayOffset < searchDays; dayOffset += 1) {
+    const dayMatches = config.frequency === "weekly"
+      ? localDay.getUTCDay() === config.dayOfWeek
+      : config.frequency !== "monthly" || localDay.getUTCDate() === config.dayOfMonth;
+    if (dayMatches) {
+      const candidate = firstAdminSchedulerInstant(
+        localDay.getUTCFullYear(),
+        localDay.getUTCMonth() + 1,
+        localDay.getUTCDate(),
+        hours,
+        minutes,
+      );
+      if (candidate && candidate > from) return candidate.toISOString();
     }
-    return next.toISOString();
+    localDay.setUTCDate(localDay.getUTCDate() + 1);
   }
-  next.setHours(hours, minutes, 0, 0);
-  if (next <= from) next.setDate(next.getDate() + 1);
-  return next.toISOString();
+  throw new Error(`Could not find the next ${ADMIN_SCHEDULER_TIMEZONE} occurrence for ${schedule}.`);
 }
 
 export function scheduledJobScheduleLabel(schedule) {

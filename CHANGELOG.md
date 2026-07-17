@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.38.0-beta.2] - 2026-07-17
+
+### Fixed
+
+- Fixed scheduled admin jobs using the host machine timezone instead of consistent UK local time, including daylight-saving transitions.
+
 ## [0.38.0-beta.1] - 2026-07-17
 
 ### Added
