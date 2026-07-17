@@ -137,6 +137,9 @@ export function normalizeCraftPlanConfig(input = {}) {
       };
     }
   }
+  const gatheredItemKeys = uniqueStrings(raw.gatheredItemKeys)
+    .filter((key) => /^(?:items|cargo):[^:\s]+$/.test(key))
+    .sort((left, right) => left.localeCompare(right));
   const playerIds = uniqueStrings(raw.sourceRules?.playerIds);
   const craftPlayerIds = Array.isArray(raw.sourceRules?.craftPlayerIds) ? uniqueStrings(raw.sourceRules.craftPlayerIds) : playerIds;
   const bankPlayerIds = uniqueStrings(raw.sourceRules?.bankPlayerIds);
@@ -165,6 +168,7 @@ export function normalizeCraftPlanConfig(input = {}) {
     sectionOverrides,
     rowNameOverrides,
     multipliers,
+    gatheredItemKeys,
     buildingProgress,
   };
 }
@@ -178,6 +182,7 @@ const CRAFT_PLAN_AUDIT_SOURCE_RULES = [
 
 const CRAFT_PLAN_AUDIT_CATEGORIES = new Set([
   "public_board",
+  "gathered_item",
   ...CRAFT_PLAN_AUDIT_SOURCE_RULES.map(([, category]) => category),
 ]);
 
@@ -209,6 +214,19 @@ export function craftPlanAuditDetails(previousInput = {}, nextInput = {}, labels
       if (before.has(entityId) === after.has(entityId)) continue;
       changes.push({ category, entityId, label: auditLabel(labels, category, entityId), enabled: after.has(entityId) });
     }
+  }
+  const previousGathered = new Set(previous.gatheredItemKeys);
+  const nextGathered = new Set(next.gatheredItemKeys);
+  const gatheredKeys = [...new Set([...previousGathered, ...nextGathered])]
+    .sort((left, right) => left.localeCompare(right));
+  for (const entityId of gatheredKeys) {
+    if (previousGathered.has(entityId) === nextGathered.has(entityId)) continue;
+    changes.push({
+      category: "gathered_item",
+      entityId,
+      label: auditLabel(labels, "gathered_item", entityId),
+      enabled: nextGathered.has(entityId),
+    });
   }
   const otherSettingsChanged = CRAFT_PLAN_OTHER_AUDIT_FIELDS.some((field) => JSON.stringify(previous[field]) !== JSON.stringify(next[field]));
   return { changes, otherSettingsChanged };

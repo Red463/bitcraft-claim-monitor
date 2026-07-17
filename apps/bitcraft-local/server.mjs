@@ -2069,11 +2069,15 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   };
 }
 
-function craftPlanAuditLabels(sources = {}) {
+function craftPlanAuditLabels(sources = {}, materials = []) {
   const storage = Object.fromEntries((sources.storage ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const players = Object.fromEntries((sources.players ?? []).map((source) => [String(source.playerId), String(source.label ?? source.playerId)]));
   const deployable = Object.fromEntries((sources.deployables ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
-  return { storage, player_inventory: players, player_crafts: players, deployable };
+  const gatheredItem = Object.fromEntries((materials ?? []).map((item) => {
+    const key = String(item.key ?? `${item.kind === "cargo" || item.itemType === 1 ? "cargo" : "items"}:${item.id}`);
+    return [key, String(item.name ?? key)];
+  }));
+  return { storage, player_inventory: players, player_crafts: players, deployable, gathered_item: gatheredItem };
 }
 
 
@@ -9676,7 +9680,7 @@ const server = createServer(async (req, res) => {
         }
         const config = saveCraftPlanConfig(submittedConfig);
         const response = await craftPlanAdminResponse(getSettings().claimId);
-        const auditDetails = craftPlanAuditDetails(previousConfig, config, craftPlanAuditLabels(response.sources));
+        const auditDetails = craftPlanAuditDetails(previousConfig, config, craftPlanAuditLabels(response.sources, response.plan?.materials));
         audit(user, "craft_plan.update", {
           targets: config.targets.length,
           players: config.sourceRules.playerIds.length,

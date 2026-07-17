@@ -224,6 +224,15 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
   assert.deepEqual(config.sourceRules.bankPlayerIds, []);
 });
 
+test("normalizeCraftPlanConfig validates, deduplicates, and sorts gathered item keys", () => {
+  const config = normalizeCraftPlanConfig({
+    gatheredItemKeys: ["items:600", "", "items:600", "building:9", "invalid", "cargo:200"],
+  });
+
+  assert.deepEqual(config.gatheredItemKeys, ["cargo:200", "items:600"]);
+  assert.deepEqual(normalizeCraftPlanConfig({}).gatheredItemKeys, []);
+});
+
 test("computeCraftPlan counts player bank sources as confirmed stock", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -309,6 +318,33 @@ test("craftPlanAuditDetails falls back to the stored source identifier", () => {
   const previous = normalizeCraftPlanConfig({ sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] } });
   const next = normalizeCraftPlanConfig({ sourceRules: { storageContainerIds: ["missing-label"], playerIds: [], craftPlayerIds: [], deployableContainerIds: [] } });
   assert.equal(craftPlanAuditDetails(previous, next).changes[0].label, "missing-label");
+});
+
+test("craftPlanAuditDetails records gathered item enable and disable changes", () => {
+  const previous = normalizeCraftPlanConfig({ gatheredItemKeys: ["items:old"] });
+  const next = normalizeCraftPlanConfig({ gatheredItemKeys: ["items:new"] });
+
+  assert.deepEqual(craftPlanAuditDetails(previous, next, {
+    gathered_item: {
+      "items:new": "Simple Stone Carvings",
+      "items:old": "Rough Stone Carvings",
+    },
+  }), {
+    changes: [
+      { category: "gathered_item", entityId: "items:new", label: "Simple Stone Carvings", enabled: true },
+      { category: "gathered_item", entityId: "items:old", label: "Rough Stone Carvings", enabled: false },
+    ],
+    otherSettingsChanged: false,
+  });
+});
+
+test("craftPlanAuditDetails falls back to a gathered typed key when its label is unavailable", () => {
+  const details = craftPlanAuditDetails(
+    normalizeCraftPlanConfig({ gatheredItemKeys: [] }),
+    normalizeCraftPlanConfig({ gatheredItemKeys: ["items:600"] }),
+  );
+
+  assert.equal(details.changes[0].label, "items:600");
 });
 
 test("craftPlanAuditLimit clamps requests to one through one hundred", () => {

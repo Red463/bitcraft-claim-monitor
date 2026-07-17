@@ -21,11 +21,12 @@ type CraftPlanConfig = {
   sectionOverrides: Record<string, string>;
   rowNameOverrides: Record<string, string>;
   multipliers: Record<string, { multiplier: number; note?: string }>;
+  gatheredItemKeys: string[];
   buildingProgress: Record<string, { baselineEntityIds: string[]; completedEntityIds: string[] }>;
 };
 
 function emptyConfig(): CraftPlanConfig {
-  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, buildingProgress: {} };
+  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
 }
 
 function itemKind(item: AnyRecord) {
@@ -160,6 +161,7 @@ const CRAFT_PLAN_AUDIT_CATEGORY_LABELS: Record<string, string> = {
   player_inventory: "Player inventory",
   player_crafts: "Player crafts",
   deployable: "Deployable",
+  gathered_item: "Gathered item",
 };
 
 function firstText(...values: unknown[]) {
