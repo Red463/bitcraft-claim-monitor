@@ -51,14 +51,32 @@ test("scheduled job schedules serialize safe dashboard updates", () => {
   assert.equal(serializeScheduledJobSchedule({ frequency: "interval", intervalSeconds: 100000 }), "interval@86400");
 });
 
-test("scheduled job next-run and labels preserve admin scheduler behavior", () => {
-  const from = new Date("2026-06-28T10:30:00.000Z");
+test("scheduled job next-run uses Europe/London independently of the host timezone", () => {
+  const summer = new Date("2026-06-28T10:30:00.000Z");
 
-  assert.equal(nextScheduledRunIso("daily@09:00", from), "2026-06-29T08:00:00.000Z");
-  assert.equal(nextScheduledRunIso("weekly@1@03:30", from), "2026-06-29T02:30:00.000Z");
-  assert.equal(nextScheduledRunIso("monthly@28@10:00", from), "2026-07-28T09:00:00.000Z");
-  assert.equal(nextScheduledRunIso("interval@120", from), "2026-06-28T10:32:00.000Z");
+  assert.equal(nextScheduledRunIso("daily@09:00", summer), "2026-06-29T08:00:00.000Z");
+  assert.equal(nextScheduledRunIso("weekly@1@03:30", summer), "2026-06-29T02:30:00.000Z");
+  assert.equal(nextScheduledRunIso("monthly@28@10:00", summer), "2026-07-28T09:00:00.000Z");
+  assert.equal(nextScheduledRunIso("interval@120", summer), "2026-06-28T10:32:00.000Z");
 
+  const winter = new Date("2026-01-11T10:30:00.000Z");
+  assert.equal(nextScheduledRunIso("daily@09:00", winter), "2026-01-12T09:00:00.000Z");
+  assert.equal(nextScheduledRunIso("weekly@1@03:30", winter), "2026-01-12T03:30:00.000Z");
+  assert.equal(nextScheduledRunIso("monthly@28@10:00", winter), "2026-01-28T10:00:00.000Z");
+});
+
+test("scheduled job next-run handles missing and repeated Europe/London wall times once", () => {
+  assert.equal(
+    nextScheduledRunIso("daily@01:30", new Date("2026-03-29T00:00:00.000Z")),
+    "2026-03-30T00:30:00.000Z",
+  );
+  assert.equal(
+    nextScheduledRunIso("daily@01:30", new Date("2026-10-25T00:45:00.000Z")),
+    "2026-10-26T01:30:00.000Z",
+  );
+});
+
+test("scheduled job labels preserve admin scheduler behavior", () => {
   assert.equal(scheduledJobScheduleLabel("daily@07:15"), "Daily at 07:15");
   assert.equal(scheduledJobScheduleLabel("weekly@2@03:30"), "Weekly on Tuesday at 03:30");
   assert.equal(scheduledJobScheduleLabel("monthly@28@10:00"), "Monthly on day 28 at 10:00");
