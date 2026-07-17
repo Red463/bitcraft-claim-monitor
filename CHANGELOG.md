@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.36.1-beta.4] - 2026-07-17
+
+### Fixed
+
+- Fixed Craft Planner merging Braxite into Pebbles and separated other distinct material families that share broad API tags.
+
 ## [0.36.1-beta.3] - 2026-07-17
 
 ### Changed
