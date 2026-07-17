@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.38.0-beta.1] - 2026-07-17
+
+### Added
+
+- Added a manually approved GitHub production deployment that builds immutable VPS releases before switching the live site.
+- Added automatic application rollback, revision-pinned health checks, deployment locking, online pre-cutover backups, and release retention.
+
+### Changed
+
+- Limited normal deployment interruption to the web-process restart and added short Caddy retries with explicit maintenance responses.
+- Replaced routine SSH updates with a documented staged-release workflow and supervised one-time VPS migration.
+
 ## [0.37.0-beta.1] - 2026-07-17
 
 ### Added
