@@ -550,13 +550,14 @@ function recipeMatchesOverride(recipe, overrideId) {
 }
 
 function selectedRecipeForTarget(recipes, overrideId, blockedKeys = []) {
-  const overridden = recipes.find((recipe) => recipeMatchesOverride(recipe, overrideId));
-  if (overridden) return overridden;
   const blocked = new Set(blockedKeys);
-  return recipes.find((recipe) => {
-    if (recipeLooksTransportRoute(recipe)) return false;
-    return !recipeInputs(recipe).some((input) => blocked.has(recipeKey(stackKind(input), stackId(input))));
-  }) ?? null;
+  const isValid = (recipe) => !recipeInputs(recipe)
+    .some((input) => blocked.has(recipeKey(stackKind(input), stackId(input))));
+  const overridden = recipes.find((recipe) => recipeMatchesOverride(recipe, overrideId));
+  if (overridden && isValid(overridden)) return overridden;
+  return recipes.find((recipe) => !recipeLooksTransportRoute(recipe) && isValid(recipe))
+    ?? recipes.find((recipe) => recipeLooksTransportRoute(recipe) && isValid(recipe))
+    ?? null;
 }
 
 function mergeDetailTarget(detail, target) {

@@ -1188,7 +1188,7 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "packed-route"]);
 });
 
-test("computeCraftPlan does not expand transport-only package loops by default", () => {
+test("computeCraftPlan uses an unpack route when it is the only valid option without recursing into the pack loop", () => {
   const berryDetail = {
     item: { id: "100", name: "Basic Berry", itemType: 0, tag: "Berry", tier: 1 },
     craftingRecipes: [{
@@ -1220,9 +1220,12 @@ test("computeCraftPlan does not expand transport-only package loops by default",
     ]),
   });
 
-  assert.equal(plan.steps.length, 0);
+  assert.equal(plan.steps.length, 1);
+  assert.equal(plan.steps[0].selectedRecipeId, "unpack-berry");
+  assert.deepEqual(plan.steps[0].alternatives.map((route) => route.id), ["unpack-berry"]);
   assert.equal(plan.materials.find((material) => material.name === "Basic Berry")?.required, 25);
-  assert.equal(plan.materials.some((material) => material.name === "Basic Berry Package"), false);
+  assert.equal(plan.materials.find((material) => material.name === "Basic Berry Package")?.required, 1);
+  assert.equal(plan.steps.some((step) => step.selectedRecipeId === "pack-berry"), false);
 });
 
 test("computeCraftPlan stops cyclic production routes at the nearest source item", () => {
@@ -2366,8 +2369,8 @@ test("collectLocalCatalogCraftPlanDetails keeps transport routes available after
         stationName: "Hauling Station",
         craftedItemStacks: [{ item_id: "8100", item_type: "item", quantity: 10 }],
         craftedItems: [{ id: "8100", itemType: 0, name: "Treated Board", tag: "Board", tier: 3 }],
-        consumedItemStacks: [{ item_id: "8101", item_type: "item", quantity: 1 }],
-        consumedItems: [{ id: "8101", itemType: 0, name: "Shipment Token", tag: "Transport", tier: 3 }],
+        consumedItemStacks: [{ item_id: "8101", item_type: "cargo", quantity: 1 }],
+        consumedItems: [{ id: "8101", itemType: 1, name: "Treated Board Shipment", tag: "Transport", tier: 3 }],
         levelRequirements: [{ skill: { name: "Construction" }, level: 1 }],
       },
       {
@@ -2382,7 +2385,10 @@ test("collectLocalCatalogCraftPlanDetails keeps transport routes available after
       },
     ],
   }]);
-  repository.upsertEntityIdentity({ id: "8101", itemType: 0, name: "Shipment Token", tag: "Transport", tier: 3 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
+  repository.upsertEntityIdentity(
+    { id: "8101", itemType: 1, name: "Treated Board Shipment", tag: "Transport", tier: 3 },
+    { updatedAt: CATALOG_UPDATED_AT, kind: "cargo" },
+  );
   repository.upsertEntityIdentity({ id: "8102", itemType: 0, name: "Raw Board", tag: "Board", tier: 3 }, { updatedAt: CATALOG_UPDATED_AT, kind: "items" });
   db.prepare("UPDATE game_catalog_recipes SET is_transport_route = 1 WHERE recipe_key = ?").run("items:8100:recipe:transport-route");
 
@@ -2402,7 +2408,7 @@ test("collectLocalCatalogCraftPlanDetails keeps transport routes available after
   });
   const overridePlan = computeCraftPlan({ config: overrideConfig, detailsByKey });
   assert.equal(overridePlan.steps[0].selectedRecipeId, "transport-route");
-  assert.equal(overridePlan.materials.find((material) => material.name === "Shipment Token")?.required, 1);
+  assert.equal(overridePlan.materials.find((material) => material.name === "Treated Board Shipment")?.required, 1);
   assert.deepEqual(overridePlan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "transport-route"]);
 });
 test("collectLocalCatalogCraftPlanDetails uses recipe names as legacy route ids for hashed normalized recipes", (t) => {
