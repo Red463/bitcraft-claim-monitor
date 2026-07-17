@@ -1913,6 +1913,35 @@ test("computeCraftPlan applies row overrides independently to material families 
   assert.equal(unfiredMaterial?.rowNameOverride, "Green Brick");
 });
 
+test("computeCraftPlan applies a Braxite family override without changing Pebbles", () => {
+  const pebbles = { id: "1030001", name: "Rough Pebbles", itemType: 0, tag: "Pebbles", tier: 1 };
+  const braxite = { id: "1985074940", name: "Rough Braxite", itemType: 0, tag: "Pebbles", tier: 1 };
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [
+        { id: pebbles.id, kind: "items", name: pebbles.name, quantity: 1, itemType: 0 },
+        { id: braxite.id, kind: "items", name: braxite.name, quantity: 1, itemType: 0 },
+      ],
+      sectionOverrides: { "row:Braxite": "Foraging" },
+      rowNameOverrides: { "row:Braxite": "Rare Braxite" },
+    }),
+    detailsByKey: new Map([
+      [recipeKey("items", pebbles.id), { item: pebbles, craftingRecipes: [] }],
+      [recipeKey("items", braxite.id), { item: braxite, craftingRecipes: [] }],
+    ]),
+  });
+
+  const pebblesMaterial = plan.materials.find((item) => item.name === pebbles.name);
+  const braxiteMaterial = plan.materials.find((item) => item.name === braxite.name);
+  assert.equal(pebblesMaterial?.sectionOverrideKey, "tag:Pebbles");
+  assert.equal(pebblesMaterial?.sectionOverride, null);
+  assert.equal(pebblesMaterial?.rowNameOverride, null);
+  assert.equal(braxiteMaterial?.sectionOverrideKey, "row:Braxite");
+  assert.equal(braxiteMaterial?.sectionOverride, "Foraging");
+  assert.equal(braxiteMaterial?.rowNameOverride, "Rare Braxite");
+});
+
 test("computeCraftPlan treats gathering byproducts as acquisition routes and ignores direct craft overrides", () => {
   const gypsiteDetail = {
     item: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },

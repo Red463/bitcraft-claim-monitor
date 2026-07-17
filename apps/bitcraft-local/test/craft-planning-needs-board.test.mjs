@@ -184,6 +184,85 @@ test("planner taxonomy gives shared-tag material families independent identities
   assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unfiredBrick, "items:812749346"), "row:Unfired Brick");
 });
 
+test("shared-tag family taxonomy separates every audited operational family", () => {
+  const samples = [
+    [{ key: "items:1", name: "Rough Pebbles", tag: "Pebbles" }, "Pebbles", "tag:Pebbles"],
+    [{ key: "items:2", name: "Rough Braxite", tag: "Pebbles" }, "Braxite", "row:Braxite"],
+    [{ key: "items:3", name: "Simple Glass", tag: "Glass" }, "Glass", "tag:Glass"],
+    [{ key: "items:4", name: "Sea Glass", tag: "Glass" }, "Sea Glass", "row:Sea Glass"],
+    [{ key: "items:5", name: "Basic Raw Meat", tag: "Raw Meat" }, "Raw Meat", "tag:Raw Meat"],
+    [{ key: "items:6", name: "Oyster Meat", tag: "Raw Meat" }, "Oyster Meat", "row:Oyster Meat"],
+    [{ key: "items:7", name: "Raw Skitch Meat", tag: "Raw Meat" }, "Raw Skitch Meat", "row:Raw Skitch Meat"],
+    [{ key: "items:8", name: "Raw Crab Meat", tag: "Raw Meat" }, "Raw Crab Meat", "row:Raw Crab Meat"],
+    [{ key: "items:9", name: "Beginner's Hieroglyphs", tag: "Ancient Hieroglyphs" }, "Ancient Hieroglyphs", "tag:Ancient Hieroglyphs"],
+    [{ key: "items:10", name: "Beginner's Stone Carvings", tag: "Ancient Hieroglyphs" }, "Stone Carvings", "row:Stone Carvings"],
+    [{ key: "items:11", name: "Beginner's Stone Diagrams", tag: "Ancient Hieroglyphs" }, "Stone Diagrams", "row:Stone Diagrams"],
+    [{ key: "items:12", name: "Nubi Goat Food", tag: "Animal Food" }, "Nubi Goat Food", "row:Nubi Goat Food"],
+    [{ key: "items:13", name: "Nubi Goat Vitamins", tag: "Animal Food" }, "Nubi Goat Vitamins", "row:Nubi Goat Vitamins"],
+    [{ key: "items:14", name: "Sagi Bird Food", tag: "Animal Food" }, "Sagi Bird Food", "row:Sagi Bird Food"],
+    [{ key: "items:15", name: "Sagi Bird Vitamins", tag: "Animal Food" }, "Sagi Bird Vitamins", "row:Sagi Bird Vitamins"],
+    [{ key: "items:16", name: "Auric Sagi Bird Egg", tag: "Domesticated Animal Materials" }, "Auric Sagi Bird Egg", "row:Auric Sagi Bird Egg"],
+    [{ key: "items:17", name: "Fertilized Sagi Bird Egg", tag: "Domesticated Animal Materials" }, "Fertilized Sagi Bird Egg", "row:Fertilized Sagi Bird Egg"],
+    [{ key: "items:18", name: "Nubi Goat Fur", tag: "Domesticated Animal Materials" }, "Nubi Goat Fur", "row:Nubi Goat Fur"],
+    [{ key: "items:19", name: "Nubi Milk", tag: "Domesticated Animal Materials" }, "Nubi Milk", "row:Nubi Milk"],
+    [{ key: "items:20", name: "Sagi Bird Down Feather", tag: "Domesticated Animal Materials" }, "Sagi Bird Down Feather", "row:Sagi Bird Down Feather"],
+    [{ key: "items:21", name: "Sagi Bird Egg", tag: "Domesticated Animal Materials" }, "Sagi Bird Egg", "row:Sagi Bird Egg"],
+    [{ key: "items:22", name: "Captured Nubi Goat", tag: "Tamed Animal" }, "Captured Nubi Goat", "row:Captured Nubi Goat"],
+    [{ key: "items:23", name: "Captured Sagi Bird", tag: "Tamed Animal" }, "Captured Sagi Bird", "row:Captured Sagi Bird"],
+    [{ key: "items:24", name: "Domesticated Nubi Goat", tag: "Tamed Animal" }, "Domesticated Nubi Goat", "row:Domesticated Nubi Goat"],
+    [{ key: "items:25", name: "Domesticated Sagi Bird", tag: "Tamed Animal" }, "Domesticated Sagi Bird", "row:Domesticated Sagi Bird"],
+    [{ key: "items:26", name: "Domesticated Nubi Goat Breeding", tag: "Tamed Animal" }, "Domesticated Nubi Goat Breeding", "row:Domesticated Nubi Goat Breeding"],
+    [{ key: "items:27", name: "Domesticated Sagi Bird Breeding", tag: "Tamed Animal" }, "Domesticated Sagi Bird Breeding", "row:Domesticated Sagi Bird Breeding"],
+  ];
+
+  for (const [item, expectedRow, expectedKey] of samples) {
+    assert.equal(plannerTaxonomy.plannerTaxonomyFor(item).row, expectedRow, item.name);
+    assert.equal(plannerTaxonomy.plannerOverrideKeyFor(item, item.key), expectedKey, item.name);
+  }
+
+  const unmatchedSharedTag = { key: "items:98", name: "Volcanic Pebbles", tag: "Pebbles" };
+  assert.equal(plannerTaxonomy.plannerTaxonomyFor(unmatchedSharedTag).row, "Volcanic Pebbles");
+  assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unmatchedSharedTag, unmatchedSharedTag.key), "item:items:98");
+
+  const unknownTag = { key: "items:99", name: "Guild Sword", tag: "Weapon" };
+  assert.equal(plannerTaxonomy.plannerTaxonomyFor(unknownTag).row, "Guild Sword");
+  assert.equal(plannerTaxonomy.plannerOverrideKeyFor(unknownTag, unknownTag.key), "item:items:99");
+});
+
+test("buildNeedsBoard keeps audited shared-tag families separate across tiers and sections", () => {
+  const material = (key, name, tag, tier, section, required) => ({ key, name, tag, tier, section, required, missing: required });
+  const board = buildNeedsBoard([
+    material("items:1", "Rough Braxite", "Pebbles", 1, "Mining", 7),
+    material("items:2", "Simple Braxite", "Pebbles", 2, "Mining", 5),
+    material("items:3", "Rough Pebbles", "Pebbles", 1, "Mining", 11),
+    material("items:4", "Simple Pebbles", "Pebbles", 2, "Mining", 13),
+    material("items:5", "Sea Glass", "Glass", 2, "Masonry", 3),
+    material("items:6", "Simple Glass", "Glass", 2, "Masonry", 4),
+    material("items:7", "Raw Skitch Meat", "Raw Meat", null, "Hunting", 2),
+    material("items:8", "Raw Crab Meat", "Raw Meat", null, "Hunting", 6),
+    material("items:9", "Beginner's Stone Carvings", "Ancient Hieroglyphs", 1, "Scholar", 8),
+    material("items:10", "Beginner's Stone Diagrams", "Ancient Hieroglyphs", 1, "Scholar", 9),
+    material("items:11", "Nubi Goat Food", "Animal Food", null, "Taming", 10),
+    material("items:12", "Sagi Bird Food", "Animal Food", null, "Taming", 12),
+  ], []);
+
+  const mining = board.find((group) => group.section === "Mining");
+  assert.deepEqual(mining?.rows.map((row) => row.name), ["Braxite", "Pebbles"]);
+  assert.deepEqual([...mining.rows[0].cells].map(([tier, cell]) => [tier, cell.name, cell.required]), [
+    ["T1", "Rough Braxite", 7],
+    ["T2", "Simple Braxite", 5],
+  ]);
+  assert.deepEqual([...mining.rows[1].cells].map(([tier, cell]) => [tier, cell.name, cell.required]), [
+    ["T1", "Rough Pebbles", 11],
+    ["T2", "Simple Pebbles", 13],
+  ]);
+
+  assert.deepEqual(board.find((group) => group.section === "Masonry")?.rows.map((row) => row.name).sort(), ["Glass", "Sea Glass"]);
+  assert.deepEqual(board.find((group) => group.section === "Hunting")?.rows.map((row) => row.name).sort(), ["Raw Crab Meat", "Raw Skitch Meat"]);
+  assert.deepEqual(board.find((group) => group.section === "Scholar")?.rows.map((row) => row.name).sort(), ["Stone Carvings", "Stone Diagrams"]);
+  assert.deepEqual(board.find((group) => group.section === "Taming")?.rows.map((row) => row.name).sort(), ["Nubi Goat Food", "Sagi Bird Food"]);
+});
+
 test("buildNeedsBoard keeps distinct material families separate when an API tag is shared", () => {
   const board = buildNeedsBoard([
     { key: "items:3030002", name: "Sturdy Brick", tag: "Brick", tier: 3, section: "Masonry", sectionOverrideKey: "tag:Brick", required: 500, available: 67, missing: 433 },
