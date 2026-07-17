@@ -64,6 +64,15 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /<Dialog[\s\S]*craft-plan-need-detail/);
   assert.match(page, /craft-plan-need-detail/);
   assert.match(page, /How to get this/);
+  assert.match(page, /Treat this cell as gathered/);
+  assert.match(page, /cellItemKeys/);
+  assert.match(page, /gatheredCellState/);
+  assert.match(page, /setCellGathered/);
+  assert.match(page, /canManage[\s\S]*craft-plan-gathered-control/);
+  assert.match(page, /x-csrf-token/);
+  assert.match(page, /href="\/\?page=map"/);
+  assert.match(page, /Open Map resource finder/);
+  assert.match(page, /must be gathered or supplied from counted stock/);
   assert.match(page, /Gathering byproduct/);
   assert.match(page, /route\.routeType === "gathering-byproduct"/);
   assert.match(page, /Expected yield/);
@@ -178,6 +187,8 @@ test("Craft Planning manager exposes a lazy, resilient audit history tab", () =>
   assert.match(manager, /const TABS = \[[^\]]*"audit"/);
   assert.match(manager, /<History size=\{15\} \/>/);
   assert.match(manager, /\/admin\/craft-plan\/audit\?limit=100/);
+  assert.match(manager, /gathered_item:\s*"Gathered item"/);
+  assert.match(manager, /gatheredItemKeys:\s*string\[\]/);
   assert.match(manager, /activeTab !== "audit" \|\| auditLoaded \|\| auditLoading/);
   assert.match(manager, /Audit history/);
   assert.match(manager, /No craft plan changes have been recorded yet\./);

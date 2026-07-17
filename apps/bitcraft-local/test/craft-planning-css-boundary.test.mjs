@@ -177,7 +177,10 @@ test("How to get this separates route headings and producer buffer controls", ()
   assert.match(page, /does not increase the .* goal/);
   assert.match(css, /\.craft-plan-route-heading\s*\{/);
   assert.match(css, /\.craft-plan-buffer-settings\s*\{/);
+  assert.match(css, /\.craft-plan-gathered-control\s*\{/);
+  assert.match(css, /\.craft-plan-gathered-state\s*\{/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-buffer-control/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-gathered-control/);
 });
 
 test("Overall Needs Board progress sits on the left and shares section completion tones", () => {

@@ -490,6 +490,27 @@
 .craft-plan-producer-requirements > small { color: var(--muted); font-weight: 700; }
 .craft-plan-producer-requirements > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; background: rgba(101, 183, 250, 0.09); }
 .craft-plan-producer-requirements > span > strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.craft-plan-gathered-control {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 159, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(7, 15, 24, 0.42);
+}
+.craft-plan-gathered-control > small { color: var(--muted); line-height: 1.4; }
+.craft-plan-gathered-control .craft-plan-gathered-mixed { color: var(--accent); }
+.craft-plan-gathered-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(240, 198, 79, 0.28);
+  border-radius: 8px;
+  background: rgba(240, 198, 79, 0.07);
+}
+.craft-plan-gathered-state p { margin: 0; color: var(--muted); line-height: 1.45; }
 .craft-plan-buffer-settings { display: grid; gap: 7px; padding: 10px; border-radius: 7px; background: rgba(139, 159, 184, 0.06); }
 .craft-plan-buffer-settings > label { color: var(--text); font-size: 0.82rem; font-weight: 700; }
 .craft-plan-buffer-settings > small { color: var(--muted); font-size: 0.74rem; line-height: 1.4; }
@@ -498,6 +519,7 @@
 .craft-plan-buffer-control input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 760px) {
   .craft-plan-action-summary > span { align-items: flex-start; }
+  .craft-plan-gathered-control, .craft-plan-gathered-state { padding: 10px; }
   .craft-plan-buffer-control { grid-template-columns: minmax(0, 1fr) auto; }
   .craft-plan-buffer-control .toolbar-button:last-child:not(:nth-child(2)) { grid-column: 1 / -1; }
 }
