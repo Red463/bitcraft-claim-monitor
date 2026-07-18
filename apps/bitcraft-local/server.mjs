@@ -70,6 +70,7 @@ import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
+import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
@@ -301,6 +302,13 @@ applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalM
 
 const statements = createPreparedStatements(db);
 const gameCatalogRepository = createGameCatalogRepository(db);
+const empireHexiteRepository = createEmpireHexiteRepository(db);
+const runEmpireHexiteRefreshJob = createEmpireHexiteRefreshJob({
+  repository: empireHexiteRepository,
+  fetchJson: (pathname) => fetchBitjita(pathname, { cache: false }),
+  batchSize: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_BATCH_SIZE ?? 50), 100)),
+  requestsPerMinute: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_REQUESTS_PER_MINUTE ?? 150), 150)),
+});
 
 seedDefaultDiscordOwner({ db, statements, defaultOwnerDiscordId: defaultOwnerDiscordIdFromEnv(process.env), isTestRuntime });
 
@@ -1066,6 +1074,13 @@ const scheduledJobRegistry = {
     schedule: "interval@1800",
     enabled: true,
     run: runMarketDealWatchJob,
+  },
+  empire_hexite_reserves_refresh: {
+    label: "Empire Hexite reserves",
+    description: "Refreshes estimated empire Hexite Energy and ready Capsule holdings from BitJita wallets, player storage, and aligned-claim inventories.",
+    schedule: "interval@21600",
+    enabled: true,
+    run: runEmpireHexiteRefreshJob,
   },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
@@ -5552,7 +5567,7 @@ function normalizeEmpireOverviewRow(empire, regionalClaims) {
 
 async function regionalEmpireOverview(regionId) {
   const key = `overview:${regionId}`;
-  return empireCacheLoad(key, async () => {
+  const overview = await empireCacheLoad(key, async () => {
     const [claimPayload, empirePayload] = await Promise.all([
       fetchRegionClaimList(regionId),
       fetchBitjita("/empires"),
@@ -5580,6 +5595,34 @@ async function regionalEmpireOverview(regionId) {
       },
     };
   });
+  const activeSweep = empireHexiteRepository.activeSweep();
+  const bootstrapFailure = activeSweep ? null : empireHexiteRepository.latestBootstrapFailure();
+  return {
+    ...overview,
+    empires: overview.empires.map((empire) => {
+      const snapshot = empireHexiteRepository.snapshotForEmpire(empire.entityId);
+      let hexiteReserves = snapshot
+        ? { ...snapshot, refreshing: Boolean(activeSweep) }
+        : aggregateEmpireHexite({
+          treasury: empire.empireCurrencyTreasury,
+          capsuleEnergyCost: activeSweep?.capsuleEnergyCost ?? null,
+          players: [],
+          claims: [],
+          sweepStartedAt: activeSweep?.startedAt ?? null,
+          calculatedAt: null,
+          refreshing: Boolean(activeSweep),
+        });
+      if (!snapshot && bootstrapFailure) {
+        hexiteReserves = {
+          ...hexiteReserves,
+          status: "error",
+          sweepStartedAt: bootstrapFailure.startedAt,
+          errors: [bootstrapFailure.lastError].filter(Boolean),
+        };
+      }
+      return { ...empire, hexiteReserves };
+    }),
+  };
 }
 
 function lastLoginMs(value) {

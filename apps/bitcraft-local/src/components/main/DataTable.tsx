@@ -3,7 +3,7 @@ import type { AnyRecord } from "../../main-app-data";
 import { sortIndexedRows, type SortDirection } from "../../utils/tableSort";
 import { AsyncState, type AsyncStateKind } from "./AsyncState";
 
-type DataTableColumn = [
+export type DataTableColumn = [
   label: string,
   render: (row: AnyRecord, index: number) => React.ReactNode,
   sortValue?: (row: AnyRecord, index: number) => unknown,
