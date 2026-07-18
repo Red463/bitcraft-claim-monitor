@@ -71,6 +71,26 @@ test("progress compares a zero-stock baseline with confirmed live missing effort
   assert.deepEqual(result.overall, { state: "ready", baselineEffort: 300, remainingEffort: 150, completion: 50 });
 });
 
+test("confirmed effort projection ignores planning-only estimated coverage", () => {
+  const result = calculateCraftPlanEffortProgress({
+    baselinePlan: {
+      materials: [{ key: "items:lake", section: "Fishing", required: 30, missing: 30 }],
+      personalViews: { fishing: { tiers: [] } },
+    },
+    currentPlan: {
+      materials: [],
+      personalViews: { fishing: { tiers: [] } },
+      confirmedEffortPlan: {
+        materials: [{ key: "items:lake", section: "Fishing", required: 30, missing: 30 }],
+        personalViews: { fishing: { tiers: [] } },
+      },
+    },
+    weights: new Map([["items:lake", 1]]),
+  });
+
+  assert.equal(result.overall.completion, 0);
+});
+
 test("materials removed from the live requirement graph count as completed effort", () => {
   const baselinePlan = { materials: [
     { key: "items:plank", section: "Carpentry", bufferedRequired: 10, missing: 10 },

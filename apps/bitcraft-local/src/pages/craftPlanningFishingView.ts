@@ -71,7 +71,7 @@ function projectedCell(route: PersonalFishingRoute): NeedCell | null {
     items: [item],
     name,
     missing: needed,
-    required: needed + stockQuantity + guaranteedInProgress,
+    required: needed + stockQuantity + guaranteedInProgress + estimatedInProgress,
     available: stockQuantity,
     inProgress: trackedQuantity,
     guaranteedInProgress,
