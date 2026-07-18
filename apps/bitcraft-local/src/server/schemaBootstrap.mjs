@@ -185,6 +185,68 @@ export const schemaBootstrapSql = `
     metadata_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS empire_hexite_sweeps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL,
+    capsule_energy_cost REAL,
+    total_targets INTEGER NOT NULL DEFAULT 0,
+    processed_targets INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    last_error TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS empire_hexite_sweep_empires (
+    sweep_id INTEGER NOT NULL,
+    empire_id TEXT NOT NULL,
+    treasury REAL NOT NULL DEFAULT 0,
+    discovery_state TEXT NOT NULL DEFAULT 'pending',
+    member_count INTEGER NOT NULL DEFAULT 0,
+    claim_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (sweep_id, empire_id),
+    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS empire_hexite_targets (
+    sweep_id INTEGER NOT NULL,
+    empire_id TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    energy REAL NOT NULL DEFAULT 0,
+    capsules REAL NOT NULL DEFAULT 0,
+    reserve_capsules REAL NOT NULL DEFAULT 0,
+    inventories_json TEXT NOT NULL DEFAULT '[]',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (sweep_id, source_type, source_id),
+    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS empire_hexite_sources (
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    empire_id TEXT NOT NULL,
+    energy REAL NOT NULL DEFAULT 0,
+    capsules REAL NOT NULL DEFAULT 0,
+    reserve_capsules REAL NOT NULL DEFAULT 0,
+    inventories_json TEXT NOT NULL DEFAULT '[]',
+    scanned_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source_type, source_id)
+  );
+  CREATE TABLE IF NOT EXISTS empire_hexite_snapshots (
+    empire_id TEXT PRIMARY KEY,
+    sweep_id INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    calculated_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_pending ON empire_hexite_targets (sweep_id, state, source_type, source_id);
+  CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_empire ON empire_hexite_targets (sweep_id, empire_id, state);
   CREATE TABLE IF NOT EXISTS server_metric_buckets (
     bucket_at TEXT NOT NULL,
     process_role TEXT NOT NULL,

@@ -1,7 +1,7 @@
 import React from "react";
 import "../styles/empires.css";
 import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
-import { DataTable } from "../components/main/DataTable";
+import { DataTable, type DataTableColumn } from "../components/main/DataTable";
 import { AsyncState } from "../components/main/AsyncState";
 import { AppSkeleton } from "../components/main/AppChrome";
 import { Dialog } from "../components/main/Dialog";
@@ -12,6 +12,7 @@ import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
+import { describeHexiteReserves, presentHexiteReserves } from "./empires/hexitePresentation";
 
 const LOCAL_API = "/api/local";
 
@@ -72,6 +73,18 @@ function statusPill(active: boolean, label: string) {
 function compactDate(value: unknown): string {
   if (!value) return "-";
   return `${timeAgo(value)} (${dateLabel(value)})`;
+}
+
+function HexiteReserveCell({ value }: { value: AnyRecord }) {
+  const presentation = presentHexiteReserves(value);
+  const title = describeHexiteReserves(value);
+  return (
+    <span className="hexite-reserve-cell" title={title} aria-label={`${presentation.primary}. ${presentation.secondary}. ${presentation.detail}`}>
+      <strong>{presentation.primary}</strong>
+      <small>{presentation.secondary}</small>
+      <span className={`hexite-reserve-status ${presentation.tone}`}>{presentation.detail}</span>
+    </span>
+  );
 }
 
 function claimDistanceTiles(tower: AnyRecord, claim: AnyRecord): number | null {
@@ -298,13 +311,14 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     return map;
   }, [watchtowers.data]);
 
-  const overviewColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
+  const overviewColumns: DataTableColumn[] = [
     ["Empire", (row) => <strong>{row.name}</strong>],
     ["Leader", (row) => row.leader ?? "-"],
     ["Members", (row) => formatNumber(row.memberCount)],
     ["Territory", (row) => formatNumber(row.territoryChunks)],
     ["Region claims", (row) => formatNumber(row.regionalClaims)],
     ["Treasury", (row) => formatCompactNumber(row.empireCurrencyTreasury)],
+    ["Hexite Reserves", (row) => <HexiteReserveCell value={row.hexiteReserves ?? {}} />, (row) => presentHexiteReserves(row.hexiteReserves).sortValue],
     ["Location", (row) => coordinates(row)],
     ["Updated", (row) => compactDate(row.updatedAt)],
   ];
@@ -313,7 +327,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     members: membersByEmpire.get(String(row.empireId ?? "")) ?? [],
     claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [],
   });
-  const towerColumns: Array<[string, (row: AnyRecord) => React.ReactNode]> = [
+  const towerColumns: DataTableColumn[] = [
     ["Empire", (row) => <strong>{row.empireName}</strong>],
     ["Tower", (row) => {
       const members = membersByEmpire.get(String(row.empireId ?? "")) ?? [];
@@ -374,6 +388,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
+            <p className="hexite-reserve-note"><Zap size={14} /> Estimates combine the empire treasury, member wallets and storage, shared aligned-claim storage, and ready Capsules using BitJita's live conversion cost. Completed Foundry Capsules are not exposed and remain excluded.</p>
             <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>

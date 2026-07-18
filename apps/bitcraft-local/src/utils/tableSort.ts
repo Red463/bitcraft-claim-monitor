@@ -44,13 +44,22 @@ export function compareSortValues(left: unknown, right: unknown, direction: Sort
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * order;
 }
 
+export function compareOptionalSortValues(left: unknown, right: unknown, direction: SortDirection): number {
+  const leftMissing = left == null || String(left).trim() === "";
+  const rightMissing = right == null || String(right).trim() === "";
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+  return compareSortValues(left, right, direction);
+}
+
 export function sortIndexedRows<Row>(
   rows: ReadonlyArray<IndexedRow<Row>>,
   sortValue: (row: Row, index: number) => unknown,
   direction: SortDirection,
 ): Array<IndexedRow<Row>> {
   return [...rows].sort((left, right) => {
-    const result = compareSortValues(sortValue(left.row, left.index), sortValue(right.row, right.index), direction);
+    const result = compareOptionalSortValues(sortValue(left.row, left.index), sortValue(right.row, right.index), direction);
     return result || left.index - right.index;
   });
 }
