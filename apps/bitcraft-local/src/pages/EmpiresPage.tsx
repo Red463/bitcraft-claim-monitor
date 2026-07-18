@@ -353,7 +353,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
         </div>
       </header>
 
-      <div className="leaderboard-tabs empires-tabs" role="tablist" aria-label="Empire views">
+      <div className="empires-tabs" role="tablist" aria-label="Empire views">
         {empireTabs.map((entry) => <button key={entry.id} className={currentTab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.icon} {entry.label}</button>)}
       </div>
 

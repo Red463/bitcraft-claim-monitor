@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.38.0-beta.4] - 2026-07-18
+
+### Fixed
+
+- Restored the Empires Overview and Watchtowers tab styling after route-based stylesheet loading.
+- Restored responsive Empire summary cards and clear spacing between the Claimed watchtowers heading and its filters.
+
 ## [0.38.0-beta.3] - 2026-07-18
 
 ### Fixed
