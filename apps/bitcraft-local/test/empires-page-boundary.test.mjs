@@ -12,7 +12,7 @@ test("Empires owns its tabs, summary layout, table panel, and filter spacing", (
   assert.match(empiresCss, /\.empires-tabs button\s*\{/);
   assert.match(empiresCss, /\.empires-tabs button:hover,\s*\.empires-tabs button:focus-visible\s*\{/);
   assert.match(empiresCss, /\.empires-tabs button\.active\s*\{[^}]*color:\s*var\(--active-color\)/s);
-  assert.match(empiresCss, /\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*12px;/s);
+  assert.match(empiresCss, /\.empires-page \.stats-grid\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*12px;/s);
   assert.match(empiresCss, /\.empires-page \.table-panel\s*\{[^}]*border:[^;}]+;[^}]*background:[^;}]+;[^}]*padding:[^;}]+;[^}]*display:\s*grid;[^}]*gap:\s*12px;/s);
   assert.match(empiresCss, /@media\s*\(max-width:\s*1250px\)\s*\{[^}]*\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)\s*\{[^}]*\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
