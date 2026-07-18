@@ -3,6 +3,21 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const empiresPage = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
+const empiresCss = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
+
+test("Empires owns its tabs, summary layout, table panel, and filter spacing", () => {
+  assert.doesNotMatch(empiresPage, /leaderboard-tabs/);
+  assert.match(empiresPage, /className="empires-tabs"/);
+  assert.match(empiresCss, /\.empires-tabs\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*gap:\s*8px;/s);
+  assert.match(empiresCss, /\.empires-tabs button\s*\{/);
+  assert.match(empiresCss, /\.empires-tabs button:hover,\s*\.empires-tabs button:focus-visible\s*\{/);
+  assert.match(empiresCss, /\.empires-tabs button\.active\s*\{[^}]*color:\s*var\(--active-color\)/s);
+  assert.match(empiresCss, /\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);[^}]*gap:\s*12px;/s);
+  assert.match(empiresCss, /\.empires-page \.table-panel\s*\{[^}]*border:[^;}]+;[^}]*background:[^;}]+;[^}]*padding:[^;}]+;[^}]*display:\s*grid;[^}]*gap:\s*12px;/s);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*1250px\)\s*\{[^}]*\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)\s*\{[^}]*\.empires-page \.stats-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(empiresCss, /\.watchtower-filter-bar\s*\{[^}]*margin:\s*12px\s+0\s+10px;/s);
+});
 
 test("Empires renders a restricted state when every view is denied", () => {
   assert.match(empiresPage, /resolveAllowedView\(tab, empireTabs\.map\(\(entry\) => entry\.id\)\)/);

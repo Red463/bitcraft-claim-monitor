@@ -41,7 +41,51 @@
 }
 
 .empires-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 18px;
+}
+
+.empires-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: linear-gradient(180deg, var(--card-top), var(--card-bottom));
+  color: var(--muted);
+  padding: 0 13px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.empires-tabs button:hover,
+.empires-tabs button:focus-visible {
+  border-color: rgba(240, 198, 79, .5);
+  color: var(--text);
+}
+
+.empires-tabs button.active {
+  border-color: rgba(240, 198, 79, .62);
+  background: rgba(240, 198, 79, .14);
+  color: var(--active-color);
+}
+
+.empires-page .stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.empires-page .table-panel {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--card-top), var(--card-bottom));
+  padding: 14px;
+  display: grid;
+  gap: 12px;
 }
 
 .empires-watch-controls {
@@ -96,7 +140,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin: -2px 0 10px;
+  margin: 12px 0 10px;
 }
 
 .watchtower-empire-filter {
@@ -240,6 +284,12 @@
 .status-pill.warn { border-color: rgba(240,198,79,.42); color: var(--gold); background: rgba(240,198,79,.12); }
 .status-pill.danger { border-color: rgba(239,100,97,.5); color: #ffb4b2; background: rgba(239,100,97,.12); }
 
+@media (max-width: 1250px) {
+  .empires-page .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .page-title-row,
   .empires-watch-controls,
@@ -249,6 +299,12 @@
   }
   .compact-field {
     min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .empires-page .stats-grid {
+    grid-template-columns: 1fr;
   }
 }
 
