@@ -125,8 +125,9 @@ function compactFishingRoute(route = {}) {
 }
 
 export function compactCraftPlanEffortInput(plan = {}) {
+  const effortPlan = plan?.confirmedEffortPlan ?? plan;
   return {
-    materials: (Array.isArray(plan?.materials) ? plan.materials : []).map((material) => {
+    materials: (Array.isArray(effortPlan?.materials) ? effortPlan.materials : []).map((material) => {
       const name = String(material?.name ?? material?.label ?? material?.itemName ?? "").trim();
       const sectionOverride = String(material?.sectionOverride ?? "").trim();
       return {
@@ -141,7 +142,7 @@ export function compactCraftPlanEffortInput(plan = {}) {
     }),
     personalViews: {
       fishing: {
-        tiers: (Array.isArray(plan?.personalViews?.fishing?.tiers) ? plan.personalViews.fishing.tiers : []).map((tier) => ({
+        tiers: (Array.isArray(effortPlan?.personalViews?.fishing?.tiers) ? effortPlan.personalViews.fishing.tiers : []).map((tier) => ({
           routes: Object.fromEntries(Object.entries(tier?.routes ?? {}).map(([name, route]) => [name, compactFishingRoute(route)])),
         })),
       },
@@ -256,6 +257,7 @@ export function calculateCraftPlanEffortProgress({
   currentPlan = {},
   weights = new Map(),
 } = {}) {
+  const currentEffortPlan = currentPlan?.confirmedEffortPlan ?? currentPlan;
   const calculateProjection = (baseline, current) => {
     if (!baseline.length) return {
       state: "empty",
@@ -330,18 +332,18 @@ export function calculateCraftPlanEffortProgress({
     };
   }
 
-  const generic = calculateProjection(baseline, projectCraftPlanEffortMaterials(currentPlan));
+  const generic = calculateProjection(baseline, projectCraftPlanEffortMaterials(currentEffortPlan));
   const fishingVariants = {};
   for (const route of ["ocean", "lake"]) {
     const baselineRoutes = baselinePlan?.personalViews?.fishing?.tiers ?? [];
-    const currentRoutes = currentPlan?.personalViews?.fishing?.tiers ?? [];
+    const currentRoutes = currentEffortPlan?.personalViews?.fishing?.tiers ?? [];
     const routeAvailable = baselineRoutes.length > 0
       && baselineRoutes.every((tier) => tier?.routes?.[route]?.available === true)
       && currentRoutes.every((tier) => tier?.routes?.[route]?.available === true);
     if (!routeAvailable) continue;
     const variant = calculateProjection(
       projectCraftPlanEffortMaterials(baselinePlan, route),
-      projectCraftPlanEffortMaterials(currentPlan, route),
+      projectCraftPlanEffortMaterials(currentEffortPlan, route),
     );
     fishingVariants[route] = { route, ...variant };
   }

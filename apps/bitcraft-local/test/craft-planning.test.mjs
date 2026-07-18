@@ -617,7 +617,7 @@ test("personal fishing view applies chance buffers to probabilistic fish inputs 
   assert.equal(tier.routes.lake.multiplier, 1);
 });
 
-test("personal fishing view displays expected output but counts guaranteed output only", () => {
+test("personal fishing view counts estimated output for material planning", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
       enabled: true,
@@ -641,8 +641,8 @@ test("personal fishing view displays expected output but counts guaranteed outpu
   assert.equal(plan.materials.find((material) => material.id === "1900")?.guaranteedInProgress, 0);
   assert.equal(plan.materials.find((material) => material.id === "1900")?.estimatedInProgress, 5);
   assert.equal(tier.trackedOil, 5);
-  assert.equal(tier.remainingOil, 10);
-  assert.equal(tier.routes.ocean.needed, 4);
+  assert.equal(tier.remainingOil, 5);
+  assert.equal(tier.routes.ocean.needed, 2);
 
   const guaranteedPlan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -656,10 +656,10 @@ test("personal fishing view displays expected output but counts guaranteed outpu
   assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.inProgress, 5);
   assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.guaranteedInProgress, 2);
   assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.estimatedInProgress, 3);
-  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 8);
+  assert.equal(guaranteedPlan.materials.find((material) => material.id === "1900")?.missing, 5);
 });
 
-test("estimated active output stays visible but does not satisfy or stop expansion", () => {
+test("estimated active output satisfies material planning and stops prerequisite expansion", () => {
   const plan = computeCraftPlan({
     config: {
       enabled: true,
@@ -667,14 +667,17 @@ test("estimated active output stays visible but does not satisfy or stop expansi
       sourceRules: { craftPlayerIds: ["player"] },
     },
     detailsByKey: fishingPreferenceDetails(),
-    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 5.9, guaranteedQuantity: 0, name: "Fish Oil" }],
+    activeCrafts: [{ id: "craft", playerId: "player", itemId: "1900", kind: "items", quantity: 10, guaranteedQuantity: 0, name: "Fish Oil" }],
   });
   const oil = plan.materials.find((item) => item.key === "items:1900");
-  assert.equal(oil.inProgress, 5);
+  assert.equal(oil.inProgress, 10);
   assert.equal(oil.guaranteedInProgress, 0);
-  assert.equal(oil.estimatedInProgress, 5);
-  assert.equal(oil.missing, 10);
-  assert.equal(plan.materials.some((item) => item.key === "items:1901" && item.missing > 0), true);
+  assert.equal(oil.estimatedInProgress, 10);
+  assert.equal(oil.missing, 0);
+  assert.equal(plan.materials.some((item) => item.key === "items:1901"), false);
+  const confirmedOil = plan.confirmedEffortPlan.materials.find((item) => item.key === "items:1900");
+  assert.equal(confirmedOil.missing, 10);
+  assert.equal(plan.confirmedEffortPlan.materials.some((item) => item.key === "items:1901"), true);
 });
 
 test("guaranteed active output satisfies requirements", () => {
@@ -690,7 +693,7 @@ test("guaranteed active output satisfies requirements", () => {
   assert.equal(plan.materials.find((item) => item.key === "items:1900").missing, 5);
 });
 
-test("active crafts without guaranteed quantity display rounded expected output without satisfying demand", () => {
+test("active crafts without guaranteed quantity display rounded expected output and satisfy planning demand", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
       enabled: true,
@@ -705,7 +708,7 @@ test("active crafts without guaranteed quantity display rounded expected output 
   assert.equal(oil?.inProgress, 5);
   assert.equal(oil?.guaranteedInProgress, 0);
   assert.equal(oil?.estimatedInProgress, 5);
-  assert.equal(oil?.missing, 10);
+  assert.equal(oil?.missing, 5);
 });
 
 test("computeCraftPlan combines expected active-craft output before rounding down", () => {
@@ -728,7 +731,7 @@ test("computeCraftPlan combines expected active-craft output before rounding dow
   assert.equal(straw?.inProgress, 1);
   assert.equal(straw?.guaranteedInProgress, 0);
   assert.equal(straw?.estimatedInProgress, 1);
-  assert.equal(straw?.missing, 10);
+  assert.equal(straw?.missing, 9);
 });
 
 test("computeCraftPlan never counts less than guaranteed active output", () => {

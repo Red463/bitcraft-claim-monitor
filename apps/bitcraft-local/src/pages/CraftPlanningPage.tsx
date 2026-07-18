@@ -45,15 +45,15 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
   const hasEstimatedActive = cell.estimatedInProgress > 0;
   const hasApproximateRequirement = cell.items.some((item) => item.estimatedRequirement === true);
   const hasIndicators = hasGuaranteedActive || hasEstimatedActive || hasApproximateRequirement;
-  const supplied = cell.available + cell.guaranteedInProgress;
-  const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && supplied <= 0;
+  const planningSupplied = cell.available + cell.guaranteedInProgress + cell.estimatedInProgress;
+  const blocked = !satisfied && cell.items.some((item) => item.hasSourceRoutes || (Array.isArray(item.sourceRoutes) && item.sourceRoutes.length > 0)) && planningSupplied <= 0;
   return (
-    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasGuaranteedActive ? " has-active" : ""}${hasIndicators ? " has-indicators" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.guaranteedInProgress)} guaranteed active output${hasEstimatedActive ? `, ${quantity(cell.estimatedInProgress)} estimated active output (not counted toward progress)` : ""}, ${quantity(cell.required)} required${hasApproximateRequirement ? "; requirement estimated from expected processing yield" : ""}`} onClick={() => onSelect(cell)}>
-      <strong>{quantity(satisfied ? supplied : cell.missing)}</strong>
-      <small>{quantity(supplied)} / {quantity(cell.required)}</small>
+    <button className={`craft-plan-need-cell${satisfied ? " is-satisfied" : " is-shortage"}${hasGuaranteedActive ? " has-active" : ""}${hasIndicators ? " has-indicators" : ""}${blocked ? " is-blocked" : ""}`} type="button" title={`${cell.name}: ${quantity(cell.missing)} needed, ${quantity(cell.available)} in stock, ${quantity(cell.guaranteedInProgress)} guaranteed active output${hasEstimatedActive ? `, ${quantity(cell.estimatedInProgress)} estimated craft output (counted for material planning only)` : ""}, ${quantity(cell.required)} required${hasApproximateRequirement ? "; requirement estimated from expected processing yield" : ""}`} onClick={() => onSelect(cell)}>
+      <strong>{quantity(satisfied ? planningSupplied : cell.missing)}</strong>
+      <small>{quantity(planningSupplied)} / {quantity(cell.required)}</small>
       {hasIndicators ? <span className="craft-plan-cell-indicators">
         {hasGuaranteedActive ? <Factory className="is-guaranteed" size={11} role="img" aria-label="Actively being crafted" /> : null}
-        {hasEstimatedActive ? <Factory className="is-estimated" size={11} role="img" aria-label="Estimated active output; not counted toward progress" /> : null}
+        {hasEstimatedActive ? <Factory className="is-estimated" size={11} role="img" aria-label="Estimated craft output; counted for material planning" /> : null}
         {hasApproximateRequirement ? <EqualApproximately className="is-approximate" size={12} role="img" aria-label="Approximate requirement" /> : null}
       </span> : null}
     </button>
@@ -235,7 +235,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         <header className="modal-header">
           <div>
             <h2>{itemNode(selectedNeed.item)}</h2>
-            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.guaranteedInProgress)} guaranteed active output, {quantity(selectedNeed.estimatedInProgress)} estimated active output.</p>
+            <p>{quantity(selectedNeed.missing)} still needed, {quantity(selectedNeed.available)} available, {quantity(selectedNeed.guaranteedInProgress)} guaranteed active output, {quantity(selectedNeed.estimatedInProgress)} estimated craft output counted for material planning.</p>
           </div>
           <button className="icon-button" type="button" onClick={closeNeedDetail} aria-label="Close item details"><X size={18} /></button>
         </header>
@@ -598,7 +598,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 return <button className={selected ? "active" : ""} type="button" aria-pressed={selected} key={group.section} onClick={() => toggleSection(group.section)}>{group.section} <span>{group.rows.length}</span></button>;
               })}
             </div> : null}
-            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered by confirmed supply</span><span className="short">More needed</span><span className="active icon-state"><Factory size={11} aria-hidden="true" />Guaranteed craft counted</span><span className="approximate icon-state"><EqualApproximately size={12} aria-hidden="true" />Approximate requirement</span><span className="estimated-output icon-state"><Factory size={11} aria-hidden="true" />Estimated active output; not counted</span><span className="blocked">Recipe cannot start from counted stock</span></div>
+            <div className="craft-plan-needs-legend" aria-label="Needs board legend"><span className="covered">Covered for material planning</span><span className="short">More needed</span><span className="active icon-state"><Factory size={11} aria-hidden="true" />Guaranteed craft counted</span><span className="approximate icon-state"><EqualApproximately size={12} aria-hidden="true" />Approximate requirement</span><span className="estimated-output icon-state"><Factory size={11} aria-hidden="true" />Estimated craft output; counted for material planning</span><span className="blocked">Recipe cannot start from counted stock</span></div>
             {filteredNeedsBoard.length ? <div className="craft-plan-needs-scroll" tabIndex={0} aria-label="Craft plan needs board">
               <div className="craft-plan-needs-table-wrap craft-plan-needs-matrix">
                 <table className="craft-plan-needs-table">

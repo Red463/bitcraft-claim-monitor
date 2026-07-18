@@ -15,19 +15,21 @@ test("Craft Planning page is registered in navigation, access control, and AppSh
   assert.match(appShell, /planning: <CraftPlanningPage/);
 });
 
-test("Craft Planning separates approximate requirements from estimated active output", () => {
+test("Craft Planning labels estimated active output as material-planning coverage", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
   const cellBody = page.match(/function needCellNode[\s\S]+?function recipeOptionLabel/)?.[0] ?? "";
 
   assert.match(page, /EqualApproximately/);
   assert.match(cellBody, /aria-label="Approximate requirement"/);
-  assert.match(cellBody, /aria-label="Estimated active output; not counted toward progress"/);
+  assert.match(cellBody, /cell\.available \+ cell\.guaranteedInProgress \+ cell\.estimatedInProgress/);
+  assert.match(cellBody, /aria-label="Estimated craft output; counted for material planning"/);
   assert.match(cellBody, /craft-plan-cell-indicators/);
   assert.doesNotMatch(cellBody, /craft-plan-estimated-marker/);
   assert.doesNotMatch(cellBody, />~<\/span>/);
   assert.match(page, />Approximate requirement<\/span>/);
-  assert.match(page, />Estimated active output; not counted<\/span>/);
-  assert.doesNotMatch(page, />Estimated; not counted<\/span>/);
+  assert.match(page, />Covered for material planning<\/span>/);
+  assert.match(page, />Estimated craft output; counted for material planning<\/span>/);
+  assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
 test("Craft Planning page renders read-only plan sections with an admin-only manager entry", () => {
@@ -45,7 +47,7 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /newly built/);
   assert.match(page, /Tracking pending/);
   assert.match(page, /needed/);
-  assert.match(page, /quantity\(supplied\).*quantity\(cell\.required\)/s);
+  assert.match(page, /quantity\(planningSupplied\).*quantity\(cell\.required\)/s);
   assert.match(page, /craft-plan-needs-board/);
   assert.match(page, /craft-plan-section-filters/);
   assert.match(page, /craft-plan-needs-search/);

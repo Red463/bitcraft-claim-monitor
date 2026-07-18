@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.38.0-beta.3] - 2026-07-18
+
+### Fixed
+
+- Fixed estimated active craft output failing to reduce material shortages and unnecessarily restoring prerequisite gathering requirements.
+
 ## [0.38.0-beta.2] - 2026-07-17
 
 ### Fixed
