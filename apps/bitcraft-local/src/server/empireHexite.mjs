@@ -148,6 +148,7 @@ export function normalizePublishedEmpireHexite(value) {
     ...value,
     capsuleWatchtowerEnergyValue: HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
   };
+  if (value.status === "error" || value.status === "pending") return normalized;
   const calculatedAt = Date.parse(String(value.calculatedAt ?? ""));
   if (!Number.isFinite(calculatedAt)) return normalized;
   const energy = optionalFiniteNumber(value.energy?.total);

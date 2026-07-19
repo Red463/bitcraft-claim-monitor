@@ -238,6 +238,25 @@ test("published snapshots without trustworthy coverage are never promoted to com
   assert.equal(normalized.status, "partial");
 });
 
+test("published snapshots preserve explicit unavailable states even when dated components exist", () => {
+  for (const status of ["error", "pending"]) {
+    const normalized = normalizePublishedEmpireHexite({
+      status,
+      calculatedAt: "2026-07-19T10:00:00.000Z",
+      estimatedEnergyEquivalent: null,
+      energy: { total: 20 },
+      capsules: { readyTotal: 1 },
+      coverage: {
+        players: { fresh: 1, reused: 0, missing: 0, total: 1 },
+        claims: { fresh: 0, reused: 0, missing: 0, total: 0 },
+      },
+    });
+
+    assert.equal(normalized.estimatedEnergyEquivalent, null);
+    assert.equal(normalized.status, status);
+  }
+});
+
 test("empire Hexite source deduplication gives player ownership precedence over shared claim payloads", () => {
   const result = dedupeEmpireHexiteSources({
     players: [{
