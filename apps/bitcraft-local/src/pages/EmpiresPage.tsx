@@ -12,11 +12,7 @@ import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
-import {
-  describeHexiteReserveMetric,
-  presentHexiteReserveMetric,
-  type HexiteReserveMetric,
-} from "./empires/hexitePresentation";
+import { presentHexiteReserveSummary } from "./empires/hexitePresentation";
 
 const LOCAL_API = "/api/local";
 
@@ -79,15 +75,22 @@ function compactDate(value: unknown): string {
   return `${timeAgo(value)} (${dateLabel(value)})`;
 }
 
-function HexiteReserveCell({ value, metric }: { value: AnyRecord; metric: HexiteReserveMetric }) {
-  const presentation = presentHexiteReserveMetric(value, metric);
-  const title = describeHexiteReserveMetric(value, metric);
+function HexiteReserveCell({ value }: { value: AnyRecord }) {
+  const presentation = presentHexiteReserveSummary(value);
   return (
-    <span className={`hexite-reserve-cell ${metric}`} title={title} aria-label={`${presentation.primary}. ${presentation.secondary}. ${presentation.detail}`}>
+    <div className="hexite-reserve-cell" aria-label={`${presentation.primary}. ${presentation.secondary}. ${presentation.status}`}>
       <strong>{presentation.primary}</strong>
       <small>{presentation.secondary}</small>
-      <span className={`hexite-reserve-status ${presentation.tone}`}>{presentation.detail}</span>
-    </span>
+      <span className={`hexite-reserve-status ${presentation.tone}`}>{presentation.status}</span>
+      {presentation.details.length ? (
+        <details className="hexite-reserve-details">
+          <summary>Details</summary>
+          <span className="hexite-reserve-detail-lines">
+            {presentation.details.map((line) => <span key={line}>{line}</span>)}
+          </span>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -322,9 +325,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Territory", (row) => formatNumber(row.territoryChunks)],
     ["Region claims", (row) => formatNumber(row.regionalClaims)],
     ["Treasury", (row) => formatCompactNumber(row.empireCurrencyTreasury)],
-    ["Hexite Energy", (row) => <HexiteReserveCell value={row.hexiteReserves ?? {}} metric="energy" />, (row) => presentHexiteReserveMetric(row.hexiteReserves, "energy").sortValue],
-    ["Capsules", (row) => <HexiteReserveCell value={row.hexiteReserves ?? {}} metric="capsules" />, (row) => presentHexiteReserveMetric(row.hexiteReserves, "capsules").sortValue],
-    ["Watchtower Energy", (row) => <HexiteReserveCell value={row.hexiteReserves ?? {}} metric="watchtower" />, (row) => presentHexiteReserveMetric(row.hexiteReserves, "watchtower").sortValue],
+    ["Hexite Reserves", (row) => <HexiteReserveCell value={row.hexiteReserves ?? {}} />, (row) => presentHexiteReserveSummary(row.hexiteReserves).sortValue],
     ["Location", (row) => coordinates(row)],
     ["Updated", (row) => compactDate(row.updatedAt)],
   ];
@@ -394,7 +395,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
-            <p className="hexite-reserve-note"><Zap size={14} /> Hexite Energy and completed Capsules include empire treasury, member, and aligned-claim holdings. A Capsule costs 100 HE to craft but provides 1,000 Watchtower energy when deployed. Foundry output is unavailable and excluded.</p>
+            <p className="hexite-reserve-note"><Zap size={14} /> Known minimum from treasury and inventories; completed Foundry output is unavailable.</p>
             <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>
