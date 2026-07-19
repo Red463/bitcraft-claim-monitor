@@ -54,7 +54,8 @@ export function coordinateText(row: AnyRecord): string {
 
 export function isWatchtowerAtRisk(row: AnyRecord): boolean {
   const inactiveRisk = row.inactiveRisk === true || String(row.inactiveRisk ?? "").toLowerCase() === "true";
-  return numericValue(row.siegeCount) > 0 || inactiveRisk;
+  const underSiege = row.underSiege === true || String(row.underSiege ?? "").toLowerCase() === "true";
+  return underSiege || numericValue(row.siegeCount) > 0 || inactiveRisk;
 }
 
 export function presentWatchtowerRows(rows: AnyRecord[]): PresentedWatchtower[] {

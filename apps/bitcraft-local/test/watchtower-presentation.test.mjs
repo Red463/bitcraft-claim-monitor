@@ -47,6 +47,8 @@ test("filterWatchtowerRows falls back to all rows when an empire selection is st
 });
 
 test("isWatchtowerAtRisk flags active siege or leader activity risk", () => {
+  assert.equal(isWatchtowerAtRisk({ underSiege: true, siegeCount: 0, inactiveRisk: false }), true);
+  assert.equal(isWatchtowerAtRisk({ underSiege: false, siegeCount: 0, inactiveRisk: false }), false);
   assert.equal(isWatchtowerAtRisk({ siegeCount: 1, inactiveRisk: false }), true);
   assert.equal(isWatchtowerAtRisk({ siegeCount: 0, inactiveRisk: true }), true);
   assert.equal(isWatchtowerAtRisk({ siegeCount: 0, inactiveRisk: false }), false);
