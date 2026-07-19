@@ -156,21 +156,17 @@
 .hexite-reserve-cell {
   display: grid;
   gap: 2px;
+  min-width: 230px;
   line-height: 1.25;
-}
-
-.hexite-reserve-cell.energy,
-.hexite-reserve-cell.capsules {
-  min-width: 148px;
-}
-
-.hexite-reserve-cell.watchtower {
-  min-width: 190px;
 }
 
 .hexite-reserve-cell strong {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.hexite-reserve-cell.danger > strong {
+  color: #ff8d98;
 }
 
 .hexite-reserve-cell small {
@@ -187,6 +183,32 @@
 .hexite-reserve-status.good { color: #63eba5; }
 .hexite-reserve-status.danger { color: #ff8d98; }
 .hexite-reserve-status.muted { color: var(--muted); }
+
+.hexite-reserve-details {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hexite-reserve-details summary {
+  width: fit-content;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.hexite-reserve-details summary:focus-visible {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.hexite-reserve-detail-lines {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  max-width: 320px;
+  white-space: normal;
+}
 
 .watchtower-filter-bar {
   display: flex;
