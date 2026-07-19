@@ -98,10 +98,18 @@ test("watchtower table exposes empire and risk filters with open-map actions", (
   assert.match(css, /\.inactivity-threshold-card/);
 });
 
-test("watchtower siege status uses a boolean label instead of a participant count", () => {
+test("watchtower siege and empire names open semantic detail dialogs without triggering the row", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /<span className="status-pill danger">Under Siege<\/span>/);
+  assert.match(page, /className="status-pill danger siege-status-trigger"/);
+  assert.match(page, /aria-label=\{[`"]View siege details/);
+  assert.match(page, /event\.stopPropagation\(\);[\s\S]*setSelectedSiegeTower\(row\)/);
+  assert.match(page, /className="empire-details-trigger"/);
+  assert.match(page, /setSelectedEmpireId/);
+  assert.match(page, /<SiegeDetailsDialog/);
+  assert.match(page, /<EmpireDetailsDialog/);
+  assert.match(page, /onBack=/);
+  assert.doesNotMatch(page, /<span className="status-pill danger">Under Siege<\/span>/);
   assert.doesNotMatch(page, /formatNumber\(row\.siegeCount\)\} siege/);
 });
 
@@ -126,4 +134,38 @@ test("watchtower popup exposes aligned claims and lazy claim member drilldown", 
   assert.match(css, /\.tower-dialog-tabs/);
   assert.match(css, /\.tower-claims-list/);
   assert.match(css, /\.claim-member-dialog/);
+});
+
+test("siege and empire details use shared accessible dialogs with complete drilldown states", () => {
+  const siegeDialog = readFileSync(new URL("../src/pages/empires/SiegeDetailsDialog.tsx", import.meta.url), "utf8");
+  const empireDialog = readFileSync(new URL("../src/pages/empires/EmpireDetailsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(siegeDialog, /<Dialog[\s\S]*open[\s\S]*title="Siege Details"/);
+  assert.match(siegeDialog, /groupSiegeParticipants/);
+  assert.match(siegeDialog, /Siege Duration/);
+  assert.match(siegeDialog, /Siege Started/);
+  assert.match(siegeDialog, /Attacking Empire/);
+  assert.match(siegeDialog, /Defending Empire/);
+  assert.match(siegeDialog, /onViewEmpire/);
+
+  assert.match(empireDialog, /\/empires\/details\?/);
+  assert.match(empireDialog, /AbortController/);
+  assert.match(empireDialog, /empireDetailsCache/);
+  assert.match(empireDialog, /role="tablist"/);
+  assert.match(empireDialog, /aria-selected=/);
+  assert.match(empireDialog, /label: "Overview"/);
+  assert.match(empireDialog, /label: "Members"/);
+  assert.match(empireDialog, /label: "Claims"/);
+  assert.match(empireDialog, /label: "Towers"/);
+  assert.match(empireDialog, />Retry</);
+  assert.match(empireDialog, /Back to Siege Details/);
+  assert.match(empiresCss, /\.siege-status-trigger\s*\{[^}]*cursor:\s*pointer/s);
+  assert.match(empiresCss, /\.empire-details-trigger:focus-visible/);
+  assert.match(empiresCss, /\.siege-details-dialog,[\s\S]*\.empire-details-dialog[\s\S]*max-height:\s*calc\(100vh - 40px\)/);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)[\s\S]*\.siege-details-dialog,[\s\S]*\.empire-details-dialog\s*\{[^}]*width:\s*100%/s);
+  assert.match(empiresCss, /\.empire-detail-tabs/);
+  assert.match(empiresCss, /\.siege-participant-card\.attacker/);
+  assert.match(empiresCss, /\.siege-participant-card\.defender/);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*900px\)[\s\S]*\.empire-detail-summary/s);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)[\s\S]*\.empire-detail-summary/s);
 });

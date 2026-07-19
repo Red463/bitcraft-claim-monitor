@@ -5655,6 +5655,17 @@ function empireInactivity(empire, members, inactiveDays) {
   };
 }
 
+function empireActivity(members) {
+  const now = Date.now();
+  const dayAgo = now - 24 * 60 * 60 * 1000;
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  return {
+    onlineNow: members.filter((member) => member.signedIn).length,
+    activeToday: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= dayAgo).length,
+    activeThisWeek: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= weekAgo).length,
+  };
+}
+
 function nestedCoordinate(source, axis) {
   const directKeys = axis === "x" ? ["locationX", "x", "coordX", "coordinateX", "worldX"] : ["locationZ", "z", "coordZ", "coordinateZ", "worldZ"];
   for (const key of directKeys) {
@@ -5723,6 +5734,7 @@ function compareEmpireMembers(a, b) {
 
 function normalizeEmpireTower(tower, empire, inactivity) {
   const siege = Array.isArray(tower?.siege) ? tower.siege : [];
+  const activeSiegeParticipants = siege.filter((entry) => entry?.active === true);
   const locationX = nestedCoordinate(tower, "x");
   const locationZ = nestedCoordinate(tower, "z");
   return {
@@ -5737,12 +5749,76 @@ function normalizeEmpireTower(tower, empire, inactivity) {
     energy: toNumber(tower?.energy),
     upkeep: toNumber(tower?.upkeep),
     active: tower?.active === true,
-    siegeCount: siege.length,
-    siege,
+    underSiege: activeSiegeParticipants.length > 0,
+    siegeCount: activeSiegeParticipants.length,
+    activeSiegeParticipants,
     inactiveRisk: inactivity.inactiveRisk,
     lastLeaderLogin: inactivity.lastLeaderLogin,
     inactivityReason: inactivity.inactivityReason,
   };
+}
+
+async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14) {
+  const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
+  const key = `details:${regionId}:${empireId}:${days}`;
+  return empireCacheLoad(key, async () => {
+    const overview = await regionalEmpireOverview(regionId);
+    const regionalEmpire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
+
+    const [detailResult, towerResult] = await Promise.allSettled([
+      fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+      fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+    ]);
+    if (!regionalEmpire && detailResult.status === "rejected") return null;
+
+    const errors = [];
+    const detailPayload = detailResult.status === "fulfilled" ? detailResult.value : null;
+    const towerPayload = towerResult.status === "fulfilled" ? towerResult.value : null;
+    if (detailResult.status === "rejected") errors.push(`Empire members unavailable: ${errorMessage(detailResult.reason)}`);
+    if (towerResult.status === "rejected") errors.push(`Watchtowers unavailable: ${errorMessage(towerResult.reason)}`);
+
+    const rawDetailEmpire = detailPayload?.empire ?? (detailPayload?.entityId ? detailPayload : null);
+    const baseEmpire = regionalEmpire ?? normalizeEmpireOverviewRow(rawDetailEmpire, []);
+    if (!baseEmpire.entityId) return null;
+    const detailEmpire = rawDetailEmpire ?? baseEmpire;
+    const rawMembers = detailPayload ? unwrap(detailPayload, "members", []) : [];
+    const members = rawMembers.map(normalizeEmpireMember).sort(compareEmpireMembers);
+    const inferredLeader = rawMembers.find((member) => toNumber(member?.rank) === 0);
+    const inferredLeaderName = memberDisplayName(inferredLeader);
+    const knownLeader = String(detailEmpire?.leader ?? baseEmpire.leader ?? "").trim();
+    const claims = baseEmpire.claims?.length
+      ? baseEmpire.claims
+      : detailEmpire?.capitalClaimId
+        ? [normalizeEmpireClaim({
+            entityId: detailEmpire.capitalClaimId,
+            name: detailEmpire.capitalClaimName,
+            regionId: detailEmpire.capitalRegionId,
+            locationX: detailEmpire.locationX,
+            locationZ: detailEmpire.locationZ,
+            empireEntityId: baseEmpire.entityId,
+          })]
+        : [];
+    const empire = {
+      ...baseEmpire,
+      leader: knownLeader && knownLeader.toLowerCase() !== "unknown" ? knownLeader : inferredLeaderName || "Unknown",
+      leaderEntityId: String(detailEmpire?.leaderEntityId ?? baseEmpire.leaderEntityId ?? "").trim() || String(inferredLeader?.entityId ?? ""),
+      memberCount: Math.max(toNumber(baseEmpire.memberCount), toNumber(detailPayload?.count), members.length),
+      claims,
+    };
+    const inactivity = empireInactivity(empire, members, days);
+    const rawTowers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
+    const towers = rawTowers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId);
+    return {
+      empire: { ...empire, ...inactivity },
+      members,
+      claims: empire.claims ?? [],
+      towers,
+      activity: empireActivity(members),
+      errors,
+      partial: errors.length > 0,
+      fetchedAt: new Date().toISOString(),
+    };
+  });
 }
 
 async function regionalEmpireClaimMembers(claimId) {
@@ -5828,7 +5904,7 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
       summary: {
         towerCount: towers.length,
         inactiveRiskEmpires: empireRows.filter((empire) => empire.inactiveRisk).length,
-        underSiege: towers.filter((tower) => tower.siegeCount > 0).length,
+        underSiege: towers.filter((tower) => tower.underSiege).length,
         activeTowers: towers.filter((tower) => tower.active).length,
       },
     };
@@ -9976,6 +10052,20 @@ const server = createServer(async (req, res) => {
           errors: [errorMessage(error)],
           summary: { empires: 0, regionalClaims: 0, totalMembers: 0, largestEmpireName: null },
         });
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/empires/details") {
+      if (!rateLimit(req, res, "empire-details", RATE_LIMITS.expensiveLocal)) return;
+      const empireId = String(url.searchParams.get("empireId") ?? "").trim();
+      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
+      if (!empireId) return send(res, 400, { error: "Empire id is required" });
+      if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
+      const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
+      try {
+        const details = await regionalEmpireDetails(empireId, regionId, inactiveDays);
+        return details ? send(res, 200, details) : send(res, 404, { error: "Empire not found in region" });
+      } catch (error) {
+        return send(res, 502, { error: "Empire details unavailable", errors: [errorMessage(error)] });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/claim-members") {

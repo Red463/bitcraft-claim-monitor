@@ -174,6 +174,7 @@ test("server collection paginates listings and protects production mutations", a
   let failClaimRefresh = false;
   let failResearchRefresh = false;
   let failEmpireList = false;
+  let failEmpireTowers = false;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/api/cache-test") {
@@ -279,9 +280,32 @@ test("server collection paginates listings and protects production mutations", a
       ],
       count: 3,
     });
-    if (url.pathname === "/api/empires/empire-1/towers") return json(res, [
-      { entityId: "tower-1", locationX: 111, locationZ: 222, locationDimension: 0, energy: 75, upkeep: 10, active: true, nickname: "North Tower", siege: [] },
-    ]);
+    if (url.pathname === "/api/empires/empire-foreign") return json(res, {
+      empire: { entityId: "empire-foreign", name: "Foreign Empire", capitalClaimId: "foreign-capital", capitalClaimName: "Foreign Capital", capitalRegionId: 9, locationX: 900, locationZ: 901, territoryChunks: 99, numClaims: 1 },
+      members: [
+        { entityId: "leader-2", playerName: "Other", rank: 0, rankTitle: "Emperor", lastLoginTimestamp: "2026-07-18T12:00:00.000Z" },
+      ],
+      count: 1,
+    });
+    if (url.pathname === "/api/empires/empire-1/towers") {
+      if (failEmpireTowers) return json(res, { error: "tower detail unavailable" }, 503);
+      return json(res, [{
+        entityId: "tower-1",
+        locationX: 111,
+        locationZ: 222,
+        locationDimension: 0,
+        energy: 75,
+        upkeep: 10,
+        active: true,
+        nickname: "North Tower",
+        siege: [
+          { active: true, attacker: false, empireEntityId: "empire-1", empireName: "Test Empire", energy: 281, startTimestamp: "2026-07-18T23:55:20.000Z" },
+          { active: true, attacker: true, empireEntityId: "empire-2", empireName: "Verdant", energy: 6710, startTimestamp: "2026-07-18T23:55:20.000Z" },
+          { active: false, attacker: true, empireEntityId: "empire-old", empireName: "Old Empire", energy: 50, startTimestamp: "2026-06-01T00:00:00.000Z" },
+        ],
+      }]);
+    }
+    if (url.pathname === "/api/empires/empire-foreign/towers") return json(res, []);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
       items: [{ id: "item-1", name: "Bronze Ingot" }],
@@ -557,11 +581,48 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(cachedRegionalEmpires.summary.empires, 0);
   assert.deepEqual(cachedRegionalEmpires.empires, []);
   failEmpireList = false;
+  const missingEmpireDetails = await fetch(`${origin}/api/local/empires/details?regionId=19`);
+  assert.equal(missingEmpireDetails.status, 400);
+  failEmpireTowers = true;
+  const partialEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=empire-1&regionId=19&inactiveDays=15`).then((response) => response.json());
+  assert.equal(partialEmpireDetails.partial, true);
+  assert.deepEqual(partialEmpireDetails.towers, []);
+  assert.match(partialEmpireDetails.errors[0], /Watchtowers unavailable/);
+  failEmpireTowers = false;
+  const empireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=empire-1&regionId=19&inactiveDays=14`);
+  assert.equal(empireDetailsResponse.status, 200);
+  const empireDetails = await empireDetailsResponse.json();
+  assert.equal(empireDetails.empire.name, "Test Empire");
+  assert.equal(empireDetails.members.length, 4);
+  assert.equal(empireDetails.claims[0].name, "Timbersteel Trade");
+  assert.equal(empireDetails.towers[0].underSiege, true);
+  assert.equal(empireDetails.activity.onlineNow, 0);
+  assert.equal(empireDetails.activity.activeToday, 0);
+  assert.equal(empireDetails.activity.activeThisWeek, 0);
+  assert.equal(empireDetails.partial, false);
+  const crossRegionEmpireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=empire-foreign&regionId=19`);
+  assert.equal(crossRegionEmpireDetailsResponse.status, 200);
+  const crossRegionEmpireDetails = await crossRegionEmpireDetailsResponse.json();
+  assert.equal(crossRegionEmpireDetails.empire.name, "Foreign Empire");
+  assert.equal(crossRegionEmpireDetails.empire.leader, "Other");
+  assert.equal(crossRegionEmpireDetails.empire.memberCount, 1);
+  assert.equal(crossRegionEmpireDetails.members[0].username, "Other");
+  assert.equal(crossRegionEmpireDetails.claims[0].name, "Foreign Capital");
+  assert.equal(crossRegionEmpireDetails.claims[0].regionId, "9");
+  const unknownEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=missing&regionId=19`);
+  assert.equal(unknownEmpireDetails.status, 404);
   const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
   assert.equal(regionalWatchtowers.summary.towerCount, 1);
   assert.equal(regionalWatchtowers.towers[0].nickname, "North Tower");
   assert.equal(regionalWatchtowers.towers[0].inactiveRisk, true);
   assert.equal(regionalWatchtowers.towers[0].locationX, 111);
+  assert.equal(regionalWatchtowers.towers[0].underSiege, true);
+  assert.equal(regionalWatchtowers.towers[0].siegeCount, 2);
+  assert.deepEqual(
+    regionalWatchtowers.towers[0].activeSiegeParticipants.map((entry) => entry.empireName),
+    ["Test Empire", "Verdant"],
+  );
+  assert.equal(regionalWatchtowers.summary.underSiege, 1);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);
   assert.equal(regionalWatchtowers.empires[0].members.length, 4);

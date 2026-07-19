@@ -421,11 +421,345 @@
 .tower-claim-metrics > span:not(.status-pill):not(.tier-badge) { display: inline-flex; align-items: center; min-height: 25px; padding: 4px 8px; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; color: var(--muted); background: rgba(15,23,42,.5); font-size: 12px; font-weight: 800; }
 .claim-member-dialog { display: grid; gap: 14px; }
 .empty-state.compact { min-height: 72px; padding: 18px; }
+
+.siege-status-trigger {
+  font: inherit;
+  cursor: pointer;
+}
+
+.siege-status-trigger:focus-visible,
+.empire-details-trigger:focus-visible {
+  outline: 2px solid var(--active-color);
+  outline-offset: 2px;
+}
+
+.empire-details-trigger {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.empire-details-trigger:hover {
+  color: var(--active-color);
+  text-decoration: underline;
+}
+
+.siege-details-dialog,
+.empire-details-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+.siege-details-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.empire-details-dialog {
+  width: min(860px, calc(100vw - 32px));
+}
+
+.siege-dialog-body,
+.empire-detail-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.siege-tower-information,
+.siege-active-summary,
+.siege-participant-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(4, 8, 14, .48);
+  padding: 14px;
+}
+
+.siege-tower-information h3,
+.siege-section-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.siege-tower-information dl,
+.siege-active-summary dl,
+.siege-participant-card dl,
+.empire-overview-grid dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.siege-tower-information dl div,
+.siege-active-summary dl div,
+.siege-participant-card dl div,
+.empire-overview-grid dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.siege-tower-information dt,
+.siege-active-summary dt,
+.siege-participant-card dt,
+.empire-overview-grid dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.siege-tower-information dd,
+.siege-active-summary dd,
+.siege-participant-card dd,
+.empire-overview-grid dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+  text-align: right;
+}
+
+.siege-active-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.siege-active-summary > .status-pill {
+  width: max-content;
+}
+
+.siege-participant-card.attacker {
+  border-color: rgba(239, 100, 97, .46);
+  background: rgba(82, 20, 24, .2);
+}
+
+.siege-participant-card.defender {
+  border-color: rgba(78, 226, 138, .36);
+  background: rgba(10, 65, 40, .18);
+}
+
+.siege-participant-head,
+.empire-detail-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.siege-participant-head .status-pill,
+.empire-tower-statuses .status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.empire-detail-back {
+  width: max-content;
+}
+
+.empire-detail-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.empire-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.empire-detail-summary > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(4, 8, 14, .48);
+  padding: 12px;
+}
+
+.empire-detail-summary svg {
+  color: var(--gold);
+}
+
+.empire-detail-summary small {
+  color: var(--muted);
+}
+
+.empire-detail-summary strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.empire-detail-tabs {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(4, 8, 14, .52);
+}
+
+.empire-detail-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.empire-detail-tabs button:hover,
+.empire-detail-tabs button:focus-visible,
+.empire-detail-tabs button.active {
+  background: rgba(240, 198, 79, .14);
+  color: var(--active-color);
+}
+
+.empire-detail-tabs button:focus-visible {
+  outline: 2px solid var(--active-color);
+  outline-offset: -2px;
+}
+
+.empire-detail-tabs button small {
+  color: inherit;
+}
+
+.empire-detail-panel {
+  min-height: 220px;
+}
+
+.empire-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.empire-overview-grid dl,
+.empire-detail-list article {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(4, 8, 14, .38);
+  padding: 12px;
+}
+
+.empire-detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.empire-detail-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  align-items: center;
+  gap: 12px;
+}
+
+.empire-detail-list strong,
+.empire-detail-list small {
+  display: block;
+}
+
+.empire-detail-list small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.empire-detail-list article > span {
+  color: var(--muted);
+  text-align: right;
+}
+
+.empire-detail-flags,
+.empire-tower-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.empire-detail-flags {
+  margin-top: 7px;
+}
+
+.empire-detail-flags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--active-color);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.empire-tower-statuses {
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .empire-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   .tower-access-list article { grid-template-columns: 1fr; align-items: start; }
   .tower-dialog-tabs { width: 100%; }
   .tower-dialog-tabs button { justify-content: center; flex: 1; }
   .tower-claims-list button { grid-template-columns: 1fr; align-items: start; }
   .tower-claim-metrics { justify-content: flex-start; }
+  .empire-overview-grid,
+  .empire-detail-list article {
+    grid-template-columns: 1fr;
+  }
+  .empire-detail-list article > span,
+  .empire-tower-statuses {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .siege-details-dialog,
+  .empire-details-dialog {
+    width: 100%;
+    max-height: calc(100vh - 16px);
+  }
+  .empire-detail-summary {
+    grid-template-columns: 1fr;
+  }
+  .siege-tower-information dl div,
+  .siege-active-summary dl div,
+  .siege-participant-card dl div {
+    display: grid;
+  }
+  .siege-tower-information dd,
+  .siege-active-summary dd,
+  .siege-participant-card dd {
+    text-align: left;
+  }
 }
 

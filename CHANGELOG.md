@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.4] - 2026-07-19
+
+### Added
+
+- Added clickable Watchtower siege details with attacker and defender energy, plus reusable Empire details for members, claims, towers, activity, and Hexite reserves.
+
+### Fixed
+
+- Kept cross-region attacker details available and contained Siege and Empire dialogs within mobile viewports.
+
 ## [0.39.0-beta.3] - 2026-07-19
 
 ### Changed
