@@ -117,8 +117,26 @@ function coverage(rows) {
   };
 }
 
+function normalizedCoverageGroup(value) {
+  if (!value || typeof value !== "object") return null;
+  const group = {
+    fresh: optionalFiniteNumber(value.fresh),
+    reused: optionalFiniteNumber(value.reused),
+    missing: optionalFiniteNumber(value.missing),
+    total: optionalFiniteNumber(value.total),
+  };
+  const counts = Object.values(group);
+  if (counts.some((count) => count == null || !Number.isInteger(count) || count < 0)) return null;
+  if (group.fresh + group.reused + group.missing !== group.total) return null;
+  return group;
+}
+
 function aggregateStatus(value) {
-  const groups = [value?.coverage?.players, value?.coverage?.claims];
+  const groups = [
+    normalizedCoverageGroup(value?.coverage?.players),
+    normalizedCoverageGroup(value?.coverage?.claims),
+  ];
+  if (groups.some((group) => group == null)) return "partial";
   const reused = groups.reduce((sum, group) => sum + number(group?.reused), 0);
   const missing = groups.reduce((sum, group) => sum + number(group?.missing), 0);
   return reused > 0 || missing > 0 ? "partial" : "complete";
@@ -130,7 +148,8 @@ export function normalizePublishedEmpireHexite(value) {
     ...value,
     capsuleWatchtowerEnergyValue: HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
   };
-  if (value.estimatedEnergyEquivalent == null) return normalized;
+  const calculatedAt = Date.parse(String(value.calculatedAt ?? ""));
+  if (!Number.isFinite(calculatedAt)) return normalized;
   const energy = optionalFiniteNumber(value.energy?.total);
   const capsules = optionalFiniteNumber(value.capsules?.readyTotal);
   if (energy == null || capsules == null) return normalized;

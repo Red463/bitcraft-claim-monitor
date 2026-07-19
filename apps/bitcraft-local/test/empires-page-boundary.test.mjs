@@ -48,6 +48,8 @@ test("Empire overview presents one combined Hexite Reserves column", () => {
   assert.match(empiresPage, /<summary>Details<\/summary>/);
   assert.match(empiresPage, /Known minimum from treasury and inventories; completed Foundry output is unavailable\./);
   assert.match(empiresCss, /\.hexite-reserve-cell\s*\{[^}]*min-width:\s*230px/s);
+  assert.match(empiresPage, /className=\{`hexite-reserve-cell \$\{presentation\.tone\}`\}/);
+  assert.match(empiresCss, /\.hexite-reserve-cell\.danger\s*>\s*strong/);
   assert.match(empiresCss, /\.hexite-reserve-details summary:focus-visible/);
 });
 

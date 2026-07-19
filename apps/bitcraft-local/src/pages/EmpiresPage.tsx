@@ -78,7 +78,7 @@ function compactDate(value: unknown): string {
 function HexiteReserveCell({ value }: { value: AnyRecord }) {
   const presentation = presentHexiteReserveSummary(value);
   return (
-    <div className="hexite-reserve-cell" aria-label={`${presentation.primary}. ${presentation.secondary}. ${presentation.status}`}>
+    <div className={`hexite-reserve-cell ${presentation.tone}`} aria-label={`${presentation.primary}. ${presentation.secondary}. ${presentation.status}`}>
       <strong>{presentation.primary}</strong>
       <small>{presentation.secondary}</small>
       <span className={`hexite-reserve-status ${presentation.tone}`}>{presentation.status}</span>

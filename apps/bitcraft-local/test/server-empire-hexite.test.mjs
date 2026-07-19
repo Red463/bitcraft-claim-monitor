@@ -208,6 +208,36 @@ test("published unavailable snapshots stay unavailable", () => {
   assert.equal(normalized.capsuleWatchtowerEnergyValue, 1_000);
 });
 
+test("published snapshots recompute a missing legacy aggregate when scanned components are valid", () => {
+  const normalized = normalizePublishedEmpireHexite({
+    status: "partial",
+    calculatedAt: "2026-07-19T10:00:00.000Z",
+    estimatedEnergyEquivalent: null,
+    energy: { total: 20 },
+    capsules: { readyTotal: 3 },
+    coverage: {
+      players: { fresh: 1, reused: 0, missing: 0, total: 1 },
+      claims: { fresh: 1, reused: 0, missing: 0, total: 1 },
+    },
+  });
+
+  assert.equal(normalized.estimatedEnergyEquivalent, 3_020);
+  assert.equal(normalized.status, "complete");
+});
+
+test("published snapshots without trustworthy coverage are never promoted to complete", () => {
+  const normalized = normalizePublishedEmpireHexite({
+    status: "partial",
+    calculatedAt: "2026-07-19T10:00:00.000Z",
+    estimatedEnergyEquivalent: 1_020,
+    energy: { total: 20 },
+    capsules: { readyTotal: 1 },
+  });
+
+  assert.equal(normalized.estimatedEnergyEquivalent, 1_020);
+  assert.equal(normalized.status, "partial");
+});
+
 test("empire Hexite source deduplication gives player ownership precedence over shared claim payloads", () => {
   const result = dedupeEmpireHexiteSources({
     players: [{

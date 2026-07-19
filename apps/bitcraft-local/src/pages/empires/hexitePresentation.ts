@@ -101,6 +101,26 @@ function formatted(value: unknown): string {
   return number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+function normalizedCoverage(value: Coverage | null | undefined): Required<Coverage> | null {
+  if (!value) return null;
+  const normalized = {
+    fresh: optionalNumber(value.fresh),
+    reused: optionalNumber(value.reused),
+    missing: optionalNumber(value.missing),
+    total: optionalNumber(value.total),
+  };
+  const counts = Object.values(normalized);
+  if (counts.some((count) => count == null || !Number.isInteger(count) || count < 0)) return null;
+  if (number(normalized.fresh) + number(normalized.reused) + number(normalized.missing) !== normalized.total) return null;
+  return normalized as Required<Coverage>;
+}
+
+function coverageDetails(label: string, value: Coverage | null | undefined): string {
+  const normalized = normalizedCoverage(value);
+  if (!normalized) return `${label} sources: coverage unavailable`;
+  return `${label} sources: ${formatted(normalized.fresh)} fresh, ${formatted(normalized.reused)} reused, ${formatted(normalized.missing)} missing`;
+}
+
 export function presentHexiteReserveSummary(
   value: HexiteReserves | null | undefined,
   nowMs = Date.now(),
@@ -119,26 +139,34 @@ export function presentHexiteReserveSummary(
   const energy = optionalNumber(value.energy?.total);
   const capsules = optionalNumber(value.capsules?.readyTotal);
   if (value.status === "error" || energy == null || capsules == null) {
+    const details = [
+      "The Hexite breakdown is not available until the scan completes.",
+      "Completed Foundry Capsules are unavailable from BitJita and excluded.",
+    ];
+    if (Array.isArray(value.errors) && value.errors.length) {
+      details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
+    }
     return {
       primary: "Unavailable",
       secondary: "No usable reserve total",
       status: "Foundry output unavailable",
       sortValue: null,
       tone: "danger",
-      details: ["The Hexite breakdown is not available until the scan completes."],
+      details,
     };
   }
 
   const knownTotal = energy + capsules * WATCHTOWER_ENERGY_PER_CAPSULE;
-  const groups = [value.coverage?.players, value.coverage?.claims];
+  const groups = [normalizedCoverage(value.coverage?.players), normalizedCoverage(value.coverage?.claims)];
+  const coverageUnavailable = groups.some((group) => group == null);
   const reused = groups.reduce((sum, group) => sum + number(group?.reused), 0);
   const missing = groups.reduce((sum, group) => sum + number(group?.missing), 0);
-  const status = missing > 0
+  const status = coverageUnavailable || missing > 0
     ? `Inventory scan incomplete · ${ageLabel(value.calculatedAt, nowMs)}`
     : reused > 0
       ? `Some inventory data reused · ${ageLabel(value.calculatedAt, nowMs)}`
       : `Known inventories scanned · ${ageLabel(value.calculatedAt, nowMs)}`;
-  const tone = missing > 0 || reused > 0 ? "warn" : "muted";
+  const tone = coverageUnavailable || missing > 0 || reused > 0 ? "warn" : "muted";
   const cost = value.capsuleEnergyCost == null ? "unavailable" : formatted(value.capsuleEnergyCost);
   const details = [
     `Known Watchtower energy: at least ${formatted(knownTotal)}`,
@@ -148,8 +176,8 @@ export function presentHexiteReserveSummary(
     `Shared claim storage: ${formatted(value.energy?.sharedClaimInventories)} HE`,
     `Ready Capsules: ${formatted(capsules)}; ${formatted(value.capsules?.reserveBuildings)} in Hexite Reserve buildings`,
     `Capsules cost ${cost} HE to craft and provide ${formatted(WATCHTOWER_ENERGY_PER_CAPSULE)} Watchtower energy when deployed.`,
-    `Player sources: ${formatted(value.coverage?.players?.fresh)} fresh, ${formatted(value.coverage?.players?.reused)} reused, ${formatted(value.coverage?.players?.missing)} missing`,
-    `Claim sources: ${formatted(value.coverage?.claims?.fresh)} fresh, ${formatted(value.coverage?.claims?.reused)} reused, ${formatted(value.coverage?.claims?.missing)} missing`,
+    coverageDetails("Player", value.coverage?.players),
+    coverageDetails("Claim", value.coverage?.claims),
     "Completed Foundry Capsules are unavailable from BitJita and excluded.",
   ];
   if (Array.isArray(value.errors) && value.errors.length) {

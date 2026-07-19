@@ -10,7 +10,7 @@ import {
 } from "../src/pages/empires/hexitePresentation.ts";
 import { compareOptionalSortValues } from "../src/utils/tableSort.ts";
 
-const complete = {
+const fullyCoveredLegacySnapshot = {
   status: "partial",
   refreshing: false,
   estimatedEnergyEquivalent: 92_261,
@@ -33,7 +33,7 @@ const complete = {
 };
 
 test("combined Hexite summary derives a compact known minimum from components", () => {
-  const result = presentHexiteReserveSummary(complete, Date.parse("2026-07-19T10:00:00.000Z"));
+  const result = presentHexiteReserveSummary(fullyCoveredLegacySnapshot, Date.parse("2026-07-19T10:00:00.000Z"));
 
   assert.equal(result.primary, "≥ 584.6K tower energy");
   assert.equal(result.secondary, "37.6K HE + 547 Capsules");
@@ -46,12 +46,12 @@ test("combined Hexite summary derives a compact known minimum from components", 
 });
 
 test("combined Hexite summary distinguishes reused and missing inventory sources", () => {
-  const reused = structuredClone(complete);
+  const reused = structuredClone(fullyCoveredLegacySnapshot);
   reused.coverage.players = { fresh: 316, reused: 1, missing: 0, total: 317 };
   assert.match(presentHexiteReserveSummary(reused).status, /Some inventory data reused/);
   assert.equal(presentHexiteReserveSummary(reused).tone, "warn");
 
-  const missing = structuredClone(complete);
+  const missing = structuredClone(fullyCoveredLegacySnapshot);
   missing.coverage.claims = { fresh: 11, reused: 0, missing: 1, total: 12 };
   assert.match(presentHexiteReserveSummary(missing).status, /Inventory scan incomplete/);
   assert.equal(presentHexiteReserveSummary(missing).tone, "warn");
@@ -62,6 +62,29 @@ test("combined Hexite summary keeps queued, scanning, and unavailable values out
   assert.equal(presentHexiteReserveSummary({ status: "pending", refreshing: true }).primary, "Scanning");
   assert.equal(presentHexiteReserveSummary({ status: "error" }).primary, "Unavailable");
   assert.equal(presentHexiteReserveSummary({ status: "error" }).sortValue, null);
+});
+
+test("combined Hexite summary treats absent coverage as incomplete", () => {
+  const withoutCoverage = structuredClone(fullyCoveredLegacySnapshot);
+  delete withoutCoverage.coverage;
+
+  const result = presentHexiteReserveSummary(withoutCoverage);
+  assert.match(result.status, /Inventory scan incomplete/);
+  assert.equal(result.tone, "warn");
+  assert.match(result.details.join("\n"), /Player sources: coverage unavailable/);
+  assert.match(result.details.join("\n"), /Claim sources: coverage unavailable/);
+});
+
+test("unavailable Hexite details retain Foundry exclusion and scan errors", () => {
+  const result = presentHexiteReserveSummary({
+    status: "error",
+    errors: ["empire discovery timed out", "rate limited"],
+  });
+
+  assert.equal(result.primary, "Unavailable");
+  assert.equal(result.tone, "danger");
+  assert.match(result.details.join("\n"), /Foundry.*unavailable/i);
+  assert.match(result.details.join("\n"), /empire discovery timed out; rate limited/);
 });
 
 test("Hexite metric presentations distinguish queued and scanning states from zero", () => {
