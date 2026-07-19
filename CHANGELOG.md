@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.2] - 2026-07-19
+
+### Fixed
+
+- Changed active watchtower siege badges to show "Under Siege" instead of counting BitJita participant records as separate sieges.
+
 ## [0.39.0-beta.1] - 2026-07-19
 
 ### Added

@@ -96,6 +96,14 @@ test("watchtower table exposes empire and risk filters with open-map actions", (
   assert.match(css, /\.watchtower-risk-toggle/);
   assert.match(css, /\.inactivity-threshold-card/);
 });
+
+test("watchtower siege status uses a boolean label instead of a participant count", () => {
+  const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /<span className="status-pill danger">Under Siege<\/span>/);
+  assert.doesNotMatch(page, /formatNumber\(row\.siegeCount\)\} siege/);
+});
+
 test("watchtower popup exposes aligned claims and lazy claim member drilldown", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
