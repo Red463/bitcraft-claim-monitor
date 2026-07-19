@@ -1,3 +1,5 @@
+import { formatCompactNumber } from "../../utils/format.ts";
+
 type Coverage = { fresh?: number; reused?: number; missing?: number; total?: number };
 
 type HexiteReserves = {
@@ -27,6 +29,17 @@ export type HexiteReservePresentation = {
   sortValue: number | null;
   tone: "muted" | "warn" | "danger" | "good";
 };
+
+export type HexiteReserveSummaryPresentation = {
+  primary: string;
+  secondary: string;
+  status: string;
+  sortValue: number | null;
+  tone: "muted" | "warn" | "danger";
+  details: string[];
+};
+
+const WATCHTOWER_ENERGY_PER_CAPSULE = 1_000;
 
 function number(value: unknown): number {
   const parsed = Number(value);
@@ -86,6 +99,71 @@ function metricValue(value: HexiteReserves, metric: HexiteReserveMetric): number
 
 function formatted(value: unknown): string {
   return number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+export function presentHexiteReserveSummary(
+  value: HexiteReserves | null | undefined,
+  nowMs = Date.now(),
+): HexiteReserveSummaryPresentation {
+  if (!value || value.status === "pending") {
+    return {
+      primary: value?.refreshing ? "Scanning" : "Queued",
+      secondary: value?.refreshing ? "First sweep in progress" : "Awaiting first sweep",
+      status: "Foundry output unavailable",
+      sortValue: null,
+      tone: "muted",
+      details: ["Completed Foundry Capsules are unavailable from BitJita and excluded."],
+    };
+  }
+
+  const energy = optionalNumber(value.energy?.total);
+  const capsules = optionalNumber(value.capsules?.readyTotal);
+  if (value.status === "error" || energy == null || capsules == null) {
+    return {
+      primary: "Unavailable",
+      secondary: "No usable reserve total",
+      status: "Foundry output unavailable",
+      sortValue: null,
+      tone: "danger",
+      details: ["The Hexite breakdown is not available until the scan completes."],
+    };
+  }
+
+  const knownTotal = energy + capsules * WATCHTOWER_ENERGY_PER_CAPSULE;
+  const groups = [value.coverage?.players, value.coverage?.claims];
+  const reused = groups.reduce((sum, group) => sum + number(group?.reused), 0);
+  const missing = groups.reduce((sum, group) => sum + number(group?.missing), 0);
+  const status = missing > 0
+    ? `Inventory scan incomplete · ${ageLabel(value.calculatedAt, nowMs)}`
+    : reused > 0
+      ? `Some inventory data reused · ${ageLabel(value.calculatedAt, nowMs)}`
+      : `Known inventories scanned · ${ageLabel(value.calculatedAt, nowMs)}`;
+  const tone = missing > 0 || reused > 0 ? "warn" : "muted";
+  const cost = value.capsuleEnergyCost == null ? "unavailable" : formatted(value.capsuleEnergyCost);
+  const details = [
+    `Known Watchtower energy: at least ${formatted(knownTotal)}`,
+    `Stored HE: ${formatted(energy)} total`,
+    `Treasury: ${formatted(value.energy?.treasury)} HE`,
+    `Player wallets and storage: ${formatted(value.energy?.playerInventories)} HE`,
+    `Shared claim storage: ${formatted(value.energy?.sharedClaimInventories)} HE`,
+    `Ready Capsules: ${formatted(capsules)}; ${formatted(value.capsules?.reserveBuildings)} in Hexite Reserve buildings`,
+    `Capsules cost ${cost} HE to craft and provide ${formatted(WATCHTOWER_ENERGY_PER_CAPSULE)} Watchtower energy when deployed.`,
+    `Player sources: ${formatted(value.coverage?.players?.fresh)} fresh, ${formatted(value.coverage?.players?.reused)} reused, ${formatted(value.coverage?.players?.missing)} missing`,
+    `Claim sources: ${formatted(value.coverage?.claims?.fresh)} fresh, ${formatted(value.coverage?.claims?.reused)} reused, ${formatted(value.coverage?.claims?.missing)} missing`,
+    "Completed Foundry Capsules are unavailable from BitJita and excluded.",
+  ];
+  if (Array.isArray(value.errors) && value.errors.length) {
+    details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
+  }
+
+  return {
+    primary: `≥ ${formatCompactNumber(knownTotal)} tower energy`,
+    secondary: `${formatCompactNumber(energy)} HE + ${formatted(capsules)} Capsules`,
+    status,
+    sortValue: knownTotal,
+    tone,
+    details,
+  };
 }
 
 export function presentHexiteReserveMetric(
