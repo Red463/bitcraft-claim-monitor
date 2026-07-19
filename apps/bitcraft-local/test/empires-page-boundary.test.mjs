@@ -161,6 +161,7 @@ test("siege and empire details use shared accessible dialogs with complete drill
   assert.match(empiresCss, /\.siege-status-trigger\s*\{[^}]*cursor:\s*pointer/s);
   assert.match(empiresCss, /\.empire-details-trigger:focus-visible/);
   assert.match(empiresCss, /\.siege-details-dialog,[\s\S]*\.empire-details-dialog[\s\S]*max-height:\s*calc\(100vh - 40px\)/);
+  assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)[\s\S]*\.siege-details-dialog,[\s\S]*\.empire-details-dialog\s*\{[^}]*width:\s*100%/s);
   assert.match(empiresCss, /\.empire-detail-tabs/);
   assert.match(empiresCss, /\.siege-participant-card\.attacker/);
   assert.match(empiresCss, /\.siege-participant-card\.defender/);

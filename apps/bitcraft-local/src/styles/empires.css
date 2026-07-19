@@ -723,7 +723,7 @@
 @media (max-width: 560px) {
   .siege-details-dialog,
   .empire-details-dialog {
-    width: calc(100vw - 16px);
+    width: 100%;
     max-height: calc(100vh - 16px);
   }
   .empire-detail-summary {
