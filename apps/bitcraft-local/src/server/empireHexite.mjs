@@ -10,6 +10,12 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function optionalFiniteNumber(value) {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function entityId(value) {
   const id = String(value ?? "").trim();
   return id;
@@ -111,6 +117,28 @@ function coverage(rows) {
   };
 }
 
+function aggregateStatus(value) {
+  const groups = [value?.coverage?.players, value?.coverage?.claims];
+  const reused = groups.reduce((sum, group) => sum + number(group?.reused), 0);
+  const missing = groups.reduce((sum, group) => sum + number(group?.missing), 0);
+  return reused > 0 || missing > 0 ? "partial" : "complete";
+}
+
+export function normalizePublishedEmpireHexite(value) {
+  if (!value || typeof value !== "object") return value ?? null;
+  const normalized = {
+    ...value,
+    capsuleWatchtowerEnergyValue: HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
+  };
+  if (value.estimatedEnergyEquivalent == null) return normalized;
+  const energy = optionalFiniteNumber(value.energy?.total);
+  const capsules = optionalFiniteNumber(value.capsules?.readyTotal);
+  if (energy == null || capsules == null) return normalized;
+  normalized.estimatedEnergyEquivalent = energy + capsules * HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE;
+  normalized.status = aggregateStatus(normalized);
+  return normalized;
+}
+
 export function dedupeEmpireHexiteSources({ players = [], claims = [] } = {}) {
   const seen = new Set();
   const normalize = (source) => {
@@ -171,6 +199,11 @@ export function aggregateEmpireHexite({
   const watchtowerEnergyValue = HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE;
   const hasScan = Boolean(calculatedAt);
   const errors = [...players, ...claims].map((row) => String(row?.error ?? "").trim()).filter(Boolean);
+  const sourceCoverage = {
+    players: coverage(players),
+    claims: coverage(claims),
+    foundry: "unavailable",
+  };
 
   return {
     estimatedEnergyEquivalent: hasScan ? totalEnergy + readyTotal * watchtowerEnergyValue : null,
@@ -189,12 +222,8 @@ export function aggregateEmpireHexite({
       foundry: null,
       readyTotal,
     },
-    coverage: {
-      players: coverage(players),
-      claims: coverage(claims),
-      foundry: "unavailable",
-    },
-    status: hasScan ? "partial" : "pending",
+    coverage: sourceCoverage,
+    status: hasScan ? aggregateStatus({ coverage: sourceCoverage }) : "pending",
     sweepStartedAt,
     calculatedAt,
     refreshing: Boolean(refreshing),
@@ -584,7 +613,7 @@ export function createEmpireHexiteRepository(db) {
 
     snapshotForEmpire(empireId) {
       const row = statements.snapshotForEmpire.get(String(empireId));
-      return row ? parseJson(row.payload_json, null) : null;
+      return row ? normalizePublishedEmpireHexite(parseJson(row.payload_json, null)) : null;
     },
 
     finishSweepIfComplete(sweepId, completedAt) {

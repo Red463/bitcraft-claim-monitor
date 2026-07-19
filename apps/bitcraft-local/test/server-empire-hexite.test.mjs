@@ -6,6 +6,7 @@ import {
   HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
   HEXITE_ENERGY_ITEM_ID,
   aggregateEmpireHexite,
+  normalizePublishedEmpireHexite,
   dedupeEmpireHexiteSources,
   summarizeClaimHexite,
   summarizePlayerHexite,
@@ -146,6 +147,65 @@ test("empire Hexite aggregation converts ready capsules once and reports source 
   assert.equal(result.capsules.foundry, null);
   assert.equal(result.status, "partial");
   assert.deepEqual(result.errors, ["timeout"]);
+});
+
+test("fresh Empire Hexite sources publish a complete known-inventory status", () => {
+  const result = aggregateEmpireHexite({
+    treasury: 10,
+    capsuleEnergyCost: 100,
+    players: [{ state: "fresh", energy: 5, capsules: 1 }],
+    claims: [{ state: "fresh", energy: 5, capsules: 2, reserveCapsules: 2 }],
+    calculatedAt: "2026-07-19T10:00:00.000Z",
+  });
+
+  assert.equal(result.status, "complete");
+  assert.equal(result.estimatedEnergyEquivalent, 3_020);
+});
+
+test("published Empire Hexite snapshots recompute stale conversion totals on read", () => {
+  const normalized = normalizePublishedEmpireHexite({
+    status: "partial",
+    calculatedAt: "2026-07-19T10:00:00.000Z",
+    estimatedEnergyEquivalent: 92_261,
+    capsuleEnergyCost: 100,
+    capsuleWatchtowerEnergyValue: 0,
+    energy: {
+      treasury: 16_300,
+      playerInventories: 20_000,
+      sharedClaimInventories: 1_261,
+      total: 37_561,
+    },
+    capsules: {
+      playerInventories: 150,
+      sharedClaimInventories: 397,
+      reserveBuildings: 397,
+      foundry: null,
+      readyTotal: 547,
+    },
+    coverage: {
+      players: { fresh: 317, reused: 0, missing: 0, total: 317 },
+      claims: { fresh: 12, reused: 0, missing: 0, total: 12 },
+      foundry: "unavailable",
+    },
+    errors: [],
+  });
+
+  assert.equal(normalized.estimatedEnergyEquivalent, 584_561);
+  assert.equal(normalized.capsuleWatchtowerEnergyValue, 1_000);
+  assert.equal(normalized.status, "complete");
+});
+
+test("published unavailable snapshots stay unavailable", () => {
+  const normalized = normalizePublishedEmpireHexite({
+    status: "error",
+    estimatedEnergyEquivalent: null,
+    energy: { total: 100 },
+    capsules: { readyTotal: 2 },
+  });
+
+  assert.equal(normalized.estimatedEnergyEquivalent, null);
+  assert.equal(normalized.status, "error");
+  assert.equal(normalized.capsuleWatchtowerEnergyValue, 1_000);
 });
 
 test("empire Hexite source deduplication gives player ownership precedence over shared claim payloads", () => {
