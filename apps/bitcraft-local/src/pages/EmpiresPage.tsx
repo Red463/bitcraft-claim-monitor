@@ -17,6 +17,8 @@ import {
   presentHexiteReserveMetric,
   type HexiteReserveMetric,
 } from "./empires/hexitePresentation";
+import { EmpireDetailsDialog } from "./empires/EmpireDetailsDialog";
+import { SiegeDetailsDialog } from "./empires/SiegeDetailsDialog";
 
 const LOCAL_API = "/api/local";
 
@@ -258,6 +260,9 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
   const [selectedTower, setSelectedTower] = React.useState<AnyRecord | null>(null);
+  const [selectedSiegeTower, setSelectedSiegeTower] = React.useState<AnyRecord | null>(null);
+  const [selectedEmpireId, setSelectedEmpireId] = React.useState<string | null>(null);
+  const [empireBackTarget, setEmpireBackTarget] = React.useState<AnyRecord | null>(null);
 
   React.useEffect(() => {
     if (regions.length && !regions.some((region) => region.regionId === regionId)) setRegionId(initialRegion);
@@ -315,8 +320,27 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     return map;
   }, [watchtowers.data]);
 
+  const openEmpireDetails = (empireId: unknown, backToSiege: AnyRecord | null = null) => {
+    const id = String(empireId ?? "").trim();
+    if (!id) return;
+    setSelectedTower(null);
+    setSelectedSiegeTower(null);
+    setEmpireBackTarget(backToSiege);
+    setSelectedEmpireId(id);
+  };
   const overviewColumns: DataTableColumn[] = [
-    ["Empire", (row) => <strong>{row.name}</strong>],
+    ["Empire", (row) => (
+      <button
+        type="button"
+        className="empire-details-trigger"
+        onClick={(event) => {
+          event.stopPropagation();
+          openEmpireDetails(row.entityId);
+        }}
+      >
+        {row.name}
+      </button>
+    )],
     ["Leader", (row) => row.leader ?? "-"],
     ["Members", (row) => formatNumber(row.memberCount)],
     ["Territory", (row) => formatNumber(row.territoryChunks)],
@@ -334,7 +358,18 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     claims: claimsByEmpire.get(String(row.empireId ?? "")) ?? [],
   });
   const towerColumns: DataTableColumn[] = [
-    ["Empire", (row) => <strong>{row.empireName}</strong>],
+    ["Empire", (row) => (
+      <button
+        type="button"
+        className="empire-details-trigger"
+        onClick={(event) => {
+          event.stopPropagation();
+          openEmpireDetails(row.empireId);
+        }}
+      >
+        {row.empireName}
+      </button>
+    )],
     ["Tower", (row) => {
       const members = membersByEmpire.get(String(row.empireId ?? "")) ?? [];
       return <span className="tower-name-cell"><strong>{row.displayName ?? "Watchtower"}</strong>{row.rawNickname ? <small>{row.rawNickname}</small> : null}<small>{members.length ? `${formatNumber(members.length)} empire members` : "No members returned"}{row.shortTowerId ? ` - ${row.shortTowerId}` : ""}</small></span>;
@@ -346,7 +381,19 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Energy", (row) => formatNumber(row.energy)],
     ["Upkeep", (row) => formatNumber(row.upkeep)],
     ["Active", (row) => statusPill(Boolean(row.active), row.active ? "Active" : "Inactive")],
-    ["Siege", (row) => toNumber(row.siegeCount) > 0 ? <span className="status-pill danger">Under Siege</span> : <span className="status-pill muted">None</span>],
+    ["Siege", (row) => row.underSiege === true || toNumber(row.siegeCount) > 0 ? (
+      <button
+        type="button"
+        className="status-pill danger siege-status-trigger"
+        aria-label={`View siege details for ${row.displayName ?? "watchtower"}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setSelectedSiegeTower(row);
+        }}
+      >
+        Under Siege
+      </button>
+    ) : <span className="status-pill muted">None</span>],
     ["Leader activity", (row) => row.inactiveRisk ? <span className="status-pill warn" title={row.inactivityReason}>Risk</span> : <span className="status-pill good" title={row.lastLeaderLogin ? dateLabel(row.lastLeaderLogin) : row.inactivityReason}>OK</span>],
     ["Details", (row) => <button className="toolbar-button compact-map-action" type="button" onClick={(event) => { event.stopPropagation(); openTowerDetails(row); }}>View tower details</button>],
   ];
@@ -445,6 +492,29 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
             )
       )}
       {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
+      {selectedSiegeTower ? (
+        <SiegeDetailsDialog
+          tower={selectedSiegeTower}
+          onClose={() => setSelectedSiegeTower(null)}
+          onViewEmpire={(empireId) => openEmpireDetails(empireId, selectedSiegeTower)}
+        />
+      ) : null}
+      {selectedEmpireId ? (
+        <EmpireDetailsDialog
+          empireId={selectedEmpireId}
+          regionId={regionId}
+          inactiveDays={inactiveDays}
+          onClose={() => {
+            setSelectedEmpireId(null);
+            setEmpireBackTarget(null);
+          }}
+          onBack={empireBackTarget ? () => {
+            setSelectedEmpireId(null);
+            setSelectedSiegeTower(empireBackTarget);
+            setEmpireBackTarget(null);
+          } : undefined}
+        />
+      ) : null}
     </div>
   );
 }
