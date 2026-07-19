@@ -1,6 +1,6 @@
 import React from "react";
 import "../styles/craft-planning.css";
-import { AlertTriangle, ClipboardList, EqualApproximately, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardList, EqualApproximately, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
@@ -93,6 +93,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [shortagesOnly, setShortagesOnly] = React.useState(false);
   const [needsSearch, setNeedsSearch] = React.useState("");
   const [fishingRoute, setFishingRoute] = usePersistedState<FishingRoutePreference>("planning.fishingRoute", "ocean");
+  const [targetsCollapsed, setTargetsCollapsed] = usePersistedState<boolean>("planning.targetsCollapsed", true);
+  const targetsAreCollapsed = targetsCollapsed !== false;
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
   const [detailSteps, setDetailSteps] = React.useState<AnyRecord[]>([]);
   const [detailLoading, setDetailLoading] = React.useState(false);
@@ -570,8 +572,23 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           </section>
 
           <section className="form-card craft-plan-section craft-plan-targets-strip">
-            <div className="split-header"><h3><Target size={17} /> Targets</h3><p className="legend">Configured goals and current progress against counted sources.</p></div>
-            <div className="craft-plan-target-list">
+            <div className="split-header craft-plan-targets-header">
+              <h3>
+                <button
+                  className="craft-plan-targets-toggle"
+                  type="button"
+                  aria-expanded={!targetsAreCollapsed}
+                  aria-controls="craft-plan-target-list"
+                  onClick={() => setTargetsCollapsed((current) => current === false)}
+                >
+                  <Target size={17} />
+                  <span>Targets</span>
+                  <ChevronDown className="craft-plan-targets-chevron" size={16} aria-hidden="true" />
+                </button>
+              </h3>
+              <p className="legend">Configured goals and current progress against counted sources.</p>
+            </div>
+            <div id="craft-plan-target-list" className="craft-plan-target-list" hidden={targetsAreCollapsed}>
               {targets.map((target: AnyRecord) => {
                 const buildingTarget = String(target.kind) === "building";
                 const covered = Math.max(0, Number(target.quantity) - Number(target.missing));

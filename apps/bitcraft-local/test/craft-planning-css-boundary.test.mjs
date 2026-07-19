@@ -140,6 +140,23 @@ test("Craft planning needs board row headings are allowed to wrap", () => {
   assert.match(rowButton, /overflow-wrap:\s*anywhere/);
 });
 
+test("Craft planning targets default collapsed and expose an accessible persisted disclosure", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /ChevronDown/);
+  assert.match(page, /usePersistedState<boolean>\("planning\.targetsCollapsed", true\)/);
+  assert.match(page, /const targetsAreCollapsed = targetsCollapsed !== false/);
+  assert.match(page, /className="craft-plan-targets-toggle"/);
+  assert.match(page, /aria-expanded=\{!targetsAreCollapsed\}/);
+  assert.match(page, /aria-controls="craft-plan-target-list"/);
+  assert.match(page, /id="craft-plan-target-list"/);
+  assert.match(page, /hidden=\{targetsAreCollapsed\}/);
+  assert.match(css, /\.craft-plan-target-list\[hidden\]\s*\{[^}]*display:\s*none/);
+  assert.match(css, /\.craft-plan-targets-toggle:focus-visible\s*\{/);
+  assert.match(css, /\.craft-plan-targets-toggle\[aria-expanded="true"\][^{]*\.craft-plan-targets-chevron\s*\{/);
+});
+
 test("Craft planning chance controls and compact targets retain responsive boundaries", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
