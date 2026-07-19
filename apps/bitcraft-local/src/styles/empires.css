@@ -156,8 +156,16 @@
 .hexite-reserve-cell {
   display: grid;
   gap: 2px;
-  min-width: 176px;
   line-height: 1.25;
+}
+
+.hexite-reserve-cell.energy,
+.hexite-reserve-cell.capsules {
+  min-width: 148px;
+}
+
+.hexite-reserve-cell.watchtower {
+  min-width: 190px;
 }
 
 .hexite-reserve-cell strong {

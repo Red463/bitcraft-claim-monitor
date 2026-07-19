@@ -472,6 +472,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.status, "pending");
   assert.equal(regionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.capsuleWatchtowerEnergyValue, 1_000);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.coverage.foundry, "unavailable");
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
     db.prepare(`
@@ -484,8 +485,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(bootstrapFailureEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
   assert.deepEqual(bootstrapFailureEmpires.empires[0].hexiteReserves.errors, ["BitJita offline"]);
   const calculatedHexitePayload = {
-    estimatedEnergyEquivalent: 5400,
+    estimatedEnergyEquivalent: 8100,
     capsuleEnergyCost: 100,
+    capsuleWatchtowerEnergyValue: 1_000,
     energy: { treasury: 5000, playerInventories: 100, sharedClaimInventories: 0, total: 5100 },
     capsules: { playerInventories: 1, sharedClaimInventories: 2, reserveBuildings: 2, foundry: null, readyTotal: 3 },
     coverage: {
@@ -511,7 +513,11 @@ test("server collection paginates listings and protects production mutations", a
     return Number(inserted.lastInsertRowid);
   });
   const calculatedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 5400);
+  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.energy.total, 5100);
+  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsules.readyTotal, 3);
+  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsuleEnergyCost, 100);
+  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsuleWatchtowerEnergyValue, 1_000);
+  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 8100);
   assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.status, "partial");
   assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.coverage.players.reused, 1);
   assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.refreshing, false);
@@ -521,7 +527,7 @@ test("server collection paginates listings and protects production mutations", a
     VALUES ('running', 100, ?, ?)
   `).run("2026-07-18T16:00:00.000Z", "2026-07-18T16:00:00.000Z").lastInsertRowid));
   const refreshingRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(refreshingRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 5400);
+  assert.equal(refreshingRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 8100);
   assert.equal(refreshingRegionalEmpires.empires[0].hexiteReserves.refreshing, true);
 
   const unavailableHexitePayload = {

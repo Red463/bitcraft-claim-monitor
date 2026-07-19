@@ -38,6 +38,20 @@ test("Empires contains wide tables on phones and names their keyboard scrollers"
   assert.match(dataTable, /aria-label=\{scrollLabel\}/);
 });
 
+test("Empire overview separates stored Hexite from Capsules and Watchtower energy", () => {
+  assert.match(empiresPage, /\["Hexite Energy",/);
+  assert.match(empiresPage, /\["Capsules",/);
+  assert.match(empiresPage, /\["Watchtower Energy",/);
+  assert.doesNotMatch(empiresPage, /\["Hexite Reserves",/);
+  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "energy"\)\.sortValue/);
+  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "capsules"\)\.sortValue/);
+  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "watchtower"\)\.sortValue/);
+  assert.match(empiresPage, /costs 100 HE to craft but provides 1,000 Watchtower energy/);
+  assert.match(empiresCss, /\.hexite-reserve-cell\.energy/);
+  assert.match(empiresCss, /\.hexite-reserve-cell\.capsules/);
+  assert.match(empiresCss, /\.hexite-reserve-cell\.watchtower/);
+});
+
 test("watchtower dialog stays viewport bounded and renders all empire members", () => {
   const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");

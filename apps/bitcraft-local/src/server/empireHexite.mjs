@@ -1,6 +1,7 @@
 export const HEXITE_ENERGY_ITEM_ID = 828972621;
 export const HEXITE_CAPSULE_CARGO_ID = 2000000;
 export const HEXITE_RESERVE_BUILDING_DESCRIPTION_ID = 90001;
+export const HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE = 1_000;
 
 const defaultSleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -167,12 +168,14 @@ export function aggregateEmpireHexite({
   const totalEnergy = treasuryEnergy + playerEnergy + sharedEnergy;
   const readyTotal = playerCapsules + sharedCapsules;
   const cost = capsuleEnergyCost == null ? null : number(capsuleEnergyCost);
+  const watchtowerEnergyValue = HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE;
   const hasScan = Boolean(calculatedAt);
   const errors = [...players, ...claims].map((row) => String(row?.error ?? "").trim()).filter(Boolean);
 
   return {
-    estimatedEnergyEquivalent: hasScan && cost != null ? totalEnergy + readyTotal * cost : null,
+    estimatedEnergyEquivalent: hasScan ? totalEnergy + readyTotal * watchtowerEnergyValue : null,
     capsuleEnergyCost: cost,
+    capsuleWatchtowerEnergyValue: watchtowerEnergyValue,
     energy: {
       treasury: treasuryEnergy,
       playerInventories: playerEnergy,

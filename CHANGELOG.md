@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.1] - 2026-07-19
+
+### Added
+
+- Added sortable Empire Hexite Energy, ready Capsule, and Watchtower Energy totals, refreshed by a resumable scheduled inventory sweep.
+
+### Changed
+
+- Valued deployed Hexite Capsules at 1,000 Watchtower energy while retaining their live Hexite Energy crafting cost for reference.
+
 ## [0.38.0-beta.4] - 2026-07-18
 
 ### Fixed

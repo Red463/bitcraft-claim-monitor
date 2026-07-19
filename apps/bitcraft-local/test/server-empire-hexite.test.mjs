@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   HEXITE_CAPSULE_CARGO_ID,
+  HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
   HEXITE_ENERGY_ITEM_ID,
   aggregateEmpireHexite,
   dedupeEmpireHexiteSources,
@@ -135,7 +136,10 @@ test("empire Hexite aggregation converts ready capsules once and reports source 
   assert.equal(result.energy.total, 1_184);
   assert.equal(result.capsules.readyTotal, 43);
   assert.equal(result.capsules.reserveBuildings, 37);
-  assert.equal(result.estimatedEnergyEquivalent, 5_484);
+  assert.equal(HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE, 1_000);
+  assert.equal(result.capsuleEnergyCost, 100);
+  assert.equal(result.capsuleWatchtowerEnergyValue, 1_000);
+  assert.equal(result.estimatedEnergyEquivalent, 44_184);
   assert.deepEqual(result.coverage.players, { fresh: 1, reused: 1, missing: 1, total: 3 });
   assert.deepEqual(result.coverage.claims, { fresh: 1, reused: 0, missing: 0, total: 1 });
   assert.equal(result.coverage.foundry, "unavailable");
@@ -175,6 +179,7 @@ test("empire Hexite aggregation returns pending instead of a misleading zero wit
   });
 
   assert.equal(result.estimatedEnergyEquivalent, null);
+  assert.equal(result.capsuleWatchtowerEnergyValue, 1_000);
   assert.equal(result.status, "pending");
   assert.equal(result.refreshing, true);
 });
@@ -216,7 +221,7 @@ test("Hexite repository resumes targets, reuses failed current sources, and excl
     updatedAt: "2026-07-18T10:03:00.000Z",
   });
   repository.publishReadySnapshots(firstSweep.id, "2026-07-18T10:04:00.000Z");
-  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 630);
+  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 5_130);
   assert.equal(repository.publishReadySnapshots(firstSweep.id, "2026-07-18T10:04:30.000Z"), 0);
   assert.equal(repository.snapshotForEmpire("e1").calculatedAt, "2026-07-18T10:04:00.000Z");
   assert.equal(repository.finishSweepIfComplete(firstSweep.id, "2026-07-18T10:05:00.000Z"), true);
@@ -245,7 +250,7 @@ test("Hexite repository resumes targets, reuses failed current sources, and excl
   repository.publishReadySnapshots(secondSweep.id, "2026-07-18T16:03:00.000Z");
 
   const refreshed = repository.snapshotForEmpire("e1");
-  assert.equal(refreshed.estimatedEnergyEquivalent, 410);
+  assert.equal(refreshed.estimatedEnergyEquivalent, 2_210);
   assert.deepEqual(refreshed.coverage.players, { fresh: 0, reused: 1, missing: 0, total: 1 });
   assert.deepEqual(refreshed.coverage.claims, { fresh: 0, reused: 0, missing: 0, total: 0 });
   assert.deepEqual(refreshed.errors, ["HTTP 503"]);
@@ -273,6 +278,7 @@ test("Hexite repository publishes a terminal unavailable snapshot when empire di
   assert.deepEqual(repository.snapshotForEmpire("e1"), {
     estimatedEnergyEquivalent: null,
     capsuleEnergyCost: 100,
+    capsuleWatchtowerEnergyValue: 1_000,
     energy: { treasury: 100, playerInventories: 0, sharedClaimInventories: 0, total: 100 },
     capsules: { playerInventories: 0, sharedClaimInventories: 0, reserveBuildings: 0, foundry: null, readyTotal: 0 },
     coverage: {
@@ -371,7 +377,8 @@ test("Hexite repository deduplicates an inventory entity globally across empire 
     });
   }
   repository.publishReadySnapshots(sweep.id, "2026-07-18T10:03:00.000Z");
-  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 110);
+  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 1_010);
+  assert.equal(repository.snapshotForEmpire("e1").capsuleWatchtowerEnergyValue, 1_000);
   assert.equal(repository.snapshotForEmpire("e2").estimatedEnergyEquivalent, 0);
   db.close();
 });
@@ -419,7 +426,7 @@ test("Hexite source cache retains raw values when current-sweep ownership dedupl
   });
   repository.failInventoryTarget({ sweepId: secondSweep.id, sourceType: "claim", sourceId: "c1", error: "HTTP 503", updatedAt: "2026-07-18T16:02:00.000Z" });
   repository.publishReadySnapshots(secondSweep.id, "2026-07-18T16:03:00.000Z");
-  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 110);
+  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 1_010);
   db.close();
 });
 
@@ -525,7 +532,11 @@ test("Hexite refresh job discovers global empire sources and publishes after res
     "/players/p1/inventories?q=hexite",
     "/claims/c1/inventories",
   ]);
-  assert.equal(repository.snapshotForEmpire("e1").estimatedEnergyEquivalent, 410);
-  assert.equal(repository.snapshotForEmpire("e1").capsules.readyTotal, 3);
+  const snapshot = repository.snapshotForEmpire("e1");
+  assert.equal(snapshot.energy.total, 110);
+  assert.equal(snapshot.capsules.readyTotal, 3);
+  assert.equal(snapshot.capsuleEnergyCost, 100);
+  assert.equal(snapshot.capsuleWatchtowerEnergyValue, 1_000);
+  assert.equal(snapshot.estimatedEnergyEquivalent, 3_110);
   db.close();
 });
