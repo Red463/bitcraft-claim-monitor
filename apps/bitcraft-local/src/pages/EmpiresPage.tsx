@@ -346,7 +346,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
     ["Energy", (row) => formatNumber(row.energy)],
     ["Upkeep", (row) => formatNumber(row.upkeep)],
     ["Active", (row) => statusPill(Boolean(row.active), row.active ? "Active" : "Inactive")],
-    ["Siege", (row) => toNumber(row.siegeCount) > 0 ? <span className="status-pill danger">{formatNumber(row.siegeCount)} siege</span> : <span className="status-pill muted">None</span>],
+    ["Siege", (row) => toNumber(row.siegeCount) > 0 ? <span className="status-pill danger">Under Siege</span> : <span className="status-pill muted">None</span>],
     ["Leader activity", (row) => row.inactiveRisk ? <span className="status-pill warn" title={row.inactivityReason}>Risk</span> : <span className="status-pill good" title={row.lastLeaderLogin ? dateLabel(row.lastLeaderLogin) : row.inactivityReason}>OK</span>],
     ["Details", (row) => <button className="toolbar-button compact-map-action" type="button" onClick={(event) => { event.stopPropagation(); openTowerDetails(row); }}>View tower details</button>],
   ];
