@@ -5723,6 +5723,7 @@ function compareEmpireMembers(a, b) {
 
 function normalizeEmpireTower(tower, empire, inactivity) {
   const siege = Array.isArray(tower?.siege) ? tower.siege : [];
+  const activeSiegeParticipants = siege.filter((entry) => entry?.active === true);
   const locationX = nestedCoordinate(tower, "x");
   const locationZ = nestedCoordinate(tower, "z");
   return {
@@ -5737,8 +5738,9 @@ function normalizeEmpireTower(tower, empire, inactivity) {
     energy: toNumber(tower?.energy),
     upkeep: toNumber(tower?.upkeep),
     active: tower?.active === true,
-    siegeCount: siege.length,
-    siege,
+    underSiege: activeSiegeParticipants.length > 0,
+    siegeCount: activeSiegeParticipants.length,
+    activeSiegeParticipants,
     inactiveRisk: inactivity.inactiveRisk,
     lastLeaderLogin: inactivity.lastLeaderLogin,
     inactivityReason: inactivity.inactivityReason,
@@ -5828,7 +5830,7 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
       summary: {
         towerCount: towers.length,
         inactiveRiskEmpires: empireRows.filter((empire) => empire.inactiveRisk).length,
-        underSiege: towers.filter((tower) => tower.siegeCount > 0).length,
+        underSiege: towers.filter((tower) => tower.underSiege).length,
         activeTowers: towers.filter((tower) => tower.active).length,
       },
     };

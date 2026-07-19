@@ -280,7 +280,21 @@ test("server collection paginates listings and protects production mutations", a
       count: 3,
     });
     if (url.pathname === "/api/empires/empire-1/towers") return json(res, [
-      { entityId: "tower-1", locationX: 111, locationZ: 222, locationDimension: 0, energy: 75, upkeep: 10, active: true, nickname: "North Tower", siege: [] },
+      {
+        entityId: "tower-1",
+        locationX: 111,
+        locationZ: 222,
+        locationDimension: 0,
+        energy: 75,
+        upkeep: 10,
+        active: true,
+        nickname: "North Tower",
+        siege: [
+          { active: true, attacker: false, empireEntityId: "empire-1", empireName: "Test Empire", energy: 281, startTimestamp: "2026-07-18T23:55:20.000Z" },
+          { active: true, attacker: true, empireEntityId: "empire-2", empireName: "Verdant", energy: 6710, startTimestamp: "2026-07-18T23:55:20.000Z" },
+          { active: false, attacker: true, empireEntityId: "empire-old", empireName: "Old Empire", energy: 50, startTimestamp: "2026-06-01T00:00:00.000Z" },
+        ],
+      },
     ]);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
@@ -562,6 +576,13 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.towers[0].nickname, "North Tower");
   assert.equal(regionalWatchtowers.towers[0].inactiveRisk, true);
   assert.equal(regionalWatchtowers.towers[0].locationX, 111);
+  assert.equal(regionalWatchtowers.towers[0].underSiege, true);
+  assert.equal(regionalWatchtowers.towers[0].siegeCount, 2);
+  assert.deepEqual(
+    regionalWatchtowers.towers[0].activeSiegeParticipants.map((entry) => entry.empireName),
+    ["Test Empire", "Verdant"],
+  );
+  assert.equal(regionalWatchtowers.summary.underSiege, 1);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);
   assert.equal(regionalWatchtowers.empires[0].members.length, 4);
