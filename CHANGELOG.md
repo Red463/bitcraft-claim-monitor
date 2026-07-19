@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.3] - 2026-07-19
+
+### Changed
+
+- Consolidated Empire Hexite holdings into one sortable reserve column with a compact Watchtower-energy minimum, stored HE and Capsule composition, and accessible source details.
+
+### Fixed
+
+- Corrected legacy Empire Hexite totals to value ready Capsules at 1,000 Watchtower energy and kept incomplete, unavailable, and stale scan states explicit.
+
 ## [0.39.0-beta.2] - 2026-07-19
 
 ### Added

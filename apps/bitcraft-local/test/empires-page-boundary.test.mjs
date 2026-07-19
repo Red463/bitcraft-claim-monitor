@@ -38,18 +38,19 @@ test("Empires contains wide tables on phones and names their keyboard scrollers"
   assert.match(dataTable, /aria-label=\{scrollLabel\}/);
 });
 
-test("Empire overview separates stored Hexite from Capsules and Watchtower energy", () => {
-  assert.match(empiresPage, /\["Hexite Energy",/);
-  assert.match(empiresPage, /\["Capsules",/);
-  assert.match(empiresPage, /\["Watchtower Energy",/);
-  assert.doesNotMatch(empiresPage, /\["Hexite Reserves",/);
-  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "energy"\)\.sortValue/);
-  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "capsules"\)\.sortValue/);
-  assert.match(empiresPage, /presentHexiteReserveMetric\(row\.hexiteReserves, "watchtower"\)\.sortValue/);
-  assert.match(empiresPage, /costs 100 HE to craft but provides 1,000 Watchtower energy/);
-  assert.match(empiresCss, /\.hexite-reserve-cell\.energy/);
-  assert.match(empiresCss, /\.hexite-reserve-cell\.capsules/);
-  assert.match(empiresCss, /\.hexite-reserve-cell\.watchtower/);
+test("Empire overview presents one combined Hexite Reserves column", () => {
+  assert.match(empiresPage, /\["Hexite Reserves",/);
+  assert.doesNotMatch(empiresPage, /\["Hexite Energy",/);
+  assert.doesNotMatch(empiresPage, /\["Capsules",/);
+  assert.doesNotMatch(empiresPage, /\["Watchtower Energy",/);
+  assert.match(empiresPage, /presentHexiteReserveSummary\(row\.hexiteReserves\)\.sortValue/);
+  assert.match(empiresPage, /<details className="hexite-reserve-details">/);
+  assert.match(empiresPage, /<summary>Details<\/summary>/);
+  assert.match(empiresPage, /Known minimum from treasury and inventories; completed Foundry output is unavailable\./);
+  assert.match(empiresCss, /\.hexite-reserve-cell\s*\{[^}]*min-width:\s*230px/s);
+  assert.match(empiresPage, /className=\{`hexite-reserve-cell \$\{presentation\.tone\}`\}/);
+  assert.match(empiresCss, /\.hexite-reserve-cell\.danger\s*>\s*strong/);
+  assert.match(empiresCss, /\.hexite-reserve-details summary:focus-visible/);
 });
 
 test("watchtower dialog stays viewport bounded and renders all empire members", () => {
