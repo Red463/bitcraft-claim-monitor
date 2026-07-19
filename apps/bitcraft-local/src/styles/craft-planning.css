@@ -237,14 +237,18 @@
 .craft-plan-summary-stat strong { color: var(--text); font-size: 1.65rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .craft-plan-summary-stat em { color: var(--muted); font-style: normal; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .craft-plan-targets-strip { order: initial; }
+.craft-plan-targets-strip { container-type: inline-size; }
 .craft-plan-targets-header { align-items: center; }
 .craft-plan-targets-toggle { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: inherit; padding: 4px 2px; font: inherit; font-weight: inherit; cursor: pointer; }
 .craft-plan-targets-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 .craft-plan-targets-chevron { transform: rotate(-90deg); transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1); }
 .craft-plan-targets-toggle[aria-expanded="true"] .craft-plan-targets-chevron { transform: rotate(0); }
-.craft-plan-target-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.craft-plan-target-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .craft-plan-target-list[hidden] { display: none; }
 .craft-plan-target-list .craft-plan-target { min-height: 0; }
+@container (max-width: 1140px) {
+  .craft-plan-target-list { grid-template-columns: 1fr; }
+}
 .craft-plan-needs-board { overflow: hidden; }
 .craft-plan-needs-scroll { overflow-x: auto; padding-bottom: 4px; scrollbar-gutter: stable; }
 .craft-plan-needs-matrix { min-width: 1120px; overflow: hidden; border: 1px solid rgba(139, 159, 184, 0.24); border-radius: 8px; background: rgba(6, 10, 16, 0.34); }
