@@ -5763,22 +5763,49 @@ async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14) {
   const key = `details:${regionId}:${empireId}:${days}`;
   return empireCacheLoad(key, async () => {
     const overview = await regionalEmpireOverview(regionId);
-    const empire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
-    if (!empire) return null;
+    const regionalEmpire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
 
     const [detailResult, towerResult] = await Promise.allSettled([
       fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
       fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
     ]);
+    if (!regionalEmpire && detailResult.status === "rejected") return null;
+
     const errors = [];
     const detailPayload = detailResult.status === "fulfilled" ? detailResult.value : null;
     const towerPayload = towerResult.status === "fulfilled" ? towerResult.value : null;
     if (detailResult.status === "rejected") errors.push(`Empire members unavailable: ${errorMessage(detailResult.reason)}`);
     if (towerResult.status === "rejected") errors.push(`Watchtowers unavailable: ${errorMessage(towerResult.reason)}`);
 
-    const detailEmpire = detailPayload?.empire ?? empire;
-    const members = (detailPayload ? unwrap(detailPayload, "members", []) : []).map(normalizeEmpireMember).sort(compareEmpireMembers);
-    const inactivity = empireInactivity({ ...empire, ...detailEmpire }, members, days);
+    const rawDetailEmpire = detailPayload?.empire ?? (detailPayload?.entityId ? detailPayload : null);
+    const baseEmpire = regionalEmpire ?? normalizeEmpireOverviewRow(rawDetailEmpire, []);
+    if (!baseEmpire.entityId) return null;
+    const detailEmpire = rawDetailEmpire ?? baseEmpire;
+    const rawMembers = detailPayload ? unwrap(detailPayload, "members", []) : [];
+    const members = rawMembers.map(normalizeEmpireMember).sort(compareEmpireMembers);
+    const inferredLeader = rawMembers.find((member) => toNumber(member?.rank) === 0);
+    const inferredLeaderName = memberDisplayName(inferredLeader);
+    const knownLeader = String(detailEmpire?.leader ?? baseEmpire.leader ?? "").trim();
+    const claims = baseEmpire.claims?.length
+      ? baseEmpire.claims
+      : detailEmpire?.capitalClaimId
+        ? [normalizeEmpireClaim({
+            entityId: detailEmpire.capitalClaimId,
+            name: detailEmpire.capitalClaimName,
+            regionId: detailEmpire.capitalRegionId,
+            locationX: detailEmpire.locationX,
+            locationZ: detailEmpire.locationZ,
+            empireEntityId: baseEmpire.entityId,
+          })]
+        : [];
+    const empire = {
+      ...baseEmpire,
+      leader: knownLeader && knownLeader.toLowerCase() !== "unknown" ? knownLeader : inferredLeaderName || "Unknown",
+      leaderEntityId: String(detailEmpire?.leaderEntityId ?? baseEmpire.leaderEntityId ?? "").trim() || String(inferredLeader?.entityId ?? ""),
+      memberCount: Math.max(toNumber(baseEmpire.memberCount), toNumber(detailPayload?.count), members.length),
+      claims,
+    };
+    const inactivity = empireInactivity(empire, members, days);
     const rawTowers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
     const towers = rawTowers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId);
     return {

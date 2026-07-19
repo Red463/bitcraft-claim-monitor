@@ -280,6 +280,13 @@ test("server collection paginates listings and protects production mutations", a
       ],
       count: 3,
     });
+    if (url.pathname === "/api/empires/empire-foreign") return json(res, {
+      empire: { entityId: "empire-foreign", name: "Foreign Empire", capitalClaimId: "foreign-capital", capitalClaimName: "Foreign Capital", capitalRegionId: 9, locationX: 900, locationZ: 901, territoryChunks: 99, numClaims: 1 },
+      members: [
+        { entityId: "leader-2", playerName: "Other", rank: 0, rankTitle: "Emperor", lastLoginTimestamp: "2026-07-18T12:00:00.000Z" },
+      ],
+      count: 1,
+    });
     if (url.pathname === "/api/empires/empire-1/towers") {
       if (failEmpireTowers) return json(res, { error: "tower detail unavailable" }, 503);
       return json(res, [{
@@ -298,6 +305,7 @@ test("server collection paginates listings and protects production mutations", a
         ],
       }]);
     }
+    if (url.pathname === "/api/empires/empire-foreign/towers") return json(res, []);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
     if (url.pathname === "/api/logs/storage") return json(res, {
       items: [{ id: "item-1", name: "Bronze Ingot" }],
@@ -592,6 +600,15 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(empireDetails.activity.activeToday, 0);
   assert.equal(empireDetails.activity.activeThisWeek, 0);
   assert.equal(empireDetails.partial, false);
+  const crossRegionEmpireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=empire-foreign&regionId=19`);
+  assert.equal(crossRegionEmpireDetailsResponse.status, 200);
+  const crossRegionEmpireDetails = await crossRegionEmpireDetailsResponse.json();
+  assert.equal(crossRegionEmpireDetails.empire.name, "Foreign Empire");
+  assert.equal(crossRegionEmpireDetails.empire.leader, "Other");
+  assert.equal(crossRegionEmpireDetails.empire.memberCount, 1);
+  assert.equal(crossRegionEmpireDetails.members[0].username, "Other");
+  assert.equal(crossRegionEmpireDetails.claims[0].name, "Foreign Capital");
+  assert.equal(crossRegionEmpireDetails.claims[0].regionId, "9");
   const unknownEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=missing&regionId=19`);
   assert.equal(unknownEmpireDetails.status, 404);
   const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
