@@ -126,3 +126,28 @@ test("watchtower popup exposes aligned claims and lazy claim member drilldown", 
   assert.match(css, /\.tower-claims-list/);
   assert.match(css, /\.claim-member-dialog/);
 });
+
+test("siege and empire details use shared accessible dialogs with complete drilldown states", () => {
+  const siegeDialog = readFileSync(new URL("../src/pages/empires/SiegeDetailsDialog.tsx", import.meta.url), "utf8");
+  const empireDialog = readFileSync(new URL("../src/pages/empires/EmpireDetailsDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(siegeDialog, /<Dialog[\s\S]*open[\s\S]*title="Siege Details"/);
+  assert.match(siegeDialog, /groupSiegeParticipants/);
+  assert.match(siegeDialog, /Siege Duration/);
+  assert.match(siegeDialog, /Siege Started/);
+  assert.match(siegeDialog, /Attacking Empire/);
+  assert.match(siegeDialog, /Defending Empire/);
+  assert.match(siegeDialog, /onViewEmpire/);
+
+  assert.match(empireDialog, /\/empires\/details\?/);
+  assert.match(empireDialog, /AbortController/);
+  assert.match(empireDialog, /empireDetailsCache/);
+  assert.match(empireDialog, /role="tablist"/);
+  assert.match(empireDialog, /aria-selected=/);
+  assert.match(empireDialog, /label: "Overview"/);
+  assert.match(empireDialog, /label: "Members"/);
+  assert.match(empireDialog, /label: "Claims"/);
+  assert.match(empireDialog, /label: "Towers"/);
+  assert.match(empireDialog, />Retry</);
+  assert.match(empireDialog, /Back to Siege Details/);
+});
