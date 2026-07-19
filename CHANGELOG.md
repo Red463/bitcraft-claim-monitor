@@ -9,7 +9,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.39.0-beta.2] - 2026-07-19
+## [0.39.0-beta.3] - 2026-07-19
 
 ### Changed
 
@@ -18,6 +18,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Fixed
 
 - Corrected legacy Empire Hexite totals to value ready Capsules at 1,000 Watchtower energy and kept incomplete, unavailable, and stale scan states explicit.
+
+## [0.39.0-beta.2] - 2026-07-19
+
+### Fixed
+
+- Changed active watchtower siege badges to show "Under Siege" instead of counting BitJita participant records as separate sieges.
 
 ## [0.39.0-beta.1] - 2026-07-19
 
