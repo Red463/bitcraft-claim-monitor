@@ -32,6 +32,16 @@ test("Craft Planning labels estimated active output as material-planning coverag
   assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
+test("Craft Planning makes the distinct-material shortage count explicit", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /"Materials still short"/);
+  assert.match(page, /"different materials after stock and tracked crafts"/);
+  assert.match(page, /<span>\{quantity\(totals\.missingItems\)\} materials still short<\/span>/);
+  assert.doesNotMatch(page, /"Materials missing"/);
+  assert.doesNotMatch(page, /<span>\{quantity\(totals\.missingItems\)\} missing items<\/span>/);
+});
+
 test("Craft Planning page renders read-only plan sections with an admin-only manager entry", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
 

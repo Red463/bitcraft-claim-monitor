@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.7] - 2026-07-20
+
+### Fixed
+
+- Grouped Timber, Plant Roots, Brick Slabs, Nails, Rope, and Spool of Thread into shared cross-tier Needs Board rows and clarified that the shortage summary counts different materials.
+
 ## [0.39.0-beta.6] - 2026-07-20
 
 ### Fixed

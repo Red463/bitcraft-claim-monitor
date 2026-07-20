@@ -101,6 +101,46 @@ test("buildNeedsBoard merges concrete item names into one row when API tags matc
   assert.equal(board[0].rows[0].cells.has("Materials"), false);
 });
 
+test("buildNeedsBoard groups approved material families across tiers by stable API tag", () => {
+  const families = [
+    { tag: "Timber", section: "Carpentry", row: "Timber", names: ["Exquisite Timber", "Peerless Timber"] },
+    { tag: "Roots", section: "Foraging", row: "Plant Roots", names: ["Exquisite Plant Roots", "Peerless Plant Roots"] },
+    { tag: "Brick Slab", section: "Masonry", row: "Brick Slab", names: ["Exquisite Brick Slab", "Peerless Brick Slab"] },
+    { tag: "Nail", section: "Smithing", row: "Nails", names: ["Luminite Nails", "Rathium Nails"] },
+    { tag: "Rope", section: "Tailoring", row: "Rope", names: ["Exquisite Rope", "Peerless Rope"] },
+    { tag: "Thread", section: "Tailoring", row: "Spool of Thread", names: ["Exquisite Spool Of Thread", "Peerless Spool Of Thread"] },
+  ];
+  const materials = families.flatMap((family, familyIndex) => family.names.map((name, tierIndex) => ({
+    key: `items:${familyIndex}-${tierIndex}`,
+    name,
+    tag: family.tag,
+    tier: tierIndex + 5,
+    section: "Others",
+    required: 10 + tierIndex,
+    missing: 10 + tierIndex,
+  })));
+
+  const board = buildNeedsBoard(materials, []);
+
+  for (const family of families) {
+    const row = board.find((group) => group.section === family.section)?.rows.find((candidate) => candidate.name === family.row);
+    assert.ok(row, `${family.row} should use one canonical ${family.section} row`);
+    assert.equal(row.overrideKey, `tag:${family.tag}`);
+    assert.equal(row.cells.get("T5")?.name, family.names[0]);
+    assert.equal(row.cells.get("T6")?.name, family.names[1]);
+  }
+
+  const exceptions = [
+    [{ key: "items:36", name: "Ancient Nails", tag: "Ancient Ingredients" }, "Ancient Nails"],
+    [{ key: "cargo:1244818324", name: "Exquisite Rope Package", tag: "Package" }, "Exquisite Rope Package"],
+    [{ key: "cargo:1595055118", name: "Hexite Infused Timber", tag: "Profession Dungeon Loot" }, "Hexite Infused Timber"],
+  ];
+  for (const [item, expectedRow] of exceptions) {
+    assert.equal(plannerTaxonomy.plannerTaxonomyFor(item).row, expectedRow);
+    assert.equal(plannerTaxonomy.plannerOverrideKeyFor(item, item.key), `item:${item.key}`);
+  }
+});
+
 test("buildNeedsBoard keeps satisfied prerequisites when an unfinished recipe still needs them", () => {
   const board = buildNeedsBoard([
     {
@@ -427,15 +467,15 @@ test("buildNeedsBoard keeps planner and raw API sections distinct", () => {
   assert.equal(board[0].rows[0].apiSection, "Carpentry");
 });
 
-test("buildNeedsBoard merges known cloth rows and Tailoring API fallbacks into one section", () => {
+test("buildNeedsBoard merges known cloth and thread rows into one Tailoring section", () => {
   const board = buildNeedsBoard([
     { key: "items:1", name: "Peerless Cloth", tag: "Cloth", tier: 5, section: "Tailoring", required: 125, missing: 125 },
-    { key: "items:2", name: "Thread", tag: "Thread", tier: 5, section: "Tailoring", required: 150, available: 177, missing: 0, recipeUsages: [{}] },
+    { key: "items:2", name: "Peerless Spool Of Thread", tag: "Thread", tier: 5, section: "Tailoring", required: 150, available: 177, missing: 0, recipeUsages: [{}] },
   ], []);
 
   assert.equal(board.filter((group) => group.section === "Tailoring").length, 1);
   assert.deepEqual(board.map((group) => group.section), ["Tailoring"]);
-  assert.deepEqual(board[0].rows.map((row) => row.name), ["Cloth", "Thread"]);
+  assert.deepEqual(board[0].rows.map((row) => row.name), ["Spool of Thread", "Cloth"]);
 });
 
 test("buildNeedsBoard calculates section completion from required and covered quantities", () => {
