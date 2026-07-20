@@ -140,6 +140,33 @@ test("Craft planning needs board row headings are allowed to wrap", () => {
   assert.match(rowButton, /overflow-wrap:\s*anywhere/);
 });
 
+test("Craft planning targets default collapsed and expose an accessible persisted disclosure", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /ChevronDown/);
+  assert.match(page, /usePersistedState<boolean>\("planning\.targetsCollapsed", true\)/);
+  assert.match(page, /const targetsAreCollapsed = targetsCollapsed !== false/);
+  assert.match(page, /className="craft-plan-targets-toggle"/);
+  assert.match(page, /aria-expanded=\{!targetsAreCollapsed\}/);
+  assert.match(page, /aria-controls="craft-plan-target-list"/);
+  assert.match(page, /id="craft-plan-target-list"/);
+  assert.match(page, /hidden=\{targetsAreCollapsed\}/);
+  assert.match(css, /\.craft-plan-target-list\[hidden\]\s*\{[^}]*display:\s*none/);
+  assert.match(css, /\.craft-plan-targets-toggle:focus-visible\s*\{/);
+  assert.match(css, /\.craft-plan-targets-toggle\[aria-expanded="true"\][^{]*\.craft-plan-targets-chevron\s*\{/);
+});
+
+test("Craft planning targets use safe container-responsive columns", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const listRule = css.match(/\.craft-plan-target-list\s*\{([^}]+)\}/)?.[1] ?? "";
+
+  assert.match(css, /\.craft-plan-targets-strip\s*\{[^}]*container-type:\s*inline-size/);
+  assert.match(listRule, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(listRule, /minmax\(300px/);
+  assert.match(css, /@container\s*\(max-width:\s*1140px\)\s*\{[\s\S]*?\.craft-plan-target-list\s*\{[^}]*grid-template-columns:\s*1fr/);
+});
+
 test("Craft planning chance controls and compact targets retain responsive boundaries", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");

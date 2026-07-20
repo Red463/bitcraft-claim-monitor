@@ -40,7 +40,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Manage Plan/);
   assert.match(page, /className="dashboard-top-meta"/);
   assert.doesNotMatch(page, /className="top-meta"/);
-  assert.match(page, /<h3><Target size=\{17\} \/> Targets<\/h3>/);
+  assert.match(page, /className="craft-plan-targets-toggle"/);
+  assert.match(page, /<Target size=\{17\} \/>\s*<span>Targets<\/span>/);
   assert.match(page, /<ItemIcon item=\{item\} \/>/);
   assert.doesNotMatch(page, /craft-plan-item-icon"><ItemIcon item=\{item\} \/>/);
   assert.match(page, /Needs Board/);
