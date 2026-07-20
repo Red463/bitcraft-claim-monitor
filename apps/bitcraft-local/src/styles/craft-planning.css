@@ -420,7 +420,8 @@
   margin: 0;
   min-width: 0;
   max-height: calc(100vh - 180px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .craft-plan-need-detail-grid h3 {
   display: flex;
@@ -452,17 +453,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.craft-plan-stock-card {
-  overflow-x: hidden;
-}
-.craft-plan-stock-card .craft-plan-detail-group,
-.craft-plan-stock-card .craft-plan-detail-row {
+.craft-plan-need-detail-grid .craft-plan-detail-row {
   min-width: 0;
-}
-.craft-plan-stock-card .craft-plan-detail-row {
   align-items: flex-start;
 }
-.craft-plan-stock-card .craft-plan-detail-row > span {
+.craft-plan-need-detail-grid .craft-plan-detail-row > span {
   flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
@@ -470,7 +465,7 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.craft-plan-stock-card .craft-plan-detail-row > strong {
+.craft-plan-need-detail-grid .craft-plan-detail-row > strong {
   flex: 0 0 auto;
 }
 .craft-plan-route-detail {

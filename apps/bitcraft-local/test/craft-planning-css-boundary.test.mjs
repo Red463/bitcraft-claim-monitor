@@ -102,22 +102,23 @@ test("Craft planning item details style grouped stock and usage drilldowns", () 
   assert.match(css, /\.craft-plan-usage-breakdown summary\s*\{/);
 });
 
-test("Craft planning stock locations wrap without horizontal scrolling", () => {
+test("Craft planning detail cards wrap rows without horizontal scrolling", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
-  const stockCard = css.match(/\.craft-plan-stock-card\s*\{([^}]+)\}/)?.[1] ?? "";
-  const stockGroups = css.match(/\.craft-plan-stock-card \.craft-plan-detail-group,\s*\.craft-plan-stock-card \.craft-plan-detail-row\s*\{([^}]+)\}/)?.[1] ?? "";
-  const stockLabels = css.match(/\.craft-plan-stock-card \.craft-plan-detail-row > span\s*\{([^}]+)\}/)?.[1] ?? "";
-  const stockQuantities = css.match(/\.craft-plan-stock-card \.craft-plan-detail-row > strong\s*\{([^}]+)\}/)?.[1] ?? "";
+  const card = css.match(/\.craft-plan-need-detail-grid \.nested-card\s*\{([^}]+)\}/)?.[1] ?? "";
+  const row = css.match(/\.craft-plan-need-detail-grid \.craft-plan-detail-row\s*\{([^}]+)\}/)?.[1] ?? "";
+  const label = css.match(/\.craft-plan-need-detail-grid \.craft-plan-detail-row > span\s*\{([^}]+)\}/)?.[1] ?? "";
+  const value = css.match(/\.craft-plan-need-detail-grid \.craft-plan-detail-row > strong\s*\{([^}]+)\}/)?.[1] ?? "";
 
-  assert.match(stockCard, /overflow-x:\s*hidden/);
-  assert.match(stockGroups, /min-width:\s*0/);
-  assert.match(css, /\.craft-plan-stock-card \.craft-plan-detail-row\s*\{[^}]*align-items:\s*flex-start/);
-  assert.match(stockLabels, /flex:\s*1 1 auto/);
-  assert.match(stockLabels, /white-space:\s*normal/);
-  assert.match(stockLabels, /overflow:\s*visible/);
-  assert.match(stockLabels, /text-overflow:\s*clip/);
-  assert.match(stockLabels, /overflow-wrap:\s*anywhere/);
-  assert.match(stockQuantities, /flex:\s*0 0 auto/);
+  assert.match(card, /overflow-x:\s*hidden/);
+  assert.match(card, /overflow-y:\s*auto/);
+  assert.match(row, /min-width:\s*0/);
+  assert.match(row, /align-items:\s*flex-start/);
+  assert.match(label, /flex:\s*1 1 auto/);
+  assert.match(label, /overflow:\s*visible/);
+  assert.match(label, /text-overflow:\s*clip/);
+  assert.match(label, /white-space:\s*normal/);
+  assert.match(label, /overflow-wrap:\s*anywhere/);
+  assert.match(value, /flex:\s*0 0 auto/);
 });
 
 test("Craft planning target editor keeps search and row actions visually grouped", () => {
