@@ -299,29 +299,43 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 </div>
               ) : selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
                 const alternatives = Array.isArray(route.alternatives) ? route.alternatives : [];
-                const gatheringByproduct = route.routeType === "gathering-byproduct";
+                const routeType = String(route.routeType ?? "craft");
+                const gatheringRoute = routeType.startsWith("gathering");
+                const byproductRoute = routeType.endsWith("-byproduct");
+                const routeKindLabel = gatheringRoute
+                  ? byproductRoute ? "Gathering byproduct" : "Gathering output"
+                  : byproductRoute ? "Craft byproduct" : "Craft output";
+                const yieldUnit = gatheringRoute ? "per gathering action" : "per craft";
+                const itemListRoute = route.expectedYield != null;
+                const expectedYield = Number(route.expectedYield) || 0;
+                const guaranteedYield = Number(route.guaranteedYield) || 0;
+                const guaranteedOutput = !byproductRoute && guaranteedYield > 0 && guaranteedYield + 1e-9 >= expectedYield;
                 const baseActions = Number(route.unbufferedCraftCount) || Math.ceil(Number(selectedNeed.required) / Math.max(Number(route.expectedYield), 0.0001));
                 const bufferedActions = Number(route.craftCount) || baseActions;
                 const routeMultiplier = Number(route.multiplier) || selectedMultiplier;
                 const producerInputs = Array.isArray(route.inputs) ? route.inputs.filter((input: AnyRecord) => Number(input.quantity) > 0) : [];
+                const displayedRecipeName = route.producerRecipe?.name ?? route.recipeName ?? "Selected recipe";
+                const actionLabel = gatheringRoute ? "Estimated gathering actions" : byproductRoute ? "Estimated crafts" : "Crafts required";
                 return (
-                  <div className={`craft-plan-route-detail${gatheringByproduct ? " is-gathering-byproduct" : ""}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                  <div className={`craft-plan-route-detail is-${gatheringRoute ? "gathering" : "craft"}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
                     <div className="craft-plan-route-heading">
-                      {gatheringByproduct ? <span className="craft-plan-route-kind">Gathering byproduct</span> : null}
-                      <strong>{gatheringByproduct && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? route.recipeName : gatheringByproduct ? route.producerRecipe?.name ?? route.recipeName : route.recipeName ?? "Selected recipe"}</strong>
-                      <p className="legend">{gatheringByproduct
-                        ? [route.gatheringSkill, route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
+                      <span className={`craft-plan-route-kind is-${gatheringRoute ? "gathering" : "craft"}`}>{routeKindLabel}</span>
+                      <strong>{gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? route.recipeName : displayedRecipeName}</strong>
+                      <p className="legend">{gatheringRoute
+                        ? [route.gatheringSkill, byproductRoute && route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
                         : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
-                    {gatheringByproduct ? (
+                    {itemListRoute ? (
                       <>
-                        {Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 2 : 1)} expected per action</small></span>)}</div> : null}
-                        <p className="craft-plan-byproduct-note">Expected yield: {formatNumber(Number(route.expectedYield) || 0, Number(route.expectedYield) < 1 ? 2 : 1)} {itemName(route.output)} per gathering action{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</p>
-                        {route.isProbabilistic ? <div className="craft-plan-chance-summary">
-                          <div className="craft-plan-action-summary"><span>Estimated processing actions <strong>{quantity(baseActions)}</strong></span>{routeMultiplier > 1 ? <span>With {formatNumber((routeMultiplier - 1) * 100, 1)}% extra <strong>{quantity(bufferedActions)} actions</strong></span> : null}</div>
-                          {producerInputs.length ? <div className="craft-plan-producer-requirements"><small>Gather/process</small>{producerInputs.map((input: AnyRecord, inputIndex: number) => <span key={itemKey(input) + "-producer-" + inputIndex}>{itemNode(input)}<strong>{quantity(input.quantity)}</strong></span>)}</div> : null}
-                          {canManage ? <div className="craft-plan-buffer-settings"><label htmlFor={`craft-plan-buffer-${index}`}>Safety buffer (% extra)</label><div className="craft-plan-buffer-control"><input id={`craft-plan-buffer-${index}`} type="number" min="0" max="1900" step="5" value={bufferPercent} onChange={(event) => setBufferPercent(event.target.value)} /><button className="toolbar-button primary" type="button" onClick={() => void saveMultiplier(selectedNeedKey, Number(bufferPercent))}>Save</button>{selectedMultiplier > 1 ? <button className="toolbar-button" type="button" onClick={() => void saveMultiplier(selectedNeedKey, 0)}>Reset</button> : null}</div><small>This adds producer actions and source-item requirements. It does not increase the item goal, change the API drop rate, or modify counted stock.</small></div> : null}
-                        </div> : null}
+                        {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 2 : 1)} expected per action</small></span>)}</div> : null}
+                        <p className="craft-plan-byproduct-note">{guaranteedOutput
+                          ? <>Guaranteed output: {formatNumber(guaranteedYield, guaranteedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}.</>
+                          : <>Expected yield: {formatNumber(expectedYield, expectedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</>}</p>
+                        <div className="craft-plan-chance-summary">
+                          <div className="craft-plan-action-summary"><span>{actionLabel} <strong>{quantity(baseActions)}</strong></span>{routeMultiplier > 1 ? <span>With {formatNumber((routeMultiplier - 1) * 100, 1)}% extra <strong>{quantity(bufferedActions)} actions</strong></span> : null}</div>
+                          {producerInputs.length ? <div className="craft-plan-producer-requirements"><small>{gatheringRoute ? "Gather/process" : "Craft inputs"}</small>{producerInputs.map((input: AnyRecord, inputIndex: number) => <span key={itemKey(input) + "-producer-" + inputIndex}>{itemNode(input)}<strong>{quantity(input.quantity)}</strong></span>)}</div> : null}
+                          {route.isProbabilistic && canManage ? <div className="craft-plan-buffer-settings"><label htmlFor={`craft-plan-buffer-${index}`}>Safety buffer (% extra)</label><div className="craft-plan-buffer-control"><input id={`craft-plan-buffer-${index}`} type="number" min="0" max="1900" step="5" value={bufferPercent} onChange={(event) => setBufferPercent(event.target.value)} /><button className="toolbar-button primary" type="button" onClick={() => void saveMultiplier(selectedNeedKey, Number(bufferPercent))}>Save</button>{selectedMultiplier > 1 ? <button className="toolbar-button" type="button" onClick={() => void saveMultiplier(selectedNeedKey, 0)}>Reset</button> : null}</div><small>This adds producer actions and source-item requirements. It does not increase the item goal, change the API drop rate, or modify counted stock.</small></div> : null}
+                        </div>
                       </>
                     ) : Array.isArray(route.inputs) && route.inputs.length ? (
                       <div className="craft-plan-route-inputs">

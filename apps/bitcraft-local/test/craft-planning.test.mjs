@@ -2003,6 +2003,103 @@ test("computeCraftPlan expands item list possibilities through cargo processing 
   assert.equal(log?.sourceRoutes?.[0]?.recipeName, "Split into Exquisite Wood Log Output -> Exquisite Wood Log");
 });
 
+test("computeCraftPlan treats guaranteed Forestry Station logs as craft output and resin as a craft byproduct", () => {
+  const log = { id: "2010001", itemType: 0, name: "Simple Wood Log", tag: "Wood Log", tier: 2 };
+  const resin = { id: "1724476397", itemType: 0, name: "Simple Amber Resin", tag: "Resin", tier: 2 };
+  const output = { id: "1940258895", itemType: 0, name: "Simple Wood Log Output", tag: "Wood Log", tier: 2 };
+  const trunk = { id: "1001", itemType: 1, name: "Simple Wood Trunk", tag: "Trunk", tier: 2 };
+  const splitRecipe = {
+    id: "201003",
+    name: "Split into Simple Wood Log Output",
+    buildingName: "Tier 2 Forestry Station",
+    skillName: "Forestry",
+    activityKind: "craft",
+    craftedItemStacks: [{ item_id: output.id, item_type: "item", quantity: 1 }],
+    craftedItems: [output],
+    consumedItemStacks: [{ item_id: trunk.id, item_type: "cargo", quantity: 1 }],
+    consumedItems: [trunk],
+  };
+  const detailsByKey = new Map([
+    [recipeKey("items", log.id), { item: log }],
+    [recipeKey("items", resin.id), { item: resin }],
+    [recipeKey("items", output.id), {
+      item: output,
+      craftingRecipes: [splitRecipe],
+      itemListPossibilities: [
+        { targetId: log.id, targetItem: log, quantity: 6, chance: 1, guaranteedQuantity: 6 },
+        { targetId: resin.id, targetItem: resin, quantity: 0.06, chance: 1, guaranteedQuantity: 0 },
+      ],
+    }],
+    [recipeKey("cargo", trunk.id), { cargo: trunk }],
+  ]);
+
+  const logPlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ ...log, kind: "items", quantity: 276 }] }),
+    detailsByKey,
+  });
+  const logRoute = logPlan.materials.find((material) => material.id === log.id)?.sourceRoutes?.[0];
+  assert.equal(logRoute?.routeType, "craft");
+  assert.equal(logRoute?.expectedYield, 6);
+  assert.equal(logRoute?.guaranteedYield, 6);
+  assert.equal(logRoute?.isProbabilistic, false);
+  assert.equal(logRoute?.inputs[0]?.name, "Simple Wood Trunk");
+  assert.equal(logRoute?.inputs[0]?.quantity, 1);
+
+  const resinPlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ ...resin, kind: "items", quantity: 1 }] }),
+    detailsByKey,
+  });
+  const resinRoute = resinPlan.materials.find((material) => material.id === resin.id)?.sourceRoutes?.[0];
+  assert.equal(resinRoute?.routeType, "craft-byproduct");
+  assert.equal(resinRoute?.isProbabilistic, true);
+});
+
+function itemListRouteFixture({ activityKind, guaranteedQuantity }) {
+  const target = { id: "9100", itemType: 0, name: "Stone Fragment", tag: "Stone", tier: 1 };
+  const producer = { id: "9101", itemType: 0, name: "Stone Output", tag: "Stone Output", tier: 1 };
+  const source = { id: "9102", itemType: 1, name: "Stone Source", tag: "Stone Source", tier: 1 };
+  const station = activityKind === "craft" ? "Mining Station" : null;
+  const recipe = {
+    id: `stone-${activityKind}`,
+    name: activityKind === "craft" ? "Process Stone" : "Gather Stone",
+    activityKind,
+    buildingName: station,
+    skillName: "Mining",
+    gatheringSource: activityKind === "gathering"
+      ? { tag: "Stone Output", label: "Stone", skill: "Mining" }
+      : null,
+    craftedItemStacks: [{ item_id: producer.id, item_type: "item", quantity: 1 }],
+    craftedItems: [producer],
+    consumedItemStacks: station ? [{ item_id: source.id, item_type: "cargo", quantity: 1 }] : [],
+    consumedItems: station ? [source] : [],
+  };
+  const detailsByKey = new Map([
+    [recipeKey("items", target.id), { item: target }],
+    [recipeKey("items", producer.id), {
+      item: producer,
+      craftingRecipes: [recipe],
+      itemListPossibilities: [{ targetId: target.id, targetItem: target, quantity: 6, chance: 1, guaranteedQuantity }],
+    }],
+    [recipeKey("cargo", source.id), { cargo: source }],
+  ]);
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ ...target, kind: "items", quantity: 6 }] }),
+    detailsByKey,
+  });
+  return plan.materials.find((material) => material.id === target.id)?.sourceRoutes?.[0];
+}
+
+for (const [activityKind, guaranteedQuantity, expectedRouteType] of [
+  ["craft", 6, "craft"],
+  ["craft", 0, "craft-byproduct"],
+  ["gathering", 6, "gathering"],
+  ["gathering", 0, "gathering-byproduct"],
+]) {
+  test(`item-list route ${activityKind} with guarantee ${guaranteedQuantity} becomes ${expectedRouteType}`, () => {
+    assert.equal(itemListRouteFixture({ activityKind, guaranteedQuantity }).routeType, expectedRouteType);
+  });
+}
+
 test("normalizeCraftPlanConfig preserves valid row name overrides", () => {
   const config = normalizeCraftPlanConfig({
     rowNameOverrides: {
@@ -2101,7 +2198,7 @@ test("computeCraftPlan applies a Braxite family override without changing Pebble
   assert.equal(braxiteMaterial?.rowNameOverride, "Rare Braxite");
 });
 
-test("computeCraftPlan treats gathering byproducts as acquisition routes and ignores direct craft overrides", () => {
+test("computeCraftPlan keeps direct overrides when a Foraging workstation offers a craft byproduct", () => {
   const gypsiteDetail = {
     item: { id: "3001", name: "Rough Gypsite", itemType: 0, tag: "Gypsite", tier: 1 },
     craftingRecipes: [{
@@ -2125,6 +2222,7 @@ test("computeCraftPlan treats gathering byproducts as acquisition routes and ign
     craftingRecipes: [{
       id: "gather-clay",
       name: "Gather Rough Clay",
+      stationName: "Foraging Camp",
       craftedItemStacks: [{ item_id: "5001", item_type: "item", quantity: 1 }],
       craftedItems: [{ id: "5001", name: "Rough Clay Output", itemType: 0, tag: "Clay Output", tier: 1 }],
       consumedItemStacks: [{ item_id: "6001", item_type: "cargo", quantity: 1 }],
@@ -2156,20 +2254,17 @@ test("computeCraftPlan treats gathering byproducts as acquisition routes and ign
     ]),
   });
 
-  assert.equal(plan.steps[0].selectedRecipeId, "possibility:gather-clay:items:3001");
-  assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
-  assert.equal(plan.materials.some((material) => material.name === "Ancient Mortar"), false);
-  const clayDeposit = plan.materials.find((material) => material.name === "Rough Clay Deposit");
-  assert.equal(clayDeposit?.kind, "cargo");
-  assert.equal(clayDeposit?.required, 16);
+  assert.equal(plan.steps[0].selectedRecipeId, "craft-gypsite");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Brick")?.required, 40);
+  assert.equal(plan.materials.find((material) => material.name === "Ancient Mortar")?.required, 80);
+  assert.equal(plan.materials.some((material) => material.name === "Rough Clay Deposit"), false);
   const gypsite = plan.materials.find((material) => material.name === "Rough Gypsite");
-  assert.equal(gypsite?.sourceRoutes?.[0]?.recipeName, "Gather Rough Clay -> Rough Gypsite");
-  assert.equal(gypsite?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
-  assert.equal(gypsite?.sourceRoutes?.[0]?.gatheringSkill, "Foraging");
-  assert.equal(gypsite?.sourceRoutes?.[0]?.producer?.name, "Rough Clay Output");
-  assert.equal(gypsite?.sourceRoutes?.[0]?.expectedYield, 0.25);
-  assert.deepEqual(gypsite?.sourceRoutes?.[0]?.alternatives.map((route) => route.id), ["possibility:gather-clay:items:3001"]);
-  assert.equal(plan.steps.some((step) => step.selectedRecipeId === "craft-gypsite"), false);
+  assert.equal(gypsite?.sourceRoutes?.[0]?.recipeName, "Craft Rough Gypsite");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.routeType, "craft");
+  assert.equal(gypsite?.sourceRoutes?.[0]?.gatheringSkill, null);
+  assert.equal(gypsite?.sourceRoutes?.[0]?.alternatives.some((route) => (
+    route.id === "possibility:gather-clay:items:3001" && route.routeType === "craft-byproduct"
+  )), true);
 });
 test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from normalized local catalog rows", (t) => {
   const { repository } = createCatalogFixture(t);
@@ -2435,10 +2530,10 @@ test("computeCraftPlan keeps direct overrides for non-gathering co-products", ()
   assert.equal(plan.steps.find((step) => step.output.id === catalyst.id)?.selectedRecipeId, "craft-catalyst");
   const route = plan.materials.find((material) => material.id === catalyst.id)?.sourceRoutes?.[0];
   assert.equal(route?.routeType, "craft");
-  assert.equal(route?.alternatives.some((alternative) => alternative.routeType === "byproduct"), true);
+  assert.equal(route?.alternatives.some((alternative) => alternative.routeType === "craft-byproduct"), true);
 });
 
-test("computeCraftPlan classifies Crushed Shells from a Fishing item-list producer", () => {
+test("computeCraftPlan keeps Fishing workstation item-list producers classified as crafts", () => {
   const shells = { id: "1110012", name: "Crushed Rough Shells", itemType: 0, tag: "Crushed Shells", tier: 1 };
   const baitOutput = { id: "1220019", name: "Basic Bait and Shells", itemType: 0, tag: "Bait Output", tier: 1 };
   const detailsByKey = new Map([
@@ -2478,9 +2573,12 @@ test("computeCraftPlan classifies Crushed Shells from a Fishing item-list produc
   });
 
   const route = plan.materials.find((material) => material.id === shells.id)?.sourceRoutes?.[0];
-  assert.equal(route?.routeType, "gathering-byproduct");
-  assert.equal(route?.gatheringSkill, "Fishing");
-  assert.equal(route?.alternatives.some((alternative) => alternative.id === "craft-shells"), false);
+  assert.equal(route?.routeType, "craft");
+  assert.equal(route?.gatheringSkill, null);
+  assert.equal(route?.alternatives.some((alternative) => (
+    alternative.id === "possibility:fish-bait-shells:items:1110012"
+      && alternative.routeType === "craft-byproduct"
+  )), true);
 });
 
 test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes through clay and tree producers", (t) => {
@@ -2586,9 +2684,9 @@ test("collectLocalCatalogCraftPlanDetails exposes normalized byproduct routes th
 
   assert.equal(plan.steps.find((step) => step.output.name === "Rough Gypsite")?.selectedRecipeId, "possibility:gather-clay:items:3001");
   assert.equal(plan.steps.find((step) => step.output.name === "Rough Resin")?.selectedRecipeId, "possibility:split-trunk:items:3002");
-  assert.equal(plan.materials.find((material) => material.name === "Rough Gypsite")?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
-  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.routeType, "gathering-byproduct");
-  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.gatheringSkill, "Forestry");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Gypsite")?.sourceRoutes?.[0]?.routeType, "craft-byproduct");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.routeType, "craft-byproduct");
+  assert.equal(plan.materials.find((material) => material.name === "Rough Resin")?.sourceRoutes?.[0]?.gatheringSkill, null);
   assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
   assert.equal(plan.materials.some((material) => material.name === "Ancient Mortar"), false);
   assert.equal(plan.materials.some((material) => material.name === "Tree Sap"), false);

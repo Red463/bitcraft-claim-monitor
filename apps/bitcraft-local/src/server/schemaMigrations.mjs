@@ -25,6 +25,7 @@ export const additiveColumnMigrations = [
   { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
   { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
   { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
+  { table: "game_catalog_recipes", column: "activity_kind", definition: "TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering'))" },
 ];
 
 export const schemaIndexStatements = [

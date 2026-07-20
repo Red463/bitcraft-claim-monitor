@@ -228,10 +228,15 @@ test("How to get this separates route headings and producer buffer controls", ()
 
   assert.match(page, /craft-plan-route-heading/);
   assert.match(page, /craft-plan-buffer-settings/);
-  assert.match(page, /Estimated processing actions/);
+  assert.match(page, /Crafts required/);
+  assert.match(page, /Estimated crafts/);
+  assert.match(page, /Estimated gathering actions/);
+  assert.match(page, /Craft inputs/);
   assert.match(page, /Gather\/process/);
   assert.match(page, /does not increase the .* goal/);
   assert.match(css, /\.craft-plan-route-heading\s*\{/);
+  assert.match(css, /\.craft-plan-route-kind\.is-craft\s*\{/);
+  assert.match(css, /\.craft-plan-route-kind\.is-gathering\s*\{/);
   assert.match(css, /\.craft-plan-buffer-settings\s*\{/);
   assert.match(css, /\.craft-plan-gathered-control\s*\{/);
   assert.match(css, /\.craft-plan-gathered-state\s*\{/);

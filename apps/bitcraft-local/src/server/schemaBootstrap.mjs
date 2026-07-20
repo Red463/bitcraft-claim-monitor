@@ -302,6 +302,7 @@ export const schemaBootstrapSql = `
     source_kind TEXT NOT NULL,
     source_id TEXT NOT NULL,
     action_count REAL NOT NULL DEFAULT 0,
+    activity_kind TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering')),
     name TEXT,
     station_name TEXT,
     skill_name TEXT,

@@ -272,6 +272,7 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   assert.equal(processRecipe.actionCount, 12);
   assert.equal(processRecipe.stationName, "Fishing Table");
   assert.equal(processRecipe.skillName, "Fishing");
+  assert.equal(processRecipe.activityKind, "craft");
   assert.equal(processRecipe.isPassive, false);
   assert.equal(processRecipe.isTransportRoute, false);
   assert.deepEqual(processRecipe.inputs, [
@@ -283,8 +284,11 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
   ]);
 
   const bundleRecipe = normalized.recipes.find((recipe) => recipe.name === "Bundle For Trade");
+  const extractionRecipe = normalized.recipes.find((recipe) => recipe.name === "Extract Shells");
+  assert.equal(extractionRecipe.activityKind, "craft");
   assert.equal(bundleRecipe.sourceKind, "cargo");
   assert.equal(bundleRecipe.sourceId, "333");
+  assert.equal(bundleRecipe.activityKind, "craft");
   assert.equal(bundleRecipe.isPassive, true);
   assert.equal(bundleRecipe.isTransportRoute, true);
   assert.deepEqual(bundleRecipe.inputs, [
@@ -298,6 +302,21 @@ test("normalizeGameCatalogDetail captures direct recipes, reverse recipes, bypro
     { producerKey: "items:1220019", outputKey: "items:1110012", kind: "items", targetId: "1110012", quantity: 0.1, chance: 1, guaranteedQuantity: 0 },
     { producerKey: "items:1220019", outputKey: "cargo:500100", kind: "cargo", targetId: "500100", quantity: 0.5, chance: 1, guaranteedQuantity: 0 },
   ]);
+});
+
+test("catalog normalization classifies only no-station extraction recipes as gathering", () => {
+  const normalized = normalizeGameCatalogDetail({
+    item: { id: "8000", itemType: 0, name: "Rough Stone Output", tag: "Stone Output", tier: 1 },
+    extractionRecipes: [{
+      id: "extract-stone-node",
+      name: "Extract Rough Stone",
+      craftedItemStacks: [{ item_id: "8000", item_type: "item", quantity: 1 }],
+      consumedItemStacks: [],
+      levelRequirements: [{ skill: { name: "Mining" }, level: 1 }],
+    }],
+  });
+
+  assert.equal(normalized.recipes[0].activityKind, "gathering");
 });
 
 test("catalog normalization trusts typed stacks over malformed refined-ingot display metadata", () => {
@@ -406,7 +425,7 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 5);
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 6);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
@@ -431,6 +450,22 @@ test("game catalog repository persists expected and guaranteed item-list quantit
     guaranteedQuantity: row.guaranteedQuantity,
   })), [{ quantity: 3.05, guaranteedQuantity: 3 }]);
   db.close();
+});
+
+test("normalizeGameCatalogDetail preserves an explicit zero guaranteed item-list quantity", () => {
+  const normalized = normalizeGameCatalogDetail({
+    item: { id: "5001", itemType: 0, name: "T1 Clay Output", tag: "Clay Output", tier: 1 },
+    itemListPossibilities: [{
+      targetId: "3001",
+      targetItem: { id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+      quantity: 0.02,
+      chance: 1,
+      guaranteedQuantity: 0,
+    }],
+  });
+
+  assert.equal(normalized.itemListOutputs[0].quantity, 0.02);
+  assert.equal(normalized.itemListOutputs[0].guaranteedQuantity, 0);
 });
 
 test("game catalog repository derives and atomically replaces versioned effort weights", () => {
@@ -577,8 +612,14 @@ test("game catalog repository stores normalized entries, preserves item-cargo co
   });
 
   assert.deepEqual(
-    repository.listProducerRecipesForOutput("items:1220019").map((recipe) => recipe.name),
-    ["Extract Shells", "Process Briny Guppi"],
+    repository.listProducerRecipesForOutput("items:1220019").map((recipe) => ({
+      name: recipe.name,
+      activityKind: recipe.activityKind,
+    })),
+    [
+      { name: "Extract Shells", activityKind: "craft" },
+      { name: "Process Briny Guppi", activityKind: "craft" },
+    ],
   );
   assert.deepEqual(
     repository.listProducerRecipesForOutput("cargo:9200").map((recipe) => ({
