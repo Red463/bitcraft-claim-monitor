@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { selectLowestEffortWeights } from "./craftPlanEffortProgress.mjs";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 5;
+export const GAME_CATALOG_NORMALIZATION_VERSION = 6;
 
 export function catalogNormalizationNeedsRefresh(storedVersion) {
   return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
@@ -171,7 +171,9 @@ function recipeStableKey(_sourceEntity, recipe, outputs, inputs) {
   return `recipe-hash:${createHash("sha1").update(signature).digest("hex").slice(0, 16)}`;
 }
 
-function normalizeRecipe(recipe, sourceEntity) {
+function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") {
+  const stationName = recipeStationName(recipe);
+  const activityKind = stationName ? "craft" : requestedActivityKind === "gathering" ? "gathering" : "craft";
   const outputDisplays = unwrapArray(recipe?.craftedItems);
   const inputDisplays = unwrapArray(recipe?.consumedItems);
   const declaredPrimary = targetFromStack(recipe?.craftedItem ?? recipe?.outputItem ?? recipe?.targetItem ?? recipe?.target ?? {}, recipe?.craftedItem ?? recipe?.targetItem ?? {});
@@ -217,8 +219,9 @@ function normalizeRecipe(recipe, sourceEntity) {
     sourceKind: primaryOutput?.kind ?? sourceEntity.kind,
     sourceId: primaryOutput?.targetId ?? sourceEntity.targetId,
     actionCount: recipeActionCount(recipe),
+    activityKind,
     name: normalizedRecipeName(recipe, sourceEntity, primaryOutput, outputs, inputs),
-    stationName: recipeStationName(recipe),
+    stationName,
     skillName: recipeSkillName(recipe),
     isPassive: recipe?.isPassive === true,
     isTransportRoute: recipeLooksTransportRoute(recipe, outputs, inputs),
@@ -285,14 +288,21 @@ export function normalizeGameCatalogDetail(payload, fallback = {}) {
   const kindHint = detail?.cargo ? "cargo" : detail?.item ? "items" : null;
   const entity = entityFromSource(source, fallback, kindHint);
 
-  const recipes = [...new Map([
-    ...unwrapArray(detail?.craftingRecipes),
-    ...unwrapArray(detail?.extractionRecipes),
-    ...unwrapArray(detail?.recipesUsingItem),
-  ]
-    .map((recipe) => normalizeRecipe(recipe, entity))
-    .filter(Boolean)
-    .map((recipe) => [recipe.recipeKey, recipe])).values()];
+  const recipeCandidates = [
+    ...unwrapArray(detail?.craftingRecipes).map((recipe) => ({ recipe, activityKind: "craft", priority: 2 })),
+    ...unwrapArray(detail?.extractionRecipes).map((recipe) => ({ recipe, activityKind: "gathering", priority: 2 })),
+    ...unwrapArray(detail?.recipesUsingItem).map((recipe) => ({ recipe, activityKind: "craft", priority: 1 })),
+  ];
+  const recipesByKey = new Map();
+  for (const candidate of recipeCandidates) {
+    const normalized = normalizeRecipe(candidate.recipe, entity, candidate.activityKind);
+    if (!normalized) continue;
+    const existing = recipesByKey.get(normalized.recipeKey);
+    if (!existing || candidate.priority > existing.priority) {
+      recipesByKey.set(normalized.recipeKey, { ...normalized, priority: candidate.priority });
+    }
+  }
+  const recipes = [...recipesByKey.values()].map(({ priority: _priority, ...recipe }) => recipe);
 
   const itemListOutputs = unwrapArray(detail?.itemListPossibilities)
     .map((possibility) => normalizeItemListOutput(possibility, entity))
@@ -322,6 +332,7 @@ function mapRecipeRow(row, inputs, outputs) {
     sourceKind: row.source_kind,
     sourceId: row.source_id,
     actionCount: toNumber(row.action_count),
+    activityKind: row.activity_kind === "gathering" ? "gathering" : "craft",
     name: row.name ?? null,
     stationName: row.station_name ?? null,
     skillName: row.skill_name ?? null,
@@ -403,12 +414,13 @@ export function createGameCatalogRepository(db) {
     deleteItemListOutputs: db.prepare("DELETE FROM game_catalog_item_list_outputs WHERE producer_key = ?"),
     insertRecipe: db.prepare(`
       INSERT INTO game_catalog_recipes (
-        recipe_key, source_kind, source_id, action_count, name, station_name, skill_name, is_passive, is_transport_route, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        recipe_key, source_kind, source_id, action_count, activity_kind, name, station_name, skill_name, is_passive, is_transport_route, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(recipe_key) DO UPDATE SET
         source_kind = excluded.source_kind,
         source_id = excluded.source_id,
         action_count = excluded.action_count,
+        activity_kind = excluded.activity_kind,
         name = excluded.name,
         station_name = excluded.station_name,
         skill_name = excluded.skill_name,
@@ -791,6 +803,7 @@ export function createGameCatalogRepository(db) {
             recipe.sourceKind,
             recipe.sourceId,
             recipe.actionCount,
+            recipe.activityKind === "gathering" ? "gathering" : "craft",
             recipe.name,
             recipe.stationName,
             recipe.skillName,

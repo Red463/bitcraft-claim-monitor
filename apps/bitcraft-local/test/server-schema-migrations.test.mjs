@@ -38,6 +38,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
     { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
     { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
+    { table: "game_catalog_recipes", column: "activity_kind", definition: "TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering'))" },
   ]);
 });
 
@@ -95,6 +96,29 @@ test("recipe action count migrates without inventing effort for old rows", () =>
   assert.deepEqual(
     { ...db.prepare("SELECT recipe_key, action_count FROM game_catalog_recipes").get() },
     { recipe_key: "recipe:old", action_count: 0 },
+  );
+  db.close();
+});
+
+test("recipe activity kind migrates old catalog rows safely as crafts", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE game_catalog_recipes (
+      recipe_key TEXT PRIMARY KEY,
+      name TEXT
+    );
+    INSERT INTO game_catalog_recipes (recipe_key, name) VALUES ('recipe:old', 'Split a trunk');
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "game_catalog_recipes",
+    column: "activity_kind",
+    definition: "TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering'))",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT recipe_key, activity_kind FROM game_catalog_recipes").get() },
+    { recipe_key: "recipe:old", activity_kind: "craft" },
   );
   db.close();
 });
