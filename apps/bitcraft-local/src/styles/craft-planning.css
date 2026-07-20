@@ -452,6 +452,27 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.craft-plan-stock-card {
+  overflow-x: hidden;
+}
+.craft-plan-stock-card .craft-plan-detail-group,
+.craft-plan-stock-card .craft-plan-detail-row {
+  min-width: 0;
+}
+.craft-plan-stock-card .craft-plan-detail-row {
+  align-items: flex-start;
+}
+.craft-plan-stock-card .craft-plan-detail-row > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.craft-plan-stock-card .craft-plan-detail-row > strong {
+  flex: 0 0 auto;
+}
 .craft-plan-route-detail {
   display: grid;
   gap: 14px;
