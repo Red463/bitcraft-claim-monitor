@@ -452,6 +452,22 @@ test("game catalog repository persists expected and guaranteed item-list quantit
   db.close();
 });
 
+test("normalizeGameCatalogDetail preserves an explicit zero guaranteed item-list quantity", () => {
+  const normalized = normalizeGameCatalogDetail({
+    item: { id: "5001", itemType: 0, name: "T1 Clay Output", tag: "Clay Output", tier: 1 },
+    itemListPossibilities: [{
+      targetId: "3001",
+      targetItem: { id: "3001", itemType: 0, name: "Rough Gypsite", tag: "Gypsite", tier: 1 },
+      quantity: 0.02,
+      chance: 1,
+      guaranteedQuantity: 0,
+    }],
+  });
+
+  assert.equal(normalized.itemListOutputs[0].quantity, 0.02);
+  assert.equal(normalized.itemListOutputs[0].guaranteedQuantity, 0);
+});
+
 test("game catalog repository derives and atomically replaces versioned effort weights", () => {
   const db = createDb();
   const repository = createGameCatalogRepository(db);

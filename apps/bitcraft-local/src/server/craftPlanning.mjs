@@ -353,24 +353,47 @@ function recipeLooksTransportRoute(recipe) {
   return inputDisplays.some(stackDisplayLooksTransport) || outputDisplays.some(stackDisplayLooksTransport);
 }
 
-const GATHERING_SKILLS = new Set(["farming", "fishing", "foraging", "forestry", "hunting", "mining"]);
-
 function recipeSkillName(recipe) {
   return String(recipe?.skillName ?? recipe?.levelRequirements?.[0]?.skill?.name ?? "").trim();
 }
 
-function isGatheringRecipe(recipe) {
-  return GATHERING_SKILLS.has(recipeSkillName(recipe).toLowerCase());
+function recipeStationName(recipe) {
+  return String(
+    recipe?.buildingName
+    ?? recipe?.building_name
+    ?? recipe?.stationName
+    ?? recipe?.station_name
+    ?? recipe?.station?.name
+    ?? recipe?.building?.name
+    ?? "",
+  ).trim();
 }
 
-function isGatheringByproductRoute(recipe) {
-  return recipe?.routeType === "gathering-byproduct";
+function recipeActivityKind(recipe) {
+  if (recipeStationName(recipe)) return "craft";
+  return recipe?.activityKind === "gathering" ? "gathering" : "craft";
+}
+
+function routeIsGathering(recipe) {
+  if (recipe?.routeType != null) {
+    return recipe.routeType === "gathering" || recipe.routeType === "gathering-byproduct";
+  }
+  return recipeActivityKind(recipe) === "gathering";
+}
+
+function routeTypeForItemListOutput(recipe, output) {
+  const activityKind = recipeActivityKind(recipe);
+  const expectedYield = Math.max(0, toNumber(output?.quantity));
+  const guaranteedYield = Math.max(0, toNumber(output?.guaranteedQuantity));
+  return guaranteedYield + 1e-9 < expectedYield ? `${activityKind}-byproduct` : activityKind;
 }
 
 function routeMetadata(recipe) {
+  const gathering = routeIsGathering(recipe);
+  const gatheringSkill = recipe?.gatheringSkill ?? recipeSkillName(recipe);
   return {
-    routeType: recipe?.routeType ?? "craft",
-    gatheringSkill: recipe?.gatheringSkill ?? null,
+    routeType: recipe?.routeType ?? recipeActivityKind(recipe),
+    gatheringSkill: gathering ? gatheringSkill || null : null,
     producer: recipe?.producer ?? null,
     producerRecipe: recipe?.producerRecipe ?? null,
     expectedYield: recipe?.expectedYield == null ? null : toNumber(recipe.expectedYield),
@@ -409,7 +432,15 @@ function recipeSortScore(recipe, target, detailsByKey) {
 
 function directRecipesForTarget(detail, target) {
   const unwrapped = unwrapRecipeDetail(detail);
-  return [...(unwrapped?.craftingRecipes ?? []), ...(unwrapped?.extractionRecipes ?? [])]
+  const candidates = [
+    ...(unwrapped?.craftingRecipes ?? []).map((recipe) => ({ recipe, fallbackActivityKind: "craft" })),
+    ...(unwrapped?.extractionRecipes ?? []).map((recipe) => ({ recipe, fallbackActivityKind: "gathering" })),
+  ];
+  return candidates
+    .map(({ recipe, fallbackActivityKind }) => ({
+      ...recipe,
+      activityKind: recipe?.activityKind ?? fallbackActivityKind,
+    }))
     .filter((recipe) => recipeOutputs(recipe).some((stack) => stackMatches(stack, target)));
 }
 
@@ -487,13 +518,15 @@ function possibilityRecipesForTarget(target, detailsByKey) {
       if (recipeLooksTransportRoute(recipe)) continue;
       const output = recipeOutputs(recipe).find((stackItem) => stackMatches(stackItem, outputTarget));
       const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? recipe.outputQuantity) || 1);
-      const gatheringSkill = recipeSkillName(recipe);
-      const routeType = isGatheringRecipe(recipe) ? "gathering-byproduct" : "byproduct";
       const craftedOutputs = expectedOutputs.map((expectedOutput) => ({
         ...expectedOutput,
         quantity: expectedOutput.quantity * outputPerCraft,
         guaranteedQuantity: expectedOutput.guaranteedQuantity * outputPerCraft,
       }));
+      const craftedOutput = craftedOutputs.find((candidate) => candidate.id === String(target.id) && candidate.kind === target.kind);
+      const routeType = routeTypeForItemListOutput(recipe, craftedOutput);
+      const gathering = routeType === "gathering" || routeType === "gathering-byproduct";
+      const gatheringSkill = recipeSkillName(recipe);
       recipes.push({
         ...recipe,
         id: `possibility:${recipeId(recipe)}:${recipeKey(target.kind, target.id)}`,
@@ -510,7 +543,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
         sourceOutputKey: sourceKey,
         sourceOutput: outputTarget,
         routeType,
-        gatheringSkill: routeType === "gathering-byproduct" ? gatheringSkill : null,
+        gatheringSkill: gathering ? gatheringSkill : null,
         producer: outputTarget,
         producerRecipe: {
           id: recipeId(recipe),
@@ -519,11 +552,11 @@ function possibilityRecipesForTarget(target, detailsByKey) {
           skillName: gatheringSkill || null,
         },
         isExpectedYield: true,
-        isProbabilistic: craftedOutputs.some((craftedOutput) => craftedOutput.guaranteedQuantity < craftedOutput.quantity),
+        isProbabilistic: (craftedOutput?.guaranteedQuantity ?? 0) + 1e-9 < (craftedOutput?.quantity ?? 0),
         expectedYield: yieldQuantity * outputPerCraft,
-        dropChance: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropChance ?? null,
-        dropQuantity: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.dropQuantity ?? null,
-        guaranteedYield: craftedOutputs.find((craftedOutput) => craftedOutput.id === String(target.id) && craftedOutput.kind === target.kind)?.guaranteedQuantity ?? 0,
+        dropChance: craftedOutput?.dropChance ?? null,
+        dropQuantity: craftedOutput?.dropQuantity ?? null,
+        guaranteedYield: craftedOutput?.guaranteedQuantity ?? 0,
         gatheringSource: recipe.gatheringSource ?? null,
       });
     }
@@ -533,8 +566,8 @@ function possibilityRecipesForTarget(target, detailsByKey) {
 
 function recipesForTarget(detail, target, detailsByKey = null) {
   const recipes = [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)];
-  const gatheringByproductRoutes = recipes.filter(isGatheringByproductRoute);
-  return (gatheringByproductRoutes.length ? gatheringByproductRoutes : recipes)
+  const gatheringRoutes = recipes.filter(routeIsGathering);
+  return (gatheringRoutes.length ? gatheringRoutes : recipes)
     .sort((a, b) => recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey));
 }
 
@@ -652,7 +685,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides, gatheredIte
   if (!selected) return [];
   const visibleRecipes = routeAlternativesForUi(recipes, selected);
   const gatheringSources = visibleRecipes
-    .filter(isGatheringByproductRoute)
+    .filter(routeIsGathering)
     .map((recipe) => ({
       label: recipe.gatheringSource?.label ?? recipe.producer?.tag ?? recipe.producer?.name ?? "Gathering",
       tag: recipe.gatheringSource?.tag ?? recipe.producer?.tag ?? null,
@@ -879,6 +912,7 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
     buildingName: recipe.stationName ?? null,
     stationName: recipe.stationName ?? null,
     skillName: recipe.skillName ?? null,
+    activityKind: recipe.activityKind === "gathering" ? "gathering" : "craft",
     isPassive: recipe.isPassive === true,
     isTransportRoute: recipe.isTransportRoute === true,
     craftedItemStacks: outputs,
@@ -917,6 +951,7 @@ function catalogGatheringOutputRecipe(row, producerTarget, source) {
     id: `gathering-output:${row.producerKey}`,
     name: `Gather ${source.label}`,
     skillName: source.skill,
+    activityKind: "gathering",
     gatheringSource: source,
     craftedItemStacks: [{ item_id: producerTarget.id, item_type: producerTarget.kind === "cargo" ? "cargo" : "item", quantity: 1 }],
     craftedItems: [producerTarget],

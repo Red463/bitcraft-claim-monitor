@@ -242,6 +242,7 @@ function normalizeItemListOutput(possibility, producerEntity) {
     quantity: possibility?.quantity,
   }, possibility?.targetItem ?? possibility);
   if (!target || target.quantity <= 0) return null;
+  const explicitGuarantee = possibility?.guaranteedQuantity ?? possibility?.guaranteed_quantity;
   return {
     producerKey: producerEntity.catalogKey,
     outputKey: target.key,
@@ -249,6 +250,7 @@ function normalizeItemListOutput(possibility, producerEntity) {
     targetId: target.targetId,
     quantity: target.quantity,
     chance: toNumber(possibility?.chance, 1),
+    guaranteedQuantity: explicitGuarantee == null ? null : Math.max(0, toNumber(explicitGuarantee)),
   };
 }
 
@@ -267,18 +269,24 @@ function coalesceItemListOutputs(outputs) {
       ...output,
       quantity: 0,
       chance: 1,
+      explicitGuaranteedQuantity: 0,
+      hasExplicitGuarantee: true,
       minimumQuantity: Number.POSITIVE_INFINITY,
       totalChance: 0,
     };
     existing.quantity += quantity * chance;
+    existing.hasExplicitGuarantee = existing.hasExplicitGuarantee && output.guaranteedQuantity != null;
+    existing.explicitGuaranteedQuantity += Math.max(0, toNumber(output.guaranteedQuantity));
     existing.minimumQuantity = Math.min(existing.minimumQuantity, quantity);
     existing.totalChance += chance;
     byPair.set(key, existing);
   }
-  return [...byPair.values()].map(({ minimumQuantity, totalChance, ...output }) => ({
+  return [...byPair.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, ...output }) => ({
     ...output,
     quantity: Number(output.quantity.toFixed(12)),
-    guaranteedQuantity: totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity : 0,
+    guaranteedQuantity: hasExplicitGuarantee
+      ? explicitGuaranteedQuantity
+      : totalChance >= 1 - 1e-9 && Number.isFinite(minimumQuantity) ? minimumQuantity : 0,
   }));
 }
 
