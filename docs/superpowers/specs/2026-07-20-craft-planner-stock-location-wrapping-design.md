@@ -36,4 +36,3 @@ The change preserves the existing semantic `details` and `summary` controls. Wra
 - Run the complete application test suite.
 - Run the production frontend build.
 - Re-run the Impeccable layout detector and inspect the affected modal when the local smoke environment is available.
-
