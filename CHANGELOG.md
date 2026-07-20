@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.39.0-beta.5] - 2026-07-20
+
+### Fixed
+
+- Corrected station-based item-list recipes in Craft Planning so guaranteed outputs are shown as craft outputs and variable co-products as craft byproducts, while gathering remains limited to world resource extraction.
+
 ## [0.39.0-beta.4] - 2026-07-19
 
 ### Added
