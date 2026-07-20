@@ -4,20 +4,20 @@ export const PLANNER_SECTION_ORDER = [
 ];
 
 const ROWS = {
-  Carpentry: ["Stripped Wood", "Plank", "Empty Bucket", "Water", "Refined Plank", "Woodworking Sandpaper"],
+  Carpentry: ["Stripped Wood", "Plank", "Empty Bucket", "Water", "Refined Plank", "Woodworking Sandpaper", "Timber"],
   Construction: [],
   Cooking: [],
   Farming: ["Fertilizer", "Crop Oil", "Filament", "Filament Plant", "Grain Plant", "Straw", "Vegetable Plant"],
   Fishing: ["Baitfish", "Bait", "Crushed Shells", "Lake Fish", "Ocean Fish", "Fish Oil"],
-  Foraging: ["Berry", "Citric Berry", "Clay", "Gypsite", "Sand", "Flower", "Plant Fiber"],
+  Foraging: ["Berry", "Citric Berry", "Clay", "Gypsite", "Sand", "Flower", "Plant Fiber", "Plant Roots"],
   Forestry: ["Trunk", "Bark", "Resin", "Wood Log"],
   Hunting: ["Animal", "Animal Hair", "Raw Meat", "Raw Skitch Meat", "Raw Crab Meat", "Oyster Meat", "Raw Pelt"],
   Leatherworking: ["Cleaned Pelt", "Hideworking Salt", "Tannin", "Tanned Pelt", "Leather", "Refined Leather", "Textile"],
-  Masonry: ["Potter's Mix", "Unfired Brick", "Brickworking Binding Ash", "Brick", "Refined Brick", "Glass", "Sea Glass", "Vial", "Pitch"],
+  Masonry: ["Potter's Mix", "Unfired Brick", "Brickworking Binding Ash", "Brick", "Refined Brick", "Glass", "Sea Glass", "Vial", "Pitch", "Brick Slab"],
   Mining: ["Chunk", "Braxite", "Pebbles", "Ore Chunk", "Ore"],
   Scholar: ["Ancient Hieroglyphs", "Stone Carvings", "Stone Diagrams", "Firesand", "Leather Solvent", "Metal Solvent", "Parchment", "Pigment", "Ink", "Journal", "Cloth Research", "Leather Research", "Metal Research", "Stone Research", "Wood Research", "Codex", "Wood Polish"],
-  Smithing: ["Crushed Ore", "Metalworking Flux", "Ore Concentrate", "Molten Ingot", "Ingot", "Refined Ingot"],
-  Tailoring: ["Clothmaker's Mordant", "Spool of Thread", "Cloth Strip", "Cloth", "Refined Cloth"],
+  Smithing: ["Crushed Ore", "Metalworking Flux", "Ore Concentrate", "Molten Ingot", "Ingot", "Refined Ingot", "Nails"],
+  Tailoring: ["Clothmaker's Mordant", "Spool of Thread", "Rope", "Cloth Strip", "Cloth", "Refined Cloth"],
   Taming: [
     "Animal Swill", "Animal Food", "Nubi Goat Food", "Nubi Goat Vitamins", "Sagi Bird Food", "Sagi Bird Vitamins",
     "Tamed Animal", "Captured Nubi Goat", "Captured Sagi Bird", "Domesticated Nubi Goat", "Domesticated Sagi Bird",
@@ -33,6 +33,7 @@ const ALIASES = new Map([
   ["starbulb", "Vegetable Plant"], ["starbulb plant", "Vegetable Plant"],
   ["vegetable", "Vegetable Plant"], ["vegetable plant", "Vegetable Plant"],
   ["oceanfish", "Ocean Fish"], ["ocean fish", "Ocean Fish"], ["lake fish", "Lake Fish"],
+  ["roots", "Plant Roots"], ["nail", "Nails"], ["thread", "Spool of Thread"],
 ]);
 
 const HIDDEN_TAGS = new Set([
