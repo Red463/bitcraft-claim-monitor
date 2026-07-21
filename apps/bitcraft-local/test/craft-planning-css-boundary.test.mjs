@@ -31,7 +31,7 @@ test("Craft planning item details use a fixed viewport modal", () => {
 
 test("Craft planning needs board cells avoid item icons", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const cellBody = page.match(/function needCellNode[\s\S]+?function recipeOptionLabel/)?.[0] ?? "";
+  const cellBody = page.match(/function needCellNode[\s\S]+?function summaryStat/)?.[0] ?? "";
   assert.doesNotMatch(cellBody, /ItemIcon/);
   assert.doesNotMatch(cellBody, /craft-plan-need-icon/);
 });

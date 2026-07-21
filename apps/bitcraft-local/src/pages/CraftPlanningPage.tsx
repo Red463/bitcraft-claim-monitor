@@ -1,6 +1,6 @@
 import React from "react";
 import "../styles/craft-planning.css";
-import { AlertTriangle, ChevronDown, ClipboardList, Download, EqualApproximately, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardList, Download, EqualApproximately, Factory, LoaderCircle, Package, Route, Search, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
@@ -9,11 +9,12 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
-import { cellItemKeys, gatheredCellState, setCellGathered } from "./craftPlanningGatheredOverrides";
+import { CraftPlanningRouteChooser } from "./CraftPlanningRouteChooser";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
 import { selectCraftPlanningEffortView } from "./craftPlanningEffortView";
 import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
+import { acquisitionRouteLabel } from "./craftPlanningRoutePresentation.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -61,15 +62,6 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
 }
 
 
-function recipeOptionLabel(recipe: AnyRecord, output?: AnyRecord) {
-  const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
-  const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
-  const station = String(recipe.buildingName ?? "").trim();
-  const routeKind = recipe.isTransportRoute ? "[Logistics] " : "";
-  if (inputs.length && output) return `${routeKind}${inputs.join(" + ")} -> ${itemName(output)}${station ? ` - ${station}` : ""}`;
-  return `${routeKind}${label}${station ? ` - ${station}` : ""}`;
-}
-
 function summaryStat(icon: React.ReactNode, label: string, value: unknown, detail: string, tone?: string) {
   return (
     <article className={`craft-plan-summary-stat${tone ? ` ${tone}` : ""}`}>
@@ -103,7 +95,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const detailRequestRef = React.useRef(0);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
-  const [gatheredSavePending, setGatheredSavePending] = React.useState(false);
+  const [routeSavePendingId, setRouteSavePendingId] = React.useState<string | null>(null);
   const [bufferPercent, setBufferPercent] = React.useState("0");
   const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
 
@@ -198,9 +190,6 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, detailSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const selectedNeedKey = selectedNeed?.items?.[0]?.key ?? (selectedNeed ? itemKey(selectedNeed.item) : "");
-  const selectedNeedKeys = selectedNeed ? cellItemKeys(selectedNeed.items) : [];
-  const selectedGatheredState = gatheredCellState(selectedNeedKeys, config.gatheredItemKeys ?? []);
-  const selectedNeedGathered = selectedGatheredState === "all";
   const selectedMultiplier = Number(config.multipliers?.[selectedNeedKey]?.multiplier) || 1;
   React.useEffect(() => {
     setBufferPercent(String(Math.max(0, Math.round((selectedMultiplier - 1) * 1000) / 10)));
@@ -276,29 +265,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <div className="craft-plan-need-detail-side">
             <section className="form-card nested-card">
               <h3><Factory size={16} /> How to get this</h3>
-              {canManage ? (
-                <div className="craft-plan-gathered-control" data-state={selectedGatheredState}>
-                  <label className="compact-toggle">
-                    <input
-                      type="checkbox"
-                      checked={selectedNeedGathered}
-                      aria-checked={selectedGatheredState === "mixed" ? "mixed" : selectedNeedGathered}
-                      disabled={gatheredSavePending || detailLoading}
-                      onChange={(event) => void saveGatheredOverride(event.target.checked)}
-                    />
-                    <span>Treat this cell as gathered</span>
-                  </label>
-                  <small>Stops producer-recipe expansion for this exact cell. The item remains required and counted stock still applies.</small>
-                  {selectedGatheredState === "mixed" ? <small className="craft-plan-gathered-mixed">Some underlying items are already marked. Changing this toggle applies one state to the whole displayed cell.</small> : null}
-                </div>
-              ) : null}
-              {selectedNeedGathered ? (
-                <div className="craft-plan-gathered-state">
-                  <strong>This item is treated as gathered.</strong>
-                  <p>The remaining amount must be gathered or supplied from counted stock. Producer recipes and package routes are ignored.</p>
-                  <a className="toolbar-button" href="/?page=map"><MapPin size={15} /> Open Map resource finder</a>
-                </div>
-              ) : selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
+              {selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
                 const alternatives = Array.isArray(route.alternatives) ? route.alternatives : [];
                 const routeType = String(route.routeType ?? "craft");
                 const gatheringRoute = routeType.startsWith("gathering");
@@ -325,7 +292,18 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 const unbufferedWork = Number(route.unbufferedExpectedEffort) || baseActions;
                 const bufferedWork = Number(route.expectedEffort) || bufferedActions;
                 return (
-                  <div className={`craft-plan-route-detail is-${gatheringRoute ? "gathering" : "craft"}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                  <React.Fragment key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                    <CraftPlanningRouteChooser
+                      routes={alternatives}
+                      selectedRecipeId={String(route.selectedRecipeId ?? "")}
+                      output={route.output ?? selectedNeed.item}
+                      missingQuantity={Number(selectedNeed.missing) || 0}
+                      multiplier={routeMultiplier}
+                      canManage={canManage}
+                      pendingRecipeId={routeSavePendingId}
+                      onSelect={(recipeId) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), recipeId)}
+                    />
+                    <div className={`craft-plan-route-detail is-${gatheringRoute ? "gathering" : "craft"}`}>
                     <div className="craft-plan-route-heading">
                       <span className={`craft-plan-route-kind is-${gatheringRoute ? "gathering" : "craft"}`}>{routeKindLabel}</span>
                       <strong>{gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? route.recipeName : displayedRecipeName}</strong>
@@ -360,15 +338,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         ))}
                       </div>
                     ) : null}
-                    {canManage && alternatives.length > 1 ? (
-                      <label className="field compact-field">
-                        <span>Recipe route</span>
-                        <select value={route.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, route.output)}</option>)}
-                        </select>
-                      </label>
-                    ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
-                  </div>
+                    </div>
+                  </React.Fragment>
                 );
               }) : <p className="legend">The current plan does not need to craft this item. Stock locations show where it is counted from, or the item is treated as a raw gathered/vendor input.</p>}
             </section>
@@ -409,7 +380,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <label className="field compact-field">
                         <span>Recipe route</span>
                         <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.key ?? ""), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, usage.output)}</option>)}
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{acquisitionRouteLabel(recipe, usage.output)}</option>)}
                         </select>
                       </label>
                     ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
@@ -472,45 +443,12 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       setRouteError(err instanceof Error ? err.message : String(err));
     }
   }
-  async function saveGatheredOverride(enabled: boolean) {
-    if (!canManage || !adminAuth?.csrfToken || !selectedNeed || !selectedNeedKeys.length) return;
+  async function saveRouteOverride(outputKey: string, recipeId: string) {
+    if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
     const openCell = selectedNeed;
     setRouteStatus(null);
     setRouteError(null);
-    setGatheredSavePending(true);
-    try {
-      const gatheredItemKeys = setCellGathered(config.gatheredItemKeys ?? [], selectedNeedKeys, enabled);
-      const response = await fetch(LOCAL_API + "/admin/craft-plan", {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          "x-csrf-token": String(adminAuth.csrfToken),
-        },
-        body: JSON.stringify({ ...config, gatheredItemKeys }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      const refreshedPlan = body.plan;
-      if (refreshedPlan && Array.isArray(refreshedPlan.materials)) {
-        setPlan(refreshedPlan);
-        const byKey = new Map<string, AnyRecord>(refreshedPlan.materials.map((item: AnyRecord): [string, AnyRecord] => [itemKey(item), item]));
-        const items = openCell.items.map((item) => byKey.get(itemKey(item)) ?? item);
-        setSelectedNeed({ ...openCell, item: items[0] ?? openCell.item, items });
-        const keys = new Set(selectedNeedKeys);
-        setDetailSteps((Array.isArray(refreshedPlan.steps) ? refreshedPlan.steps : []).filter((step: AnyRecord) => keys.has(itemKey(step.output ?? {}))));
-      }
-      setRouteStatus(enabled ? "This cell is now treated as gathered." : "Recipe expansion restored for this cell.");
-      setManagerRefreshToken((value) => value + 1);
-    } catch (err) {
-      setRouteError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setGatheredSavePending(false);
-    }
-  }
-  async function saveRouteOverride(outputKey: string, recipeId: string) {
-    if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
-    setRouteStatus(null);
-    setRouteError(null);
+    setRouteSavePendingId(recipeId);
     try {
       const nextConfig = {
         ...config,
@@ -529,11 +467,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      setRouteStatus("Recipe route updated.");
+      if (body.plan) setPlan(body.plan);
+      setRouteStatus("Acquisition route updated.");
       setManagerRefreshToken((value) => value + 1);
-      setSelectedNeed(null);
+      if (openCell) await openNeedDetail(openCell);
     } catch (err) {
       setRouteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRouteSavePendingId(null);
     }
   }
   async function saveMultiplier(outputKey: string, percent: number) {
