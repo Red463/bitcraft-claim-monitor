@@ -182,13 +182,22 @@ collect_class_files() {
   esac
   shopt -u nullglob
 
-  local path modified
+  local path modified name timestamp
   for path in "${matches[@]}"; do
     [[ -f "$path" && ! -L "$path" ]] || continue
+    name="${path##*/}"
+    case "$class" in
+      legacy) [[ "$name" =~ ^bitcraft-local-predeploy-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      daily) [[ "$name" =~ ^bitcraft-local-daily-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      migration) [[ "$name" =~ ^bitcraft-local-migration-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      manual) [[ "$name" =~ ^bitcraft-local-manual-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+    esac
     modified="$(stat -c %Y -- "$path")" || continue
     (( modified <= cleanup_started )) || continue
-    printf "%s\n" "$path"
-  done | sort -r
+    timestamp="${name%.sqlite}"
+    timestamp="${timestamp: -15}"
+    printf "%s\t%s\n" "$timestamp" "$path"
+  done | sort -t $'\t' -k1,1r | cut -f2-
 }
 
 class_keep_count() {
@@ -298,6 +307,11 @@ cleanup_legacy_backups() {
   printf "Recovered bytes: %s\n" "$bytes"
 }
 
+acquire_deploy_lock() {
+  exec 7>"$DEPLOY_LOCK_FILE"
+  flock -n 7
+}
+
 create_backup() {
   [[ -f "$DATABASE" ]] || { printf "Database not found: %s\n" "$DATABASE" >&2; return 1; }
   install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
@@ -327,6 +341,14 @@ main() {
     return 1
   fi
   parse_args "$@"
+  case "$MODE" in
+    daily)
+      acquire_deploy_lock || { printf "A deployment is currently running; backup was not started.\n" >&2; return 1; }
+      ;;
+    --dry-run-prune|--apply-prune)
+      acquire_deploy_lock || { printf "A deployment is currently running; cleanup was not started.\n" >&2; return 1; }
+      ;;
+  esac
   exec 8>"$BACKUP_LOCK_FILE"
   flock -n 8 || { printf "Another database backup is already running.\n" >&2; return 1; }
   trap restore_on_exit EXIT
@@ -334,8 +356,6 @@ main() {
   trap 'exit 143' TERM
   case "$MODE" in
     --dry-run-prune|--apply-prune)
-      exec 7>"$DEPLOY_LOCK_FILE"
-      flock -n 7 || { printf "A deployment is currently running; cleanup was not started.\n" >&2; return 1; }
       if [[ "$MODE" == "--apply-prune" ]]; then
         cleanup_legacy_backups 1
       else

@@ -42,3 +42,20 @@ test("backup command exposes guarded legacy cleanup modes", () => {
   assert.match(script, /Newest retained backup failed validation/);
   assert.match(script, /DEPLOY_LOCK_FILE="\$\{DEPLOY_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-deploy\.lock\}"/);
 });
+
+test("retention sorts revision-bearing backup names by their timestamp suffix", () => {
+  assert.match(script, /timestamp="\$\{name%\.sqlite\}"/);
+  assert.match(script, /timestamp="\$\{timestamp: -15\}"/);
+  assert.match(script, /printf "%s\\t%s\\n" "\$timestamp" "\$path"/);
+});
+
+test("scheduled daily backups refuse to overlap a deployment", () => {
+  assert.match(script, /acquire_deploy_lock/);
+  assert.match(script, /daily\)[\s\S]*acquire_deploy_lock/);
+  assert.match(script, /A deployment is currently running; backup was not started/);
+  const main = script.slice(script.indexOf("main()"));
+  assert.ok(
+    main.indexOf("acquire_deploy_lock") < main.indexOf('exec 8>"$BACKUP_LOCK_FILE"'),
+    "daily and cleanup modes must take the deploy lock before the backup lock",
+  );
+});

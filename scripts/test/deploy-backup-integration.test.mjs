@@ -250,6 +250,23 @@ test("class retention keeps seven daily and three migration and manual files", {
   assert.equal(result.remainingNames.filter((name) => name.includes("-manual-")).length, 3);
 });
 
+test("retention uses timestamps rather than revision text", { skip: !hasBash }, () => {
+  const result = runCleanupFixture({
+    mode: "retention",
+    extraNames: [
+      "bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite",
+      "bitcraft-local-migration-eeeeeeeeeeee-20260702-000000.sqlite",
+      "bitcraft-local-migration-dddddddddddd-20260703-000000.sqlite",
+      "bitcraft-local-migration-000000000001-20260704-000000.sqlite",
+      "bitcraft-local-migration-000000000002-20260705-000000.sqlite",
+    ],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.remainingNames.includes("bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite"), false);
+  assert.equal(result.remainingNames.includes("bitcraft-local-migration-000000000002-20260705-000000.sqlite"), true);
+  assert.equal(result.remainingNames.filter((name) => name.includes("-migration-")).length, 3);
+});
+
 test("legacy apply refuses cleanup when the newest retained backup is invalid", { skip: !hasBash }, () => {
   const result = runCleanupFixture({ mode: "--apply-prune", legacyCount: 8, quickCheck: "corrupt" });
   assert.notEqual(result.status, 0);
