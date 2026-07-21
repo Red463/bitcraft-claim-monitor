@@ -65,8 +65,9 @@ function recipeOptionLabel(recipe: AnyRecord, output?: AnyRecord) {
   const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
   const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
   const station = String(recipe.buildingName ?? "").trim();
-  if (inputs.length && output) return `${inputs.join(" + ")} -> ${itemName(output)}${station ? ` - ${station}` : ""}`;
-  return `${label}${station ? ` - ${station}` : ""}`;
+  const routeKind = recipe.isTransportRoute ? "[Logistics] " : "";
+  if (inputs.length && output) return `${routeKind}${inputs.join(" + ")} -> ${itemName(output)}${station ? ` - ${station}` : ""}`;
+  return `${routeKind}${label}${station ? ` - ${station}` : ""}`;
 }
 
 function summaryStat(icon: React.ReactNode, label: string, value: unknown, detail: string, tone?: string) {
@@ -307,7 +308,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   ? prospectingRoute ? byproductRoute ? "Prospecting byproduct" : "Prospecting output" : byproductRoute ? "Gathering byproduct" : "Gathering output"
                   : byproductRoute ? "Craft byproduct" : "Craft output";
                 const yieldUnit = gatheringRoute ? prospectingRoute ? "per extraction progress" : "per resource progress" : "per craft (recipe completion)";
-                const itemListRoute = route.expectedYield != null;
+                const probabilityUnavailable = route.probabilityStatus === "unavailable";
+                const itemListRoute = route.expectedYield != null || probabilityUnavailable;
                 const expectedYield = Number(route.expectedYield) || 0;
                 const guaranteedYield = Number(route.guaranteedYield) || 0;
                 const guaranteedOutput = !byproductRoute && guaranteedYield > 0 && guaranteedYield + 1e-9 >= expectedYield;
@@ -331,7 +333,13 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         ? [route.gatheringSkill, byproductRoute && route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
                         : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
                     </div>
-                    {itemListRoute ? (
+                    {probabilityUnavailable ? (
+                      <div className="craft-plan-chance-summary" role="status">
+                        <p className="craft-plan-byproduct-note"><strong>Validated output rate unavailable.</strong></p>
+                        <p className="legend">This production route is known, but required completions and inputs cannot be calculated until a validated probability snapshot is available.</p>
+                        {producerInputs.length ? <div className="craft-plan-producer-requirements"><small>Producer recipe inputs</small>{producerInputs.map((input: AnyRecord, inputIndex: number) => <span key={itemKey(input) + "-producer-" + inputIndex}>{itemNode(input)}<strong>x{quantity(input.quantityPerCraft ?? input.quantity)}</strong></span>)}</div> : null}
+                      </div>
+                    ) : itemListRoute ? (
                       <>
                         {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 3 : 1)} expected {yieldUnit}</small></span>)}</div> : null}
                         <p className="craft-plan-byproduct-note">{guaranteedOutput
