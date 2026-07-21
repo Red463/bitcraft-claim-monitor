@@ -40,3 +40,36 @@ test("atomic switch and rollback restore the previous release", { skip: !hasBash
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("schema backup selection distinguishes ordinary, migration, and forced deployments", { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-schema-"));
+  const previous = join(root, "previous");
+  const candidate = join(root, "candidate");
+  const harness = `
+    set -euo pipefail
+    source "$1"
+    previous="$2/previous"
+    candidate="$2/candidate"
+    mkdir -p "$previous/deploy" "$candidate/deploy"
+    printf '1\n' >"$previous/deploy/database-schema-version"
+    printf '1\n' >"$candidate/deploy/database-schema-version"
+    FORCE_BACKUP=0
+    [[ "$(schema_backup_kind "$previous" "$candidate")" == "none" ]]
+    printf '2\n' >"$candidate/deploy/database-schema-version"
+    [[ "$(schema_backup_kind "$previous" "$candidate")" == "migration" ]]
+    rm "$previous/deploy/database-schema-version"
+    [[ "$(schema_backup_kind "$previous" "$candidate")" == "migration" ]]
+    printf '2\n' >"$previous/deploy/database-schema-version"
+    FORCE_BACKUP=1
+    [[ "$(schema_backup_kind "$previous" "$candidate")" == "manual" ]]
+    printf '3\n' >"$candidate/deploy/database-schema-version"
+    [[ "$(schema_backup_kind "$previous" "$candidate")" == "migration" ]]
+  `;
+
+  try {
+    const result = spawnSync("bash", ["-c", harness, "test", script.pathname, root], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

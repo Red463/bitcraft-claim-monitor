@@ -22,7 +22,7 @@ test("VPS updater builds an immutable release before cutover", () => {
   assert.match(script, /git[^\n]+worktree add --detach/);
   assert.match(
     script,
-    /prepare_release "\$release_dir"[\s\S]*validate_release_config "\$release_dir"[\s\S]*create_predeploy_backup[\s\S]*atomic_switch "\$release_dir"/,
+    /prepare_release "\$release_dir"[\s\S]*validate_release_config "\$release_dir"[\s\S]*schema_backup_kind[\s\S]*atomic_switch "\$release_dir"/,
   );
   assert.doesNotMatch(script, /log "Stopping services"[\s\S]*Fetching latest code/);
 });
@@ -31,7 +31,7 @@ test("VPS updater validates cutover and restores the previous release on failure
   assert.match(script, /expected_version/);
   assert.match(script, /rollback_release\(\)/);
   assert.match(script, /atomic_switch "\$previous_release"/);
-  assert.match(script, /sqlite3[^\n]+\.backup/);
+  assert.doesNotMatch(script, /sqlite3[^\n]+\.backup/);
   assert.match(
     script,
     /restart_service "\$WEB_SERVICE"[\s\S]*wait_for_health "\$expected_version"[\s\S]*restart_service "\$WORKER_SERVICE"/,
@@ -69,6 +69,15 @@ test("VPS update script exposes verbose and public-check controls", () => {
   assert.match(script, /--no-public-check/);
   assert.match(script, /VERBOSE=1/);
   assert.match(script, /SKIP_PUBLIC_CHECK=1/);
+});
+
+test("VPS updater creates backups only for migrations or an explicit force", () => {
+  assert.match(script, /--force-backup/);
+  assert.match(script, /database-schema-version/);
+  assert.match(script, /backup-bitcraft-monitor.*migration.*--revision/);
+  assert.match(script, /backup-bitcraft-monitor.*manual.*--revision/);
+  assert.doesNotMatch(script, /create_predeploy_backup/);
+  assert.doesNotMatch(script, /sqlite3[^\n]+\.backup/);
 });
 
 test("VPS update script prints concise readiness and failure diagnostics", () => {

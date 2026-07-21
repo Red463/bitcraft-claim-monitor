@@ -1,0 +1,11 @@
+[Unit]
+Description=Create the daily BitCraft Claim Monitor database backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/backup-bitcraft-monitor daily
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
