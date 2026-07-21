@@ -1,0 +1,371 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor}"
+BACKUP_LOCK_FILE="${BACKUP_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-backup.lock}"
+DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-deploy.lock}"
+RUN_USER="${RUN_USER:-bitcraft}"
+WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-worker.service}"
+COLLECTOR_SERVICE="${COLLECTOR_SERVICE:-bitcraft-monitor-collector.service}"
+COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-monitor-collector.timer}"
+HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
+DAILY_KEEP="${DAILY_KEEP:-7}"
+MIGRATION_KEEP="${MIGRATION_KEEP:-3}"
+MANUAL_KEEP="${MANUAL_KEEP:-3}"
+LEGACY_KEEP="${LEGACY_KEEP:-3}"
+DATABASE="$DATA_DIR/bitcraft-local.sqlite"
+
+MODE=""
+REVISION=""
+worker_was_active=0
+collector_was_active=0
+timer_was_active=0
+services_recorded=0
+
+usage() {
+  cat <<USAGE
+Usage:
+  backup-bitcraft-monitor daily
+  backup-bitcraft-monitor migration --revision <full-sha>
+  backup-bitcraft-monitor manual --revision <full-sha>
+  backup-bitcraft-monitor --dry-run-prune
+  backup-bitcraft-monitor --apply-prune
+USAGE
+}
+
+parse_args() {
+  [[ $# -ge 1 ]] || { usage; return 2; }
+  case "$1" in
+    daily|migration|manual)
+      MODE="$1"
+      shift
+      ;;
+    --dry-run-prune|--apply-prune)
+      MODE="$1"
+      shift
+      ;;
+    *)
+      printf "Unknown backup mode: %s\n" "$1" >&2
+      usage
+      return 2
+      ;;
+  esac
+
+  if [[ "$MODE" == "--dry-run-prune" || "$MODE" == "--apply-prune" ]]; then
+    [[ $# -eq 0 ]] || { printf "%s does not accept additional arguments.\n" "$MODE" >&2; return 2; }
+    return 0
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --revision)
+        [[ $# -ge 2 ]] || { printf "--revision requires a value.\n" >&2; return 2; }
+        REVISION="$2"
+        shift 2
+        ;;
+      *)
+        printf "Unknown option: %s\n" "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "$MODE" == "daily" ]]; then
+    [[ -z "$REVISION" ]] || { printf "daily does not accept --revision.\n" >&2; return 2; }
+  elif [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    printf "%s requires a full 40-character lowercase revision.\n" "$MODE" >&2
+    return 2
+  fi
+
+  [[ "$HEARTBEAT_SECONDS" =~ ^[1-9][0-9]*$ ]] || {
+    printf "HEARTBEAT_SECONDS must be a positive integer.\n" >&2
+    return 2
+  }
+}
+
+unit_is_active() {
+  systemctl is-active --quiet "$1"
+}
+
+record_and_pause_services() {
+  unit_is_active "$WORKER_SERVICE" && worker_was_active=1 || true
+  unit_is_active "$COLLECTOR_SERVICE" && collector_was_active=1 || true
+  unit_is_active "$COLLECTOR_TIMER" && timer_was_active=1 || true
+  services_recorded=1
+
+  if [[ "$timer_was_active" == "1" ]]; then
+    systemctl stop "$COLLECTOR_TIMER"
+  fi
+  if [[ "$collector_was_active" == "1" ]]; then
+    systemctl stop "$COLLECTOR_SERVICE"
+  fi
+  if [[ "$worker_was_active" == "1" ]]; then
+    systemctl stop "$WORKER_SERVICE"
+  fi
+}
+
+restore_services() {
+  [[ "$services_recorded" == "1" ]] || return 0
+  local status=0
+  if [[ "$worker_was_active" == "1" ]]; then
+    systemctl start "$WORKER_SERVICE" || status=1
+  fi
+  if [[ "$collector_was_active" == "1" ]]; then
+    systemctl start "$COLLECTOR_SERVICE" || status=1
+  fi
+  if [[ "$timer_was_active" == "1" ]]; then
+    systemctl start "$COLLECTOR_TIMER" || status=1
+  fi
+  services_recorded=0
+  return "$status"
+}
+
+restore_on_exit() {
+  local status=$?
+  trap - EXIT INT TERM
+  if ! restore_services && [[ "$status" -eq 0 ]]; then
+    status=1
+  fi
+  exit "$status"
+}
+
+run_backup_with_heartbeat() {
+  local partial="$1"
+  local started now elapsed next_heartbeat bytes backup_pid backup_status
+  started="$(date +%s)"
+  next_heartbeat="$HEARTBEAT_SECONDS"
+
+  sudo -u "$RUN_USER" sqlite3 "$DATABASE" ".backup '$partial'" &
+  backup_pid=$!
+  while kill -0 "$backup_pid" 2>/dev/null; do
+    sleep 1
+    now="$(date +%s)"
+    elapsed=$((now - started))
+    if (( elapsed >= next_heartbeat )); then
+      bytes="$(stat -c %s -- "$partial" 2>/dev/null || printf "0")"
+      printf "Backup still running: elapsed=%ss bytes=%s\n" "$elapsed" "$bytes"
+      next_heartbeat=$((next_heartbeat + HEARTBEAT_SECONDS))
+    fi
+  done
+
+  set +e
+  wait "$backup_pid"
+  backup_status=$?
+  set -e
+  return "$backup_status"
+}
+
+validate_and_publish() {
+  local partial="$1"
+  local final="$2"
+  local check_result
+  check_result="$(sudo -u "$RUN_USER" sqlite3 "$partial" "PRAGMA quick_check;")"
+  if [[ "$check_result" != "ok" ]]; then
+    printf "Backup validation failed: %s\n" "$check_result" >&2
+    return 1
+  fi
+  mv -- "$partial" "$final"
+}
+
+collect_class_files() {
+  local class="$1"
+  local cleanup_started="$2"
+  local -a matches=()
+  shopt -s nullglob
+  case "$class" in
+    legacy) matches=("$BACKUP_DIR"/bitcraft-local-predeploy-????????????-????????-??????.sqlite) ;;
+    daily) matches=("$BACKUP_DIR"/bitcraft-local-daily-????????-??????.sqlite) ;;
+    migration) matches=("$BACKUP_DIR"/bitcraft-local-migration-????????????-????????-??????.sqlite) ;;
+    manual) matches=("$BACKUP_DIR"/bitcraft-local-manual-????????????-????????-??????.sqlite) ;;
+    *) return 2 ;;
+  esac
+  shopt -u nullglob
+
+  local path modified name timestamp
+  for path in "${matches[@]}"; do
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    name="${path##*/}"
+    case "$class" in
+      legacy) [[ "$name" =~ ^bitcraft-local-predeploy-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      daily) [[ "$name" =~ ^bitcraft-local-daily-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      migration) [[ "$name" =~ ^bitcraft-local-migration-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      manual) [[ "$name" =~ ^bitcraft-local-manual-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+    esac
+    modified="$(stat -c %Y -- "$path")" || continue
+    (( modified <= cleanup_started )) || continue
+    timestamp="${name%.sqlite}"
+    timestamp="${timestamp: -15}"
+    printf "%s\t%s\n" "$timestamp" "$path"
+  done | sort -t $'\t' -k1,1r | cut -f2-
+}
+
+class_keep_count() {
+  case "$1" in
+    legacy) printf "%s\n" "$LEGACY_KEEP" ;;
+    daily) printf "%s\n" "$DAILY_KEEP" ;;
+    migration) printf "%s\n" "$MIGRATION_KEEP" ;;
+    manual) printf "%s\n" "$MANUAL_KEEP" ;;
+    *) return 2 ;;
+  esac
+}
+
+collect_removable_files() {
+  local class="$1"
+  local cleanup_started="$2"
+  local keep index=0 path
+  keep="$(class_keep_count "$class")"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if (( index >= keep )) && ! fuser -s -- "$path" 2>/dev/null; then
+      printf "%s\n" "$path"
+    fi
+    index=$((index + 1))
+  done < <(collect_class_files "$class" "$cleanup_started")
+}
+
+remove_if_still_eligible() {
+  local path="$1"
+  local cleanup_started="$2"
+  local modified
+  [[ -f "$path" && ! -L "$path" ]] || return 0
+  modified="$(stat -c %Y -- "$path")" || return 0
+  (( modified <= cleanup_started )) || return 0
+  fuser -s -- "$path" 2>/dev/null && return 0
+  rm -- "$path"
+}
+
+prune_class() {
+  local class="$1"
+  local cleanup_started path
+  cleanup_started="$(date +%s)"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    remove_if_still_eligible "$path" "$cleanup_started"
+  done < <(collect_removable_files "$class" "$cleanup_started")
+}
+
+prune_completed_classes() {
+  prune_class daily
+  prune_class migration
+  prune_class manual
+}
+
+newest_retained_legacy() {
+  local cleanup_started="$1"
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    printf "%s\n" "$path"
+    return 0
+  done < <(collect_class_files legacy "$cleanup_started")
+}
+
+validate_retained_legacy() {
+  local cleanup_started="$1"
+  local retained check_result
+  retained="$(newest_retained_legacy "$cleanup_started")"
+  [[ -n "$retained" ]] || {
+    printf "Newest retained backup failed validation: no completed legacy backup found.\n" >&2
+    return 1
+  }
+  check_result="$(sudo -u "$RUN_USER" sqlite3 "$retained" "PRAGMA quick_check;")"
+  if [[ "$check_result" != "ok" ]]; then
+    printf "Newest retained backup failed validation: %s\n" "$check_result" >&2
+    return 1
+  fi
+}
+
+cleanup_legacy_backups() {
+  local apply="$1"
+  local cleanup_started path bytes=0 size
+  local -a candidates=()
+  cleanup_started="$(date +%s)"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && candidates+=("$path")
+  done < <(collect_removable_files legacy "$cleanup_started")
+
+  if [[ "$apply" == "0" ]]; then
+    for path in "${candidates[@]}"; do
+      size="$(stat -c %s -- "$path" 2>/dev/null || printf "0")"
+      bytes=$((bytes + size))
+      printf "Would remove: %s\n" "$path"
+    done
+    printf "Recoverable bytes: %s\n" "$bytes"
+    return 0
+  fi
+
+  ((${#candidates[@]} > 0)) || { printf "No eligible legacy backups to remove.\n"; return 0; }
+  validate_retained_legacy "$cleanup_started"
+  for path in "${candidates[@]}"; do
+    size="$(stat -c %s -- "$path" 2>/dev/null || printf "0")"
+    if remove_if_still_eligible "$path" "$cleanup_started" && [[ ! -e "$path" ]]; then
+      bytes=$((bytes + size))
+      printf "Removed: %s\n" "$path"
+    fi
+  done
+  printf "Recovered bytes: %s\n" "$bytes"
+}
+
+acquire_deploy_lock() {
+  exec 7>"$DEPLOY_LOCK_FILE"
+  flock -n 7
+}
+
+create_backup() {
+  [[ -f "$DATABASE" ]] || { printf "Database not found: %s\n" "$DATABASE" >&2; return 1; }
+  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
+
+  local timestamp suffix partial final
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  if [[ "$MODE" == "daily" ]]; then
+    suffix="daily-$timestamp"
+  else
+    suffix="$MODE-${REVISION:0:12}-$timestamp"
+  fi
+  partial="$BACKUP_DIR/bitcraft-local-${suffix}.sqlite.partial"
+  final="${partial%.partial}"
+
+  record_and_pause_services
+  printf "Creating %s database backup: %s\n" "$MODE" "$final"
+  run_backup_with_heartbeat "$partial"
+  validate_and_publish "$partial" "$final"
+  restore_services
+  prune_completed_classes
+  printf "Database backup complete: %s\n" "$final"
+}
+
+main() {
+  if [[ "${ALLOW_NON_ROOT_FOR_TESTS:-0}" != "1" && "${EUID:-$(id -u)}" -ne 0 ]]; then
+    printf "Run this command as root.\n" >&2
+    return 1
+  fi
+  parse_args "$@"
+  case "$MODE" in
+    daily)
+      acquire_deploy_lock || { printf "A deployment is currently running; backup was not started.\n" >&2; return 1; }
+      ;;
+    --dry-run-prune|--apply-prune)
+      acquire_deploy_lock || { printf "A deployment is currently running; cleanup was not started.\n" >&2; return 1; }
+      ;;
+  esac
+  exec 8>"$BACKUP_LOCK_FILE"
+  flock -n 8 || { printf "Another database backup is already running.\n" >&2; return 1; }
+  trap restore_on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  case "$MODE" in
+    --dry-run-prune|--apply-prune)
+      if [[ "$MODE" == "--apply-prune" ]]; then
+        cleanup_legacy_backups 1
+      else
+        cleanup_legacy_backups 0
+      fi
+      ;;
+    *) create_backup ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

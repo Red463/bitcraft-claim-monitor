@@ -17,6 +17,7 @@ PUBLIC_URL="${PUBLIC_URL:-https://app.timbersteeltrade.com}"
 LOG_FILE="${LOG_FILE:-/tmp/bitcraft-claim-monitor-update-$(date +%Y%m%d-%H%M%S).log}"
 VERBOSE=0
 SKIP_PUBLIC_CHECK=0
+FORCE_BACKUP=0
 REVISION=""
 HEALTH_SUMMARY="Health: not checked"
 PUBLIC_SUMMARY="Public: skipped"
@@ -24,11 +25,12 @@ deployment_succeeded=0
 
 usage() {
   cat <<USAGE
-Usage: update-bitcraft-monitor --revision <full-sha> [--verbose] [--no-public-check]
+Usage: update-bitcraft-monitor --revision <full-sha> [--verbose] [--no-public-check] [--force-backup]
 
   --revision <sha>  Deploy this full lowercase commit SHA from origin/main.
   --verbose         Stream install/build output while also logging it.
   --no-public-check Skip the public HTTPS check after local health passes.
+  --force-backup    Create a manual backup even when the schema is unchanged.
 USAGE
 }
 
@@ -46,6 +48,10 @@ parse_args() {
         ;;
       --no-public-check)
         SKIP_PUBLIC_CHECK=1
+        shift
+        ;;
+      --force-backup)
+        FORCE_BACKUP=1
         shift
         ;;
       -h|--help)
@@ -245,22 +251,70 @@ prepare_release() {
     "cd '$release_dir' && corepack pnpm --filter @workspace/bitcraft-local run build"
 }
 
-create_predeploy_backup() {
-  local database="$DATA_DIR/bitcraft-local.sqlite"
-  [[ -f "$database" ]] || return 0
-  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
-  local backup="$BACKUP_DIR/bitcraft-local-predeploy-${REVISION:0:12}-$(date +%Y%m%d-%H%M%S).sqlite"
-  run_logged "Creating pre-deploy database backup" sudo -u "$RUN_USER" \
-    sqlite3 "$database" ".backup '$backup'"
+read_schema_version() {
+  local marker="$1/deploy/database-schema-version"
+  local value
+  [[ -f "$marker" ]] || return 1
+  value="$(tr -d '[:space:]' <"$marker")"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf "%s\n" "$value"
+}
+
+schema_backup_kind() {
+  local previous_version candidate_version
+  previous_version="$(read_schema_version "$1" 2>/dev/null || true)"
+  candidate_version="$(read_schema_version "$2" 2>/dev/null || true)"
+  if [[ -z "$previous_version" || -z "$candidate_version" || "$previous_version" != "$candidate_version" ]]; then
+    printf "migration\n"
+  elif [[ "$FORCE_BACKUP" == "1" ]]; then
+    printf "manual\n"
+  else
+    printf "none\n"
+  fi
+}
+
+create_required_backup() {
+  local kind="$1"
+  [[ -f "$DATA_DIR/bitcraft-local.sqlite" ]] || {
+    printf "Database does not exist yet; no deployment backup is needed.\n"
+    return 0
+  }
+  case "$kind" in
+    migration)
+      run_logged "Creating schema-migration database backup" \
+        /usr/local/bin/backup-bitcraft-monitor migration --revision "$REVISION"
+      ;;
+    manual)
+      run_logged "Creating manually requested database backup" \
+        /usr/local/bin/backup-bitcraft-monitor manual --revision "$REVISION"
+      ;;
+    none)
+      printf "Database schema is unchanged; deployment backup skipped.\n"
+      ;;
+    *)
+      printf "Unknown backup kind: %s\n" "$kind" >&2
+      return 1
+      ;;
+  esac
 }
 
 validate_release_config() {
   local release_dir="$1"
-  run_logged "Validating systemd units" systemd-analyze verify \
-    "$release_dir/deploy/bitcraft-claim-monitor.service" \
-    "$release_dir/deploy/bitcraft-claim-monitor-worker.service" \
-    "$release_dir/deploy/bitcraft-monitor-collector.service" \
+  local -a units=(
+    "$release_dir/deploy/bitcraft-claim-monitor.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-worker.service"
+    "$release_dir/deploy/bitcraft-monitor-collector.service"
     "$release_dir/deploy/bitcraft-monitor-collector.timer"
+  )
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" ]]; then
+    units+=(
+      "$release_dir/deploy/bitcraft-claim-monitor-backup.service"
+      "$release_dir/deploy/bitcraft-claim-monitor-backup.timer"
+    )
+  fi
+  run_logged "Validating systemd units" systemd-analyze verify \
+    "${units[@]}"
   run_logged "Validating Caddy configuration" caddy validate \
     --config "$release_dir/deploy/Caddyfile.example"
 }
@@ -275,6 +329,13 @@ install_release_config() {
     /etc/systemd/system/bitcraft-monitor-collector.service
   install -m 0644 "$release_dir/deploy/bitcraft-monitor-collector.timer" \
     /etc/systemd/system/bitcraft-monitor-collector.timer
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" ]]; then
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
+      /etc/systemd/system/bitcraft-claim-monitor-backup.service
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" \
+      /etc/systemd/system/bitcraft-claim-monitor-backup.timer
+  fi
   install -m 0644 "$release_dir/deploy/Caddyfile.example" /etc/caddy/Caddyfile
   install -d -o root -g "$RUN_USER" -m 0750 "$DATA_DIR/monitoring"
   systemctl daemon-reload
@@ -393,7 +454,9 @@ main() {
   local expected_version
   expected_version="$(node -p "require('$release_dir/apps/bitcraft-local/package.json').version")"
   validate_release_config "$release_dir"
-  create_predeploy_backup
+  local backup_kind
+  backup_kind="$(schema_backup_kind "$previous_release" "$release_dir")"
+  create_required_backup "$backup_kind"
   install_release_config "$release_dir"
   prepare_finished="$(date +%s)"
   cutover_started="$prepare_finished"
@@ -422,7 +485,9 @@ main() {
 
   deployment_succeeded=1
   cutover_finished="$(date +%s)"
+  install -m 0755 "$release_dir/deploy/backup-bitcraft-monitor" /usr/local/bin/backup-bitcraft-monitor
   install -m 0755 "$release_dir/deploy/update-bitcraft-monitor" /usr/local/bin/update-bitcraft-monitor
+  systemctl enable --now bitcraft-claim-monitor-backup.timer >>"$LOG_FILE" 2>&1
   prune_releases "$release_dir"
   print_summary "$previous_release" "$release_dir" "$expected_version" \
     "$((prepare_finished - deploy_started))" "$((cutover_finished - cutover_started))"

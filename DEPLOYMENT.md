@@ -161,7 +161,9 @@ systemd-analyze verify \
   "$RELEASE/deploy/bitcraft-claim-monitor.service" \
   "$RELEASE/deploy/bitcraft-claim-monitor-worker.service" \
   "$RELEASE/deploy/bitcraft-monitor-collector.service" \
-  "$RELEASE/deploy/bitcraft-monitor-collector.timer"
+  "$RELEASE/deploy/bitcraft-monitor-collector.timer" \
+  "$RELEASE/deploy/bitcraft-claim-monitor-backup.service" \
+  "$RELEASE/deploy/bitcraft-claim-monitor-backup.timer"
 caddy validate --config "$RELEASE/deploy/Caddyfile.example"
 
 install -m 0644 "$RELEASE/deploy/bitcraft-claim-monitor.service" /etc/systemd/system/
@@ -169,15 +171,20 @@ install -m 0644 "$RELEASE/deploy/bitcraft-claim-monitor-worker.service" /etc/sys
 install -m 0644 "$RELEASE/deploy/bitcraft-monitor-collector.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deploy/bitcraft-monitor-collector.timer" /etc/systemd/system/
 install -m 0755 "$RELEASE/deploy/update-bitcraft-monitor" /usr/local/bin/update-bitcraft-monitor
+install -m 0755 "$RELEASE/deploy/backup-bitcraft-monitor" /usr/local/bin/backup-bitcraft-monitor
+install -m 0644 "$RELEASE/deploy/bitcraft-claim-monitor-backup.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deploy/bitcraft-claim-monitor-backup.timer" /etc/systemd/system/
 install -m 0644 "$RELEASE/deploy/Caddyfile.example" /etc/caddy/Caddyfile
 
 systemctl daemon-reload
-systemctl enable bitcraft-claim-monitor bitcraft-claim-monitor-worker bitcraft-monitor-collector.timer
+systemctl enable bitcraft-claim-monitor bitcraft-claim-monitor-worker \
+  bitcraft-monitor-collector.timer bitcraft-claim-monitor-backup.timer
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 systemctl start bitcraft-claim-monitor
 curl --fail --silent --show-error http://127.0.0.1:18430/api/local/health
 systemctl start bitcraft-claim-monitor-worker bitcraft-monitor-collector.timer
+systemctl start bitcraft-claim-monitor-backup.timer
 systemctl is-active --quiet bitcraft-claim-monitor bitcraft-claim-monitor-worker bitcraft-monitor-collector.timer
 curl --fail --silent --show-error https://app.timbersteeltrade.com/
 ```
@@ -243,12 +250,82 @@ In GitHub:
 
 The workflow cannot access the SSH secrets until the verification job passes and the production environment deployment is approved.
 
+## Database backup policy
+
+Routine deployments no longer copy the full SQLite database. The updater compares the integer in `deploy/database-schema-version` between the active and candidate releases:
+
+- An unchanged marker skips the deployment backup.
+- A missing or changed marker creates one validated migration backup before cutover.
+- Selecting the `force_database_backup` workflow option creates one manual backup when a migration backup is not already required.
+
+Increment `deploy/database-schema-version` in the same pull request as any SQLite schema or data migration. The dedicated command writes to a `.partial` file, reports elapsed time and bytes every 30 seconds, requires `PRAGMA quick_check` to return `ok`, and only then publishes the completed `.sqlite` file. It pauses and restores the worker and collector to their exact previous active states; it never stops the web service.
+
+The persistent `bitcraft-claim-monitor-backup.timer` creates a daily backup at 03:30 Europe/London with up to 15 minutes of randomized delay. Retention keeps seven daily backups, three migration backups, and three manual backups.
+
+Useful checks:
+
+```bash
+systemctl status bitcraft-claim-monitor-backup.timer --no-pager -l
+systemctl list-timers bitcraft-claim-monitor-backup.timer --all
+journalctl -u bitcraft-claim-monitor-backup.service -n 100 --no-pager -l
+```
+
+## One-time backup-policy bootstrap and legacy cleanup
+
+The first rollout needs the new updater and backup helper installed before the workflow runs, because the currently installed updater would otherwise start another unconditional legacy backup. Run this only after the pull request is merged and both lock checks are clear. It fetches the exact `origin/main` revision, saves the existing updater, syntax-checks both helpers, and does not change the active release or database:
+
+```bash
+set -euo pipefail
+sudo fuser -s /run/lock/bitcraft-claim-monitor-deploy.lock && { echo "Deployment lock is active."; exit 1; }
+sudo fuser -s /run/lock/bitcraft-claim-monitor-backup.lock && { echo "Backup lock is active."; exit 1; }
+
+sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source fetch --prune origin main
+REVISION="$(sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source rev-parse origin/main)"
+[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source merge-base --is-ancestor "$REVISION" origin/main
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+install -m 0700 /usr/local/bin/update-bitcraft-monitor "/root/update-bitcraft-monitor-pre-backup-policy-$STAMP"
+BOOTSTRAP_DIR="$(mktemp -d /tmp/bitcraft-backup-bootstrap.XXXXXX)"
+cleanup_bootstrap() {
+  find "$BOOTSTRAP_DIR" -mindepth 1 -maxdepth 1 -type f -delete
+  rmdir "$BOOTSTRAP_DIR"
+}
+trap cleanup_bootstrap EXIT
+
+sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source show "$REVISION:deploy/update-bitcraft-monitor" >"$BOOTSTRAP_DIR/update-bitcraft-monitor"
+sudo -u bitcraft git -C /opt/bitcraft-claim-monitor/source show "$REVISION:deploy/backup-bitcraft-monitor" >"$BOOTSTRAP_DIR/backup-bitcraft-monitor"
+bash -n "$BOOTSTRAP_DIR/update-bitcraft-monitor"
+bash -n "$BOOTSTRAP_DIR/backup-bitcraft-monitor"
+install -m 0755 "$BOOTSTRAP_DIR/update-bitcraft-monitor" /usr/local/bin/update-bitcraft-monitor
+install -m 0755 "$BOOTSTRAP_DIR/backup-bitcraft-monitor" /usr/local/bin/backup-bitcraft-monitor
+```
+
+Review the exact cleanup inventory before deleting anything:
+
+```bash
+sudo fuser -v /run/lock/bitcraft-claim-monitor-deploy.lock
+sudo fuser -v /run/lock/bitcraft-claim-monitor-backup.lock
+sudo find /var/backups/bitcraft-claim-monitor -maxdepth 1 -type f \
+  -printf '%TY-%Tm-%Td %TH:%TM:%TS %s %p\n' | sort
+sudo /usr/local/bin/backup-bitcraft-monitor --dry-run-prune
+```
+
+The dry run lists only completed legacy `bitcraft-local-predeploy-*.sqlite` files older than the newest three and prints the recoverable byte total. It excludes partial files, unknown names, directories, open files, and files created after cleanup begins. If those exact paths are correct, apply the recomputed cleanup:
+
+```bash
+sudo /usr/local/bin/backup-bitcraft-monitor --apply-prune
+```
+
+Apply mode first validates the newest retained legacy backup. Never replace this process with a wildcard deletion. After the first successful workflow deployment, confirm the backup timer is active. Because the previously active release has no schema marker, that first deployment intentionally creates one migration backup.
+
 ## Routine production deployment
 
 1. Merge the reviewed pull request into `main`.
 2. Open GitHub **Actions** and run **Deploy production** from `main`.
 3. Review and approve the pending `production` environment deployment.
-4. Follow the GitHub job summary until local and public health checks complete.
+4. Leave `force_database_backup` off for an ordinary same-schema release. Select it only when an extra manual recovery point is wanted.
+5. Follow the GitHub job summary until local and public health checks complete.
 
 Merging does not deploy automatically. Routine deployment does not require an interactive SSH session.
 
@@ -257,7 +334,7 @@ The updater:
 1. Acquires an exclusive `flock` deployment lock.
 2. Verifies the exact requested SHA is reachable from `origin/main`.
 3. Builds an immutable release while the current web and worker remain live.
-4. Validates systemd and Caddy configuration and creates an online SQLite backup.
+4. Validates systemd and Caddy configuration and creates a database backup only for a schema change or explicit manual request.
 5. Atomically switches `current`, restarts web, and checks the expected version.
 6. Restarts the single worker only after web health succeeds.
 7. Checks the public site and removes old inactive releases after success.
@@ -292,6 +369,7 @@ readlink -f /opt/bitcraft-claim-monitor/current
 systemctl status bitcraft-claim-monitor --no-pager -l
 systemctl status bitcraft-claim-monitor-worker --no-pager -l
 systemctl status bitcraft-monitor-collector.timer --no-pager -l
+systemctl status bitcraft-claim-monitor-backup.timer --no-pager -l
 journalctl -u bitcraft-claim-monitor -n 100 --no-pager
 journalctl -u bitcraft-claim-monitor-worker -n 100 --no-pager
 caddy validate --config /etc/caddy/Caddyfile
