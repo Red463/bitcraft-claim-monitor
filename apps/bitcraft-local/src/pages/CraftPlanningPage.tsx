@@ -245,7 +245,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         {detailLoading ? (
           <div className="craft-plan-detail-loading" role="status">
             <span className="craft-plan-detail-loading-icon" aria-hidden="true">
-              <LoaderCircle size={17} className="spin" />
+              <LoaderCircle size={17} className="is-spinning" />
             </span>
             <span>
               <strong>Updating item details</strong>

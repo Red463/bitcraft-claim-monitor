@@ -37,6 +37,10 @@ test("Craft planning item details use an intentional loading strip and close con
   assert.match(page, /className="craft-plan-detail-loading-icon" aria-hidden="true"/);
   assert.match(page, /Updating item details/);
   assert.match(page, /Showing saved planner data while current routes load\./);
+  assert.match(page, /<LoaderCircle size=\{17\} className="is-spinning" \/>/);
+  assert.doesNotMatch(page, /<LoaderCircle size=\{17\} className="spin" \/>/);
+  assert.match(css, /\.is-spinning\s*\{[^}]*animation:\s*craft-plan-spin\s+0\.8s\s+linear\s+infinite/s);
+  assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\.is-spinning\s*\{[^}]*animation:\s*none/s);
 
   const loadingMatch = css.match(/\.craft-plan-detail-loading\s*\{([^}]+)\}/);
   assert.ok(loadingMatch, "detail loading-strip CSS should exist");
