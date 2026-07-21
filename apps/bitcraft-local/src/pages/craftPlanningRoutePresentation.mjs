@@ -36,6 +36,11 @@ function isGenericRecipeName(value) {
 }
 
 function gatheringSourceName(route) {
+  const sources = [...new Set((Array.isArray(route?.gatheringSources) ? route.gatheringSources : [])
+    .map((source) => text(source?.label ?? source?.name ?? source?.tag))
+    .filter(Boolean))];
+  if (sources.length === 1) return sources[0];
+  if (sources.length > 1) return `${sources.slice(0, -1).join(", ")} or ${sources.at(-1)}`;
   return text(route?.gatheringSource?.label ?? route?.gatheringSource?.name ?? route?.producer?.tag ?? route?.producer?.name) || "resource node";
 }
 

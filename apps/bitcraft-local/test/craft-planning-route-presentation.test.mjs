@@ -21,6 +21,10 @@ test("gathering labels use the source node instead of a generic recipe label", (
 
   assert.equal(acquisitionRouteKind(route), "Gathering byproduct");
   assert.equal(acquisitionRouteLabel(route, gypsite), "Gather byproduct from Mud Mound while collecting Rough Clay Output");
+  assert.equal(acquisitionRouteLabel({
+    routeType: "gathering",
+    gatheringSources: [{ label: "Mud Mound" }, { label: "Rough Sand Pile" }],
+  }, gypsite), "Gather from Mud Mound or Rough Sand Pile");
 });
 
 test("craft and logistics labels expose inputs, station, and transport intent", () => {
