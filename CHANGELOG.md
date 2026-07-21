@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.1-beta.2] - 2026-07-21
+
+### Fixed
+
+- Fixed deployment verification incorrectly failing when two simultaneous BitJita cache requests reached the server in a different order.
+
 ## [0.40.1-beta.1] - 2026-07-21
 
 ### Changed
