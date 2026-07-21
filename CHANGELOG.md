@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.0-beta.1] - 2026-07-21
+
+### Added
+
+- Added a validated probability catalogue for gathering, resource-completion, and crafting outputs, including nested item lists and item-versus-cargo identity.
+- Added a public downloadable probability workbook with player-friendly formulas, route coverage, raw weights, source revisions, and data-quality warnings.
+
+### Changed
+
+- Updated Craft Planning to calculate probabilistic routes from expected output per craft or resource progress, show full-resource equivalents, and apply safety buffers only to expected-value routes.
+- Updated effort progress to use the shared probability model and retain the last valid catalogue snapshot when a refresh fails.
+
 ## [0.39.0-beta.7] - 2026-07-20
 
 ### Fixed
