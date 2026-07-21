@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyCatalogRefreshError, parseRetryAfterMs } from "../src/server/catalogRefreshRecovery.mjs";
+import { classifyCatalogRefreshError, parseRetryAfterMs, withCatalogRefreshTargetContext } from "../src/server/catalogRefreshRecovery.mjs";
 
 test("parseRetryAfterMs supports seconds and HTTP dates", () => {
   assert.equal(parseRetryAfterMs("12", 1_000), 12_000);
@@ -35,4 +35,21 @@ test("catalog refresh recovery skips permanent upstream misses and stops on loca
     delayMs: 0,
     reason: "local_error",
   });
+});
+
+test("catalog refresh failures identify the exact current target without changing classification", () => {
+  const cause = Object.assign(new Error("UNIQUE constraint failed: recipe outputs"), { statusCode: 503, retryAfterMs: 1000 });
+  const error = withCatalogRefreshTargetContext(cause, {
+    kind: "cargo",
+    id: "60000",
+    name: "Argent Ore",
+    catalogKey: "cargo:60000",
+  });
+
+  assert.match(error.message, /cargo:60000 \(Argent Ore\)/);
+  assert.match(error.message, /UNIQUE constraint failed/);
+  assert.equal(error.cause, cause);
+  assert.equal(error.statusCode, 503);
+  assert.equal(error.retryAfterMs, 1000);
+  assert.equal(classifyCatalogRefreshError(error, { attemptNumber: 1 }).action, "retry");
 });

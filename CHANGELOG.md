@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.1-beta.1] - 2026-07-21
+
+### Changed
+
+- Clarified prospecting yields in Craft Planning and the probability workbook as expected output per extraction progress, without estimating an unknown full-node total.
+
+### Fixed
+
+- Fixed catalogue refreshes for prospecting resources whose output is represented by multiple independent probability components.
+
 ## [0.40.0-beta.1] - 2026-07-21
 
 ### Added

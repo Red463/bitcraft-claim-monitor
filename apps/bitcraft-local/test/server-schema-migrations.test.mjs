@@ -39,10 +39,12 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
     { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
     { table: "game_catalog_recipes", column: "activity_kind", definition: "TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering'))" },
+    { table: "game_catalog_recipes", column: "gathering_mode", definition: "TEXT NOT NULL DEFAULT 'ordinary' CHECK (gathering_mode IN ('ordinary', 'prospecting'))" },
     { table: "game_catalog_entities", column: "item_list_id", definition: "TEXT" },
     { table: "game_catalog_recipes", column: "resource_id", definition: "TEXT" },
     { table: "game_catalog_recipe_outputs", column: "occurrence_rate", definition: "REAL NOT NULL DEFAULT 1" },
     { table: "game_catalog_recipe_outputs", column: "yield_basis", definition: "TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress'))" },
+    { table: "game_catalog_recipe_outputs", column: "guaranteed_quantity", definition: "REAL" },
     { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
 });
@@ -101,15 +103,18 @@ test("probability catalogue columns migrate existing recipe and item-list rows w
   applyAdditiveColumnMigrations(db, [
     { table: "game_catalog_entities", column: "item_list_id", definition: "TEXT" },
     { table: "game_catalog_recipes", column: "resource_id", definition: "TEXT" },
+    { table: "game_catalog_recipes", column: "gathering_mode", definition: "TEXT NOT NULL DEFAULT 'ordinary' CHECK (gathering_mode IN ('ordinary', 'prospecting'))" },
     { table: "game_catalog_recipe_outputs", column: "occurrence_rate", definition: "REAL NOT NULL DEFAULT 1" },
     { table: "game_catalog_recipe_outputs", column: "yield_basis", definition: "TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress'))" },
+    { table: "game_catalog_recipe_outputs", column: "guaranteed_quantity", definition: "REAL" },
     { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
 
   assert.deepEqual(
-    { ...db.prepare("SELECT output_key, quantity, occurrence_rate, yield_basis FROM game_catalog_recipe_outputs").get() },
-    { output_key: "items:1", quantity: 2, occurrence_rate: 1, yield_basis: "per_craft" },
+    { ...db.prepare("SELECT output_key, quantity, occurrence_rate, yield_basis, guaranteed_quantity FROM game_catalog_recipe_outputs").get() },
+    { output_key: "items:1", quantity: 2, occurrence_rate: 1, yield_basis: "per_craft", guaranteed_quantity: null },
   );
+  assert.equal(db.prepare("SELECT gathering_mode FROM game_catalog_recipes").get().gathering_mode, "ordinary");
   assert.equal(db.prepare("SELECT name FROM game_catalog_entities WHERE catalog_key = 'items:1'").get().name, "Existing Item");
   assert.equal(db.prepare("SELECT output_key FROM game_catalog_item_list_possibility_outputs").get().output_key, "items:1");
   db.close();

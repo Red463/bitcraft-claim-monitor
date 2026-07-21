@@ -390,6 +390,8 @@ function routeTypeForItemListOutput(recipe, output) {
 
 function routeMetadata(recipe, target = null) {
   const gathering = routeIsGathering(recipe);
+  const gatheringMode = gathering && recipe?.gatheringMode === "prospecting" ? "prospecting" : "ordinary";
+  const prospecting = gatheringMode === "prospecting";
   const gatheringSkill = recipe?.gatheringSkill ?? recipeSkillName(recipe);
   const targetOutput = target
     ? recipeOutputs(recipe).find((output) => stackMatches(output, target))
@@ -398,8 +400,8 @@ function routeMetadata(recipe, target = null) {
     ? Math.max(0, toNumber(targetOutput?.quantity)) || null
     : toNumber(recipe.expectedYield);
   const yieldBasis = gathering ? "per_progress" : "per_craft";
-  const resourceHealth = gathering ? Math.max(0, toNumber(recipe?.resourceHealth)) || null : null;
-  const completionYield = target && Array.isArray(recipe?.resourceCompletionOutputs)
+  const resourceHealth = gathering && !prospecting ? Math.max(0, toNumber(recipe?.resourceHealth)) || null : null;
+  const completionYield = !prospecting && target && Array.isArray(recipe?.resourceCompletionOutputs)
     ? recipe.resourceCompletionOutputs
       .filter((output) => output.outputKey === recipeKey(target.kind, target.id))
       .reduce((sum, output) => sum + (Math.max(0, toNumber(output.quantity)) * Math.max(0, toNumber(output.occurrenceRate, 1))), 0)
@@ -410,6 +412,7 @@ function routeMetadata(recipe, target = null) {
     : null;
   return {
     routeType: recipe?.routeType ?? recipeActivityKind(recipe),
+    gatheringMode,
     gatheringSkill: gathering ? gatheringSkill || null : null,
     producer: recipe?.producer ?? null,
     producerRecipe: recipe?.producerRecipe ?? null,
@@ -423,7 +426,9 @@ function routeMetadata(recipe, target = null) {
     isProbabilistic: recipe?.isProbabilistic === true || recipe?.probabilityStatus === "expected",
     dropChance: recipe?.dropChance == null ? null : toNumber(recipe.dropChance),
     dropQuantity: recipe?.dropQuantity == null ? null : toNumber(recipe.dropQuantity),
-    guaranteedYield: recipe?.guaranteedYield == null ? null : toNumber(recipe.guaranteedYield),
+    guaranteedYield: recipe?.guaranteedYield == null
+      ? targetOutput?.guaranteedQuantity == null ? null : Math.max(0, toNumber(targetOutput.guaranteedQuantity))
+      : toNumber(recipe.guaranteedYield),
     gatheringSource: recipe?.gatheringSource ?? null,
   };
 }
@@ -946,7 +951,9 @@ function catalogStack(link = {}) {
     rawQuantity,
     occurrenceRate,
     yieldBasis: link.yieldBasis ?? "per_craft",
-    guaranteedQuantity: occurrenceRate === 1 ? rawQuantity : 0,
+    guaranteedQuantity: link.guaranteedQuantity == null
+      ? occurrenceRate === 1 ? rawQuantity : 0
+      : Math.max(0, toNumber(link.guaranteedQuantity)),
   };
 }
 
@@ -964,10 +971,13 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
   const inputDisplays = (recipe.inputs ?? []).map((input) => catalogLinkedDisplay(repository, input, warnings));
   const id = catalogRouteId(recipe);
   const name = catalogPlannerRecipeName(repository, recipe);
-  const resource = recipe.resourceId ? repository.getResource(recipe.resourceId) : null;
-  const resourceCompletionOutputs = recipe.resourceId ? repository.listResourceCompletionOutputs(recipe.resourceId) : [];
   const gathering = recipe.activityKind === "gathering";
-  const probabilistic = outputs.some((output) => output.occurrenceRate !== 1);
+  const gatheringMode = gathering && recipe.gatheringMode === "prospecting" ? "prospecting" : "ordinary";
+  const resource = recipe.resourceId && gatheringMode !== "prospecting" ? repository.getResource(recipe.resourceId) : null;
+  const resourceCompletionOutputs = recipe.resourceId && gatheringMode !== "prospecting"
+    ? repository.listResourceCompletionOutputs(recipe.resourceId)
+    : [];
+  const probabilistic = outputs.some((output) => output.guaranteedQuantity + 1e-9 < output.quantity);
   return {
     id,
     recipeKey: recipe.recipeKey,
@@ -977,6 +987,7 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
     stationName: recipe.stationName ?? null,
     skillName: recipe.skillName ?? null,
     activityKind: recipe.activityKind === "gathering" ? "gathering" : "craft",
+    gatheringMode,
     isPassive: recipe.isPassive === true,
     isTransportRoute: recipe.isTransportRoute === true,
     actionsRequired: Math.max(0, toNumber(recipe.actionCount)),

@@ -304,6 +304,7 @@ export const schemaBootstrapSql = `
     source_id TEXT NOT NULL,
     action_count REAL NOT NULL DEFAULT 0,
     activity_kind TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering')),
+    gathering_mode TEXT NOT NULL DEFAULT 'ordinary' CHECK (gathering_mode IN ('ordinary', 'prospecting')),
     name TEXT,
     station_name TEXT,
     skill_name TEXT,
@@ -329,6 +330,7 @@ export const schemaBootstrapSql = `
     quantity REAL NOT NULL,
     occurrence_rate REAL NOT NULL DEFAULT 1,
     yield_basis TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress')),
+    guaranteed_quantity REAL,
     is_primary_output INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (recipe_key, output_key),
     FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
@@ -349,6 +351,19 @@ export const schemaBootstrapSql = `
     chance REAL,
     guaranteed_quantity REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (producer_key, output_key)
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_recipe_output_components (
+    recipe_key TEXT NOT NULL,
+    component_index INTEGER NOT NULL,
+    output_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    occurrence_rate REAL NOT NULL DEFAULT 1,
+    yield_basis TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress')),
+    is_primary_output INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (recipe_key, component_index),
+    FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS game_catalog_item_lists (
     item_list_id TEXT PRIMARY KEY,
@@ -776,6 +791,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_kind_target ON game_catalog_entities (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipes_source ON game_catalog_recipes (source_kind, source_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_outputs_output ON game_catalog_recipe_outputs (output_key, is_primary_output DESC, recipe_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_output_components_output ON game_catalog_recipe_output_components (output_key, recipe_key, component_index);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_sources_recipe ON game_catalog_recipe_sources (recipe_key, catalog_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_inputs_input ON game_catalog_recipe_inputs (input_key, recipe_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);

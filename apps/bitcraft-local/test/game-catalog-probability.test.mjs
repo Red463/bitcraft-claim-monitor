@@ -67,6 +67,136 @@ test("catalog normalization records extraction occurrence rates without clamping
   }]);
 });
 
+test("catalog refresh preserves and aggregates repeated prospecting output components", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  const detail = {
+    cargo: { id: "60000", itemType: 1, name: "Argent Ore" },
+    extractionRecipes: [{
+      id: 5036,
+      cargoId: 60000,
+      resourceId: 0,
+      name: "Gather Argent Ore",
+      levelRequirements: [{ skill: { name: "Argent Ore Prospecting" }, level: 1 }],
+      extractedItemStacks: [1, 0.5, 0.25, 0.125, 0.0625].map((probability) => ({
+        item_stack: { item_id: 60000, item_type: "Cargo", quantity: 1 },
+        probability,
+      })),
+      consumedItemStacks: [],
+    }],
+  };
+
+  const normalized = normalizeGameCatalogDetail(detail);
+  assert.equal(normalized.recipes[0].outputs.length, 1);
+  assert.deepEqual(normalized.recipes[0].outputs[0], {
+    outputKey: "cargo:60000",
+    kind: "cargo",
+    targetId: "60000",
+    quantity: 1.9375,
+    occurrenceRate: 1,
+    yieldBasis: "per_progress",
+    guaranteedQuantity: 1,
+    isPrimaryOutput: true,
+  });
+  assert.equal(normalized.recipes[0].outputComponents.length, 5);
+
+  assert.doesNotThrow(() => repository.upsertDetail(detail));
+  repository.replaceProbabilitySnapshot({ itemLists: [], resources: [], sourceUrl: "https://example.test/static" });
+  assert.deepEqual(
+    db.prepare(`
+      SELECT component_index, output_key, quantity, occurrence_rate, yield_basis
+      FROM game_catalog_recipe_output_components
+      WHERE recipe_key = 'recipe:5036'
+      ORDER BY component_index
+    `).all().map((row) => ({ ...row })),
+    [1, 0.5, 0.25, 0.125, 0.0625].map((occurrenceRate, componentIndex) => ({
+      component_index: componentIndex,
+      output_key: "cargo:60000",
+      quantity: 1,
+      occurrence_rate: occurrenceRate,
+      yield_basis: "per_progress",
+    })),
+  );
+  assert.deepEqual(
+    { ...db.prepare("SELECT output_key, quantity, occurrence_rate, guaranteed_quantity FROM game_catalog_recipe_outputs WHERE recipe_key = 'recipe:5036'").get() },
+    { output_key: "cargo:60000", quantity: 1.9375, occurrence_rate: 1, guaranteed_quantity: 1 },
+  );
+  assert.deepEqual(
+    repository.getProbabilityWorkbookData()?.rawRecipeOutputs.map((row) => row.occurrenceRate),
+    [1, 0.5, 0.25, 0.125, 0.0625],
+  );
+  db.close();
+});
+
+test("repeated probabilistic components preserve an explicit zero guaranteed quantity", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail({
+    cargo: { id: "60001", itemType: 1, name: "Chance-only Prospecting Ore" },
+    extractionRecipes: [{
+      id: 5037,
+      cargoId: 60001,
+      resourceId: 0,
+      extractedItemStacks: [0.5, 0.25].map((probability) => ({
+        item_stack: { item_id: 60001, item_type: "Cargo", quantity: 1 },
+        probability,
+      })),
+    }],
+  });
+
+  const output = repository.listProducerRecipesForOutput("cargo:60001")[0].outputs[0];
+  assert.equal(output.quantity, 0.75);
+  assert.equal(output.occurrenceRate, 1);
+  assert.equal(output.guaranteedQuantity, 0);
+  db.close();
+});
+
+test("prospecting classification is structural and never treats displayed health as finite progress", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertDetail({
+    cargo: { id: "61000", itemType: 1, name: "Rare Prospecting Ore" },
+    extractionRecipes: [{
+      id: 610,
+      cargoId: 61000,
+      resourceId: 0,
+      name: "Gather Rare Prospecting Ore",
+      levelRequirements: [{ skill: { name: "Rare Ore Prospecting" }, level: 1 }],
+      extractedItemStacks: [{
+        item_stack: { item_id: 61000, item_type: "Cargo", quantity: 1 },
+        probability: 0.5,
+      }],
+    }],
+  });
+  repository.replaceProbabilitySnapshot({
+    itemLists: [],
+    resources: normalizeGameDataResources([{
+      id: 0,
+      name: "Displayed Prospecting Node",
+      max_health: 250000,
+      on_destroy_yield: [{ item_id: 61000, item_type: "Cargo", quantity: 99 }],
+    }]),
+    sourceUrl: "https://example.test/static",
+  });
+
+  const recipe = repository.listProducerRecipesForOutput("cargo:61000")[0];
+  assert.equal(recipe.gatheringMode, "prospecting");
+
+  const route = repository.getProbabilityWorkbookData().gatheringRoutes[0];
+  assert.equal(route.gatheringMode, "prospecting");
+  assert.equal(route.expectedPerProgress, 0.5);
+  assert.equal(route.resourceHealth, null);
+  assert.equal(route.completionYield, null);
+  assert.equal(route.expectedPerResource, null);
+  assert.match(route.probabilityStatus, /exhaustion is unknown/i);
+
+  const effort = repository.listProbabilityEffortCandidates()[0];
+  assert.equal(effort.sourceKey, "recipe:610");
+  assert.equal(effort.resourceHealth, null);
+  assert.equal(effort.expectedPerResource, null);
+  db.close();
+});
+
 test("catalog normalization treats item-list id zero as no item list", () => {
   const normalized = normalizeGameCatalogDetail({
     item: { id: "11001", name: "Sticks", item_list_id: 0 },
@@ -123,7 +253,7 @@ test("probability snapshot publication is atomic and rebuilds producer aggregate
     sourceUrl: "https://example.test/static",
     sourceRevision: "etag-1",
     sources: [
-      { sourceKind: "bitjita", sourceUrl: "https://bitjita.com/api", sourceRevision: "catalog-normalization-7" },
+      { sourceKind: "bitjita", sourceUrl: "https://bitjita.com/api", sourceRevision: "catalog-normalization-8" },
       { sourceKind: "game_data", sourceUrl: "https://example.test/static", sourceRevision: "etag-1" },
     ],
     updatedAt: "2026-07-21T12:00:00.000Z",

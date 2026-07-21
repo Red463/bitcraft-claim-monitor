@@ -95,6 +95,7 @@ function addHowToRead(workbook, snapshot) {
     ["Item-list chance", "Raw item-list values are relative weights. Selection chance = possibility weight / total weight of every possibility, including a possibility that awards nothing."],
     ["Gathering", "Expected per progress = extraction quantity x occurrence rate per progress x expected item-list quantity. Tool power changes how many hits deliver that progress; it does not change the drop rate."],
     ["Full resource", "Expected per full resource = expected per progress x resource maximum health + completion yield."],
+    ["Prospecting", "Prospecting rows report expected output per extraction progress only. Displayed node health is not a depletion budget, and total node yield is unavailable because prospecting exhaustion is unknown."],
     ["Crafting", "Expected per craft = direct output quantity x output occurrence rate x expected item-list quantity. Actions per item = actions per craft / expected output per craft."],
     ["Honeyberry example", "A Honeyberry Bush has 595 health and a 0.06723 berry-list rate per progress: 40.00185 expected list rolls. Weights 1 and 0.02 normalize to 98.0392% and 1.9608%, giving about 39.2175 Simple Berries and 0.78435 Simple Citric Berries per full bush."],
     ["Catalogue refreshed", snapshot?.updatedAt ?? "Unavailable"],
@@ -147,22 +148,24 @@ function addAllItems(workbook, data) {
 function addGathering(workbook, data) {
   const sourceUrl = data.snapshot?.sourceUrl ?? "";
   const rows = (data.gatheringRoutes ?? []).map((route) => [
-    route.resourceId, route.resourceName, number(route.resourceHealth), route.recipeKey,
+    route.resourceId, route.resourceName, route.gatheringMode === "prospecting" ? "Prospecting" : "Ordinary",
+    route.resourceHealth == null ? null : number(route.resourceHealth), route.recipeKey,
     route.outputKind === "cargo" ? "Cargo" : "Item", route.outputId, route.outputName,
     number(route.extractionQuantity), number(route.occurrenceRate), route.listChance == null ? null : number(route.listChance),
-    number(route.listExpectedQuantity, 1), number(route.expectedPerProgress), number(route.completionYield),
+    number(route.listExpectedQuantity, 1), number(route.expectedPerProgress), route.completionYield == null ? null : number(route.completionYield),
     null, null, route.probabilityStatus ?? "Expected value", sourceUrl,
   ]);
   const sheet = workbook.addWorksheet("Gathering Routes");
-  titleSheet(sheet, "Gathering Probabilities", "One row per resource route and final item or cargo output. Occurrence rate is per unit of resource progress, not per tool hit.", "Q");
-  const lastRow = addRows(sheet, ["Resource ID", "Resource", "Max health", "Recipe ID", "Output type", "Output ID", "Output", "Extraction quantity", "Occurrence rate / progress", "List selection chance", "Expected qty / list roll", "Expected / progress", "Completion yield", "Expected / full resource", "Expected progress / item", "Probability status", "Source URL"], rows, [13, 28, 12, 18, 12, 16, 30, 16, 20, 18, 19, 18, 17, 22, 21, 18, 45]);
+  titleSheet(sheet, "Gathering Probabilities", "One row per gathering route and final item or cargo output. Prospecting is reported per extraction progress because its exhaustion limit is unknown.", "R");
+  const lastRow = addRows(sheet, ["Resource ID", "Resource", "Gathering mode", "Max health", "Recipe ID", "Output type", "Output ID", "Output", "Extraction quantity", "Occurrence rate / progress", "List selection chance", "Expected qty / list roll", "Expected / progress", "Completion yield", "Expected / full resource", "Expected progress / item", "Probability status", "Source URL"], rows, [13, 28, 16, 12, 18, 12, 16, 30, 16, 20, 18, 19, 18, 17, 22, 21, 40, 45]);
   for (let row = 4; row <= lastRow; row += 1) {
     const source = data.gatheringRoutes[row - 4];
-    sheet.getCell(`N${row}`).value = { formula: `=L${row}*C${row}+M${row}`, result: number(source?.expectedPerResource) };
+    if (source?.gatheringMode === "prospecting") continue;
+    sheet.getCell(`O${row}`).value = { formula: `=M${row}*D${row}+N${row}`, result: number(source?.expectedPerResource) };
     const effective = number(source?.expectedPerProgress) + (number(source?.resourceHealth) > 0 ? number(source?.completionYield) / number(source.resourceHealth) : 0);
-    sheet.getCell(`O${row}`).value = { formula: `=IF(L${row}+M${row}/C${row}>0,1/(L${row}+M${row}/C${row}),\"\")`, result: effective > 0 ? 1 / effective : "" };
+    sheet.getCell(`P${row}`).value = { formula: `=IF(M${row}+N${row}/D${row}>0,1/(M${row}+N${row}/D${row}),\"\")`, result: effective > 0 ? 1 / effective : "" };
   }
-  styleData(sheet, 4, lastRow, [3, 8, 9, 11, 12, 13, 14, 15], [10]);
+  styleData(sheet, 4, lastRow, [4, 9, 10, 12, 13, 14, 15, 16], [11]);
 }
 
 function addCrafting(workbook, data) {
@@ -183,6 +186,26 @@ function addCrafting(workbook, data) {
     sheet.getCell(`O${row}`).value = { formula: `=IF(L${row}>0,N${row}/L${row},\"\")`, result: expected > 0 ? number(source?.actionCount) / expected : "" };
   }
   styleData(sheet, 4, lastRow, [8, 10, 11, 12, 13, 14, 15], [9]);
+}
+
+function addRawRecipeOutputs(workbook, data) {
+  const rows = (data.rawRecipeOutputs ?? []).map((row) => [
+    row.recipeKey,
+    row.recipeName,
+    row.gatheringMode === "prospecting" ? "Prospecting" : row.gatheringMode === "ordinary" ? "Ordinary" : "Craft",
+    number(row.componentIndex),
+    row.outputKind === "cargo" ? "Cargo" : "Item",
+    row.outputId,
+    row.outputName,
+    number(row.occurrenceRate, 1),
+    number(row.quantity),
+    row.yieldBasis,
+    data.snapshot?.sourceUrl ?? "",
+  ]);
+  const sheet = workbook.addWorksheet("Raw Recipe Outputs");
+  titleSheet(sheet, "Raw Recipe Output Components", "Every source output component is retained separately. Repeated rows for one item are combined only when calculating expected planner yield.", "K");
+  const lastRow = addRows(sheet, ["Recipe ID", "Recipe", "Gathering mode", "Component", "Output type", "Output ID", "Output", "Occurrence rate", "Quantity", "Yield basis", "Source URL"], rows, [18, 34, 16, 12, 12, 16, 30, 18, 13, 16, 45]);
+  styleData(sheet, 4, lastRow, [4, 8, 9]);
 }
 
 function addRawLists(workbook, data) {
@@ -221,6 +244,7 @@ export async function buildProbabilityWorkbookBuffer(data = {}) {
   addAllItems(workbook, data);
   addGathering(workbook, data);
   addCrafting(workbook, data);
+  addRawRecipeOutputs(workbook, data);
   addRawLists(workbook, data);
   addDataQuality(workbook, data);
 
