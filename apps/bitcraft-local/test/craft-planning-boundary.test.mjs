@@ -419,3 +419,14 @@ test("Craft Planning explains unavailable producer yields and labels logistics r
   assert.match(page, /route is known, but required completions and inputs cannot be calculated/i);
   assert.match(presentation, /isTransportRoute[\s\S]*?Logistics/);
 });
+
+test("Craft Planning route feedback is scoped to the opened item", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /type ItemDetailFeedback = \{/);
+  assert.match(page, /itemDetailFeedback\?\.itemKey === selectedNeedKey/);
+  assert.match(page, /setItemDetailFeedback\(null\)/);
+  assert.match(page, /itemKey: outputKey/);
+  assert.doesNotMatch(page, /const \[routeStatus, setRouteStatus\]/);
+  assert.doesNotMatch(page, /const \[routeError, setRouteError\]/);
+});

@@ -18,6 +18,12 @@ import { acquisitionRouteLabel, acquisitionRouteMetrics, formatProbabilityRate }
 
 const LOCAL_API = "/api/local";
 
+type ItemDetailFeedback = {
+  itemKey: string;
+  tone: "success" | "error";
+  message: string;
+};
+
 function itemNode(item: AnyRecord) {
   return (
     <span className="craft-plan-item-label">
@@ -93,8 +99,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
   const detailRequestRef = React.useRef(0);
-  const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
-  const [routeError, setRouteError] = React.useState<string | null>(null);
+  const [itemDetailFeedback, setItemDetailFeedback] = React.useState<ItemDetailFeedback | null>(null);
+  const [rowOverrideError, setRowOverrideError] = React.useState<string | null>(null);
   const [routeSavePendingId, setRouteSavePendingId] = React.useState<string | null>(null);
   const [bufferPercent, setBufferPercent] = React.useState("0");
   const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
@@ -131,6 +137,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
 
   async function openNeedDetail(cell: NeedCell) {
     const requestId = ++detailRequestRef.current;
+    const nextItemKey = cell.items?.[0]?.key ?? itemKey(cell.item);
+    setItemDetailFeedback((current) => current?.itemKey === nextItemKey ? current : null);
     setSelectedNeed(cell);
     setDetailSteps([]);
     setDetailError(null);
@@ -158,6 +166,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     setDetailSteps([]);
     setDetailError(null);
     setDetailLoading(false);
+    setItemDetailFeedback(null);
   }
 
   const config = plan?.config ?? {};
@@ -190,18 +199,19 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, detailSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const selectedNeedKey = selectedNeed?.items?.[0]?.key ?? (selectedNeed ? itemKey(selectedNeed.item) : "");
+  const visibleItemFeedback = itemDetailFeedback?.itemKey === selectedNeedKey ? itemDetailFeedback : null;
   const selectedMultiplier = Number(config.multipliers?.[selectedNeedKey]?.multiplier) || 1;
   React.useEffect(() => {
     setBufferPercent(String(Math.max(0, Math.round((selectedMultiplier - 1) * 1000) / 10)));
   }, [selectedNeedKey, selectedMultiplier]);
   const sectionOverrideDialog = selectedSectionOverride ? (
-    <Dialog open title="Override needs board row" closeOnBackdrop={false} onClose={() => setSelectedSectionOverride(null)} className="modal craft-plan-section-override" backdropClassName="modal-backdrop craft-plan-section-override-backdrop">
+    <Dialog open title="Override needs board row" closeOnBackdrop={false} onClose={() => { setSelectedSectionOverride(null); setRowOverrideError(null); }} className="modal craft-plan-section-override" backdropClassName="modal-backdrop craft-plan-section-override-backdrop">
         <header className="modal-header">
           <div>
             <h2>Edit {selectedSectionOverride.row.name}</h2>
             <p>Planner default: {selectedSectionOverride.row.apiName} in {selectedSectionOverride.row.plannerSection}. Overrides apply to the same row across craft goals.</p>
           </div>
-          <button className="icon-button" type="button" onClick={() => setSelectedSectionOverride(null)} aria-label="Close row override"><X size={18} /></button>
+          <button className="icon-button" type="button" onClick={() => { setSelectedSectionOverride(null); setRowOverrideError(null); }} aria-label="Close row override"><X size={18} /></button>
         </header>
         <div className="craft-plan-section-override-body">
           <label className="field">
@@ -218,6 +228,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             <button className="toolbar-button" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, null, null)}>Use planner defaults</button>
             <button className="toolbar-button primary" type="button" onClick={() => void saveRowOverride(selectedSectionOverride.row, selectedSectionOverride.section, selectedSectionOverride.name)}>Save row</button>
           </div>
+          {rowOverrideError ? <p className="alert error" role="alert">{rowOverrideError}</p> : null}
         </div>
     </Dialog>
   ) : null;
@@ -422,8 +433,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                   </div>
                 );
               }) : <p className="legend">No downstream recipe context was found. This is likely a final target, base gathered item, or vendor material.</p>}
-              {routeStatus ? <p className="alert success">{routeStatus}</p> : null}
-              {routeError ? <p className="alert error">{routeError}</p> : null}
+              {visibleItemFeedback ? <p className={`alert ${visibleItemFeedback.tone}`} role={visibleItemFeedback.tone === "error" ? "alert" : "status"}>{visibleItemFeedback.message}</p> : null}
             </section>
           </div>
         </div>
@@ -446,8 +456,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
 
   async function saveRowOverride(row: NeedRow, section: string | null, name: string | null) {
     if (!canManage || !adminAuth?.csrfToken || !row.overrideKey) return;
-    setRouteStatus(null);
-    setRouteError(null);
+    setRowOverrideError(null);
     try {
       const nextSectionOverrides = { ...currentSectionOverrides };
       if (!section || section === row.apiSection) delete nextSectionOverrides[row.overrideKey];
@@ -471,18 +480,16 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      setRouteStatus(section || cleanName ? "Needs board row updated." : "Needs board row reset to API defaults.");
       setSelectedSectionOverride(null);
       setManagerRefreshToken((value) => value + 1);
     } catch (err) {
-      setRouteError(err instanceof Error ? err.message : String(err));
+      setRowOverrideError(err instanceof Error ? err.message : String(err));
     }
   }
   async function saveRouteOverride(outputKey: string, recipeId: string) {
     if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
     const openCell = selectedNeed;
-    setRouteStatus(null);
-    setRouteError(null);
+    setItemDetailFeedback(null);
     setRouteSavePendingId(recipeId);
     try {
       const nextConfig = {
@@ -503,19 +510,18 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
       if (body.plan) setPlan(body.plan);
-      setRouteStatus("Acquisition route updated.");
       setManagerRefreshToken((value) => value + 1);
       if (openCell) await openNeedDetail(openCell);
+      setItemDetailFeedback({ itemKey: outputKey, tone: "success", message: "Acquisition route updated." });
     } catch (err) {
-      setRouteError(err instanceof Error ? err.message : String(err));
+      setItemDetailFeedback({ itemKey: outputKey, tone: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setRouteSavePendingId(null);
     }
   }
   async function saveMultiplier(outputKey: string, percent: number) {
     if (!canManage || !adminAuth?.csrfToken || !outputKey) return;
-    setRouteStatus(null);
-    setRouteError(null);
+    setItemDetailFeedback(null);
     try {
       const multipliers = { ...(config.multipliers ?? {}) };
       const safePercent = Math.max(0, Math.min(1900, Number.isFinite(percent) ? percent : 0));
@@ -524,10 +530,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       const response = await fetch(LOCAL_API + "/admin/craft-plan", { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": String(adminAuth.csrfToken) }, body: JSON.stringify({ ...config, multipliers }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      setRouteStatus(safePercent > 0 ? `Safety buffer saved at ${safePercent}%.` : "Safety buffer removed.");
+      setItemDetailFeedback({ itemKey: outputKey, tone: "success", message: safePercent > 0 ? `Safety buffer saved at ${safePercent}%.` : "Safety buffer removed." });
       setManagerRefreshToken((value) => value + 1);
     } catch (err) {
-      setRouteError(err instanceof Error ? err.message : String(err));
+      setItemDetailFeedback({ itemKey: outputKey, tone: "error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -641,7 +647,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       </div> : null}</div></th>{NEED_COLUMNS.map((column) => <th key={column}>{column}</th>)}</tr>
                         {group.rows.map((row) => (
                           <tr key={row.name}>
-                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.plannerSection, name: row.rowNameOverride ?? row.apiName })}>{row.name}</button> : row.name}</th>
+                            <th>{canManage ? <button className="craft-plan-row-section-button" type="button" title={`Edit ${row.name} row display`} onClick={() => { setRowOverrideError(null); setSelectedSectionOverride({ row, section: row.sectionOverride ?? row.plannerSection, name: row.rowNameOverride ?? row.apiName }); }}>{row.name}</button> : row.name}</th>
                             {NEED_COLUMNS.map((column) => <td key={column}>{needCellNode(row.cells.get(column), (cell) => void openNeedDetail(cell))}</td>)}
                           </tr>
                         ))}
