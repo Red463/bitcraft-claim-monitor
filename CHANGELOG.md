@@ -9,6 +9,15 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.1-beta.3] - 2026-07-21
+
+### Changed
+
+- Replaced the manual "Treat cell as gathered" setting with acquisition-route selection, so the chosen gathering, crafting, byproduct, or logistics route now drives the plan automatically.
+- Reworked acquisition choices into clearly named route cards that identify source nodes, recipe inputs, stations, and the route selected for the plan.
+- Made probabilistic work estimates player-friendly with whole-node or recipe-completion plans, while keeping exact rates, progress, drop chances, and safety-buffer controls under an optional calculation detail.
+- Renamed player-facing "full resource" estimates to "full node" in Craft Planning and the downloadable probability workbook.
+
 ## [0.40.1-beta.2] - 2026-07-21
 
 ### Fixed
