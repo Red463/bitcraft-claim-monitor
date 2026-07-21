@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.1-beta.5] - 2026-07-21
+
+### Added
+
+- Added processing and completed passive crafts from tracked players to Craft Planning material coverage, including expected and guaranteed farming outputs.
+- Added passive-craft source details for the player, structure, and status, with a clear warning when BitJita does not report a location.
+
 ## [0.40.1-beta.4] - 2026-07-21
 
 ### Changed
