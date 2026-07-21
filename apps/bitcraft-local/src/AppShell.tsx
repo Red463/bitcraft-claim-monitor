@@ -25,6 +25,7 @@ import packageJson from "../package.json";
 import { useBitjitaData } from "./api/bitjita";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
+import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
 import { AppPopupManager } from "./components/main/AppPopupManager";
@@ -110,10 +111,6 @@ class RouteErrorBoundary extends React.Component<{ routeKey: string; children: R
       </section>
     );
   }
-}
-
-function RouteLoadingState() {
-  return <section className="empty-state route-loading-state" aria-live="polite">Loading page...</section>;
 }
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
@@ -753,7 +750,7 @@ function DashboardApp() {
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
             <div className="page-view" key={active}>
               <RouteErrorBoundary routeKey={active}>
-                <React.Suspense fallback={<RouteLoadingState />}>{activePanel}</React.Suspense>
+                <React.Suspense fallback={<RouteLoadingState label={activePageLabel} />}>{activePanel}</React.Suspense>
               </RouteErrorBoundary>
             </div>
           </>
