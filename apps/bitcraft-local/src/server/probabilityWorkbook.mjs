@@ -94,7 +94,7 @@ function addHowToRead(workbook, snapshot) {
     ["What these numbers mean", "Expected values are long-run averages. A specific craft or resource can produce more or less. Use the planner safety buffer when you want extra confidence."],
     ["Item-list chance", "Raw item-list values are relative weights. Selection chance = possibility weight / total weight of every possibility, including a possibility that awards nothing."],
     ["Gathering", "Expected per progress = extraction quantity x occurrence rate per progress x expected item-list quantity. Tool power changes how many hits deliver that progress; it does not change the drop rate."],
-    ["Full resource", "Expected per full resource = expected per progress x resource maximum health + completion yield."],
+    ["Full node", "Expected per full node = expected per progress x node maximum health + completion yield."],
     ["Prospecting", "Prospecting rows report expected output per extraction progress only. Displayed node health is not a depletion budget, and total node yield is unavailable because prospecting exhaustion is unknown."],
     ["Crafting", "Expected per craft = direct output quantity x output occurrence rate x expected item-list quantity. Actions per item = actions per craft / expected output per craft."],
     ["Honeyberry example", "A Honeyberry Bush has 595 health and a 0.06723 berry-list rate per progress: 40.00185 expected list rolls. Weights 1 and 0.02 normalize to 98.0392% and 1.9608%, giving about 39.2175 Simple Berries and 0.78435 Simple Citric Berries per full bush."],
@@ -141,7 +141,7 @@ function addAllItems(workbook, data) {
   });
   const sheet = workbook.addWorksheet("All Items");
   titleSheet(sheet, "All Items and Cargo", "Every current catalogue entity is listed, including entities without a gathering or crafting probability route.", "K");
-  const lastRow = addRows(sheet, ["Type", "ID", "Name", "Tier", "Tag", "Probability routes", "Gathering routes", "Crafting routes", "Best expected / full resource", "Best expected / craft", "Coverage"], rows, [10, 16, 34, 8, 24, 15, 15, 14, 22, 20, 35]);
+  const lastRow = addRows(sheet, ["Type", "ID", "Name", "Tier", "Tag", "Probability routes", "Gathering routes", "Crafting routes", "Best expected / full node", "Best expected / craft", "Coverage"], rows, [10, 16, 34, 8, 24, 15, 15, 14, 22, 20, 35]);
   styleData(sheet, 4, lastRow, [4, 6, 7, 8, 9, 10]);
 }
 
@@ -157,7 +157,7 @@ function addGathering(workbook, data) {
   ]);
   const sheet = workbook.addWorksheet("Gathering Routes");
   titleSheet(sheet, "Gathering Probabilities", "One row per gathering route and final item or cargo output. Prospecting is reported per extraction progress because its exhaustion limit is unknown.", "R");
-  const lastRow = addRows(sheet, ["Resource ID", "Resource", "Gathering mode", "Max health", "Recipe ID", "Output type", "Output ID", "Output", "Extraction quantity", "Occurrence rate / progress", "List selection chance", "Expected qty / list roll", "Expected / progress", "Completion yield", "Expected / full resource", "Expected progress / item", "Probability status", "Source URL"], rows, [13, 28, 16, 12, 18, 12, 16, 30, 16, 20, 18, 19, 18, 17, 22, 21, 40, 45]);
+  const lastRow = addRows(sheet, ["Resource ID", "Resource", "Gathering mode", "Max health", "Recipe ID", "Output type", "Output ID", "Output", "Extraction quantity", "Occurrence rate / progress", "List selection chance", "Expected qty / list roll", "Expected / progress", "Completion yield", "Expected / full node", "Expected progress / item", "Probability status", "Source URL"], rows, [13, 28, 16, 12, 18, 12, 16, 30, 16, 20, 18, 19, 18, 17, 22, 21, 40, 45]);
   for (let row = 4; row <= lastRow; row += 1) {
     const source = data.gatheringRoutes[row - 4];
     if (source?.gatheringMode === "prospecting") continue;
