@@ -335,7 +335,7 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
-  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?config\.gatheredItemKeys,[\s\S]*?requireValidatedProbabilities: true/);
+  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?64,[\s\S]*?\[\],[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`\)/);
