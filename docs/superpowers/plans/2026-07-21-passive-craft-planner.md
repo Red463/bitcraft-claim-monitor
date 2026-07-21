@@ -356,4 +356,3 @@ git status -sb
 ```
 
 Expected: no whitespace errors, only approved planner/spec files changed, and the worktree is clean.
-
