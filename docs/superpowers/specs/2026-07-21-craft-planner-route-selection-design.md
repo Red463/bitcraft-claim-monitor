@@ -68,6 +68,8 @@ For finite ordinary gathering nodes, lead with actionable whole-node planning:
 
 The whole-node count is the ceiling of the buffered expected node equivalents. The supporting decimal remains an expected-value quantity, not a guarantee.
 
+Base the work estimate on the item's remaining shortage, not its total historical requirement. When the shortage is zero, show `No additional nodes needed` while still displaying the route's average yield for comparison.
+
 Do not lead with small decimals such as `0.002 expected per resource progress`. Translate them into a reciprocal that players can interpret, such as `about 1 item per 500 node progress`, and keep the raw decimal in the technical calculation disclosure.
 
 Use meaningful precision without displaying a probabilistic non-zero rate as zero. The safety buffer changes planned work, not the API probability or the item requirement.
