@@ -1,6 +1,6 @@
 import React from "react";
 import "../styles/craft-planning.css";
-import { AlertTriangle, ChevronDown, ClipboardList, Download, EqualApproximately, Factory, LoaderCircle, MapPin, Package, Route, Search, Target, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardList, Download, EqualApproximately, Factory, LoaderCircle, Package, Route, Search, Target, X } from "lucide-react";
 
 import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
@@ -9,11 +9,12 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
-import { cellItemKeys, gatheredCellState, setCellGathered } from "./craftPlanningGatheredOverrides";
+import { CraftPlanningRouteChooser } from "./CraftPlanningRouteChooser";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
 import { selectCraftPlanningEffortView } from "./craftPlanningEffortView";
 import { buildNeedsBoard, filterNeedsBoard, itemKey, itemName, NEED_COLUMNS, NEED_SECTIONS, type NeedCell, type NeedRow } from "./craftPlanningNeedsBoard";
 import { groupNeedCellActiveCrafts, groupNeedCellRecipeUsages, groupNeedCellSources, groupNeedCellSourceRoutes } from "./craftPlanningNeedDetails";
+import { acquisitionRouteLabel, acquisitionRouteMetrics, formatProbabilityRate } from "./craftPlanningRoutePresentation.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -61,15 +62,6 @@ function needCellNode(cell: NeedCell | undefined, onSelect: (cell: NeedCell) => 
 }
 
 
-function recipeOptionLabel(recipe: AnyRecord, output?: AnyRecord) {
-  const inputs = Array.isArray(recipe.inputs) ? recipe.inputs.map(itemName).filter(Boolean) : [];
-  const label = String(recipe.label ?? recipe.name ?? recipe.id ?? "Recipe");
-  const station = String(recipe.buildingName ?? "").trim();
-  const routeKind = recipe.isTransportRoute ? "[Logistics] " : "";
-  if (inputs.length && output) return `${routeKind}${inputs.join(" + ")} -> ${itemName(output)}${station ? ` - ${station}` : ""}`;
-  return `${routeKind}${label}${station ? ` - ${station}` : ""}`;
-}
-
 function summaryStat(icon: React.ReactNode, label: string, value: unknown, detail: string, tone?: string) {
   return (
     <article className={`craft-plan-summary-stat${tone ? ` ${tone}` : ""}`}>
@@ -103,7 +95,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const detailRequestRef = React.useRef(0);
   const [routeStatus, setRouteStatus] = React.useState<string | null>(null);
   const [routeError, setRouteError] = React.useState<string | null>(null);
-  const [gatheredSavePending, setGatheredSavePending] = React.useState(false);
+  const [routeSavePendingId, setRouteSavePendingId] = React.useState<string | null>(null);
   const [bufferPercent, setBufferPercent] = React.useState("0");
   const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
 
@@ -198,9 +190,6 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const selectedNeedSourceRoutes = selectedNeed ? groupNeedCellSourceRoutes(selectedNeed, detailSteps) : [];
   const selectedNeedUsages = selectedNeed ? groupNeedCellRecipeUsages(selectedNeed) : [];
   const selectedNeedKey = selectedNeed?.items?.[0]?.key ?? (selectedNeed ? itemKey(selectedNeed.item) : "");
-  const selectedNeedKeys = selectedNeed ? cellItemKeys(selectedNeed.items) : [];
-  const selectedGatheredState = gatheredCellState(selectedNeedKeys, config.gatheredItemKeys ?? []);
-  const selectedNeedGathered = selectedGatheredState === "all";
   const selectedMultiplier = Number(config.multipliers?.[selectedNeedKey]?.multiplier) || 1;
   React.useEffect(() => {
     setBufferPercent(String(Math.max(0, Math.round((selectedMultiplier - 1) * 1000) / 10)));
@@ -276,29 +265,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           <div className="craft-plan-need-detail-side">
             <section className="form-card nested-card">
               <h3><Factory size={16} /> How to get this</h3>
-              {canManage ? (
-                <div className="craft-plan-gathered-control" data-state={selectedGatheredState}>
-                  <label className="compact-toggle">
-                    <input
-                      type="checkbox"
-                      checked={selectedNeedGathered}
-                      aria-checked={selectedGatheredState === "mixed" ? "mixed" : selectedNeedGathered}
-                      disabled={gatheredSavePending || detailLoading}
-                      onChange={(event) => void saveGatheredOverride(event.target.checked)}
-                    />
-                    <span>Treat this cell as gathered</span>
-                  </label>
-                  <small>Stops producer-recipe expansion for this exact cell. The item remains required and counted stock still applies.</small>
-                  {selectedGatheredState === "mixed" ? <small className="craft-plan-gathered-mixed">Some underlying items are already marked. Changing this toggle applies one state to the whole displayed cell.</small> : null}
-                </div>
-              ) : null}
-              {selectedNeedGathered ? (
-                <div className="craft-plan-gathered-state">
-                  <strong>This item is treated as gathered.</strong>
-                  <p>The remaining amount must be gathered or supplied from counted stock. Producer recipes and package routes are ignored.</p>
-                  <a className="toolbar-button" href="/?page=map"><MapPin size={15} /> Open Map resource finder</a>
-                </div>
-              ) : selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
+              {selectedNeedSourceRoutes.length ? selectedNeedSourceRoutes.map((route, index) => {
                 const alternatives = Array.isArray(route.alternatives) ? route.alternatives : [];
                 const routeType = String(route.routeType ?? "craft");
                 const gatheringRoute = routeType.startsWith("gathering");
@@ -307,28 +274,38 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 const routeKindLabel = gatheringRoute
                   ? prospectingRoute ? byproductRoute ? "Prospecting byproduct" : "Prospecting output" : byproductRoute ? "Gathering byproduct" : "Gathering output"
                   : byproductRoute ? "Craft byproduct" : "Craft output";
-                const yieldUnit = gatheringRoute ? prospectingRoute ? "per extraction progress" : "per resource progress" : "per craft (recipe completion)";
-                const probabilityUnavailable = route.probabilityStatus === "unavailable";
-                const itemListRoute = route.expectedYield != null || probabilityUnavailable;
+                const yieldUnit = gatheringRoute ? prospectingRoute ? "per extraction progress" : "per node progress" : "per craft";
+                const routeMultiplier = Number(route.multiplier) || selectedMultiplier;
+                const routeMetrics = acquisitionRouteMetrics(route, {
+                  missingQuantity: Number(selectedNeed.missing) || 0,
+                  multiplier: routeMultiplier,
+                });
+                const probabilityUnavailable = route.probabilityStatus === "unavailable" || routeMetrics.status === "unavailable";
+                const itemListRoute = route.expectedYield != null || routeMetrics.status === "available" || probabilityUnavailable;
                 const expectedYield = Number(route.expectedYield) || 0;
                 const guaranteedYield = Number(route.guaranteedYield) || 0;
                 const guaranteedOutput = !byproductRoute && guaranteedYield > 0 && guaranteedYield + 1e-9 >= expectedYield;
-                const baseActions = Number(route.unbufferedCraftCount) || Math.ceil(Number(selectedNeed.required) / Math.max(Number(route.expectedYield), 0.0001));
-                const bufferedActions = Number(route.craftCount) || baseActions;
-                const routeMultiplier = Number(route.multiplier) || selectedMultiplier;
                 const producerInputs = Array.isArray(route.inputs) ? route.inputs.filter((input: AnyRecord) => Number(input.quantity) > 0) : [];
-                const displayedRecipeName = route.producerRecipe?.name ?? route.recipeName ?? "Selected recipe";
-                const actionLabel = gatheringRoute ? prospectingRoute ? "Expected extraction progress" : "Expected resource progress" : "Recipe completions";
-                const progressPerResource = Number(route.resourceHealth) || 0;
-                const unbufferedResources = progressPerResource > 0 ? baseActions / progressPerResource : 0;
-                const bufferedResources = Number(route.expectedResourceEquivalents) || (progressPerResource > 0 ? bufferedActions / progressPerResource : 0);
-                const unbufferedWork = Number(route.unbufferedExpectedEffort) || baseActions;
-                const bufferedWork = Number(route.expectedEffort) || bufferedActions;
+                const displayedRecipeName = acquisitionRouteLabel(route, route.output ?? selectedNeed.item);
+                const outputLabel = itemName(route.output ?? selectedNeed.item);
+                const expectedPerProgress = Number(route.expectedPerProgress ?? (gatheringRoute ? route.expectedYield : 0)) || 0;
+                const expectedPerCraft = Number(route.expectedPerCraft ?? route.expectedYield ?? route.guaranteedYield) || 0;
                 return (
-                  <div className={`craft-plan-route-detail is-${gatheringRoute ? "gathering" : "craft"}`} key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                  <React.Fragment key={String(route.selectedRecipeId ?? route.id ?? route.key ?? index) + "-" + index}>
+                    <CraftPlanningRouteChooser
+                      routes={alternatives}
+                      selectedRecipeId={String(route.selectedRecipeId ?? "")}
+                      output={route.output ?? selectedNeed.item}
+                      missingQuantity={Number(selectedNeed.missing) || 0}
+                      multiplier={routeMultiplier}
+                      canManage={canManage}
+                      pendingRecipeId={routeSavePendingId}
+                      onSelect={(recipeId) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), recipeId)}
+                    />
+                    <div className={`craft-plan-route-detail is-${gatheringRoute ? "gathering" : "craft"}`}>
                     <div className="craft-plan-route-heading">
                       <span className={`craft-plan-route-kind is-${gatheringRoute ? "gathering" : "craft"}`}>{routeKindLabel}</span>
-                      <strong>{gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? route.recipeName : displayedRecipeName}</strong>
+                      <strong>{displayedRecipeName}</strong>
                       <p className="legend">{gatheringRoute
                         ? [route.gatheringSkill, byproductRoute && route.producer?.name ? `received with ${route.producer.name}` : null].filter(Boolean).join(" - ")
                         : route.buildingName ? "At " + route.buildingName : "Selected plan route"}</p>
@@ -341,16 +318,42 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       </div>
                     ) : itemListRoute ? (
                       <>
-                        {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 3 : 1)} expected {yieldUnit}</small></span>)}</div> : null}
-                        <p className="craft-plan-byproduct-note">{guaranteedOutput
-                          ? <>Guaranteed output: {formatNumber(guaranteedYield, guaranteedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}.</>
-                          : <>Expected yield: {formatNumber(expectedYield, expectedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</>}</p>
+                        {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => {
+                          const sourceExpected = Number(source.expectedYield) || 0;
+                          return <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{sourceExpected > 0 ? `About 1 ${outputLabel} per ${formatNumber(1 / sourceExpected)} ${prospectingRoute ? "extraction progress" : "node progress"}` : "Validated yield unavailable"}</small></span>;
+                        })}</div> : null}
                         <div className="craft-plan-chance-summary">
-                          {prospectingRoute ? <p className="craft-plan-resource-yield">Total node yield is unavailable because prospecting exhaustion is unknown; displayed health is not treated as finite progress.</p> : null}
-                          {gatheringRoute && Number(route.expectedPerResource) > 0 ? <p className="craft-plan-resource-yield">Expected per full resource: <strong>{formatNumber(Number(route.expectedPerResource), Number(route.expectedPerResource) < 1 ? 3 : 1)}</strong> {itemName(route.output)} from <strong>{quantity(route.resourceHealth)}</strong> progress.</p> : null}
-                          <div className="craft-plan-action-summary"><span>{actionLabel} <strong>{quantity(baseActions)}</strong>{gatheringRoute && unbufferedResources > 0 ? <small>{formatNumber(unbufferedResources, 2)} full-resource equivalents</small> : null}{!gatheringRoute && unbufferedWork !== baseActions ? <small>{quantity(unbufferedWork)} total recipe actions</small> : null}</span>{routeMultiplier > 1 ? <span>With {formatNumber((routeMultiplier - 1) * 100, 1)}% extra <strong>{quantity(bufferedActions)} {gatheringRoute ? "progress" : "completions"}</strong>{gatheringRoute && bufferedResources > 0 ? <small>{formatNumber(bufferedResources, 2)} full-resource equivalents</small> : null}{!gatheringRoute && bufferedWork !== bufferedActions ? <small>{quantity(bufferedWork)} total recipe actions</small> : null}</span> : null}</div>
+                          <div className="craft-plan-primary-work">
+                            {routeMetrics.basis === "node" ? <>
+                              <strong>{routeMetrics.plannedUnits === 0 ? "No additional nodes needed" : `Plan for ${quantity(routeMetrics.plannedUnits)} full nodes`}</strong>
+                              <span>About {formatNumber(Number(routeMetrics.expectedPerUnit), Number(routeMetrics.expectedPerUnit) < 1 ? 3 : 1)} {outputLabel} per full node</span>
+                              <small>{formatNumber(Number(routeMetrics.exactUnits), 2)} expected node equivalents{routeMultiplier > 1 ? `, including ${formatNumber((routeMultiplier - 1) * 100, 1)}% safety buffer` : ""}</small>
+                            </> : routeMetrics.basis === "progress" ? <>
+                              <strong>{routeMetrics.plannedUnits === 0 ? "No additional progress needed" : `Plan for ${quantity(routeMetrics.plannedUnits)} ${prospectingRoute ? "extraction progress" : "node progress"}`}</strong>
+                              <span>{Number(routeMetrics.progressPerExpectedItem) > 0 ? `About 1 ${outputLabel} per ${formatNumber(Number(routeMetrics.progressPerExpectedItem))} ${prospectingRoute ? "extraction progress" : "node progress"}` : "Expected output rate unavailable"}</span>
+                              {prospectingRoute ? <small>Full-node estimates are unavailable for prospecting because node exhaustion is unknown.</small> : null}
+                            </> : <>
+                              <strong>{routeMetrics.plannedUnits === 0 ? "No additional crafts needed" : `Plan for ${quantity(routeMetrics.plannedUnits)} recipe completions`}</strong>
+                              <span>{guaranteedOutput ? "Guaranteed" : "About"} {formatNumber(Number(routeMetrics.expectedPerUnit), Number(routeMetrics.expectedPerUnit) < 1 ? 3 : 1)} {outputLabel} per craft</span>
+                              {Number(routeMetrics.totalActions) !== Number(routeMetrics.plannedUnits) ? <small>{quantity(routeMetrics.totalActions)} total station actions</small> : null}
+                            </>}
+                          </div>
                           {producerInputs.length ? <div className="craft-plan-producer-requirements"><small>{gatheringRoute ? "Gather/process" : "Craft inputs"}</small>{producerInputs.map((input: AnyRecord, inputIndex: number) => <span key={itemKey(input) + "-producer-" + inputIndex}>{itemNode(input)}<strong>{quantity(input.quantity)}</strong></span>)}</div> : null}
-                          {route.isProbabilistic && canManage ? <div className="craft-plan-buffer-settings"><label htmlFor={`craft-plan-buffer-${index}`}>Safety buffer (% extra)</label><div className="craft-plan-buffer-control"><input id={`craft-plan-buffer-${index}`} type="number" min="0" max="1900" step="5" value={bufferPercent} onChange={(event) => setBufferPercent(event.target.value)} /><button className="toolbar-button primary" type="button" onClick={() => void saveMultiplier(selectedNeedKey, Number(bufferPercent))}>Save</button>{selectedMultiplier > 1 ? <button className="toolbar-button" type="button" onClick={() => void saveMultiplier(selectedNeedKey, 0)}>Reset</button> : null}</div><small>This adds producer actions and source-item requirements. It does not increase the item goal, change the API drop rate, or modify counted stock.</small></div> : null}
+                          <details className="craft-plan-calculation">
+                            <summary>Show calculation</summary>
+                            <div className="craft-plan-calculation-body">
+                              <span>Expected yield <strong>{formatProbabilityRate(gatheringRoute ? expectedPerProgress : expectedPerCraft)} {outputLabel} {yieldUnit}</strong></span>
+                              {gatheringRoute && Number(route.expectedPerResource) > 0 ? <span>Expected per full node <strong>{formatProbabilityRate(route.expectedPerResource)} {outputLabel}</strong></span> : null}
+                              {gatheringRoute && Number(route.resourceHealth) > 0 && !prospectingRoute ? <span>Node health <strong>{quantity(route.resourceHealth)} progress</strong></span> : null}
+                              {routeMetrics.basis === "node" ? <><span>Exact node equivalents <strong>{formatNumber(Number(routeMetrics.exactUnits), 4)}</strong></span><span>Planned node progress <strong>{quantity(routeMetrics.totalProgress)}</strong></span></> : null}
+                              {routeMetrics.basis === "progress" ? <span>Required progress <strong>{quantity(routeMetrics.totalProgress)}</strong></span> : null}
+                              {routeMetrics.basis === "craft" ? <><span>Recipe completions <strong>{quantity(routeMetrics.plannedUnits)}</strong></span><span>Total station actions <strong>{quantity(routeMetrics.totalActions)}</strong></span></> : null}
+                              {guaranteedYield > 0 ? <span>Guaranteed output <strong>{formatProbabilityRate(guaranteedYield)} {outputLabel} {yieldUnit}</strong></span> : null}
+                              {route.dropChance != null ? <span>Drop chance <strong>{formatNumber(Number(route.dropChance) * 100, 3)}% for {formatNumber(Number(route.dropQuantity) || 0, 2)}</strong></span> : null}
+                              {prospectingRoute ? <p>Full-node estimates are unavailable for prospecting because node exhaustion is unknown; displayed health is not treated as finite progress.</p> : null}
+                              {route.isProbabilistic && canManage ? <div className="craft-plan-buffer-settings"><label htmlFor={`craft-plan-buffer-${index}`}>Safety buffer (% extra)</label><div className="craft-plan-buffer-control"><input id={`craft-plan-buffer-${index}`} type="number" min="0" max="1900" step="5" value={bufferPercent} onChange={(event) => setBufferPercent(event.target.value)} /><button className="toolbar-button primary" type="button" onClick={() => void saveMultiplier(selectedNeedKey, Number(bufferPercent))}>Save</button>{selectedMultiplier > 1 ? <button className="toolbar-button" type="button" onClick={() => void saveMultiplier(selectedNeedKey, 0)}>Reset</button> : null}</div><small>This adds producer actions and source-item requirements. It does not increase the item goal, change the API drop rate, or modify counted stock.</small></div> : null}
+                            </div>
+                          </details>
                         </div>
                       </>
                     ) : Array.isArray(route.inputs) && route.inputs.length ? (
@@ -360,15 +363,8 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                         ))}
                       </div>
                     ) : null}
-                    {canManage && alternatives.length > 1 ? (
-                      <label className="field compact-field">
-                        <span>Recipe route</span>
-                        <select value={route.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(route.key ?? itemKey(route.output ?? {})), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, route.output)}</option>)}
-                        </select>
-                      </label>
-                    ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
-                  </div>
+                    </div>
+                  </React.Fragment>
                 );
               }) : <p className="legend">The current plan does not need to craft this item. Stock locations show where it is counted from, or the item is treated as a raw gathered/vendor input.</p>}
             </section>
@@ -409,7 +405,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                       <label className="field compact-field">
                         <span>Recipe route</span>
                         <select value={usage.selectedRecipeId ?? ""} onChange={(event) => void saveRouteOverride(String(usage.key ?? ""), event.target.value)}>
-                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{recipeOptionLabel(recipe, usage.output)}</option>)}
+                          {alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{acquisitionRouteLabel(recipe, usage.output)}</option>)}
                         </select>
                       </label>
                     ) : alternatives.length > 1 ? <p className="legend">{alternatives.length} routes available.</p> : null}
@@ -472,45 +468,12 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       setRouteError(err instanceof Error ? err.message : String(err));
     }
   }
-  async function saveGatheredOverride(enabled: boolean) {
-    if (!canManage || !adminAuth?.csrfToken || !selectedNeed || !selectedNeedKeys.length) return;
+  async function saveRouteOverride(outputKey: string, recipeId: string) {
+    if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
     const openCell = selectedNeed;
     setRouteStatus(null);
     setRouteError(null);
-    setGatheredSavePending(true);
-    try {
-      const gatheredItemKeys = setCellGathered(config.gatheredItemKeys ?? [], selectedNeedKeys, enabled);
-      const response = await fetch(LOCAL_API + "/admin/craft-plan", {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          "x-csrf-token": String(adminAuth.csrfToken),
-        },
-        body: JSON.stringify({ ...config, gatheredItemKeys }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      const refreshedPlan = body.plan;
-      if (refreshedPlan && Array.isArray(refreshedPlan.materials)) {
-        setPlan(refreshedPlan);
-        const byKey = new Map<string, AnyRecord>(refreshedPlan.materials.map((item: AnyRecord): [string, AnyRecord] => [itemKey(item), item]));
-        const items = openCell.items.map((item) => byKey.get(itemKey(item)) ?? item);
-        setSelectedNeed({ ...openCell, item: items[0] ?? openCell.item, items });
-        const keys = new Set(selectedNeedKeys);
-        setDetailSteps((Array.isArray(refreshedPlan.steps) ? refreshedPlan.steps : []).filter((step: AnyRecord) => keys.has(itemKey(step.output ?? {}))));
-      }
-      setRouteStatus(enabled ? "This cell is now treated as gathered." : "Recipe expansion restored for this cell.");
-      setManagerRefreshToken((value) => value + 1);
-    } catch (err) {
-      setRouteError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setGatheredSavePending(false);
-    }
-  }
-  async function saveRouteOverride(outputKey: string, recipeId: string) {
-    if (!canManage || !adminAuth?.csrfToken || !outputKey || !recipeId) return;
-    setRouteStatus(null);
-    setRouteError(null);
+    setRouteSavePendingId(recipeId);
     try {
       const nextConfig = {
         ...config,
@@ -529,11 +492,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "HTTP " + response.status);
-      setRouteStatus("Recipe route updated.");
+      if (body.plan) setPlan(body.plan);
+      setRouteStatus("Acquisition route updated.");
       setManagerRefreshToken((value) => value + 1);
-      setSelectedNeed(null);
+      if (openCell) await openNeedDetail(openCell);
     } catch (err) {
       setRouteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRouteSavePendingId(null);
     }
   }
   async function saveMultiplier(outputKey: string, percent: number) {

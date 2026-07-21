@@ -414,6 +414,7 @@ function routeMetadata(recipe, target = null) {
   const expectedPerResource = gathering && resourceHealth && !probabilityUnavailable
     ? Math.max(0, toNumber(recipe?.expectedPerResource)) || ((expectedPerProgress * resourceHealth) + completionYield)
     : null;
+  const actionsRequired = Math.max(1, toNumber(recipe?.actionsRequired ?? recipe?.actions_required) || 1);
   return {
     routeType: recipe?.routeType ?? recipeActivityKind(recipe),
     gatheringMode,
@@ -426,6 +427,7 @@ function routeMetadata(recipe, target = null) {
     expectedPerProgress,
     expectedPerResource,
     resourceHealth,
+    actionsRequired,
     isTransportRoute: recipeLooksTransportRoute(recipe),
     probabilityStatus,
     isProbabilistic: recipe?.isProbabilistic === true || probabilityStatus === "expected" || probabilityUnavailable,
@@ -733,7 +735,6 @@ function routeAlternativesForUi(recipes) {
 
 function sourceRoutesForTarget(target, detailsByKey, routeOverrides, gatheredItemKeys) {
   const targetKey = recipeKey(target.kind, target.id);
-  if (gatheredItemKeys.has(targetKey)) return [];
   const detail = detailsByKey.get(targetKey);
   if (!detail) return [];
   const normalizedTarget = mergeDetailTarget(detail, target);
@@ -831,6 +832,8 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, gathered
     const alternatives = visibleRecipes.map((recipe) => ({
       id: recipeId(recipe),
       label: String(recipe.name ?? normalizedTarget.name),
+      ...routeMetadata(recipe, normalizedTarget),
+      buildingName: recipe.buildingName ?? recipe.building_name ?? null,
       inputs: recipeInputs(recipe).map((input, index) => ({
         ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
         quantity: toNumber(input.quantity),
@@ -1136,7 +1139,7 @@ export function collectLocalCatalogCraftPlanDetails(
   targets,
   routeOverrides = {},
   maxDepth = 64,
-  gatheredItemKeys = [],
+  _legacyGatheredItemKeys = [],
   { requireValidatedProbabilities = false } = {},
 ) {
   const detailsByKey = new Map();
@@ -1144,7 +1147,6 @@ export function collectLocalCatalogCraftPlanDetails(
   const byproductsByProducerKey = new Map();
   const visiting = new Set();
   const completed = new Set();
-  const gatheredKeys = new Set(gatheredItemKeys);
   const probabilitySnapshotAvailable = Boolean(repository.getProbabilitySnapshot?.());
   const probabilityStatus = requireValidatedProbabilities && !probabilitySnapshotAvailable ? "unavailable" : null;
   if (probabilityStatus === "unavailable") {
@@ -1196,12 +1198,6 @@ export function collectLocalCatalogCraftPlanDetails(
       return;
     }
     if (visiting.has(key)) return;
-    if (gatheredKeys.has(key)) {
-      setDetail(key, target);
-      completed.add(key);
-      return;
-    }
-
     const byproductProducers = repository.listByproductProducersForOutput(key);
     for (const row of byproductProducers) addByproductProducer(row);
     if (completed.has(key)) {
@@ -1629,7 +1625,7 @@ export function computeCraftPlan({
 
   const planningStockTotals = stockTotalsWithActiveOutput(availableTotals, countedActiveTotals, "total");
   const confirmedStockTotals = stockTotalsWithActiveOutput(availableTotals, countedActiveTotals, "guaranteedTotal");
-  const gatheredItemKeys = new Set(normalized.gatheredItemKeys);
+  const gatheredItemKeys = new Set();
   const calculationTargets = expandedPlanTargets(normalized.targets, normalized.buildingProgress);
   const { required, steps, usages, warnings } = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, gatheredItemKeys, normalized.multipliers, planningStockTotals);
   const confirmedRequirements = buildRequirementMap(calculationTargets, detailsByKey, normalized.routeOverrides, gatheredItemKeys, normalized.multipliers, confirmedStockTotals);

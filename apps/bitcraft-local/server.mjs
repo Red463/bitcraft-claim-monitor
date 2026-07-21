@@ -2381,7 +2381,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     catalogTargets,
     config.routeOverrides,
     64,
-    config.gatheredItemKeys,
+    [],
     { requireValidatedProbabilities: true },
   );
   const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([

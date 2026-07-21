@@ -484,6 +484,48 @@
   margin: 0 16px 12px;
   color: var(--text-muted);
 }
+.craft-plan-route-options {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+.craft-plan-route-options legend {
+  margin-bottom: 7px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.craft-plan-route-option {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 11px 38px 11px 12px;
+  overflow: hidden;
+  border: 1px solid rgba(139, 159, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(6, 10, 16, 0.36);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.craft-plan-route-option:hover { border-color: rgba(240, 198, 79, 0.48); }
+.craft-plan-route-option input { position: absolute; top: 12px; right: 12px; margin: 0; accent-color: var(--accent); }
+.craft-plan-route-option.is-selected { border-color: rgba(240, 198, 79, 0.68); background: rgba(240, 198, 79, 0.08); }
+.craft-plan-route-option.is-pending { opacity: 0.66; cursor: progress; }
+.craft-plan-route-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.craft-plan-route-option strong,
+.craft-plan-route-option span,
+.craft-plan-route-option small,
+.craft-plan-route-option em { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.craft-plan-route-option-kind { color: var(--accent); font-size: 0.69rem; font-weight: 800; text-transform: uppercase; }
+.craft-plan-route-option > strong { color: var(--text); line-height: 1.3; }
+.craft-plan-route-option-work { color: var(--text); font-size: 0.82rem; font-weight: 700; }
+.craft-plan-route-option small { color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
+.craft-plan-route-option em { color: var(--accent); font-size: 0.7rem; font-style: normal; font-weight: 800; text-transform: uppercase; }
 .craft-plan-route-detail + .craft-plan-route-detail {
   margin-top: 10px;
 }
@@ -515,6 +557,10 @@
 .craft-plan-need-cell.is-blocked:focus-visible { background: rgba(239, 100, 97, 0.16); outline-color: rgba(239, 100, 97, 0.72); }
 @media (max-width: 760px) { .craft-plan-needs-header { align-items: stretch; } .craft-plan-overall-progress { min-width: 0; grid-template-columns: auto minmax(100px, 1fr); } }
 .craft-plan-chance-summary { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid rgba(139, 159, 184, 0.16); }
+.craft-plan-primary-work { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border-radius: 8px; background: rgba(240, 198, 79, 0.07); }
+.craft-plan-primary-work > strong { color: var(--text); font-size: 1rem; line-height: 1.3; }
+.craft-plan-primary-work > span { color: var(--accent); font-size: 0.84rem; font-weight: 700; }
+.craft-plan-primary-work > small { color: var(--muted); font-size: 0.74rem; line-height: 1.4; }
 .craft-plan-resource-yield { margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
 .craft-plan-resource-yield strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .craft-plan-action-summary { display: grid; gap: 6px; }
@@ -525,27 +571,13 @@
 .craft-plan-producer-requirements > small { color: var(--muted); font-weight: 700; }
 .craft-plan-producer-requirements > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; background: rgba(101, 183, 250, 0.09); }
 .craft-plan-producer-requirements > span > strong { color: var(--text); font-variant-numeric: tabular-nums; }
-.craft-plan-gathered-control {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid rgba(139, 159, 184, 0.24);
-  border-radius: 8px;
-  background: rgba(7, 15, 24, 0.42);
-}
-.craft-plan-gathered-control > small { color: var(--muted); line-height: 1.4; }
-.craft-plan-gathered-control .craft-plan-gathered-mixed { color: var(--accent); }
-.craft-plan-gathered-state {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid rgba(240, 198, 79, 0.28);
-  border-radius: 8px;
-  background: rgba(240, 198, 79, 0.07);
-}
-.craft-plan-gathered-state p { margin: 0; color: var(--muted); line-height: 1.45; }
+.craft-plan-calculation { min-width: 0; border-top: 1px solid rgba(139, 159, 184, 0.16); padding-top: 9px; }
+.craft-plan-calculation summary { width: fit-content; color: var(--muted); font-size: 0.78rem; font-weight: 800; cursor: pointer; }
+.craft-plan-calculation[open] summary { margin-bottom: 10px; color: var(--text); }
+.craft-plan-calculation-body { display: grid; gap: 7px; min-width: 0; }
+.craft-plan-calculation-body > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; min-width: 0; color: var(--muted); font-size: 0.78rem; }
+.craft-plan-calculation-body > span > strong { min-width: 0; color: var(--text); text-align: right; white-space: normal; overflow-wrap: anywhere; }
+.craft-plan-calculation-body > p { margin: 2px 0 0; color: var(--muted); font-size: 0.75rem; line-height: 1.4; }
 .craft-plan-buffer-settings { display: grid; gap: 7px; padding: 10px; border-radius: 7px; background: rgba(139, 159, 184, 0.06); }
 .craft-plan-buffer-settings > label { color: var(--text); font-size: 0.82rem; font-weight: 700; }
 .craft-plan-buffer-settings > small { color: var(--muted); font-size: 0.74rem; line-height: 1.4; }
@@ -554,7 +586,8 @@
 .craft-plan-buffer-control input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 760px) {
   .craft-plan-action-summary > span { align-items: flex-start; }
-  .craft-plan-gathered-control, .craft-plan-gathered-state { padding: 10px; }
+  .craft-plan-calculation-body > span { grid-template-columns: 1fr; gap: 2px; }
+  .craft-plan-calculation-body > span > strong { text-align: left; }
   .craft-plan-buffer-control { grid-template-columns: minmax(0, 1fr) auto; }
   .craft-plan-buffer-control .toolbar-button:last-child:not(:nth-child(2)) { grid-column: 1 / -1; }
 }

@@ -17,7 +17,7 @@ test("Craft Planning page is registered in navigation, access control, and AppSh
 
 test("Craft Planning labels estimated active output as material-planning coverage", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const cellBody = page.match(/function needCellNode[\s\S]+?function recipeOptionLabel/)?.[0] ?? "";
+  const cellBody = page.match(/function needCellNode[\s\S]+?function summaryStat/)?.[0] ?? "";
 
   assert.match(page, /EqualApproximately/);
   assert.match(cellBody, /aria-label="Approximate requirement"/);
@@ -41,8 +41,14 @@ test("Craft Planning exposes a public probability workbook download with explici
   assert.match(server, /getProbabilityWorkbookData/);
   assert.match(server, /Probability catalogue is not ready/);
   assert.match(page, /Download probabilities/);
-  assert.match(page, /per resource progress/);
-  assert.match(page, /Expected per full resource/);
+  assert.match(page, /per node progress/);
+  assert.match(page, /per full node/);
+  assert.match(page, /node equivalents/);
+  assert.match(page, /<summary>Show calculation<\/summary>/);
+  assert.match(page, /No additional nodes needed/);
+  assert.match(page, /Full-node estimates are unavailable for prospecting/);
+  assert.doesNotMatch(page, /Expected per full resource/);
+  assert.doesNotMatch(page, /full-resource equivalents/);
   assert.doesNotMatch(page, /per gathering action/);
 });
 
@@ -106,15 +112,17 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /<Dialog[\s\S]*craft-plan-need-detail/);
   assert.match(page, /craft-plan-need-detail/);
   assert.match(page, /How to get this/);
-  assert.match(page, /Treat this cell as gathered/);
-  assert.match(page, /cellItemKeys/);
-  assert.match(page, /gatheredCellState/);
-  assert.match(page, /setCellGathered/);
-  assert.match(page, /canManage[\s\S]*craft-plan-gathered-control/);
+  assert.match(page, /<CraftPlanningRouteChooser/);
+  assert.match(page, /routeSavePendingId/);
+  assert.match(page, /await openNeedDetail\(openCell\)/);
+  assert.doesNotMatch(page, /Treat this cell as gathered/);
+  assert.doesNotMatch(page, /cellItemKeys/);
+  assert.doesNotMatch(page, /gatheredCellState/);
+  assert.doesNotMatch(page, /setCellGathered/);
+  assert.doesNotMatch(page, /craft-plan-gathered-control/);
+  assert.doesNotMatch(page, /saveGatheredOverride/);
   assert.match(page, /x-csrf-token/);
-  assert.match(page, /href="\/\?page=map"/);
-  assert.match(page, /Open Map resource finder/);
-  assert.match(page, /must be gathered or supplied from counted stock/);
+  assert.doesNotMatch(page, /Open Map resource finder/);
   assert.match(page, /Craft output/);
   assert.match(page, /Craft byproduct/);
   assert.match(page, /Gathering output/);
@@ -122,10 +130,12 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /routeType\.startsWith\("gathering"\)/);
   assert.match(page, /routeType\.endsWith\("-byproduct"\)/);
   assert.doesNotMatch(page, /route\.routeType === "gathering-byproduct"/);
-  assert.match(page, /Guaranteed output:/);
+  assert.match(page, /Guaranteed output/);
   assert.match(page, /Expected yield/);
   assert.match(page, /per craft/);
-  assert.match(page, /per resource progress/);
+  assert.match(page, /per node progress/);
+  assert.match(page, /acquisitionRouteMetrics/);
+  assert.match(page, /about 1 .* per .*node progress/i);
   assert.doesNotMatch(page, /per gathering action/);
   assert.match(page, /Craft inputs/);
   assert.match(page, /Used for/);
@@ -159,6 +169,21 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /<details className="[^"]*craft-plan-catalog-diagnostics[^"]*"/);
   assert.match(page, /Unavailable stock sources/);
   assert.match(page, /CraftPlanManagerDialog/);
+});
+
+test("Craft Planning acquisition routes use accessible comparable cards", () => {
+  const chooser = readFileSync(new URL("../src/pages/CraftPlanningRouteChooser.tsx", import.meta.url), "utf8");
+
+  assert.match(chooser, /<fieldset className="craft-plan-route-options"/);
+  assert.match(chooser, /<legend>Choose acquisition route<\/legend>/);
+  assert.match(chooser, /type="radio"/);
+  assert.match(chooser, /checked=\{selected\}/);
+  assert.match(chooser, /disabled=\{!canManage \|\| pendingRecipeId !== null/);
+  assert.match(chooser, /aria-busy=\{pending\}/);
+  assert.match(chooser, /acquisitionRouteLabel/);
+  assert.match(chooser, /acquisitionRouteMetrics/);
+  assert.match(chooser, /No additional nodes needed/);
+  assert.match(chooser, /Yield calculation unavailable/);
 });
 
 test("Craft Planning keeps the preferred fishing route browser-local", () => {
@@ -335,7 +360,7 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
-  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?config\.gatheredItemKeys,[\s\S]*?requireValidatedProbabilities: true/);
+  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?64,[\s\S]*?\[\],[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`\)/);
@@ -385,9 +410,10 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const presentation = readFileSync(new URL("../src/pages/craftPlanningRoutePresentation.mjs", import.meta.url), "utf8");
 
   assert.match(page, /probabilityStatus\s*===\s*["']unavailable["']/);
   assert.match(page, /Validated output rate unavailable/);
   assert.match(page, /route is known, but required completions and inputs cannot be calculated/i);
-  assert.match(page, /isTransportRoute[\s\S]*?Logistics/);
+  assert.match(presentation, /isTransportRoute[\s\S]*?Logistics/);
 });

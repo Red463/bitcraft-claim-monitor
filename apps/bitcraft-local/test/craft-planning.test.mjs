@@ -474,6 +474,35 @@ test("normalizeCraftPlanConfig validates, deduplicates, and sorts gathered item 
   assert.deepEqual(normalizeCraftPlanConfig({}).gatheredItemKeys, []);
 });
 
+test("computeCraftPlan ignores legacy gathered overrides and follows the selected route", () => {
+  const key = recipeKey("items", "600");
+  const detailsByKey = new Map([[key, {
+    item: { id: "600", itemType: 0, name: "Rough Stone Carvings" },
+    craftingRecipes: [{
+      id: "carve-stone",
+      name: "Carve Rough Stone Carvings",
+      buildingName: "Scholar Station",
+      actionsRequired: 4,
+      craftedItemStacks: [{ item_id: "600", item_type: "item", quantity: 2 }],
+      consumedItemStacks: [{ item_id: "601", item_type: "item", quantity: 3 }],
+      consumedItems: [{ id: "601", itemType: 0, name: "Rough Stone" }],
+    }],
+  }]]);
+  const plan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "600", kind: "items", itemType: 0, name: "Rough Stone Carvings", quantity: 5 }],
+      gatheredItemKeys: [key],
+      routeOverrides: { [key]: "carve-stone" },
+    }),
+    detailsByKey,
+  });
+
+  assert.equal(plan.steps[0].selectedRecipeId, "carve-stone");
+  assert.equal(plan.materials.find((item) => item.key === key)?.isGatheredOverride, false);
+  assert.equal(plan.materials.find((item) => item.key === key)?.sourceRoutes.length, 1);
+});
+
 test("computeCraftPlan counts player bank sources as confirmed stock", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -1517,7 +1546,7 @@ test("computeCraftPlan does not automatically use an unpack route when it is the
   assert.equal(overridePlan.steps[0]?.selectedRecipeId, "unpack-berry");
 });
 
-test("computeCraftPlan keeps downstream consumers but stops producer expansion at gathered items", () => {
+test("computeCraftPlan follows selected producer routes despite legacy gathered keys", () => {
   const plannedPack = { id: "500", kind: "cargo", itemType: 1, name: "Scholar Supply Pack", quantity: 1 };
   const carvings = { id: "600", kind: "items", itemType: 0, name: "Rough Stone Carvings", tier: 1 };
   const misleadingPack = { id: "601", kind: "cargo", itemType: 1, name: "Stone Carvings Package", tier: 1 };
@@ -1561,14 +1590,14 @@ test("computeCraftPlan keeps downstream consumers but stops producer expansion a
   });
   const carvingMaterial = plan.materials.find((item) => item.key === recipeKey("items", "600"));
 
-  assert.deepEqual(plan.steps.map((step) => step.selectedRecipeId), ["craft-scholar-pack"]);
+  assert.deepEqual(plan.steps.map((step) => step.selectedRecipeId), ["unpack-carvings", "craft-scholar-pack"]);
   assert.equal(carvingMaterial.required, 5);
   assert.equal(carvingMaterial.available, 2);
   assert.equal(carvingMaterial.missing, 3);
-  assert.equal(carvingMaterial.isGatheredOverride, true);
-  assert.deepEqual(carvingMaterial.sourceRoutes, []);
+  assert.equal(carvingMaterial.isGatheredOverride, false);
+  assert.equal(carvingMaterial.sourceRoutes[0].selectedRecipeId, "unpack-carvings");
   assert.equal(carvingMaterial.recipeUsages[0].output.name, "Scholar Supply Pack");
-  assert.equal(plan.materials.some((item) => item.key === recipeKey("cargo", "601")), false);
+  assert.equal(plan.materials.some((item) => item.key === recipeKey("cargo", "601")), true);
   assert.equal(plan.config.routeOverrides[recipeKey("items", "600")], "unpack-carvings");
   assert.equal(plan.config.multipliers[recipeKey("items", "600")].multiplier, 1.5);
 });
@@ -1595,7 +1624,7 @@ test("computeCraftPlan retains independently targeted packages when an input is 
   assert.equal(plan.materials.some((item) => item.key === packageKey), true);
 });
 
-test("computeCraftPlan restores retained routes after a gathered override is removed", () => {
+test("legacy gathered overrides do not change retained route resolution", () => {
   const key = recipeKey("items", "600");
   const detailsByKey = new Map([[key, {
     item: { id: "600", itemType: 0, name: "Rough Stone Carvings" },
@@ -1616,12 +1645,13 @@ test("computeCraftPlan restores retained routes after a gathered override is rem
   const gathered = computeCraftPlan({ config: normalizeCraftPlanConfig({ ...shared, gatheredItemKeys: [key] }), detailsByKey });
   const restored = computeCraftPlan({ config: normalizeCraftPlanConfig({ ...shared, gatheredItemKeys: [] }), detailsByKey });
 
-  assert.equal(gathered.steps.length, 0);
+  assert.equal(gathered.steps[0].selectedRecipeId, "unpack-carvings");
   assert.equal(restored.steps[0].selectedRecipeId, "unpack-carvings");
+  assert.equal(gathered.materials.some((item) => item.key === recipeKey("cargo", "601")), true);
   assert.equal(restored.materials.some((item) => item.key === recipeKey("cargo", "601")), true);
 });
 
-test("computeCraftPlan does not reintroduce personal fishing routes for gathered fish oil", () => {
+test("legacy gathered overrides do not suppress personal fishing routes", () => {
   const key = recipeKey("items", "1900");
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({
@@ -1634,7 +1664,7 @@ test("computeCraftPlan does not reintroduce personal fishing routes for gathered
   const tier = plan.personalViews.fishing.tiers[0];
 
   assert.equal(tier.remainingOil, 10);
-  assert.equal(Object.values(tier.routes).some((route) => route.available), false);
+  assert.equal(Object.values(tier.routes).some((route) => route.available), true);
 });
 
 test("computeCraftPlan stops cyclic production routes at the nearest source item", () => {
@@ -1971,6 +2001,8 @@ test("computeCraftPlan exposes source locations and recipe alternatives for mate
   assert.equal(oceanFish.recipeUsages[0].selectedRecipeId, "ocean-route");
   assert.deepEqual(oceanFish.recipeUsages[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
   assert.equal(oceanFish.recipeUsages[0].alternatives[0].inputs[0].quantityPerCraft, 3);
+  assert.equal(oceanFish.recipeUsages[0].alternatives[0].routeType, "craft");
+  assert.equal(oceanFish.recipeUsages[0].alternatives[0].actionsRequired, 1);
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => [recipe.id, recipe.label]), [["ocean-route", "Ocean Fish Oil"], ["lake-route", "Lake Fish Oil"]]);
 });
 
@@ -2581,7 +2613,7 @@ test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from norm
   assert.equal(berry?.missing, 9);
 });
 
-test("collectLocalCatalogCraftPlanDetails stops below gathered catalog items", (t) => {
+test("collectLocalCatalogCraftPlanDetails ignores legacy gathered keys", (t) => {
   const { repository } = createCatalogFixture(t);
   upsertCatalogDetails(repository, [
     {
@@ -2608,14 +2640,14 @@ test("collectLocalCatalogCraftPlanDetails stops below gathered catalog items", (
   const result = collectLocalCatalogCraftPlanDetails(
     repository,
     [{ id: "700", kind: "items", itemType: 0, name: "Scholar Pack", quantity: 1 }],
-    {},
+    { [recipeKey("items", "600")]: "unpack-carvings" },
     64,
     [recipeKey("items", "600")],
   );
 
   assert.equal(result.detailsByKey.has(recipeKey("items", "700")), true);
   assert.equal(result.detailsByKey.has(recipeKey("items", "600")), true);
-  assert.equal(result.detailsByKey.has(recipeKey("cargo", "601")), false);
+  assert.equal(result.detailsByKey.has(recipeKey("cargo", "601")), true);
   assert.deepEqual(result.warnings, []);
 });
 
@@ -2960,6 +2992,18 @@ test("collectLocalCatalogCraftPlanDetails treats recipe-less Sand and Clay Outpu
   assert.equal(route?.recipeName, "Gather from Sand or Clay");
   assert.deepEqual(route?.gatheringSources.map((source) => source.label), ["Sand", "Clay"]);
   assert.equal(route?.gatheringSources.every((source) => source.expectedYield === 0.02), true);
+  assert.deepEqual(route?.alternatives.map((alternative) => [
+    alternative.id,
+    alternative.gatheringSource?.label,
+    alternative.routeType,
+    alternative.expectedPerProgress,
+    alternative.expectedPerResource,
+    alternative.resourceHealth,
+    alternative.actionsRequired,
+  ]), [
+    ["possibility:gathering-output:items:5001:items:3001", "Clay", "gathering-byproduct", 0.02, null, null, 1],
+    ["possibility:gathering-output:items:5002:items:3001", "Sand", "gathering-byproduct", 0.02, null, null, 1],
+  ]);
   assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
 });
 

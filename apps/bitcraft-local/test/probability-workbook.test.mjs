@@ -71,6 +71,10 @@ test("probability workbook contains the player guide, complete data sheets, form
   assert.equal(workbook.getWorksheet("Raw Recipe Outputs").autoFilter.toString(), "A3:K8");
   assert.equal(workbook.getWorksheet("Raw Recipe Outputs").getCell("H8").value, 0.0625);
   assert.equal(workbook.getWorksheet("Raw Recipe Outputs").getCell("K4").value, fixture.snapshot.sourceUrl);
+  assert.equal(workbook.getWorksheet("How to Read").getCell("A5").value, "Full node");
+  assert.match(String(workbook.getWorksheet("How to Read").getCell("B5").value), /full node/i);
+  assert.ok(workbook.getWorksheet("All Items").getRow(3).values.includes("Best expected / full node"));
+  assert.ok(workbook.getWorksheet("Gathering Routes").getRow(3).values.includes("Expected / full node"));
   assert.match(workbook.getWorksheet("How to Read").getColumn(2).values.join(" "), /prospecting exhaustion is unknown/i);
   assert.doesNotMatch(buffer.toString("latin1"), /settlement stock|discord token|member inventory/i);
 });
