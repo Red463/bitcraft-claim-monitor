@@ -15,6 +15,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 - Improved the Craft Planning item-detail loading state while keeping saved stock, routes, and usage visible.
 - Restyled the item-detail close control to match the surrounding modal.
+- Replaced the generic page-loading panel with a structured skeleton that names the page being opened.
+- Clarified processing-route choices with their actual source materials and removed internal recipe placeholders from player-facing labels.
+
+### Fixed
+
+- Prevented route and safety-buffer confirmations from appearing in a different item's detail panel.
 
 ## [0.40.1-beta.3] - 2026-07-21
 
