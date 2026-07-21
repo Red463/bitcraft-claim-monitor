@@ -32,6 +32,20 @@ test("Craft Planning labels estimated active output as material-planning coverag
   assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
+test("Craft Planning exposes a public probability workbook download with explicit gathering units", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(server, /\/api\/local\/catalog\/probabilities\.xlsx/);
+  assert.match(server, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
+  assert.match(server, /getProbabilityWorkbookData/);
+  assert.match(server, /Probability catalogue is not ready/);
+  assert.match(page, /Download probabilities/);
+  assert.match(page, /per resource progress/);
+  assert.match(page, /Expected per full resource/);
+  assert.doesNotMatch(page, /per gathering action/);
+});
+
 test("Craft Planning makes the distinct-material shortage count explicit", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
 
@@ -111,7 +125,8 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /Guaranteed output:/);
   assert.match(page, /Expected yield/);
   assert.match(page, /per craft/);
-  assert.match(page, /per gathering action/);
+  assert.match(page, /per resource progress/);
+  assert.doesNotMatch(page, /per gathering action/);
   assert.match(page, /Craft inputs/);
   assert.match(page, /Used for/);
   assert.match(page, /Show \{usage\.entries\.length\} recipe demands/);
@@ -311,15 +326,16 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(server, /GAME_CATALOG_NORMALIZATION_VERSION/);
   assert.match(server, /catalogRefreshShouldResume\(previousRun, storedNormalizationVersion\)/);
   assert.match(server, /game_catalog_normalization_version/);
-  assert.match(server, /fetchBitjita\("\/resources", \{ cache: false \}\)/);
-  assert.match(server, /normalizeGameResourceEffortCandidates\(resourcesPayload\)/);
+  assert.match(server, /fetchGameDataProbabilitySnapshot\(\{/);
+  assert.match(server, /replaceProbabilitySnapshot\(probabilitySource\)/);
+  assert.match(server, /listProbabilityEffortCandidates\(\)/);
   assert.match(server, /replaceEffortWeights\(\s*effortCandidates,\s*CRAFT_PLAN_EFFORT_MODEL_VERSION/);
   assert.match(server, /game_catalog_effort_model_version/);
   assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
-  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\(gameCatalogRepository, catalogTargets, config\.routeOverrides, 64, config\.gatheredItemKeys\)/);
+  assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?config\.gatheredItemKeys,[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`\)/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`\)/);

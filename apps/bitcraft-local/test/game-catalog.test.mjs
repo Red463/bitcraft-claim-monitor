@@ -425,7 +425,7 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 6);
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 7);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);

@@ -515,9 +515,12 @@
 .craft-plan-need-cell.is-blocked:focus-visible { background: rgba(239, 100, 97, 0.16); outline-color: rgba(239, 100, 97, 0.72); }
 @media (max-width: 760px) { .craft-plan-needs-header { align-items: stretch; } .craft-plan-overall-progress { min-width: 0; grid-template-columns: auto minmax(100px, 1fr); } }
 .craft-plan-chance-summary { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid rgba(139, 159, 184, 0.16); }
+.craft-plan-resource-yield { margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+.craft-plan-resource-yield strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .craft-plan-action-summary { display: grid; gap: 6px; }
-.craft-plan-action-summary > span { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 0.84rem; }
+.craft-plan-action-summary > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; color: var(--muted); font-size: 0.84rem; }
 .craft-plan-action-summary strong { color: var(--text); text-align: right; }
+.craft-plan-action-summary small { grid-column: 2; color: var(--muted); font-size: 0.72rem; text-align: right; }
 .craft-plan-producer-requirements { display: grid; gap: 7px; }
 .craft-plan-producer-requirements > small { color: var(--muted); font-weight: 700; }
 .craft-plan-producer-requirements > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; background: rgba(101, 183, 250, 0.09); }

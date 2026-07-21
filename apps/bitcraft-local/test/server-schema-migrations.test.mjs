@@ -39,6 +39,11 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
     { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
     { table: "game_catalog_recipes", column: "activity_kind", definition: "TEXT NOT NULL DEFAULT 'craft' CHECK (activity_kind IN ('craft', 'gathering'))" },
+    { table: "game_catalog_entities", column: "item_list_id", definition: "TEXT" },
+    { table: "game_catalog_recipes", column: "resource_id", definition: "TEXT" },
+    { table: "game_catalog_recipe_outputs", column: "occurrence_rate", definition: "REAL NOT NULL DEFAULT 1" },
+    { table: "game_catalog_recipe_outputs", column: "yield_basis", definition: "TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress'))" },
+    { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
 });
 
@@ -69,11 +74,53 @@ test("guaranteed item-list quantity migrates an existing catalog additively", ()
   db.close();
 });
 
+test("probability catalogue columns migrate existing recipe and item-list rows without data loss", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE game_catalog_entities (catalog_key TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE game_catalog_recipes (recipe_key TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE game_catalog_recipe_outputs (
+      recipe_key TEXT NOT NULL,
+      output_key TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      PRIMARY KEY (recipe_key, output_key)
+    );
+    CREATE TABLE game_catalog_item_list_possibility_outputs (
+      item_list_id TEXT NOT NULL,
+      possibility_index INTEGER NOT NULL,
+      output_index INTEGER NOT NULL,
+      output_key TEXT NOT NULL,
+      PRIMARY KEY (item_list_id, possibility_index, output_index)
+    );
+    INSERT INTO game_catalog_entities VALUES ('items:1', 'Existing Item');
+    INSERT INTO game_catalog_recipes VALUES ('recipe:1', 'Existing Recipe');
+    INSERT INTO game_catalog_recipe_outputs VALUES ('recipe:1', 'items:1', 2);
+    INSERT INTO game_catalog_item_list_possibility_outputs VALUES ('10', 0, 0, 'items:1');
+  `);
+
+  applyAdditiveColumnMigrations(db, [
+    { table: "game_catalog_entities", column: "item_list_id", definition: "TEXT" },
+    { table: "game_catalog_recipes", column: "resource_id", definition: "TEXT" },
+    { table: "game_catalog_recipe_outputs", column: "occurrence_rate", definition: "REAL NOT NULL DEFAULT 1" },
+    { table: "game_catalog_recipe_outputs", column: "yield_basis", definition: "TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress'))" },
+    { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
+  ]);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT output_key, quantity, occurrence_rate, yield_basis FROM game_catalog_recipe_outputs").get() },
+    { output_key: "items:1", quantity: 2, occurrence_rate: 1, yield_basis: "per_craft" },
+  );
+  assert.equal(db.prepare("SELECT name FROM game_catalog_entities WHERE catalog_key = 'items:1'").get().name, "Existing Item");
+  assert.equal(db.prepare("SELECT output_key FROM game_catalog_item_list_possibility_outputs").get().output_key, "items:1");
+  db.close();
+});
+
 test("schemaIndexStatements preserves release-sensitive unique indexes", () => {
   assert.deepEqual(schemaIndexStatements, [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_source ON activity_events (claim_id, event_type, source_key) WHERE source_key IS NOT NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
+    "CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_item_list ON game_catalog_entities (item_list_id, catalog_key);",
   ]);
 });
 

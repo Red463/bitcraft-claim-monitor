@@ -31,6 +31,8 @@ import {
   catalogRefreshShouldResume,
   createGameCatalogRepository,
 } from "./src/server/gameCatalog.mjs";
+import { fetchGameDataProbabilitySnapshot } from "./src/server/gameDataProbabilitySource.mjs";
+import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
 import { classifyCatalogRefreshError, parseRetryAfterMs } from "./src/server/catalogRefreshRecovery.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
@@ -46,8 +48,6 @@ import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
   calculateCraftPlanEffortProgress,
   compactCraftPlanEffortInput,
-  craftingEffortCandidate,
-  normalizeGameResourceEffortCandidates,
   unavailableCraftPlanEffortProgress,
 } from "./src/server/craftPlanEffortProgress.mjs";
 import { createCraftPlanEffortBaselineCache, craftPlanEffortBaselineKey } from "./src/server/craftPlanEffortCache.mjs";
@@ -555,6 +555,7 @@ function gameCatalogListTarget(kind, row = {}) {
     tier: row.tier ?? null,
     rarityStr: row.rarityStr ?? row.rarity ?? null,
     iconAssetName: row.iconAssetName ?? null,
+    itemListId: row.itemListId ?? row.item_list_id ?? null,
     catalogRow: row,
   };
 }
@@ -610,7 +611,7 @@ async function fetchAndStoreGameCatalogDetail(target) {
   const payload = await fetchBitjita(`/${endpointKind}/${encodeURIComponent(target.id)}`, { cache: false });
   const stored = gameCatalogRepository.upsertDetail(payload, {
     updatedAt: new Date().toISOString(),
-    fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName },
+    fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName, itemListId: target.itemListId },
   });
   upsertRecipeCatalogDetail(target, payload, "game_catalog_refresh");
   return stored;
@@ -890,13 +891,22 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
 
   gameCatalogRepository.deleteOrphanRecipes();
   const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
-  const resourcesPayload = await fetchBitjita("/resources", { cache: false });
-  const effortCandidates = [
-    ...gameCatalogRepository.listCraftingEffortCandidates()
-      .map(craftingEffortCandidate)
-      .filter(Boolean),
-    ...normalizeGameResourceEffortCandidates(resourcesPayload),
+  updateScheduledJobProgress(jobKey, { stage: "probability_snapshot" });
+  const probabilitySource = await fetchGameDataProbabilitySnapshot({
+    itemListsUrl: process.env.GAME_DATA_ITEM_LISTS_URL,
+    resourcesUrl: process.env.GAME_DATA_RESOURCES_URL,
+    sourceUrl: process.env.GAME_DATA_SOURCE_URL,
+  });
+  probabilitySource.sources = [
+    {
+      sourceKind: "bitjita_catalog",
+      sourceUrl: `${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api`,
+      sourceRevision: `catalog-normalization-${GAME_CATALOG_NORMALIZATION_VERSION}`,
+    },
+    ...(probabilitySource.sources ?? []),
   ];
+  const probabilitySnapshot = gameCatalogRepository.replaceProbabilitySnapshot(probabilitySource);
+  const effortCandidates = gameCatalogRepository.listProbabilityEffortCandidates();
   const effortUpdatedAt = new Date().toISOString();
   const completedAt = new Date().toISOString();
   const effortWeightCount = gameCatalogRepository.replaceEffortWeights(
@@ -930,6 +940,8 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
   craftPlanEffortBaselineCache.clear();
   craftPlanResponseGeneration += 1;
   craftPlanResponseCache.clear();
+  probabilityWorkbookCache = null;
+  probabilityWorkbookInflight = null;
 
   return {
     complete: true,
@@ -946,6 +958,7 @@ async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
     effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
     effortWeightCount,
     effortUpdatedAt,
+    probabilitySnapshot,
     ...legacyRefresh,
   };
 }
@@ -1852,6 +1865,32 @@ const craftPlanResponseCache = new Map();
 const craftPlanResponseInflight = new Map();
 const craftPlanEffortBaselineCache = createCraftPlanEffortBaselineCache();
 let craftPlanResponseGeneration = 0;
+let probabilityWorkbookCache = null;
+let probabilityWorkbookInflight = null;
+
+async function probabilityWorkbookBuffer() {
+  const data = gameCatalogRepository.getProbabilityWorkbookData();
+  if (!data?.snapshot) {
+    const error = new Error("Probability catalogue is not ready. Complete a validated catalogue refresh first.");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const revision = `${data.snapshot.sourceRevision ?? "unknown"}:${data.snapshot.updatedAt ?? "unknown"}`;
+  if (probabilityWorkbookCache?.revision === revision) return probabilityWorkbookCache.buffer;
+  if (probabilityWorkbookInflight?.revision === revision) return probabilityWorkbookInflight.promise;
+
+  const promise = buildProbabilityWorkbookBuffer(data)
+    .then((buffer) => {
+      probabilityWorkbookCache = { revision, buffer };
+      return buffer;
+    })
+    .finally(() => {
+      if (probabilityWorkbookInflight?.revision === revision) probabilityWorkbookInflight = null;
+    });
+  probabilityWorkbookInflight = { revision, promise };
+  return promise;
+}
 
 function storedCraftPlanConfig() {
   const row = statements.getCraftPlan?.get(CRAFT_PLAN_KEY);
@@ -2333,7 +2372,14 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     // Keep prior baselines and observed completions when BitJita building discovery is unavailable.
   }
   const catalogTargets = craftPlanCatalogTargets(config);
-  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(gameCatalogRepository, catalogTargets, config.routeOverrides, 64, config.gatheredItemKeys);
+  const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(
+    gameCatalogRepository,
+    catalogTargets,
+    config.routeOverrides,
+    64,
+    config.gatheredItemKeys,
+    { requireValidatedProbabilities: true },
+  );
   const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
@@ -9190,6 +9236,26 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
+    if (req.method === "GET" && url.pathname === "/api/local/catalog/probabilities.xlsx") {
+      if (!rateLimit(req, res, "probability-workbook", RATE_LIMITS.expensiveLocal)) return;
+      try {
+        return sendBinary(
+          res,
+          200,
+          await probabilityWorkbookBuffer(),
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          {
+            "cache-control": "public, max-age=300",
+            "content-disposition": 'attachment; filename="bitcraft-item-probabilities.xlsx"',
+          },
+        );
+      } catch (error) {
+        const statusCode = error?.statusCode === 503 ? 503 : 500;
+        return send(res, statusCode, {
+          error: error instanceof Error ? error.message : "Unable to build the probability workbook",
+        });
+      }
+    }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan/detail") {
       try {
         const keys = String(url.searchParams.get("keys") ?? "").split(",").map((key) => key.trim()).filter(Boolean).slice(0, 20);

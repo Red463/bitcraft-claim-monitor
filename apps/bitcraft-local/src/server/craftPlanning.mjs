@@ -388,16 +388,39 @@ function routeTypeForItemListOutput(recipe, output) {
   return guaranteedYield + 1e-9 < expectedYield ? `${activityKind}-byproduct` : activityKind;
 }
 
-function routeMetadata(recipe) {
+function routeMetadata(recipe, target = null) {
   const gathering = routeIsGathering(recipe);
   const gatheringSkill = recipe?.gatheringSkill ?? recipeSkillName(recipe);
+  const targetOutput = target
+    ? recipeOutputs(recipe).find((output) => stackMatches(output, target))
+    : null;
+  const expectedYield = recipe?.expectedYield == null
+    ? Math.max(0, toNumber(targetOutput?.quantity)) || null
+    : toNumber(recipe.expectedYield);
+  const yieldBasis = gathering ? "per_progress" : "per_craft";
+  const resourceHealth = gathering ? Math.max(0, toNumber(recipe?.resourceHealth)) || null : null;
+  const completionYield = target && Array.isArray(recipe?.resourceCompletionOutputs)
+    ? recipe.resourceCompletionOutputs
+      .filter((output) => output.outputKey === recipeKey(target.kind, target.id))
+      .reduce((sum, output) => sum + (Math.max(0, toNumber(output.quantity)) * Math.max(0, toNumber(output.occurrenceRate, 1))), 0)
+    : 0;
+  const expectedPerProgress = gathering ? Math.max(0, toNumber(recipe?.expectedPerProgress ?? expectedYield)) : null;
+  const expectedPerResource = gathering && resourceHealth
+    ? Math.max(0, toNumber(recipe?.expectedPerResource)) || ((expectedPerProgress * resourceHealth) + completionYield)
+    : null;
   return {
     routeType: recipe?.routeType ?? recipeActivityKind(recipe),
     gatheringSkill: gathering ? gatheringSkill || null : null,
     producer: recipe?.producer ?? null,
     producerRecipe: recipe?.producerRecipe ?? null,
-    expectedYield: recipe?.expectedYield == null ? null : toNumber(recipe.expectedYield),
-    isProbabilistic: recipe?.isProbabilistic === true,
+    expectedYield,
+    yieldBasis,
+    expectedPerCraft: gathering ? null : expectedYield,
+    expectedPerProgress,
+    expectedPerResource,
+    resourceHealth,
+    probabilityStatus: recipe?.probabilityStatus ?? (recipe?.isProbabilistic === true ? "expected" : "guaranteed"),
+    isProbabilistic: recipe?.isProbabilistic === true || recipe?.probabilityStatus === "expected",
     dropChance: recipe?.dropChance == null ? null : toNumber(recipe.dropChance),
     dropQuantity: recipe?.dropQuantity == null ? null : toNumber(recipe.dropQuantity),
     guaranteedYield: recipe?.guaranteedYield == null ? null : toNumber(recipe.guaranteedYield),
@@ -467,7 +490,9 @@ function possibilityExpectedOutputs(detail) {
     const quantity = Math.max(0, toNumber(possibility.quantity));
     const rawChance = possibility.chance == null ? 1 : toNumber(possibility.chance);
     const chance = Math.max(0, Math.min(1, rawChance > 1 ? rawChance / 100 : rawChance));
-    const expectedYield = quantity * Math.max(0, Math.min(1, chance || 0));
+    const expectedYield = possibility?.quantityIsExpected === true
+      ? quantity
+      : quantity * Math.max(0, Math.min(1, chance || 0));
     if (expectedYield <= 0) continue;
     const key = recipeKey(kind, id);
     const current = outputs.get(key) ?? {
@@ -492,7 +517,7 @@ function possibilityExpectedOutputs(detail) {
     current.explicitGuaranteedQuantity += Math.max(0, toNumber(explicitGuarantee));
     current.minimumQuantity = Math.min(current.minimumQuantity, quantity);
     current.totalChance += chance;
-    current.weightedDropQuantity += quantity * chance;
+    current.weightedDropQuantity += Math.max(0, toNumber(possibility?.dropQuantity ?? quantity)) * chance;
     outputs.set(key, current);
   }
   return [...outputs.values()].map(({ explicitGuaranteedQuantity, hasExplicitGuarantee, minimumQuantity, totalChance, weightedDropQuantity, ...output }) => ({
@@ -517,16 +542,30 @@ function possibilityRecipesForTarget(target, detailsByKey) {
     for (const recipe of directRecipesForTarget(detail, outputTarget)) {
       if (recipeLooksTransportRoute(recipe)) continue;
       const output = recipeOutputs(recipe).find((stackItem) => stackMatches(stackItem, outputTarget));
-      const outputPerCraft = Math.max(1, toNumber(output?.quantity ?? recipe.outputQuantity) || 1);
+      const outputPerCraft = Math.max(0.0001, toNumber(output?.quantity ?? recipe.outputQuantity) || 1);
+      const producerGuaranteed = Math.max(0, toNumber(output?.guaranteedQuantity ?? outputPerCraft));
       const craftedOutputs = expectedOutputs.map((expectedOutput) => ({
         ...expectedOutput,
         quantity: expectedOutput.quantity * outputPerCraft,
-        guaranteedQuantity: expectedOutput.guaranteedQuantity * outputPerCraft,
+        guaranteedQuantity: expectedOutput.guaranteedQuantity * producerGuaranteed,
       }));
       const craftedOutput = craftedOutputs.find((candidate) => candidate.id === String(target.id) && candidate.kind === target.kind);
       const routeType = routeTypeForItemListOutput(recipe, craftedOutput);
       const gathering = routeType === "gathering" || routeType === "gathering-byproduct";
       const gatheringSkill = recipeSkillName(recipe);
+      const resourceHealth = Math.max(0, toNumber(recipe?.resourceHealth)) || null;
+      const completionYield = (recipe?.resourceCompletionOutputs ?? [])
+        .filter((output) => output.outputKey === recipeKey(target.kind, target.id))
+        .reduce((sum, output) => sum + (Math.max(0, toNumber(output.quantity)) * Math.max(0, toNumber(output.occurrenceRate, 1))), 0);
+      const expectedPerProgress = yieldQuantity * outputPerCraft;
+      const expectedPerResource = gathering && resourceHealth
+        ? (expectedPerProgress * resourceHealth) + completionYield
+        : null;
+      const effectiveExpectedYield = gathering && resourceHealth
+        ? expectedPerResource / resourceHealth
+        : expectedPerProgress;
+      const probabilistic = outputPerCraft !== producerGuaranteed
+        || (craftedOutput?.guaranteedQuantity ?? 0) + 1e-9 < (craftedOutput?.quantity ?? 0);
       recipes.push({
         ...recipe,
         id: `possibility:${recipeId(recipe)}:${recipeKey(target.kind, target.id)}`,
@@ -552,8 +591,12 @@ function possibilityRecipesForTarget(target, detailsByKey) {
           skillName: gatheringSkill || null,
         },
         isExpectedYield: true,
-        isProbabilistic: (craftedOutput?.guaranteedQuantity ?? 0) + 1e-9 < (craftedOutput?.quantity ?? 0),
-        expectedYield: yieldQuantity * outputPerCraft,
+        isProbabilistic: probabilistic,
+        probabilityStatus: probabilistic ? "expected" : "guaranteed",
+        expectedYield: effectiveExpectedYield,
+        expectedPerProgress,
+        expectedPerResource,
+        resourceHealth,
         dropChance: craftedOutput?.dropChance ?? null,
         dropQuantity: craftedOutput?.dropQuantity ?? null,
         guaranteedYield: craftedOutput?.guaranteedQuantity ?? 0,
@@ -696,7 +739,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides, gatheredIte
   return [{
     id: recipeId(selected),
     recipeName: gatheringSources.length > 1 ? `Gather from ${gatheringSources.map((source) => source.label).join(" or ")}` : recipeLabel(selected),
-    ...routeMetadata(selected),
+    ...routeMetadata(selected, normalizedTarget),
     output: normalizedTarget,
     inputs: recipeInputs(selected).map((input, index) => ({
       ...enrichDisplayFromDetails(stackDisplay(input, selected.consumedItems, index), detailsByKey),
@@ -708,7 +751,7 @@ function sourceRoutesForTarget(target, detailsByKey, routeOverrides, gatheredIte
     alternatives: visibleRecipes.map((alternative) => ({
       id: recipeId(alternative),
       label: recipeLabel(alternative),
-      ...routeMetadata(alternative),
+      ...routeMetadata(alternative, normalizedTarget),
       buildingName: alternative.buildingName ?? alternative.building_name ?? null,
       inputs: recipeInputs(alternative).map((input, index) => ({
         ...enrichDisplayFromDetails(stackDisplay(input, alternative.consumedItems, index), detailsByKey),
@@ -752,8 +795,9 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, gathered
     addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
     if (quantityToCraft <= 0 || !selected) return;
     const output = recipeOutputs(selected).find((stackItem) => stackMatches(stackItem, normalizedTarget));
-    const rawOutputPerCraft = toNumber(output?.quantity ?? selected.outputQuantity) || 1;
-    const outputPerCraft = String(selected.id ?? "").startsWith("possibility:") ? Math.max(0.0001, rawOutputPerCraft) : Math.max(1, rawOutputPerCraft);
+    const metadata = routeMetadata(selected, normalizedTarget);
+    const rawOutputPerCraft = toNumber(metadata.expectedYield ?? output?.quantity ?? selected.outputQuantity) || 1;
+    const outputPerCraft = Math.max(0.0001, rawOutputPerCraft);
     const unbufferedCraftCount = Math.ceil(quantityToCraft / outputPerCraft);
     const multiplier = selected.isProbabilistic === true ? multipliers[key]?.multiplier ?? 1 : 1;
     const craftCount = Math.ceil(quantityToCraft * multiplier / outputPerCraft);
@@ -807,19 +851,28 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, gathered
     steps.push({
       id: recipeId(selected),
       recipeName: String(selected.name ?? normalizedTarget.name),
-      ...routeMetadata(selected),
+      ...metadata,
       output: { ...normalizedTarget, quantity: craftCount * outputPerCraft },
       inputs,
       craftCount,
       unbufferedCraftCount,
       multiplier,
       outputPerCraft,
+      unbufferedExpectedEffort: metadata.yieldBasis === "per_progress"
+        ? unbufferedCraftCount
+        : unbufferedCraftCount * Math.max(1, toNumber(selected.actionsRequired)),
+      expectedEffort: metadata.yieldBasis === "per_progress"
+        ? craftCount
+        : craftCount * Math.max(1, toNumber(selected.actionsRequired)),
+      expectedResourceEquivalents: metadata.yieldBasis === "per_progress" && metadata.resourceHealth
+        ? craftCount / metadata.resourceHealth
+        : null,
       section,
       buildingName: selected.buildingName ?? null,
       alternatives: visibleRecipes.map((recipe) => ({
         id: recipeId(recipe),
         label: recipeLabel(recipe),
-        ...routeMetadata(recipe),
+        ...routeMetadata(recipe, normalizedTarget),
         buildingName: recipe.buildingName ?? recipe.building_name ?? null,
         inputs: recipeInputs(recipe).map((input, index) => ({
           ...enrichDisplayFromDetails(stackDisplay(input, recipe.consumedItems, index), detailsByKey),
@@ -883,10 +936,17 @@ function catalogPlannerRecipeName(repository, recipe) {
 
 function catalogStack(link = {}) {
   const kind = normalizeKind(link.kind);
+  const rawQuantity = toNumber(link.quantity);
+  const occurrenceRate = link.occurrenceRate == null ? 1 : Math.max(0, toNumber(link.occurrenceRate));
+  const expectedQuantity = rawQuantity * occurrenceRate;
   return {
     item_id: String(link.targetId ?? link.id ?? ""),
     item_type: kind === "cargo" ? "cargo" : "item",
-    quantity: toNumber(link.quantity),
+    quantity: expectedQuantity,
+    rawQuantity,
+    occurrenceRate,
+    yieldBasis: link.yieldBasis ?? "per_craft",
+    guaranteedQuantity: occurrenceRate === 1 ? rawQuantity : 0,
   };
 }
 
@@ -904,6 +964,10 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
   const inputDisplays = (recipe.inputs ?? []).map((input) => catalogLinkedDisplay(repository, input, warnings));
   const id = catalogRouteId(recipe);
   const name = catalogPlannerRecipeName(repository, recipe);
+  const resource = recipe.resourceId ? repository.getResource(recipe.resourceId) : null;
+  const resourceCompletionOutputs = recipe.resourceId ? repository.listResourceCompletionOutputs(recipe.resourceId) : [];
+  const gathering = recipe.activityKind === "gathering";
+  const probabilistic = outputs.some((output) => output.occurrenceRate !== 1);
   return {
     id,
     recipeKey: recipe.recipeKey,
@@ -915,6 +979,13 @@ function catalogPlannerRecipe(repository, recipe, warnings) {
     activityKind: recipe.activityKind === "gathering" ? "gathering" : "craft",
     isPassive: recipe.isPassive === true,
     isTransportRoute: recipe.isTransportRoute === true,
+    actionsRequired: Math.max(0, toNumber(recipe.actionCount)),
+    resourceId: recipe.resourceId ?? null,
+    resourceHealth: resource?.maxHealth ?? null,
+    resourceCompletionOutputs,
+    gatheringSource: gathering && resource ? { tag: resource.tag, label: resource.name, skill: recipe.skillName ?? null } : null,
+    isProbabilistic: probabilistic,
+    probabilityStatus: probabilistic ? "expected" : "guaranteed",
     craftedItemStacks: outputs,
     craftedItems: outputDisplays,
     consumedItemStacks: inputs,
@@ -933,7 +1004,9 @@ function catalogByproductPossibility(repository, row, warnings) {
     itemType: targetItem.itemType,
     targetItem,
     quantity: toNumber(row.quantity),
+    quantityIsExpected: true,
     chance: row.chance == null ? 1 : toNumber(row.chance),
+    dropQuantity: toNumber(row.chance) > 0 ? toNumber(row.quantity) / toNumber(row.chance) : 0,
     guaranteedQuantity: Math.max(0, toNumber(row.guaranteedQuantity)),
     isCargo: targetItem.kind === "cargo",
   };
@@ -961,29 +1034,90 @@ function catalogGatheringOutputRecipe(row, producerTarget, source) {
   };
 }
 
+function catalogResourceCompletionRecipe(recipe, target) {
+  const resourceHealth = Math.max(0, toNumber(recipe?.resourceHealth));
+  const completionOutput = recipe?.completionOutput ?? {};
+  const expectedPerResource = Math.max(0, toNumber(completionOutput.quantity))
+    * Math.max(0, toNumber(completionOutput.occurrenceRate, 1));
+  if (!(resourceHealth > 0) || !(expectedPerResource > 0)) return null;
+  const expectedPerProgress = expectedPerResource / resourceHealth;
+  return {
+    id: `resource-completion:${catalogRouteId(recipe)}:${recipeKey(target.kind, target.id)}`,
+    recipeKey: recipe.recipeKey,
+    catalogRecipeKey: recipe.recipeKey,
+    name: `${recipe.resourceName ?? "Resource"} completion`,
+    skillName: recipe.skillName ?? null,
+    activityKind: "gathering",
+    gatheringSource: { label: recipe.resourceName ?? "Resource", skill: recipe.skillName ?? null },
+    actionsRequired: 1,
+    resourceId: recipe.resourceId ?? null,
+    resourceHealth,
+    expectedPerProgress,
+    expectedPerResource,
+    isProbabilistic: true,
+    probabilityStatus: "expected",
+    craftedItemStacks: [{
+      item_id: target.id,
+      item_type: target.kind === "cargo" ? "cargo" : "item",
+      quantity: expectedPerProgress,
+      rawQuantity: expectedPerResource,
+      occurrenceRate: 1,
+      yieldBasis: "per_progress",
+      guaranteedQuantity: 0,
+    }],
+    craftedItems: [target],
+    consumedItemStacks: [],
+    consumedItems: [],
+    levelRequirements: recipe.skillName ? [{ skill: { name: recipe.skillName }, level: 0 }] : [],
+  };
+}
+
 function localCatalogDetail(repository, key, fallbackTarget, byproductRows, warnings) {
   const { kind, id } = catalogKeyParts(key);
   const entity = repository.getEntity(key);
   const recipes = repository.listProducerRecipesForOutput(key);
-  if (!entity && recipes.length === 0 && byproductRows.length === 0) return null;
+  const resourceCompletionRecipes = typeof repository.listResourceCompletionRecipesForOutput === "function"
+    ? repository.listResourceCompletionRecipesForOutput(key)
+    : [];
+  if (!entity && recipes.length === 0 && byproductRows.length === 0 && resourceCompletionRecipes.length === 0) return null;
   if (!entity) warnings.add(`Local catalog identity is missing for ${key}; planner used an id-only fallback.`);
   const source = catalogEntityDisplay(entity, { ...fallbackTarget, id, kind });
+  const directRecipeKeys = new Set(recipes.map((recipe) => recipe.recipeKey));
+  const completionRecipes = resourceCompletionRecipes
+    .filter((recipe) => !directRecipeKeys.has(recipe.recipeKey))
+    .map((recipe) => catalogResourceCompletionRecipe(recipe, source))
+    .filter(Boolean);
   return {
     [kind === "cargo" ? "cargo" : "item"]: source,
-    craftingRecipes: recipes.map((recipe) => catalogPlannerRecipe(repository, recipe, warnings)),
+    craftingRecipes: [
+      ...recipes.map((recipe) => catalogPlannerRecipe(repository, recipe, warnings)),
+      ...completionRecipes,
+    ],
     extractionRecipes: [],
     recipesUsingItem: [],
     itemListPossibilities: byproductRows.map((row) => catalogByproductPossibility(repository, row, warnings)),
   };
 }
 
-export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOverrides = {}, maxDepth = 64, gatheredItemKeys = []) {
+export function collectLocalCatalogCraftPlanDetails(
+  repository,
+  targets,
+  routeOverrides = {},
+  maxDepth = 64,
+  gatheredItemKeys = [],
+  { requireValidatedProbabilities = false } = {},
+) {
   const detailsByKey = new Map();
   const warnings = new Set();
   const byproductsByProducerKey = new Map();
   const visiting = new Set();
   const completed = new Set();
   const gatheredKeys = new Set(gatheredItemKeys);
+  const probabilitySnapshotAvailable = Boolean(repository.getProbabilitySnapshot?.());
+  const probabilisticRoutesAvailable = !requireValidatedProbabilities || probabilitySnapshotAvailable;
+  if (!probabilisticRoutesAvailable) {
+    warnings.add("Validated probability snapshot unavailable; probabilistic item-list and occurrence-rate routes are disabled.");
+  }
 
   function addByproductProducer(row) {
     if (!row?.producerKey) return;
@@ -999,6 +1133,10 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
       return existing;
     }
     const detail = localCatalogDetail(repository, key, fallbackTarget, byproductsByProducerKey.get(key) ?? [], warnings);
+    if (detail && !probabilisticRoutesAvailable) {
+      detail.craftingRecipes = detail.craftingRecipes.filter((recipe) => recipe.isProbabilistic !== true);
+      detail.itemListPossibilities = [];
+    }
     if (detail) detailsByKey.set(key, detail);
     return detail;
   }
@@ -1018,7 +1156,7 @@ export function collectLocalCatalogCraftPlanDetails(repository, targets, routeOv
       return;
     }
 
-    const byproductProducers = repository.listByproductProducersForOutput(key);
+    const byproductProducers = probabilisticRoutesAvailable ? repository.listByproductProducersForOutput(key) : [];
     for (const row of byproductProducers) addByproductProducer(row);
     if (completed.has(key)) {
       setDetail(key, target);
