@@ -1468,7 +1468,7 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "packed-route"]);
 });
 
-test("computeCraftPlan uses an unpack route when it is the only valid option without recursing into the pack loop", () => {
+test("computeCraftPlan does not automatically use an unpack route when it is the only catalog option", () => {
   const berryDetail = {
     item: { id: "100", name: "Basic Berry", itemType: 0, tag: "Berry", tier: 1 },
     craftingRecipes: [{
@@ -1492,20 +1492,29 @@ test("computeCraftPlan uses an unpack route when it is the only valid option wit
     }],
   };
 
+  const detailsByKey = new Map([
+    [recipeKey("items", "100"), berryDetail],
+    [recipeKey("cargo", "200"), packageDetail],
+  ]);
   const plan = computeCraftPlan({
-    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 25, itemType: 0 }] }),
-    detailsByKey: new Map([
-      [recipeKey("items", "100"), berryDetail],
-      [recipeKey("cargo", "200"), packageDetail],
-    ]),
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 500, itemType: 0 }] }),
+    detailsByKey,
   });
 
-  assert.equal(plan.steps.length, 1);
-  assert.equal(plan.steps[0].selectedRecipeId, "unpack-berry");
-  assert.deepEqual(plan.steps[0].alternatives.map((route) => route.id), ["unpack-berry"]);
-  assert.equal(plan.materials.find((material) => material.name === "Basic Berry")?.required, 25);
-  assert.equal(plan.materials.find((material) => material.name === "Basic Berry Package")?.required, 1);
-  assert.equal(plan.steps.some((step) => step.selectedRecipeId === "pack-berry"), false);
+  assert.equal(plan.steps.length, 0);
+  assert.deepEqual(plan.materials.find((row) => row.id === "100")?.sourceRoutes, []);
+  assert.equal(plan.materials.some((row) => row.id === "200"), false);
+  assert.match(plan.warnings.join("\n"), /only transport routes.*items:100/i);
+
+  const overridePlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 500, itemType: 0 }],
+      routeOverrides: { [recipeKey("items", "100")]: "unpack-berry" },
+    }),
+    detailsByKey,
+  });
+  assert.equal(overridePlan.steps[0]?.selectedRecipeId, "unpack-berry");
 });
 
 test("computeCraftPlan keeps downstream consumers but stops producer expansion at gathered items", () => {
@@ -3084,6 +3093,7 @@ test("collectLocalCatalogCraftPlanDetails keeps transport routes available after
   const defaultPlan = computeCraftPlan({ config: baseConfig, detailsByKey });
   assert.equal(defaultPlan.steps[0].selectedRecipeId, "craft-route");
   assert.deepEqual(defaultPlan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "transport-route"]);
+  assert.equal(defaultPlan.steps[0].alternatives.find((recipe) => recipe.id === "transport-route")?.isTransportRoute, true);
 
   const overrideConfig = normalizeCraftPlanConfig({
     enabled: true,

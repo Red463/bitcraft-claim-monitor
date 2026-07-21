@@ -426,6 +426,7 @@ function routeMetadata(recipe, target = null) {
     expectedPerProgress,
     expectedPerResource,
     resourceHealth,
+    isTransportRoute: recipeLooksTransportRoute(recipe),
     probabilityStatus,
     isProbabilistic: recipe?.isProbabilistic === true || probabilityStatus === "expected" || probabilityUnavailable,
     dropChance: recipe?.dropChance == null ? null : toNumber(recipe.dropChance),
@@ -665,9 +666,7 @@ function selectedRecipeForTarget(recipes, overrideId, blockedKeys = []) {
     .some((input) => blocked.has(recipeKey(stackKind(input), stackId(input))));
   const overridden = recipes.find((recipe) => recipeMatchesOverride(recipe, overrideId));
   if (overridden && isValid(overridden)) return overridden;
-  return recipes.find((recipe) => !recipeLooksTransportRoute(recipe) && isValid(recipe))
-    ?? recipes.find((recipe) => recipeLooksTransportRoute(recipe) && isValid(recipe))
-    ?? null;
+  return recipes.find((recipe) => !recipeLooksTransportRoute(recipe) && isValid(recipe)) ?? null;
 }
 
 function mergeDetailTarget(detail, target) {
@@ -809,7 +808,13 @@ function buildRequirementMapPass(targets, detailsByKey, routeOverrides, gathered
     const recipes = recipesForTarget(detail, normalizedTarget, detailsByKey);
     const selected = selectedRecipeForTarget(recipes, routeOverrides[key], [...stack, key]);
     addRequired(required, normalizedTarget, quantity, sectionForMaterial(normalizedTarget, selected ?? parentRecipe));
-    if (quantityToCraft <= 0 || !selected) return;
+    if (quantityToCraft <= 0) return;
+    if (!selected) {
+      if (recipes.some(recipeLooksTransportRoute)) {
+        warnings.push(`Only transport routes are available for ${key}; no package conversion was selected automatically.`);
+      }
+      return;
+    }
     const metadata = routeMetadata(selected, normalizedTarget);
     if (metadata.probabilityStatus === "unavailable") {
       warnings.push(`Validated output rate unavailable for ${key}; producer route retained without quantity expansion.`);
