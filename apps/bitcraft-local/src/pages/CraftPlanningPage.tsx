@@ -231,7 +231,17 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           </div>
           <button className="icon-button" type="button" onClick={closeNeedDetail} aria-label="Close item details"><X size={18} /></button>
         </header>
-        {detailLoading ? <p className="craft-plan-detail-loading" role="status"><LoaderCircle size={16} className="spin" /> Loading current item details...</p> : null}
+        {detailLoading ? (
+          <div className="craft-plan-detail-loading" role="status">
+            <span className="craft-plan-detail-loading-icon" aria-hidden="true">
+              <LoaderCircle size={17} className="spin" />
+            </span>
+            <span>
+              <strong>Updating item details</strong>
+              <small>Showing saved planner data while current routes load.</small>
+            </span>
+          </div>
+        ) : null}
         {detailError ? <p className="alert error" role="alert">Item details could not be loaded: {detailError}</p> : null}
         <div className="craft-plan-need-detail-grid">
           <section className="form-card nested-card craft-plan-stock-card">
