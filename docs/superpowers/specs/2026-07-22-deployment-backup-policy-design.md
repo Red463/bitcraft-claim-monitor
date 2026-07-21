@@ -40,7 +40,7 @@ The deployment contract tests document this behavior. The marker is intentionall
 
 Add a root-owned `deploy/backup-bitcraft-monitor` script used by both the daily timer and the staged updater.
 
-The command accepts exactly one backup class: `daily`, `migration`, or `manual`. It also supports `--dry-run-prune` and `--apply-prune` for legacy cleanup. Paths remain fixed under `/var/backups/bitcraft-claim-monitor`; callers cannot supply arbitrary database or backup paths.
+The command accepts either one backup class (`daily`, `migration`, or `manual`) or one cleanup operation (`--dry-run-prune` or `--apply-prune`). Migration and manual backups additionally require `--revision <full-sha>`; daily backups reject a revision. Paths remain fixed under `/var/backups/bitcraft-claim-monitor`; callers cannot supply arbitrary database or backup paths.
 
 For a real backup, the script:
 
@@ -69,9 +69,9 @@ The command never treats a `.partial` file as a valid recovery point. Failed par
 
 Add `bitcraft-claim-monitor-backup.service` and `bitcraft-claim-monitor-backup.timer`.
 
-The timer runs daily at 03:30 Europe/London with a bounded randomized delay of fifteen minutes. Persistent timer behavior runs one missed daily backup after the VPS returns online. The service invokes the backup command with class `daily` and uses the same production database and backup directory.
+The timer runs daily using the systemd calendar expression `*-*-* 03:30:00 Europe/London`, with a bounded randomized delay of fifteen minutes. Persistent timer behavior runs one missed daily backup after the VPS returns online. The service invokes the backup command with class `daily` and uses the same production database and backup directory.
 
-The staged updater installs and enables the backup timer with the existing production units. It does not synchronously run a daily backup during deployment.
+The staged updater validates the candidate backup units during preparation but enables and starts the backup timer only after candidate web, worker, and public health checks succeed. Rollback to a release that predates the backup units remains supported. The updater does not synchronously run a daily backup during deployment.
 
 ## Deployment workflow
 
@@ -120,14 +120,17 @@ Before applying cleanup on production, the active deployment and backup locks mu
 
 The currently running legacy backup must finish or be terminated deliberately before installing the new scripts. Its deployment lock prevents a second updater from starting.
 
+The VPS currently executes `/usr/local/bin/update-bitcraft-monitor` from the previous release. Before the first workflow run, an administrator must therefore install the new updater and backup helper from the exact merged commit after verifying that commit is reachable from `origin/main`. The existing updater is copied to a timestamped root-only recovery file before replacement. This one-time bootstrap changes deployment tooling only; it does not switch the active application release or touch SQLite.
+
 After the lock is free:
 
 1. Validate the newest completed legacy backup with `PRAGMA quick_check`.
-2. Run legacy cleanup in dry-run mode and record the exact candidate list and recoverable bytes.
-3. Apply cleanup only after reviewing that list.
-4. Deploy the new release with `force_database_backup=false`; because the active release has no schema marker, the first rollout creates one migration backup.
-5. Confirm the daily backup timer is active and scheduled.
-6. Confirm the worker and collector timer returned to their prior states.
+2. Bootstrap the new updater and backup helper from the exact merged commit, retaining the previous updater as a recovery file.
+3. Run legacy cleanup in dry-run mode and record the exact candidate list and recoverable bytes.
+4. Apply cleanup only after reviewing that list.
+5. Deploy the new release with `force_database_backup=false`; because the active release has no schema marker, the first rollout creates one migration backup.
+6. Confirm the daily backup timer is active and scheduled.
+7. Confirm the worker and collector timer returned to their prior states.
 
 ## Testing
 
