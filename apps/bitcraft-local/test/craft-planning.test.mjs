@@ -1425,6 +1425,40 @@ test("computeCraftPlan counts active crafts only for craft-tracked players", () 
   assert.deepEqual(lakeFish.activeCraftSources.map((source) => [source.label, source.playerName, source.quantity]), [["Fishing Station", "Modular", 3]]);
 });
 
+test("computeCraftPlan preserves passive craft source metadata for item details", () => {
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "900", kind: "items", name: "Fish Oil", quantity: 10, itemType: 0 }],
+    sourceRules: { craftPlayerIds: ["farmer-1"] },
+    routeOverrides: { [recipeKey("items", "900")]: "lake-route" },
+  });
+  const plan = computeCraftPlan({
+    config,
+    detailsByKey: new Map([[recipeKey("items", "900"), fishOilDetail]]),
+    activeCrafts: [{
+      id: "passive:farmer-1:lake-fish",
+      playerId: "farmer-1",
+      playerName: "Farmer",
+      buildingName: "Fishing Pond",
+      itemId: "101",
+      kind: "items",
+      quantity: 3,
+      guaranteedQuantity: 3,
+      name: "Lake Fish",
+      passive: true,
+      sourceType: "Passive craft",
+      locationUnknown: true,
+      status: "Passive craft in progress",
+    }],
+  });
+
+  const source = plan.materials.find((material) => material.name === "Lake Fish")?.activeCraftSources[0];
+  assert.equal(source?.passive, true);
+  assert.equal(source?.sourceType, "Passive craft");
+  assert.equal(source?.locationUnknown, true);
+  assert.equal(source?.status, "Passive craft in progress");
+});
+
 test("computeCraftPlan only expands the missing quantity of stocked intermediate crafts", () => {
   const plankDetail = {
     item: { id: "300", name: "Simple Plank", itemType: 0, tag: "Plank", tier: 2 },
