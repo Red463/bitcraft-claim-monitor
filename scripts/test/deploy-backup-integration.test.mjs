@@ -54,8 +54,7 @@ command="$2"
 if [[ "$command" == .backup* ]]; then
   printf 'backup\n' >>"$FIXTURE_ACTIONS"
   sleep "$FIXTURE_BACKUP_DELAY"
-  target="\${command#.backup \' }"
-  target="\${target%\'}"
+  target="\${command:9:-1}"
   cp "$database" "$target"
 elif [[ "$command" == "PRAGMA quick_check;" ]]; then
   printf 'quick_check\n' >>"$FIXTURE_ACTIONS"
@@ -92,6 +91,101 @@ fi
   return fixture;
 }
 
+function runCleanupFixture({
+  mode = "--dry-run-prune",
+  legacyCount = 0,
+  dailyCount = 0,
+  migrationCount = 0,
+  manualCount = 0,
+  openNames = [],
+  extraNames = [],
+  quickCheck = "ok",
+} = {}) {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-cleanup-"));
+  const bin = join(root, "bin");
+  const data = join(root, "data");
+  const backups = join(root, "backups");
+  const openPath = join(root, "open.txt");
+  mkdirSync(bin);
+  mkdirSync(data);
+  mkdirSync(backups);
+  writeFileSync(join(data, "bitcraft-local.sqlite"), "database", "utf8");
+  writeFileSync(openPath, openNames.join("\n"), "utf8");
+
+  const names = [];
+  for (let index = 1; index <= legacyCount; index += 1) {
+    names.push(`bitcraft-local-predeploy-${String(index).padStart(12, "0")}-20260701-${String(index).padStart(6, "0")}.sqlite`);
+  }
+  for (let index = 1; index <= dailyCount; index += 1) {
+    names.push(`bitcraft-local-daily-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+  }
+  for (let index = 1; index <= migrationCount; index += 1) {
+    names.push(`bitcraft-local-migration-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+  }
+  for (let index = 1; index <= manualCount; index += 1) {
+    names.push(`bitcraft-local-manual-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+  }
+  for (const name of [...names, ...extraNames]) {
+    const path = join(backups, name);
+    if (name.endsWith("/")) {
+      mkdirSync(path.slice(0, -1));
+    } else {
+      writeFileSync(path, "backup", "utf8");
+    }
+  }
+
+  writeExecutable(join(bin, "sudo"), `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == "-u" ]]
+shift 2
+exec "$@"
+`);
+  writeExecutable(join(bin, "sqlite3"), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$2" == "PRAGMA quick_check;" ]]; then
+  printf '%s\n' "$FIXTURE_QUICK_CHECK"
+elif [[ "$2" == .backup* ]]; then
+  target="\${2:9:-1}"
+  cp "$1" "$target"
+fi
+`);
+  writeExecutable(join(bin, "fuser"), `#!/usr/bin/env bash
+set -euo pipefail
+path="\${!#}"
+grep -Fxq "$(basename "$path")" "$FIXTURE_OPEN"
+`);
+  writeExecutable(join(bin, "systemctl"), "#!/usr/bin/env bash\nexit 1\n");
+
+  const before = new Set(readdirSync(backups));
+  const args = mode === "retention" ? ["daily"] : [mode];
+  const result = spawnSync("bash", [script.pathname, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      DATA_DIR: data,
+      BACKUP_DIR: backups,
+      BACKUP_LOCK_FILE: join(root, "backup.lock"),
+      DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+      RUN_USER: process.env.USER ?? process.env.LOGNAME ?? "root",
+      ALLOW_NON_ROOT_FOR_TESTS: "1",
+      FIXTURE_OPEN: openPath,
+      FIXTURE_QUICK_CHECK: quickCheck,
+    },
+  });
+  const remainingNames = readdirSync(backups);
+  const remaining = new Set(remainingNames);
+  const fixture = {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    remainingNames,
+    removedNames: [...before].filter((name) => !remaining.has(name)),
+  };
+  rmSync(root, { recursive: true, force: true });
+  return fixture;
+}
+
 test("backup pauses active writers, validates, publishes, and restores them", { skip: !hasBash }, () => {
   const result = runBackupFixture({
     activeUnits: ["bitcraft-claim-monitor-worker.service", "bitcraft-monitor-collector.timer"],
@@ -123,4 +217,42 @@ test("long backups emit heartbeat progress", { skip: !hasBash }, () => {
   const result = runBackupFixture({ backupDelaySeconds: 2 });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Backup still running: elapsed=[1-9][0-9]*s bytes=[0-9]+/);
+});
+
+test("dry run lists only legacy files older than the newest three", { skip: !hasBash }, () => {
+  const result = runCleanupFixture({ mode: "--dry-run-prune", legacyCount: 8 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.removedNames.length, 0);
+  assert.equal(result.remainingNames.filter((name) => name.startsWith("bitcraft-local-predeploy-")).length, 8);
+  assert.equal((result.stdout.match(/Would remove:/g) ?? []).length, 5);
+  assert.match(result.stdout, /Recoverable bytes: [1-9][0-9]*/);
+});
+
+test("apply removes only recomputed eligible legacy files", { skip: !hasBash }, () => {
+  const result = runCleanupFixture({
+    mode: "--apply-prune",
+    legacyCount: 8,
+    openNames: ["bitcraft-local-predeploy-000000000001-20260701-000001.sqlite"],
+    extraNames: ["unknown.sqlite", "bitcraft-local-predeploy-test.partial", "bitcraft-local-predeploy-000000000009-20260701-000009.sqlite/"],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.remainingNames.includes("unknown.sqlite"), true);
+  assert.equal(result.remainingNames.includes("bitcraft-local-predeploy-test.partial"), true);
+  assert.equal(result.removedNames.includes("unknown.sqlite"), false);
+  assert.equal(result.removedNames.includes("bitcraft-local-predeploy-000000000001-20260701-000001.sqlite"), false);
+});
+
+test("class retention keeps seven daily and three migration and manual files", { skip: !hasBash }, () => {
+  const result = runCleanupFixture({ mode: "retention", dailyCount: 9, migrationCount: 5, manualCount: 5 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.remainingNames.filter((name) => name.includes("-daily-")).length, 7);
+  assert.equal(result.remainingNames.filter((name) => name.includes("-migration-")).length, 3);
+  assert.equal(result.remainingNames.filter((name) => name.includes("-manual-")).length, 3);
+});
+
+test("legacy apply refuses cleanup when the newest retained backup is invalid", { skip: !hasBash }, () => {
+  const result = runCleanupFixture({ mode: "--apply-prune", legacyCount: 8, quickCheck: "corrupt" });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.removedNames.length, 0);
+  assert.match(result.stderr, /Newest retained backup failed validation/);
 });

@@ -33,3 +33,12 @@ test("backup command declares retention for each completed backup class", () => 
   assert.match(script, /MANUAL_KEEP="\$\{MANUAL_KEEP:-3\}"/);
   assert.match(script, /LEGACY_KEEP="\$\{LEGACY_KEEP:-3\}"/);
 });
+
+test("backup command exposes guarded legacy cleanup modes", () => {
+  assert.match(script, /--dry-run-prune/);
+  assert.match(script, /--apply-prune/);
+  assert.match(script, /Would remove:/);
+  assert.match(script, /Recoverable bytes:/);
+  assert.match(script, /Newest retained backup failed validation/);
+  assert.match(script, /DEPLOY_LOCK_FILE="\$\{DEPLOY_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-deploy\.lock\}"/);
+});
