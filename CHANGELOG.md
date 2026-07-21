@@ -9,6 +9,26 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.41.0-beta.1] - 2026-07-22
+
+### Added
+
+- Added validated daily database backups with progress reporting, automatic integrity checks, and separate retention for daily, migration, and manually requested recovery points.
+- Added a guarded legacy-backup cleanup command that previews exact files and recoverable space before deleting anything.
+
+### Changed
+
+- Changed routine deployments to skip full database backups when the schema is unchanged, while schema changes still create a protected migration backup.
+- Extended production deployment timeouts and SSH keepalives so legitimate long-running backup operations stay connected.
+
+### Fixed
+
+- Prevented scheduled backups, deployments, and backup cleanup from overlapping or selecting backups by revision instead of creation time.
+
+### Operator action required
+
+- Production must complete the one-time backup-helper bootstrap and reviewed legacy-backup cleanup in `DEPLOYMENT.md` before the first deployment of this release.
+
 ## [0.40.1-beta.5] - 2026-07-21
 
 ### Added
