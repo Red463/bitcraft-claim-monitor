@@ -356,28 +356,76 @@ test("local catalog planner converts expected craft output into completions and 
   assert.equal(step.probabilityStatus, "expected");
 });
 
-test("local catalog planner disables probabilistic routes when a validated snapshot is required but unavailable", (t) => {
+test("local catalog planner preserves producer routes while validated yields are unavailable", (t) => {
   const { repository } = createCatalogFixture(t);
   upsertCatalogDetails(repository, [
-    { item: { id: "4100", name: "Chance Output" } },
+    { item: { id: "4100", itemType: 0, name: "Chance Output", tag: "Output", tier: 1 } },
     {
-      item: { id: "4101", name: "Chance Bundle" },
-      craftingRecipes: [{ id: "make-bundle", craftedItemStacks: [{ item_id: "4101", item_type: "item", quantity: 1 }] }],
-      itemListPossibilities: [{ targetId: "4100", targetItem: { id: "4100", name: "Chance Output" }, quantity: 1, chance: 0.5 }],
+      item: { id: "4101", itemType: 0, name: "Chance Bundle", tag: "Products", tier: 1 },
+      craftingRecipes: [{
+        id: "make-bundle",
+        name: "Process Chance Plant",
+        stationName: "Farming Station",
+        craftedItemStacks: [{ item_id: "4101", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "4101", itemType: 0, name: "Chance Bundle", tag: "Products", tier: 1 }],
+        consumedItemStacks: [{ item_id: "4102", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "4102", itemType: 0, name: "Chance Plant", tag: "Plant", tier: 1 }],
+      }],
+      itemListPossibilities: [{
+        targetId: "4100",
+        targetItem: { id: "4100", itemType: 0, name: "Chance Output", tag: "Output", tier: 1 },
+        quantity: 1,
+        chance: 0.5,
+      }],
     },
+    { item: { id: "4102", itemType: 0, name: "Chance Plant", tag: "Plant", tier: 1 } },
+    {
+      item: { id: "4103", itemType: 0, name: "Alternative Bundle", tag: "Products", tier: 1 },
+      craftingRecipes: [{
+        id: "make-alternative-bundle",
+        name: "Process Alternative Plant",
+        stationName: "Farming Station",
+        craftedItemStacks: [{ item_id: "4103", item_type: "item", quantity: 1 }],
+        craftedItems: [{ id: "4103", itemType: 0, name: "Alternative Bundle", tag: "Products", tier: 1 }],
+        consumedItemStacks: [{ item_id: "4104", item_type: "item", quantity: 1 }],
+        consumedItems: [{ id: "4104", itemType: 0, name: "Alternative Plant", tag: "Plant", tier: 1 }],
+      }],
+      itemListPossibilities: [{
+        targetId: "4100",
+        targetItem: { id: "4100", itemType: 0, name: "Chance Output", tag: "Output", tier: 1 },
+        quantity: 1,
+        chance: 0.25,
+      }],
+    },
+    { item: { id: "4104", itemType: 0, name: "Alternative Plant", tag: "Plant", tier: 1 } },
   ]);
 
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "4100", kind: "items", name: "Chance Output", quantity: 10, itemType: 0 }],
+  });
   const catalog = collectLocalCatalogCraftPlanDetails(
     repository,
-    [{ id: "4100", kind: "items", name: "Chance Output", quantity: 1 }],
-    {},
+    config.targets,
+    config.routeOverrides,
     64,
     [],
     { requireValidatedProbabilities: true },
   );
+  const plan = computeCraftPlan({ config, detailsByKey: catalog.detailsByKey, catalogWarnings: catalog.warnings });
+  const target = plan.materials.find((row) => row.id === "4100");
 
-  assert.equal(catalog.detailsByKey.get("items:4100")?.itemListPossibilities.length, 0);
-  assert.match(catalog.warnings.join("\n"), /validated probability snapshot unavailable/i);
+  assert.equal(catalog.detailsByKey.get("items:4101")?.itemListPossibilities.length, 1);
+  assert.equal(target?.sourceRoutes?.[0]?.producerRecipe?.name, "Process Chance Plant");
+  assert.equal(target?.sourceRoutes?.[0]?.probabilityStatus, "unavailable");
+  assert.equal(target?.sourceRoutes?.[0]?.expectedYield, null);
+  assert.deepEqual(
+    target?.sourceRoutes?.[0]?.alternatives.map((route) => route.label).sort(),
+    ["Process Alternative Plant -> Chance Output", "Process Chance Plant -> Chance Output"],
+  );
+  assert.equal(plan.materials.some((row) => row.id === "4102"), false);
+  assert.equal(plan.materials.some((row) => row.id === "4104"), false);
+  assert.match(plan.warnings.join("\n"), /validated output rate unavailable.*items:4100/i);
 });
 
 test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and multipliers", () => {
@@ -1420,7 +1468,7 @@ test("computeCraftPlan prefers crafting recipes over unpacking packed transport 
   assert.deepEqual(plan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "packed-route"]);
 });
 
-test("computeCraftPlan uses an unpack route when it is the only valid option without recursing into the pack loop", () => {
+test("computeCraftPlan does not automatically use an unpack route when it is the only catalog option", () => {
   const berryDetail = {
     item: { id: "100", name: "Basic Berry", itemType: 0, tag: "Berry", tier: 1 },
     craftingRecipes: [{
@@ -1444,20 +1492,29 @@ test("computeCraftPlan uses an unpack route when it is the only valid option wit
     }],
   };
 
+  const detailsByKey = new Map([
+    [recipeKey("items", "100"), berryDetail],
+    [recipeKey("cargo", "200"), packageDetail],
+  ]);
   const plan = computeCraftPlan({
-    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 25, itemType: 0 }] }),
-    detailsByKey: new Map([
-      [recipeKey("items", "100"), berryDetail],
-      [recipeKey("cargo", "200"), packageDetail],
-    ]),
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 500, itemType: 0 }] }),
+    detailsByKey,
   });
 
-  assert.equal(plan.steps.length, 1);
-  assert.equal(plan.steps[0].selectedRecipeId, "unpack-berry");
-  assert.deepEqual(plan.steps[0].alternatives.map((route) => route.id), ["unpack-berry"]);
-  assert.equal(plan.materials.find((material) => material.name === "Basic Berry")?.required, 25);
-  assert.equal(plan.materials.find((material) => material.name === "Basic Berry Package")?.required, 1);
-  assert.equal(plan.steps.some((step) => step.selectedRecipeId === "pack-berry"), false);
+  assert.equal(plan.steps.length, 0);
+  assert.deepEqual(plan.materials.find((row) => row.id === "100")?.sourceRoutes, []);
+  assert.equal(plan.materials.some((row) => row.id === "200"), false);
+  assert.match(plan.warnings.join("\n"), /only transport routes.*items:100/i);
+
+  const overridePlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [{ id: "100", kind: "items", name: "Basic Berry", quantity: 500, itemType: 0 }],
+      routeOverrides: { [recipeKey("items", "100")]: "unpack-berry" },
+    }),
+    detailsByKey,
+  });
+  assert.equal(overridePlan.steps[0]?.selectedRecipeId, "unpack-berry");
 });
 
 test("computeCraftPlan keeps downstream consumers but stops producer expansion at gathered items", () => {
@@ -3036,6 +3093,7 @@ test("collectLocalCatalogCraftPlanDetails keeps transport routes available after
   const defaultPlan = computeCraftPlan({ config: baseConfig, detailsByKey });
   assert.equal(defaultPlan.steps[0].selectedRecipeId, "craft-route");
   assert.deepEqual(defaultPlan.steps[0].alternatives.map((recipe) => recipe.id), ["craft-route", "transport-route"]);
+  assert.equal(defaultPlan.steps[0].alternatives.find((recipe) => recipe.id === "transport-route")?.isTransportRoute, true);
 
   const overrideConfig = normalizeCraftPlanConfig({
     enabled: true,

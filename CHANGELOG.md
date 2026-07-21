@@ -13,6 +13,8 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ### Fixed
 
+- Kept known processing routes visible when validated probability values are unavailable, including Wispweave Filament from Wispweave plants and Straw from Embergrain processing.
+- Prevented package and unpacking conversions from replacing normal production routes automatically, while retaining them as clearly labelled logistics alternatives.
 - Fixed deployment verification incorrectly failing when two simultaneous BitJita cache requests reached the server in a different order.
 
 ## [0.40.1-beta.1] - 2026-07-21

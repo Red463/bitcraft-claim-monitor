@@ -382,3 +382,12 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.doesNotMatch(page, /needsBoardCompletion/);
   assert.match(bitjita, /activePanel === "planning"/);
 });
+
+test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /probabilityStatus\s*===\s*["']unavailable["']/);
+  assert.match(page, /Validated output rate unavailable/);
+  assert.match(page, /route is known, but required completions and inputs cannot be calculated/i);
+  assert.match(page, /isTransportRoute[\s\S]*?Logistics/);
+});
