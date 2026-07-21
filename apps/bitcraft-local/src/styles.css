@@ -683,6 +683,31 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
 .skeleton-grid div { height: 98px; }
 .skeleton-block { height: 190px; }
 .skeleton-block.short { height: 98px; }
+.route-loading-state {
+  width: 100%;
+  min-height: min(520px, calc(100vh - 170px));
+  padding: 24px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+.route-loading-label { margin: 0; color: var(--muted); font-size: .85rem; }
+.route-loading-shape {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(100deg, rgba(255,255,255,.04), rgba(255,255,255,.09), rgba(255,255,255,.04));
+  background-size: 220% 100%;
+  animation: skeleton-sweep 1.25s linear infinite;
+}
+.route-loading-title { width: min(320px, 55%); height: 34px; }
+.route-loading-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.route-loading-summary .route-loading-shape { height: 92px; }
+.route-loading-content { display: grid; gap: 10px; padding-top: 4px; }
+.route-loading-content .route-loading-shape:first-child { height: 40px; }
+.route-loading-content .route-loading-shape:not(:first-child) { height: 86px; }
 @keyframes skeleton-sweep { to { background-position: -120% 0; } }
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .stat { min-height: 106px; border: 1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,.035), transparent), var(--panel); border-radius: 8px; padding: 16px; display: grid; align-content: space-between; position: relative; overflow: hidden; text-align: left; }
@@ -1385,6 +1410,12 @@ body .market-page tbody tr:hover td {
   .activity-member-filter .select-control { min-width: 0; flex: 1; }
 }
 
+@media (max-width: 720px) {
+  .route-loading-state { min-height: 360px; padding: 16px; }
+  .route-loading-summary { grid-template-columns: 1fr; }
+  .route-loading-summary .route-loading-shape { height: 64px; }
+}
+
 @media (pointer: coarse) {
   .sidebar-toggle,
   .toolbar-button,
@@ -1399,6 +1430,7 @@ body .market-page tbody tr:hover td {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .route-loading-shape { animation: none; background-position: 0 0; }
   .app-sidebar, .mobile-navigation-backdrop { transition: none !important; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

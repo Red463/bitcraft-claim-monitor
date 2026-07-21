@@ -43,6 +43,7 @@ export function CraftPlanningRouteChooser({ routes, selectedRecipeId, output, mi
   return (
     <fieldset className="craft-plan-route-options" aria-busy={pendingRecipeId !== null}>
       <legend>Choose acquisition route</legend>
+      <p className="craft-plan-route-options-help">{formatNumber(routes.length)} processing routes available — choose the source material you plan to use.</p>
       {routes.map((route, index) => {
         const recipeId = String(route.id ?? "");
         const selected = recipeId === selectedRecipeId;

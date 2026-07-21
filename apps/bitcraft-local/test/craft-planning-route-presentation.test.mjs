@@ -103,3 +103,31 @@ test("technical probability rates never round a non-zero value to zero", () => {
   assert.equal(formatProbabilityRate(0.0000000123), "1.23e-8");
   assert.equal(formatProbabilityRate(0), "0");
 });
+
+test("placeholder processing recipes are named by their actual inputs", () => {
+  const route = {
+    routeType: "craft-byproduct",
+    recipeName: "Harvest {0}",
+    buildingName: "Fine Hunting Station",
+    inputs: [{ name: "Fine Wolf Carcass" }],
+  };
+
+  assert.equal(
+    acquisitionRouteLabel(route, { name: "Fine Animal Hair" }),
+    "Process Fine Wolf Carcass -> Fine Animal Hair at Fine Hunting Station",
+  );
+  assert.doesNotMatch(acquisitionRouteLabel(route, { name: "Fine Animal Hair" }), /\{\d+\}/);
+  assert.equal(
+    acquisitionRouteLabel({ ...route, inputs: [{ name: "Fine Bear Carcass" }] }, { name: "Fine Animal Hair" }),
+    "Process Fine Bear Carcass -> Fine Animal Hair at Fine Hunting Station",
+  );
+});
+
+test("placeholder recipes without inputs use a clean output fallback", () => {
+  assert.equal(acquisitionRouteLabel({
+    routeType: "craft",
+    recipeName: "Harvest {1}",
+    buildingName: "Fine Hunting Station",
+    inputs: [],
+  }, { name: "Fine Animal Hair" }), "Produce Fine Animal Hair at Fine Hunting Station");
+});

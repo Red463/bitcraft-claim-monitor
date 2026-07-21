@@ -184,6 +184,8 @@ test("Craft Planning acquisition routes use accessible comparable cards", () => 
   assert.match(chooser, /acquisitionRouteMetrics/);
   assert.match(chooser, /No additional nodes needed/);
   assert.match(chooser, /Yield calculation unavailable/);
+  assert.match(chooser, /processing routes available/);
+  assert.match(chooser, /choose the source material you plan to use/);
 });
 
 test("Craft Planning keeps the preferred fishing route browser-local", () => {
@@ -416,4 +418,15 @@ test("Craft Planning explains unavailable producer yields and labels logistics r
   assert.match(page, /Validated output rate unavailable/);
   assert.match(page, /route is known, but required completions and inputs cannot be calculated/i);
   assert.match(presentation, /isTransportRoute[\s\S]*?Logistics/);
+});
+
+test("Craft Planning route feedback is scoped to the opened item", () => {
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /type ItemDetailFeedback = \{/);
+  assert.match(page, /itemDetailFeedback\?\.itemKey === selectedNeedKey/);
+  assert.match(page, /setItemDetailFeedback\(null\)/);
+  assert.match(page, /itemKey: outputKey/);
+  assert.doesNotMatch(page, /const \[routeStatus, setRouteStatus\]/);
+  assert.doesNotMatch(page, /const \[routeError, setRouteError\]/);
 });

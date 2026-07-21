@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import "./styles.css";
 
 const App = React.lazy(() => import("./AppShell"));
@@ -30,7 +31,7 @@ class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, 
 // do not have to trace startup behaviour through multiple entrypoints.
 createRoot(document.getElementById("root")!).render(
   <RouteErrorBoundary>
-    <React.Suspense fallback={<main className="route-entry-state"><section className="empty-state panel" aria-live="polite">Loading page...</section></main>}>
+    <React.Suspense fallback={<main className="route-entry-state"><RouteLoadingState /></main>}>
       <App />
     </React.Suspense>
   </RouteErrorBoundary>,

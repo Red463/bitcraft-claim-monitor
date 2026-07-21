@@ -546,6 +546,13 @@
   font-size: 0.82rem;
   font-weight: 800;
 }
+.craft-plan-route-options-help {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
 .craft-plan-route-option {
   position: relative;
   display: grid;

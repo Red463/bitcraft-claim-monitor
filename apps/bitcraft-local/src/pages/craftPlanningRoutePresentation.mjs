@@ -35,6 +35,10 @@ function isGenericRecipeName(value) {
   return /^Recipe(?:\s*->|$)/i.test(text(value));
 }
 
+function hasNumericTemplate(value) {
+  return /\{\d+\}/.test(text(value));
+}
+
 function gatheringSourceName(route) {
   const sources = [...new Set((Array.isArray(route?.gatheringSources) ? route.gatheringSources : [])
     .map((source) => text(source?.label ?? source?.name ?? source?.tag))
@@ -79,11 +83,15 @@ export function acquisitionRouteLabel(route, output = {}) {
     return `Gather from ${source}`;
   }
 
-  if (label && !isGenericRecipeName(label)) return withStation(label, route);
+  const templatedLabel = hasNumericTemplate(label);
+  if (label && !isGenericRecipeName(label) && !templatedLabel) return withStation(label, route);
   const inputs = inputNames(route);
   const outputName = itemName(output);
-  if (inputs.length) return withStation(`${inputs.join(" + ")} -> ${outputName}`, route);
-  return withStation(label || `Produce ${outputName}`, route);
+  if (inputs.length) {
+    const processLabel = `${templatedLabel ? "Process " : ""}${inputs.join(" + ")} -> ${outputName}`;
+    return withStation(processLabel, route);
+  }
+  return withStation(templatedLabel ? `Produce ${outputName}` : label || `Produce ${outputName}`, route);
 }
 
 export function acquisitionRouteMetrics(route, options = {}) {
