@@ -1330,6 +1330,9 @@ function addSourceTotals(totals, sources, type, unavailable, quantityField = "qu
         craftId: source.craftId == null ? item.craftId : String(source.craftId),
         status: source.status == null ? item.status : String(source.status),
         completed: source.completed == null ? item.completed === true : source.completed === true,
+        passive: source.passive === true,
+        sourceType: String(source.sourceType ?? type),
+        locationUnknown: source.locationUnknown === true,
       });
       totals.set(item.key, current);
     }
@@ -1617,6 +1620,9 @@ export function computeCraftPlan({
       craftId: craft.id ?? craft.craftId ?? null,
       status: craft.status ?? (craft.completed ? "Ready to collect" : "In progress"),
       completed: craft.completed === true,
+      passive: craft.passive === true,
+      sourceType: String(craft.sourceType ?? (craft.passive ? "Passive craft" : "Active craft")),
+      locationUnknown: craft.locationUnknown === true,
       items: [craft],
     }));
   addSourceTotals(expectedActiveTotals, activeCraftSources, "Active craft", unavailableSources, "quantity");

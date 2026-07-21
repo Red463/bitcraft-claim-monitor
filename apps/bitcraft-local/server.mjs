@@ -54,7 +54,7 @@ import { createCraftPlanEffortBaselineCache, craftPlanEffortBaselineKey } from "
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
-import { craftPlanCatalogLookup, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { craftPlanCatalogLookup, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { createRequestCoordinator } from "./src/server/requestCoordinator.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
@@ -2393,18 +2393,31 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     return [playerId, String(member.userName ?? member.username ?? playerId)];
   }));
-  const playerCraftResults = await Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
-    try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, cache: true });
-      return { playerId, payload, error: "" };
-    } catch (error) {
-      return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
-    }
-  }));
+  const [playerCraftResults, playerPassiveCraftResults] = await Promise.all([
+    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
+      try {
+        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, cache: true });
+        return { playerId, payload, error: "" };
+      } catch (error) {
+        return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
+      }
+    })),
+    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
+      try {
+        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { timeoutMs: 6000, cache: true });
+        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload, error: "" };
+      } catch (error) {
+        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
+      }
+    })),
+  ]);
   const craftPayloads = [publicCraftsPayload, ...playerCraftResults.map((result) => result.payload)];
   const craftSourceErrors = playerCraftResults
     .filter((result) => result.error)
     .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerId} crafts`, type: "Tracked crafts", error: result.error }));
+  const passiveCraftSourceErrors = playerPassiveCraftResults
+    .filter((result) => result.error)
+    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerName} passive crafts`, type: "Tracked passive crafts", error: result.error }));
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const bankSources = [];
@@ -2441,8 +2454,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     playerSources,
     bankSources,
     deployableSources,
-    activeCrafts: trackedCraftPlanOutputs(craftPayloads, detailsByKey),
-    craftSourceErrors,
+    activeCrafts: [
+      ...trackedCraftPlanOutputs(craftPayloads, detailsByKey),
+      ...trackedPassiveCraftPlanOutputs(playerPassiveCraftResults, detailsByKey),
+    ],
+    craftSourceErrors: [...craftSourceErrors, ...passiveCraftSourceErrors],
   });
   const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
   if (storedEffortModelVersion !== CRAFT_PLAN_EFFORT_MODEL_VERSION) {

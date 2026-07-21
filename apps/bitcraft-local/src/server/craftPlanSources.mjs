@@ -170,6 +170,37 @@ export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new M
   }).filter((item) => item.itemId && item.quantity > 0);
 }
 
+function passiveCraftStatus(craft) {
+  return String(craft?.status ?? craft?.state ?? "").trim().toLowerCase();
+}
+
+export function trackedPassiveCraftPlanOutputs(passiveSources = [], detailsByKey = new Map()) {
+  const payloads = asArray(passiveSources).map((source) => ({
+    ...(source?.payload ?? {}),
+    craftResults: asArray(source?.payload?.craftResults).flatMap((craft, index) => {
+      const status = passiveCraftStatus(craft);
+      if (status !== "processing" && status !== "complete") return [];
+      const rawId = String(craft?.entityId ?? craft?.id ?? `${status}:${index}`).trim();
+      return [{
+        ...craft,
+        entityId: `passive:${String(source?.playerId ?? "unknown")}:${rawId}`,
+        ownerEntityId: craft?.ownerEntityId ?? source?.playerId,
+        ownerUsername: craft?.ownerUsername ?? source?.playerName,
+        completed: status === "complete",
+        status,
+      }];
+    }),
+  }));
+
+  return trackedCraftPlanOutputs([{ craftResults: [] }, ...payloads], detailsByKey).map((output) => ({
+    ...output,
+    passive: true,
+    sourceType: "Passive craft",
+    locationUnknown: true,
+    status: output.completed ? "Passive craft ready to collect" : "Passive craft in progress",
+  }));
+}
+
 export function settlementStorageSourcesFromInventories(inventories = {}, allowedIds = []) {
   const allowed = new Set(allowedIds.map(String));
   const lookup = craftPlanCatalogLookup(inventories);

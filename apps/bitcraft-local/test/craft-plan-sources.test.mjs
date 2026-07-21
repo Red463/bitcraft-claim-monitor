@@ -1,7 +1,55 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+
+test("trackedPassiveCraftPlanOutputs counts processing and complete jobs but ignores other states", () => {
+  const outputs = trackedPassiveCraftPlanOutputs([{
+    playerId: "farmer-1",
+    playerName: "Farmer",
+    payload: {
+      items: [{ id: 3200001, name: "Basic Embergrain Products", tier: 1 }],
+      craftResults: [
+        { entityId: "growing", status: "processing", buildingName: "Basic Farming Station", craftedItem: [{ item_id: 3200001, quantity: 2 }] },
+        { entityId: "ready", status: "complete", buildingName: "Basic Farming Station", craftedItem: [{ item_id: 3200001, quantity: 3 }] },
+        { entityId: "unsupported", status: "queued", buildingName: "Basic Farming Station", craftedItem: [{ item_id: 3200001, quantity: 100 }] },
+      ],
+    },
+  }], new Map());
+
+  assert.deepEqual(outputs.map((output) => [output.craftId, output.quantity, output.status]), [
+    ["passive:farmer-1:growing", 2, "Passive craft in progress"],
+    ["passive:farmer-1:ready", 3, "Passive craft ready to collect"],
+  ]);
+  assert.equal(outputs.every((output) => output.passive === true && output.sourceType === "Passive craft" && output.locationUnknown === true), true);
+});
+
+test("trackedPassiveCraftPlanOutputs expands probabilistic farming products", () => {
+  const product = { id: 3200001, name: "Basic Embergrain Products", tier: 1 };
+  const detailsByKey = new Map([["items:3200001", {
+    item: product,
+    itemListPossibilities: [{
+      targetId: "straw",
+      targetItem: { id: "straw", name: "Rough Straw", tier: 1 },
+      quantity: 0.2,
+      chance: 1,
+      guaranteedQuantity: 0,
+    }],
+  }]]);
+  const outputs = trackedPassiveCraftPlanOutputs([{
+    playerId: "farmer-1",
+    playerName: "Farmer",
+    payload: {
+      items: [product],
+      craftResults: [{ entityId: "grain", status: "processing", craftCount: 10, craftedItem: [{ item_id: 3200001, quantity: 1 }] }],
+    },
+  }], detailsByKey);
+
+  const straw = outputs.find((output) => output.itemId === "straw");
+  assert.equal(straw?.quantity, 2);
+  assert.equal(straw?.guaranteedQuantity, 0);
+  assert.equal(straw?.status, "Passive craft in progress");
+});
 
 test("trackedCraftPlanOutputs expands farming product possibilities into expected Needs Board outputs", () => {
   const payload = {

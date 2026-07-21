@@ -29,6 +29,8 @@ test("Craft Planning labels estimated active output as material-planning coverag
   assert.match(page, />Approximate requirement<\/span>/);
   assert.match(page, />Covered for material planning<\/span>/);
   assert.match(page, />Estimated craft output; counted for material planning<\/span>/);
+  assert.match(page, /Passive craft/);
+  assert.match(page, /Location not reported by BitJita/);
   assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
@@ -375,6 +377,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /bankSources/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
   assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
+  assert.match(server, /trackedPassiveCraftPlanOutputs/);
+  assert.match(computedCraftPlan, /passive-crafts\?status=all/);
+  assert.match(computedCraftPlan, /type:\s*"Tracked passive crafts"/);
+  assert.match(computedCraftPlan, /activeCrafts:\s*\[[\s\S]*trackedCraftPlanOutputs[\s\S]*trackedPassiveCraftPlanOutputs/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineKey/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineCache\.getOrCreate/);
   assert.match(computedCraftPlan, /compactCraftPlanEffortInput\(computeCraftPlan/);

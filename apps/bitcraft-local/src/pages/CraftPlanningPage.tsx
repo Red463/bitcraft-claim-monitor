@@ -278,7 +278,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             {selectedNeedCrafts.length ? <div className="craft-plan-tracked-crafts">
               <h3><Factory size={16} /> Tracked crafts</h3>
               {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row" key={String(craft.craftId ?? index)}>
-                <span><strong>{craft.buildingName ?? "Crafting station"}</strong><small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small></span>
+                <span>
+                  <strong>{craft.passive ? `Passive craft · ${craft.buildingName ?? "Unknown structure"}` : craft.buildingName ?? "Crafting station"}</strong>
+                  <small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small>
+                  {craft.locationUnknown ? <small>Location not reported by BitJita</small> : null}
+                </span>
                 <span><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
               </div>)}
             </div> : null}

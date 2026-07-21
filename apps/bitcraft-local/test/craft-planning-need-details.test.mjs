@@ -111,6 +111,18 @@ test("groupNeedCellActiveCrafts combines expected and guaranteed quantities inde
   assert.equal(crafts[0].guaranteedQuantity, 1);
 });
 
+test("groupNeedCellActiveCrafts keeps passive craft metadata and identity separate", () => {
+  const crafts = groupNeedCellActiveCrafts({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], activeCraftSources: [
+      { craftId: "craft:grain", quantity: 1, sourceType: "Active craft" },
+      { craftId: "passive:farmer:grain", quantity: 2, passive: true, sourceType: "Passive craft", locationUnknown: true },
+    ] }],
+  });
+  assert.equal(crafts.length, 2);
+  assert.equal(crafts.find((craft) => craft.passive)?.locationUnknown, true);
+});
+
 test("groupNeedCellRecipeUsages groups repeated usages by output item", () => {
   const groups = groupNeedCellRecipeUsages(roughLogCell);
   assert.equal(groups.length, 2);
