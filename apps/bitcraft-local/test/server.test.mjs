@@ -478,8 +478,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(proxyOne.status, 200);
   assert.equal(proxyTwo.status, 200);
   assert.equal(proxyCacheRequests, 1);
-  assert.equal(proxyOne.headers.get("x-bitjita-cache"), "miss");
-  assert.equal(proxyTwo.headers.get("x-bitjita-cache"), "deduped");
+  assert.deepEqual(
+    [proxyOne.headers.get("x-bitjita-cache"), proxyTwo.headers.get("x-bitjita-cache")].sort(),
+    ["deduped", "miss"],
+  );
   assert.deepEqual(await proxyOne.json(), { ok: true, request: 1 });
   assert.deepEqual(await proxyTwo.json(), { ok: true, request: 1 });
   await new Promise((resolve) => setTimeout(resolve, 1100));
