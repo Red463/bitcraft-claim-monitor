@@ -21,6 +21,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Fixed
 
 - Prevented route and safety-buffer confirmations from appearing in a different item's detail panel.
+- Fixed the Craft Planning item-detail loading indicator so it visibly rotates while routes load.
 
 ## [0.40.1-beta.3] - 2026-07-21
 
