@@ -138,3 +138,10 @@ export function acquisitionRouteMetrics(route, options = {}) {
     totalActions: plannedUnits * Math.max(1, positive(route?.actionsRequired) || 1),
   };
 }
+
+export function formatProbabilityRate(value) {
+  const rate = number(value);
+  if (rate === 0) return "0";
+  if (Math.abs(rate) < 0.000001) return rate.toExponential(2).replace(/\.0+e/, "e");
+  return rate.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}

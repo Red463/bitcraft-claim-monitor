@@ -41,8 +41,14 @@ test("Craft Planning exposes a public probability workbook download with explici
   assert.match(server, /getProbabilityWorkbookData/);
   assert.match(server, /Probability catalogue is not ready/);
   assert.match(page, /Download probabilities/);
-  assert.match(page, /per resource progress/);
-  assert.match(page, /Expected per full resource/);
+  assert.match(page, /per node progress/);
+  assert.match(page, /per full node/);
+  assert.match(page, /node equivalents/);
+  assert.match(page, /<summary>Show calculation<\/summary>/);
+  assert.match(page, /No additional nodes needed/);
+  assert.match(page, /Full-node estimates are unavailable for prospecting/);
+  assert.doesNotMatch(page, /Expected per full resource/);
+  assert.doesNotMatch(page, /full-resource equivalents/);
   assert.doesNotMatch(page, /per gathering action/);
 });
 
@@ -124,10 +130,12 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /routeType\.startsWith\("gathering"\)/);
   assert.match(page, /routeType\.endsWith\("-byproduct"\)/);
   assert.doesNotMatch(page, /route\.routeType === "gathering-byproduct"/);
-  assert.match(page, /Guaranteed output:/);
+  assert.match(page, /Guaranteed output/);
   assert.match(page, /Expected yield/);
   assert.match(page, /per craft/);
-  assert.match(page, /per resource progress/);
+  assert.match(page, /per node progress/);
+  assert.match(page, /acquisitionRouteMetrics/);
+  assert.match(page, /about 1 .* per .*node progress/i);
   assert.doesNotMatch(page, /per gathering action/);
   assert.match(page, /Craft inputs/);
   assert.match(page, /Used for/);
@@ -402,9 +410,10 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+  const presentation = readFileSync(new URL("../src/pages/craftPlanningRoutePresentation.mjs", import.meta.url), "utf8");
 
   assert.match(page, /probabilityStatus\s*===\s*["']unavailable["']/);
   assert.match(page, /Validated output rate unavailable/);
   assert.match(page, /route is known, but required completions and inputs cannot be calculated/i);
-  assert.match(page, /isTransportRoute[\s\S]*?Logistics/);
+  assert.match(presentation, /isTransportRoute[\s\S]*?Logistics/);
 });

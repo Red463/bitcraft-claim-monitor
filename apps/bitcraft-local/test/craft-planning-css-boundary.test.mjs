@@ -230,10 +230,10 @@ test("How to get this separates route headings and producer buffer controls", ()
   assert.match(page, /craft-plan-route-heading/);
   assert.match(page, /craft-plan-buffer-settings/);
   assert.match(page, /Recipe completions/);
-  assert.match(page, /Expected resource progress/);
-  assert.match(page, /Expected extraction progress/);
-  assert.match(page, /prospecting exhaustion is unknown/i);
-  assert.match(page, /total recipe actions/);
+  assert.match(page, /full nodes/);
+  assert.match(page, /extraction progress/);
+  assert.match(page, /node exhaustion is unknown/i);
+  assert.match(page, /total station actions/i);
   assert.match(page, /Craft inputs/);
   assert.match(page, /Gather\/process/);
   assert.match(page, /does not increase the .* goal/);
@@ -241,10 +241,23 @@ test("How to get this separates route headings and producer buffer controls", ()
   assert.match(css, /\.craft-plan-route-kind\.is-craft\s*\{/);
   assert.match(css, /\.craft-plan-route-kind\.is-gathering\s*\{/);
   assert.match(css, /\.craft-plan-buffer-settings\s*\{/);
-  assert.match(css, /\.craft-plan-gathered-control\s*\{/);
-  assert.match(css, /\.craft-plan-gathered-state\s*\{/);
+  assert.match(css, /\.craft-plan-route-options\s*\{/);
+  assert.match(css, /\.craft-plan-calculation\s*\{/);
+  assert.doesNotMatch(css, /\.craft-plan-gathered-control\s*\{/);
+  assert.doesNotMatch(css, /\.craft-plan-gathered-state\s*\{/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-buffer-control/);
-  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-gathered-control/);
+});
+
+test("Craft planning route cards and calculations wrap without horizontal scrolling", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.craft-plan-route-options\s*\{[^}]*display:\s*grid[^}]*min-width:\s*0/s);
+  assert.match(css, /\.craft-plan-route-option\s*\{[^}]*display:\s*grid[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.craft-plan-route-option\.is-selected\s*\{/);
+  assert.match(css, /\.craft-plan-route-option\.is-pending\s*\{/);
+  assert.match(css, /\.craft-plan-route-option:has\(input:focus-visible\)\s*\{/);
+  assert.match(css, /\.craft-plan-route-option strong,[\s\S]*white-space:\s*normal;[\s\S]*overflow-wrap:\s*anywhere;/);
+  assert.match(css, /\.craft-plan-calculation-body\s*\{[^}]*display:\s*grid[^}]*min-width:\s*0/s);
 });
 
 test("Overall Needs Board progress sits on the left and shares section completion tones", () => {

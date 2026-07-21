@@ -5,6 +5,7 @@ import {
   acquisitionRouteKind,
   acquisitionRouteLabel,
   acquisitionRouteMetrics,
+  formatProbabilityRate,
 } from "../src/pages/craftPlanningRoutePresentation.mjs";
 
 const gypsite = { id: "3001", name: "Rough Gypsite", kind: "items" };
@@ -91,4 +92,10 @@ test("zero shortage, prospecting, crafting, and unavailable rates remain honest"
     routeType: "craft",
     probabilityStatus: "unavailable",
   }, { missingQuantity: 10 }), { status: "unavailable" });
+});
+
+test("technical probability rates never round a non-zero value to zero", () => {
+  assert.equal(formatProbabilityRate(0.002), "0.002");
+  assert.equal(formatProbabilityRate(0.0000000123), "1.23e-8");
+  assert.equal(formatProbabilityRate(0), "0");
 });

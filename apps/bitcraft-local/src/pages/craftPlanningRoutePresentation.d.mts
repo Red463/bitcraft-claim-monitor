@@ -12,3 +12,4 @@ export type AcquisitionRouteMetrics = {
 export function acquisitionRouteKind(route: Record<string, unknown>): "Gathering" | "Gathering byproduct" | "Prospecting" | "Crafting" | "Craft byproduct" | "Logistics";
 export function acquisitionRouteLabel(route: Record<string, unknown>, output?: Record<string, unknown>): string;
 export function acquisitionRouteMetrics(route: Record<string, unknown>, options?: { missingQuantity?: number; multiplier?: number }): AcquisitionRouteMetrics;
+export function formatProbabilityRate(value: unknown): string;
