@@ -29,6 +29,8 @@ test("Craft Planning labels estimated active output as material-planning coverag
   assert.match(page, />Approximate requirement<\/span>/);
   assert.match(page, />Covered for material planning<\/span>/);
   assert.match(page, />Estimated craft output; counted for material planning<\/span>/);
+  assert.match(page, /Passive craft/);
+  assert.match(page, /Location not reported by BitJita/);
   assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
