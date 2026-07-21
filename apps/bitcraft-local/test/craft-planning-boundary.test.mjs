@@ -375,6 +375,10 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /bankSources/);
   assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
   assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey\)/);
+  assert.match(server, /trackedPassiveCraftPlanOutputs/);
+  assert.match(computedCraftPlan, /passive-crafts\?status=all/);
+  assert.match(computedCraftPlan, /type:\s*"Tracked passive crafts"/);
+  assert.match(computedCraftPlan, /activeCrafts:\s*\[[\s\S]*trackedCraftPlanOutputs[\s\S]*trackedPassiveCraftPlanOutputs/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineKey/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineCache\.getOrCreate/);
   assert.match(computedCraftPlan, /compactCraftPlanEffortInput\(computeCraftPlan/);
