@@ -1,2 +1,3 @@
 *.pdf binary
 deploy/update-bitcraft-monitor text eol=lf
+deploy/backup-bitcraft-monitor text eol=lf
