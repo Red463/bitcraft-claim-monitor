@@ -201,6 +201,7 @@ test("game catalog schema bootstraps normalized catalog tables, indexes, and cas
     "game_catalog_recipes",
     "game_catalog_recipe_inputs",
     "game_catalog_recipe_outputs",
+    "game_catalog_recipe_output_components",
     "game_catalog_recipe_sources",
     "game_catalog_item_list_outputs",
     "game_catalog_effort_weights",
@@ -425,7 +426,7 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
 test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
   const incompleteRun = { status: "paused" };
 
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 7);
+  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 8);
   assert.equal(catalogNormalizationNeedsRefresh(null), true);
   assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
   assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
@@ -705,7 +706,7 @@ test("game catalog detail replacement rolls back all writes when a linked row fa
 
   assert.throws(
     () => repository.upsertDetail(baitAndShellsDetailUpdated, { updatedAt: "2026-07-10T12:05:00.000Z" }),
-    /forced catalog output failure/,
+    /Recipe recipe:.*forced catalog output failure/,
   );
   assert.deepEqual(db.prepare("SELECT recipe_key, name FROM game_catalog_recipes ORDER BY recipe_key").all(), before);
   assert.equal(repository.listProducerRecipesForOutput("items:1220019").length, 2);

@@ -33,7 +33,7 @@ import {
 } from "./src/server/gameCatalog.mjs";
 import { fetchGameDataProbabilitySnapshot } from "./src/server/gameDataProbabilitySource.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
-import { classifyCatalogRefreshError, parseRetryAfterMs } from "./src/server/catalogRefreshRecovery.mjs";
+import { classifyCatalogRefreshError, parseRetryAfterMs, withCatalogRefreshTargetContext } from "./src/server/catalogRefreshRecovery.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
@@ -607,14 +607,18 @@ async function fetchGameCatalogTargets(kind) {
 }
 
 async function fetchAndStoreGameCatalogDetail(target) {
-  const endpointKind = target.kind === "cargo" ? "cargo" : "items";
-  const payload = await fetchBitjita(`/${endpointKind}/${encodeURIComponent(target.id)}`, { cache: false });
-  const stored = gameCatalogRepository.upsertDetail(payload, {
-    updatedAt: new Date().toISOString(),
-    fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName, itemListId: target.itemListId },
-  });
-  upsertRecipeCatalogDetail(target, payload, "game_catalog_refresh");
-  return stored;
+  try {
+    const endpointKind = target.kind === "cargo" ? "cargo" : "items";
+    const payload = await fetchBitjita(`/${endpointKind}/${encodeURIComponent(target.id)}`, { cache: false });
+    const stored = gameCatalogRepository.upsertDetail(payload, {
+      updatedAt: new Date().toISOString(),
+      fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName, itemListId: target.itemListId },
+    });
+    upsertRecipeCatalogDetail(target, payload, "game_catalog_refresh");
+    return stored;
+  } catch (error) {
+    throw withCatalogRefreshTargetContext(error, target);
+  }
 }
 
 function storedGameCatalogNormalizationVersion() {

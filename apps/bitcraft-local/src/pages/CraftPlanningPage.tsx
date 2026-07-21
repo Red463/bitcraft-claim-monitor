@@ -302,10 +302,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 const routeType = String(route.routeType ?? "craft");
                 const gatheringRoute = routeType.startsWith("gathering");
                 const byproductRoute = routeType.endsWith("-byproduct");
+                const prospectingRoute = gatheringRoute && route.gatheringMode === "prospecting";
                 const routeKindLabel = gatheringRoute
-                  ? byproductRoute ? "Gathering byproduct" : "Gathering output"
+                  ? prospectingRoute ? byproductRoute ? "Prospecting byproduct" : "Prospecting output" : byproductRoute ? "Gathering byproduct" : "Gathering output"
                   : byproductRoute ? "Craft byproduct" : "Craft output";
-                const yieldUnit = gatheringRoute ? "per resource progress" : "per craft (recipe completion)";
+                const yieldUnit = gatheringRoute ? prospectingRoute ? "per extraction progress" : "per resource progress" : "per craft (recipe completion)";
                 const itemListRoute = route.expectedYield != null;
                 const expectedYield = Number(route.expectedYield) || 0;
                 const guaranteedYield = Number(route.guaranteedYield) || 0;
@@ -315,7 +316,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                 const routeMultiplier = Number(route.multiplier) || selectedMultiplier;
                 const producerInputs = Array.isArray(route.inputs) ? route.inputs.filter((input: AnyRecord) => Number(input.quantity) > 0) : [];
                 const displayedRecipeName = route.producerRecipe?.name ?? route.recipeName ?? "Selected recipe";
-                const actionLabel = gatheringRoute ? "Expected resource progress" : "Recipe completions";
+                const actionLabel = gatheringRoute ? prospectingRoute ? "Expected extraction progress" : "Expected resource progress" : "Recipe completions";
                 const progressPerResource = Number(route.resourceHealth) || 0;
                 const unbufferedResources = progressPerResource > 0 ? baseActions / progressPerResource : 0;
                 const bufferedResources = Number(route.expectedResourceEquivalents) || (progressPerResource > 0 ? bufferedActions / progressPerResource : 0);
@@ -332,11 +333,12 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                     </div>
                     {itemListRoute ? (
                       <>
-                        {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 3 : 1)} expected per resource progress</small></span>)}</div> : null}
+                        {gatheringRoute && Array.isArray(route.gatheringSources) && route.gatheringSources.length > 1 ? <div className="craft-plan-gathering-sources">{route.gatheringSources.map((source: AnyRecord) => <span key={String(source.tag ?? source.label)}><strong>{source.label}</strong><small>{formatNumber(Number(source.expectedYield) || 0, Number(source.expectedYield) < 1 ? 3 : 1)} expected {yieldUnit}</small></span>)}</div> : null}
                         <p className="craft-plan-byproduct-note">{guaranteedOutput
                           ? <>Guaranteed output: {formatNumber(guaranteedYield, guaranteedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}.</>
                           : <>Expected yield: {formatNumber(expectedYield, expectedYield < 1 ? 2 : 1)} {itemName(route.output)} {yieldUnit}{route.dropChance != null ? ` (${formatNumber(Number(route.dropChance) * 100, 1)}% chance for ${formatNumber(Number(route.dropQuantity) || 0, 1)})` : ""}.</>}</p>
                         <div className="craft-plan-chance-summary">
+                          {prospectingRoute ? <p className="craft-plan-resource-yield">Total node yield is unavailable because prospecting exhaustion is unknown; displayed health is not treated as finite progress.</p> : null}
                           {gatheringRoute && Number(route.expectedPerResource) > 0 ? <p className="craft-plan-resource-yield">Expected per full resource: <strong>{formatNumber(Number(route.expectedPerResource), Number(route.expectedPerResource) < 1 ? 3 : 1)}</strong> {itemName(route.output)} from <strong>{quantity(route.resourceHealth)}</strong> progress.</p> : null}
                           <div className="craft-plan-action-summary"><span>{actionLabel} <strong>{quantity(baseActions)}</strong>{gatheringRoute && unbufferedResources > 0 ? <small>{formatNumber(unbufferedResources, 2)} full-resource equivalents</small> : null}{!gatheringRoute && unbufferedWork !== baseActions ? <small>{quantity(unbufferedWork)} total recipe actions</small> : null}</span>{routeMultiplier > 1 ? <span>With {formatNumber((routeMultiplier - 1) * 100, 1)}% extra <strong>{quantity(bufferedActions)} {gatheringRoute ? "progress" : "completions"}</strong>{gatheringRoute && bufferedResources > 0 ? <small>{formatNumber(bufferedResources, 2)} full-resource equivalents</small> : null}{!gatheringRoute && bufferedWork !== bufferedActions ? <small>{quantity(bufferedWork)} total recipe actions</small> : null}</span> : null}</div>
                           {producerInputs.length ? <div className="craft-plan-producer-requirements"><small>{gatheringRoute ? "Gather/process" : "Craft inputs"}</small>{producerInputs.map((input: AnyRecord, inputIndex: number) => <span key={itemKey(input) + "-producer-" + inputIndex}>{itemNode(input)}<strong>{quantity(input.quantity)}</strong></span>)}</div> : null}

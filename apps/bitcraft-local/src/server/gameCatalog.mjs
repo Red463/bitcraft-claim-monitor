@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { selectLowestEffortWeights } from "./craftPlanEffortProgress.mjs";
 import { resolveItemListProbabilities } from "./itemProbability.mjs";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 7;
+export const GAME_CATALOG_NORMALIZATION_VERSION = 8;
 
 export function catalogNormalizationNeedsRefresh(storedVersion) {
   return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
@@ -175,9 +175,56 @@ function recipeStableKey(_sourceEntity, recipe, outputs, inputs) {
   return `recipe-hash:${createHash("sha1").update(signature).digest("hex").slice(0, 16)}`;
 }
 
+function coalesceRecipeOutputs(components) {
+  const grouped = new Map();
+  for (const component of components) {
+    const existing = grouped.get(component.outputKey);
+    if (!existing) {
+      grouped.set(component.outputKey, {
+        ...component,
+        componentCount: 1,
+        expectedQuantity: component.quantity * component.occurrenceRate,
+        guaranteedQuantity: component.occurrenceRate === 1 ? component.quantity : 0,
+      });
+      continue;
+    }
+    existing.componentCount += 1;
+    existing.expectedQuantity += component.quantity * component.occurrenceRate;
+    if (component.occurrenceRate === 1) existing.guaranteedQuantity += component.quantity;
+    existing.isPrimaryOutput = existing.isPrimaryOutput || component.isPrimaryOutput;
+  }
+  return [...grouped.values()].map(({ componentCount, expectedQuantity, ...output }) => ({
+    outputKey: output.outputKey,
+    kind: output.kind,
+    targetId: output.targetId,
+    quantity: componentCount === 1 ? output.quantity : Number(expectedQuantity.toFixed(12)),
+    ...((componentCount > 1 || output.yieldBasis != null) ? {
+      occurrenceRate: componentCount === 1 ? output.occurrenceRate : 1,
+      yieldBasis: output.yieldBasis ?? "per_craft",
+    } : {}),
+    ...(componentCount > 1 ? { guaranteedQuantity: Number(output.guaranteedQuantity.toFixed(12)) } : {}),
+    isPrimaryOutput: output.isPrimaryOutput,
+  }));
+}
+
+function positiveCatalogId(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized && Number(normalized) > 0 ? normalized : null;
+}
+
+function recipeGatheringMode(recipe, activityKind) {
+  if (activityKind !== "gathering") return "ordinary";
+  const label = `${recipe?.name ?? ""} ${recipeSkillName(recipe)}`;
+  if (/\bprospect(?:ing)?\b/i.test(label)) return "prospecting";
+  const resourceId = positiveCatalogId(recipe?.resourceId ?? recipe?.resource_id);
+  const cargoId = positiveCatalogId(recipe?.cargoId ?? recipe?.cargo_id);
+  return !resourceId && cargoId ? "prospecting" : "ordinary";
+}
+
 function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") {
   const stationName = recipeStationName(recipe);
   const activityKind = stationName ? "craft" : requestedActivityKind === "gathering" ? "gathering" : "craft";
+  const gatheringMode = recipeGatheringMode(recipe, activityKind);
   const outputDisplays = unwrapArray(recipe?.craftedItems);
   const inputDisplays = unwrapArray(recipe?.consumedItems);
   const declaredPrimary = targetFromStack(recipe?.craftedItem ?? recipe?.outputItem ?? recipe?.targetItem ?? recipe?.target ?? {}, recipe?.craftedItem ?? recipe?.targetItem ?? {});
@@ -218,7 +265,8 @@ function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") 
   const sourceOutputKey = sourceEntity.catalogKey;
   const singleOutputKey = outputs.length === 1 ? outputs[0].key : null;
   const primaryOutputKey = declaredPrimary?.key ?? (outputs.some((output) => output.key === sourceOutputKey) ? sourceOutputKey : singleOutputKey);
-  const normalizedOutputs = outputs.map((output) => ({
+  const outputComponents = outputs.map((output, componentIndex) => ({
+    componentIndex,
     outputKey: output.key,
     kind: output.kind,
     targetId: output.targetId,
@@ -229,6 +277,7 @@ function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") 
     } : {}),
     isPrimaryOutput: output.key === primaryOutputKey,
   }));
+  const normalizedOutputs = coalesceRecipeOutputs(outputComponents);
   const primaryOutput = outputs.find((output) => output.key === primaryOutputKey) ?? null;
 
   return {
@@ -237,7 +286,8 @@ function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") 
     sourceId: primaryOutput?.targetId ?? sourceEntity.targetId,
     actionCount: recipeActionCount(recipe),
     activityKind,
-    resourceId: String(recipe?.resourceId ?? recipe?.resource_id ?? "").trim() || null,
+    gatheringMode,
+    resourceId: positiveCatalogId(recipe?.resourceId ?? recipe?.resource_id),
     name: normalizedRecipeName(recipe, sourceEntity, primaryOutput, outputs, inputs),
     stationName,
     skillName: recipeSkillName(recipe),
@@ -250,6 +300,7 @@ function normalizeRecipe(recipe, sourceEntity, requestedActivityKind = "craft") 
       quantity: input.quantity,
     })),
     outputs: normalizedOutputs,
+    outputComponents,
   };
 }
 
@@ -360,6 +411,7 @@ function mapRecipeRow(row, inputs, outputs) {
     sourceId: row.source_id,
     actionCount: toNumber(row.action_count),
     activityKind: row.activity_kind === "gathering" ? "gathering" : "craft",
+    gatheringMode: row.gathering_mode === "prospecting" ? "prospecting" : "ordinary",
     name: row.name ?? null,
     stationName: row.station_name ?? null,
     skillName: row.skill_name ?? null,
@@ -438,18 +490,20 @@ export function createGameCatalogRepository(db) {
     countRecipeSources: db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipe_sources WHERE recipe_key = ?"),
     deleteRecipeInputs: db.prepare("DELETE FROM game_catalog_recipe_inputs WHERE recipe_key = ?"),
     deleteRecipeOutputs: db.prepare("DELETE FROM game_catalog_recipe_outputs WHERE recipe_key = ?"),
+    deleteRecipeOutputComponents: db.prepare("DELETE FROM game_catalog_recipe_output_components WHERE recipe_key = ?"),
     deleteRecipe: db.prepare("DELETE FROM game_catalog_recipes WHERE recipe_key = ?"),
     deleteOrphanRecipes: db.prepare("DELETE FROM game_catalog_recipes WHERE NOT EXISTS (SELECT 1 FROM game_catalog_recipe_sources AS sources WHERE sources.recipe_key = game_catalog_recipes.recipe_key)"),
     deleteItemListOutputs: db.prepare("DELETE FROM game_catalog_item_list_outputs WHERE producer_key = ?"),
     insertRecipe: db.prepare(`
       INSERT INTO game_catalog_recipes (
-        recipe_key, source_kind, source_id, action_count, activity_kind, name, station_name, skill_name, is_passive, is_transport_route, resource_id, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        recipe_key, source_kind, source_id, action_count, activity_kind, gathering_mode, name, station_name, skill_name, is_passive, is_transport_route, resource_id, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(recipe_key) DO UPDATE SET
         source_kind = excluded.source_kind,
         source_id = excluded.source_id,
         action_count = excluded.action_count,
         activity_kind = excluded.activity_kind,
+        gathering_mode = excluded.gathering_mode,
         name = excluded.name,
         station_name = excluded.station_name,
         skill_name = excluded.skill_name,
@@ -463,8 +517,13 @@ export function createGameCatalogRepository(db) {
       VALUES (?, ?, ?, ?, ?)
     `),
     insertRecipeOutput: db.prepare(`
-      INSERT INTO game_catalog_recipe_outputs (recipe_key, output_key, kind, target_id, quantity, occurrence_rate, yield_basis, is_primary_output)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO game_catalog_recipe_outputs (recipe_key, output_key, kind, target_id, quantity, occurrence_rate, yield_basis, guaranteed_quantity, is_primary_output)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    insertRecipeOutputComponent: db.prepare(`
+      INSERT INTO game_catalog_recipe_output_components (
+        recipe_key, component_index, output_key, kind, target_id, quantity, occurrence_rate, yield_basis, is_primary_output
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     insertItemListOutput: db.prepare(`
       INSERT INTO game_catalog_item_list_outputs (producer_key, output_key, kind, target_id, quantity, chance, guaranteed_quantity)
@@ -491,7 +550,7 @@ export function createGameCatalogRepository(db) {
       ORDER BY rowid ASC
     `),
     listRecipeOutputs: db.prepare(`
-      SELECT output_key, kind, target_id, quantity, occurrence_rate, yield_basis, is_primary_output
+      SELECT output_key, kind, target_id, quantity, occurrence_rate, yield_basis, guaranteed_quantity, is_primary_output
       FROM game_catalog_recipe_outputs
       WHERE recipe_key = ?
       ORDER BY is_primary_output DESC, rowid ASC
@@ -676,6 +735,7 @@ export function createGameCatalogRepository(db) {
         recipes.station_name,
         recipes.skill_name,
         recipes.activity_kind,
+        recipes.gathering_mode,
         recipes.action_count,
         recipes.resource_id,
         outputs.output_key,
@@ -683,6 +743,7 @@ export function createGameCatalogRepository(db) {
         outputs.target_id AS output_target_id,
         outputs.quantity,
         outputs.occurrence_rate,
+        outputs.guaranteed_quantity,
         entities.item_list_id,
         resources.name AS resource_name,
         resources.max_health
@@ -702,6 +763,12 @@ export function createGameCatalogRepository(db) {
       SELECT outputs.resource_id, outputs.output_key, outputs.quantity, outputs.occurrence_rate, resources.max_health
       FROM game_catalog_resource_completion_outputs AS outputs
       JOIN game_catalog_resources AS resources ON resources.resource_id = outputs.resource_id
+      WHERE EXISTS (
+        SELECT 1 FROM game_catalog_recipes AS recipes
+        WHERE recipes.resource_id = outputs.resource_id
+          AND recipes.activity_kind = 'gathering'
+          AND recipes.gathering_mode = 'ordinary'
+      )
       ORDER BY outputs.resource_id ASC, outputs.output_key ASC
     `),
     getResource: db.prepare("SELECT * FROM game_catalog_resources WHERE resource_id = ?"),
@@ -726,6 +793,7 @@ export function createGameCatalogRepository(db) {
       JOIN game_catalog_recipes AS recipes
         ON recipes.resource_id = completion.resource_id
         AND recipes.activity_kind = 'gathering'
+        AND recipes.gathering_mode = 'ordinary'
       WHERE completion.output_key = ?
       ORDER BY recipes.recipe_key ASC
     `),
@@ -755,6 +823,26 @@ export function createGameCatalogRepository(db) {
       LEFT JOIN game_catalog_entities AS entities ON entities.catalog_key = outputs.output_key
       ORDER BY lists.item_list_id ASC, possibilities.possibility_index ASC, outputs.output_index ASC
     `),
+    listRawRecipeOutputComponents: db.prepare(`
+      SELECT
+        components.recipe_key,
+        recipes.name AS recipe_name,
+        recipes.activity_kind,
+        recipes.gathering_mode,
+        components.component_index,
+        components.output_key,
+        components.kind AS output_kind,
+        components.target_id AS output_target_id,
+        entities.name AS output_name,
+        components.quantity,
+        components.occurrence_rate,
+        components.yield_basis,
+        components.is_primary_output
+      FROM game_catalog_recipe_output_components AS components
+      JOIN game_catalog_recipes AS recipes ON recipes.recipe_key = components.recipe_key
+      LEFT JOIN game_catalog_entities AS entities ON entities.catalog_key = components.output_key
+      ORDER BY components.recipe_key ASC, components.component_index ASC
+    `),
   };
 
   function recipeWithLinks(row) {
@@ -774,6 +862,9 @@ export function createGameCatalogRepository(db) {
         ...((output.yield_basis === "per_progress" || toNumber(output.occurrence_rate, 1) !== 1) ? {
           occurrenceRate: Math.max(0, toNumber(output.occurrence_rate, 1)),
           yieldBasis: output.yield_basis === "per_progress" ? "per_progress" : "per_craft",
+        } : {}),
+        ...(output.guaranteed_quantity != null ? {
+          guaranteedQuantity: Math.max(0, toNumber(output.guaranteed_quantity)),
         } : {}),
         isPrimaryOutput: Boolean(output.is_primary_output),
       })),
@@ -971,38 +1062,59 @@ export function createGameCatalogRepository(db) {
         if (!preservePublishedItemListOutputs) statements.deleteItemListOutputs.run(normalized.entity.catalogKey);
 
         for (const recipe of normalized.recipes) {
-          statements.insertRecipe.run(
-            recipe.recipeKey,
-            recipe.sourceKind,
-            recipe.sourceId,
-            recipe.actionCount,
-            recipe.activityKind === "gathering" ? "gathering" : "craft",
-            recipe.name,
-            recipe.stationName,
-            recipe.skillName,
-            recipe.isPassive ? 1 : 0,
-            recipe.isTransportRoute ? 1 : 0,
-            recipe.resourceId,
-            updatedAt,
-          );
-          statements.deleteRecipeInputs.run(recipe.recipeKey);
-          statements.deleteRecipeOutputs.run(recipe.recipeKey);
-          for (const input of recipe.inputs) {
-            statements.insertRecipeInput.run(recipe.recipeKey, input.inputKey, input.kind, input.targetId, input.quantity);
-          }
-          for (const output of recipe.outputs) {
-            statements.insertRecipeOutput.run(
+          try {
+            statements.insertRecipe.run(
               recipe.recipeKey,
-              output.outputKey,
-              output.kind,
-              output.targetId,
-              output.quantity,
-              Math.max(0, toNumber(output.occurrenceRate, 1)),
-              output.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
-              output.isPrimaryOutput ? 1 : 0,
+              recipe.sourceKind,
+              recipe.sourceId,
+              recipe.actionCount,
+              recipe.activityKind === "gathering" ? "gathering" : "craft",
+              recipe.gatheringMode === "prospecting" ? "prospecting" : "ordinary",
+              recipe.name,
+              recipe.stationName,
+              recipe.skillName,
+              recipe.isPassive ? 1 : 0,
+              recipe.isTransportRoute ? 1 : 0,
+              recipe.resourceId,
+              updatedAt,
             );
+            statements.deleteRecipeInputs.run(recipe.recipeKey);
+            statements.deleteRecipeOutputs.run(recipe.recipeKey);
+            statements.deleteRecipeOutputComponents.run(recipe.recipeKey);
+            for (const input of recipe.inputs) {
+              statements.insertRecipeInput.run(recipe.recipeKey, input.inputKey, input.kind, input.targetId, input.quantity);
+            }
+            for (const output of recipe.outputs) {
+              statements.insertRecipeOutput.run(
+                recipe.recipeKey,
+                output.outputKey,
+                output.kind,
+                output.targetId,
+                output.quantity,
+                Math.max(0, toNumber(output.occurrenceRate, 1)),
+                output.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+                output.guaranteedQuantity == null ? null : Math.max(0, toNumber(output.guaranteedQuantity)),
+                output.isPrimaryOutput ? 1 : 0,
+              );
+            }
+            for (const component of recipe.outputComponents) {
+              statements.insertRecipeOutputComponent.run(
+                recipe.recipeKey,
+                component.componentIndex,
+                component.outputKey,
+                component.kind,
+                component.targetId,
+                component.quantity,
+                Math.max(0, toNumber(component.occurrenceRate, 1)),
+                component.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+                component.isPrimaryOutput ? 1 : 0,
+              );
+            }
+            statements.insertRecipeSource.run(normalized.entity.catalogKey, recipe.recipeKey);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Recipe ${recipe.recipeKey}${recipe.name ? ` (${recipe.name})` : ""}: ${message}`, { cause: error });
           }
-          statements.insertRecipeSource.run(normalized.entity.catalogKey, recipe.recipeKey);
         }
 
         if (!preservePublishedItemListOutputs) {
@@ -1317,9 +1429,10 @@ export function createGameCatalogRepository(db) {
           const listExpectedQuantity = Math.max(0, toNumber(derived.quantity, 1));
           const listChance = Math.min(1, Math.max(0, toNumber(derived.chance, 1)));
           const expected = directQuantity * occurrenceRate * listExpectedQuantity;
-          const guaranteed = occurrenceRate === 1
-            ? directQuantity * Math.max(0, toNumber(derived.guaranteed_quantity, 1))
-            : 0;
+          const directGuaranteed = row.guaranteed_quantity == null
+            ? occurrenceRate === 1 ? directQuantity : 0
+            : Math.max(0, toNumber(row.guaranteed_quantity));
+          const guaranteed = directGuaranteed * Math.max(0, toNumber(derived.guaranteed_quantity, 1));
           const outputKey = derived.output_key;
           const outputEntity = entityByKey.get(outputKey);
           const common = {
@@ -1340,18 +1453,23 @@ export function createGameCatalogRepository(db) {
             probabilityStatus: Math.abs(expected - guaranteed) < 1e-9 ? "Guaranteed" : "Expected value",
           };
           if (row.activity_kind === "gathering") {
-            const resourceHealth = Math.max(0, toNumber(row.max_health));
+            const prospecting = row.gathering_mode === "prospecting";
+            const resourceHealth = prospecting ? null : Math.max(0, toNumber(row.max_health));
             const completionKey = `${row.resource_id}\u0000${outputKey}`;
-            const completionYield = completionByResourceOutput.get(completionKey) ?? 0;
-            coveredCompletionKeys.add(completionKey);
+            const completionYield = prospecting ? null : completionByResourceOutput.get(completionKey) ?? 0;
+            if (!prospecting) coveredCompletionKeys.add(completionKey);
             gatheringRoutes.push({
               ...common,
+              gatheringMode: prospecting ? "prospecting" : "ordinary",
               resourceId: row.resource_id,
-              resourceName: row.resource_name ?? `Resource #${row.resource_id}`,
+              resourceName: prospecting ? "Prospecting discovery" : row.resource_name ?? `Resource #${row.resource_id}`,
               resourceHealth,
               expectedPerProgress: expected,
               completionYield,
-              expectedPerResource: resourceHealth > 0 ? (expected * resourceHealth) + completionYield : null,
+              expectedPerResource: !prospecting && resourceHealth > 0 ? (expected * resourceHealth) + completionYield : null,
+              probabilityStatus: prospecting
+                ? "Expected per extraction progress; prospecting exhaustion is unknown"
+                : common.probabilityStatus,
             });
           } else {
             craftingRoutes.push({
@@ -1373,6 +1491,7 @@ export function createGameCatalogRepository(db) {
         const outputId = separator >= 0 ? outputKey.slice(separator + 1) : outputKey;
         gatheringRoutes.push({
           resourceId,
+          gatheringMode: "ordinary",
           resourceName: resource?.name ?? `Resource #${resourceId}`,
           resourceHealth: resource?.maxHealth ?? 0,
           recipeKey: `resource:${resourceId}:completion`,
@@ -1409,12 +1528,30 @@ export function createGameCatalogRepository(db) {
         nestedItemListId: row.nested_item_list_id ?? null,
         quantity: row.quantity == null ? null : toNumber(row.quantity),
       }));
+      const rawRecipeOutputs = statements.listRawRecipeOutputComponents.all().map((row) => ({
+        recipeKey: row.recipe_key,
+        recipeName: row.recipe_name ?? row.recipe_key,
+        activityKind: row.activity_kind === "gathering" ? "gathering" : "craft",
+        gatheringMode: row.activity_kind === "gathering"
+          ? row.gathering_mode === "prospecting" ? "prospecting" : "ordinary"
+          : null,
+        componentIndex: toNumber(row.component_index),
+        outputKey: row.output_key,
+        outputKind: row.output_kind,
+        outputId: row.output_target_id,
+        outputName: row.output_name ?? `${row.output_kind === "cargo" ? "Cargo" : "Item"} #${row.output_target_id}`,
+        quantity: toNumber(row.quantity),
+        occurrenceRate: Math.max(0, toNumber(row.occurrence_rate, 1)),
+        yieldBasis: row.yield_basis === "per_progress" ? "per_progress" : "per_craft",
+        isPrimaryOutput: Boolean(row.is_primary_output),
+      }));
 
       return {
         snapshot,
         entities,
         gatheringRoutes,
         craftingRoutes,
+        rawRecipeOutputs,
         rawItemLists,
         warnings: [...warnings],
       };
@@ -1438,9 +1575,10 @@ export function createGameCatalogRepository(db) {
 
       for (const row of statements.listProbabilityRecipeRows.all()) {
         const method = row.activity_kind === "gathering" ? "gathering" : "crafting";
+        const prospecting = method === "gathering" && row.gathering_mode === "prospecting";
         const actionsRequired = method === "gathering" ? 1 : Math.max(0, toNumber(row.action_count));
         if (!(actionsRequired > 0)) continue;
-        const sourceKey = method === "gathering" && row.resource_id
+        const sourceKey = method === "gathering" && row.resource_id && !prospecting
           ? `resource:${row.resource_id}`
           : row.recipe_key;
         const baseExpected = Math.max(0, toNumber(row.quantity)) * Math.max(0, toNumber(row.occurrence_rate, 1));
@@ -1455,7 +1593,7 @@ export function createGameCatalogRepository(db) {
               sourceKey,
               method,
               actionsRequired,
-              resourceHealth: row.max_health == null ? null : toNumber(row.max_health),
+              resourceHealth: prospecting || row.max_health == null ? null : toNumber(row.max_health),
             });
             candidate.expectedOutput += baseExpected * Math.max(0, toNumber(output.quantity));
           }
@@ -1465,7 +1603,7 @@ export function createGameCatalogRepository(db) {
             sourceKey,
             method,
             actionsRequired,
-            resourceHealth: row.max_health == null ? null : toNumber(row.max_health),
+            resourceHealth: prospecting || row.max_health == null ? null : toNumber(row.max_health),
           });
           candidate.expectedOutput += baseExpected;
         }

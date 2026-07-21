@@ -235,6 +235,46 @@ test("local catalog planner uses normalized gathering probability, resource effo
   assert.equal(step.probabilityStatus, "expected");
 });
 
+test("local catalog planner keeps prospecting per progress and omits full-resource equivalents", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [{
+    cargo: { id: "62000", itemType: 1, name: "Prospected Crystal" },
+    extractionRecipes: [{
+      id: 620,
+      cargoId: 62000,
+      resourceId: 0,
+      name: "Gather Prospected Crystal",
+      levelRequirements: [{ skill: { name: "Crystal Prospecting" }, level: 1 }],
+      extractedItemStacks: [1, 0.5].map((probability) => ({
+        item_stack: { item_id: 62000, item_type: "Cargo", quantity: 1 },
+        probability,
+      })),
+    }],
+  }]);
+  repository.replaceProbabilitySnapshot({
+    itemLists: [],
+    resources: normalizeGameDataResources([{ id: 0, name: "Displayed Crystal Node", max_health: 250000 }]),
+    sourceUrl: "https://example.test/static",
+  });
+
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "62000", kind: "cargo", itemType: 1, name: "Prospected Crystal", quantity: 10 }],
+  });
+  const catalog = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey: catalog.detailsByKey, catalogWarnings: catalog.warnings });
+  const step = plan.steps.find((row) => row.output.id === "62000");
+
+  assert.equal(step.gatheringMode, "prospecting");
+  assert.equal(step.yieldBasis, "per_progress");
+  assert.equal(step.expectedPerProgress, 1.5);
+  assert.equal(step.expectedPerResource, null);
+  assert.equal(step.resourceHealth, null);
+  assert.equal(step.expectedResourceEquivalents, null);
+  assert.equal(step.guaranteedYield, 1);
+  assert.equal(step.probabilityStatus, "expected");
+});
+
 test("local catalog planner exposes resource-completion-only outputs as full-resource routes", (t) => {
   const { repository } = createCatalogFixture(t);
   upsertCatalogDetails(repository, [

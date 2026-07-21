@@ -1,6 +1,6 @@
 import { plannerTaxonomyFor } from "../pages/craftPlanningTaxonomyData.mjs";
 
-export const CRAFT_PLAN_EFFORT_MODEL_VERSION = 2;
+export const CRAFT_PLAN_EFFORT_MODEL_VERSION = 3;
 
 const MAX_MISSING_WEIGHT_KEYS = 25;
 

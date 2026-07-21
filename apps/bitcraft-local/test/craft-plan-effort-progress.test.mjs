@@ -37,7 +37,7 @@ function fishingWeights() {
 }
 
 test("effort candidates use actions or inverse gathering probability", () => {
-  assert.equal(CRAFT_PLAN_EFFORT_MODEL_VERSION, 2);
+  assert.equal(CRAFT_PLAN_EFFORT_MODEL_VERSION, 3);
   assert.equal(craftingEffortCandidate({ catalogKey: "items:oil", sourceKey: "recipe:oil", actionsRequired: 12, outputQuantity: 3, probability: 1 }).effortWeight, 4);
   assert.equal(craftingEffortCandidate({ catalogKey: "items:straw", sourceKey: "recipe:grain", actionsRequired: 8, outputQuantity: 2, probability: 0.5 }).effortWeight, 8);
   assert.equal(gatheringEffortCandidate({ catalogKey: "items:gypsite", sourceKey: "resource:clay", outputQuantity: 1, probability: 0.02 }).effortWeight, 50);
