@@ -295,6 +295,7 @@ export const schemaBootstrapSql = `
     tier INTEGER,
     rarity TEXT,
     icon_asset_name TEXT,
+    item_list_id TEXT,
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS game_catalog_recipes (
@@ -308,6 +309,7 @@ export const schemaBootstrapSql = `
     skill_name TEXT,
     is_passive INTEGER NOT NULL DEFAULT 0,
     is_transport_route INTEGER NOT NULL DEFAULT 0,
+    resource_id TEXT,
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS game_catalog_recipe_inputs (
@@ -325,6 +327,8 @@ export const schemaBootstrapSql = `
     kind TEXT NOT NULL,
     target_id TEXT NOT NULL,
     quantity REAL NOT NULL,
+    occurrence_rate REAL NOT NULL DEFAULT 1,
+    yield_basis TEXT NOT NULL DEFAULT 'per_craft' CHECK (yield_basis IN ('per_craft', 'per_progress')),
     is_primary_output INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (recipe_key, output_key),
     FOREIGN KEY (recipe_key) REFERENCES game_catalog_recipes(recipe_key) ON DELETE CASCADE
@@ -345,6 +349,70 @@ export const schemaBootstrapSql = `
     chance REAL,
     guaranteed_quantity REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (producer_key, output_key)
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_item_lists (
+    item_list_id TEXT PRIMARY KEY,
+    name TEXT,
+    total_weight REAL NOT NULL,
+    source_url TEXT NOT NULL,
+    source_revision TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_item_list_possibilities (
+    item_list_id TEXT NOT NULL,
+    possibility_index INTEGER NOT NULL,
+    raw_weight REAL NOT NULL,
+    normalized_probability REAL NOT NULL,
+    PRIMARY KEY (item_list_id, possibility_index),
+    FOREIGN KEY (item_list_id) REFERENCES game_catalog_item_lists(item_list_id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_item_list_possibility_outputs (
+    item_list_id TEXT NOT NULL,
+    possibility_index INTEGER NOT NULL,
+    output_index INTEGER NOT NULL,
+    output_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    nested_item_list_id TEXT,
+    quantity REAL NOT NULL,
+    PRIMARY KEY (item_list_id, possibility_index, output_index),
+    FOREIGN KEY (item_list_id, possibility_index)
+      REFERENCES game_catalog_item_list_possibilities(item_list_id, possibility_index) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_resources (
+    resource_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tier INTEGER,
+    tag TEXT,
+    max_health REAL NOT NULL,
+    source_url TEXT NOT NULL,
+    source_revision TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_resource_completion_outputs (
+    resource_id TEXT NOT NULL,
+    output_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    occurrence_rate REAL NOT NULL DEFAULT 1,
+    PRIMARY KEY (resource_id, output_key),
+    FOREIGN KEY (resource_id) REFERENCES game_catalog_resources(resource_id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_probability_snapshot (
+    snapshot_id INTEGER PRIMARY KEY CHECK (snapshot_id = 1),
+    source_url TEXT NOT NULL,
+    source_revision TEXT,
+    item_list_count INTEGER NOT NULL,
+    resource_count INTEGER NOT NULL,
+    warning_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_probability_sources (
+    source_kind TEXT PRIMARY KEY,
+    source_url TEXT NOT NULL,
+    source_revision TEXT,
+    updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS game_catalog_effort_weights (
     catalog_key TEXT PRIMARY KEY,
@@ -711,6 +779,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_sources_recipe ON game_catalog_recipe_sources (recipe_key, catalog_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_inputs_input ON game_catalog_recipe_inputs (input_key, recipe_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_possibility_outputs_output ON game_catalog_item_list_possibility_outputs (output_key, item_list_id);
+  CREATE INDEX IF NOT EXISTS idx_game_catalog_resource_completion_outputs_output ON game_catalog_resource_completion_outputs (output_key, resource_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_status_time ON game_catalog_refresh_runs (status, started_at DESC, completed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_updated_at ON game_catalog_refresh_runs (updated_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_targets_queue ON game_catalog_refresh_targets (run_id, state, sequence);

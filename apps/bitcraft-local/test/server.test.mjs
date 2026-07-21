@@ -16,6 +16,21 @@ function json(res, body, status = 200) {
   res.end(JSON.stringify(body));
 }
 
+function gameDataProbabilityFixture(url, res) {
+  if (url.pathname === "/game-data/item-lists") {
+    json(res, [{ id: 55, possibilities: [
+      { probability: 0.2, items: [{ item_id: 400, item_type: "Item", quantity: 1 }] },
+      { probability: 0.8, items: [] },
+    ] }]);
+    return true;
+  }
+  if (url.pathname === "/game-data/resources") {
+    json(res, [{ id: 1, name: "Test Resource", max_health: 1, on_destroy_yield: [] }]);
+    return true;
+  }
+  return false;
+}
+
 async function listen(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   return server.address().port;
@@ -1592,6 +1607,7 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   let item200Attempts = 0;
   const upstream = createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (gameDataProbabilityFixture(url, res)) return;
     if (url.pathname === "/api/items") {
       itemsPageRequests += 1;
       const page = Number(url.searchParams.get("page") || 1);
@@ -1713,6 +1729,9 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
+      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
+      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
       GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
       GAME_CATALOG_REFRESH_RETRY_DELAYS_MS: "1000,1000,1000",
     },
@@ -1764,6 +1783,9 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   }).then((response) => response.json());
   assert.equal(initialStatus.scheduledJob.key, "recipe_catalog_refresh");
   assert.equal(initialStatus.scheduledJob.schedule, "weekly@1@00:00");
+  const unavailableWorkbook = await fetch(`${origin}/api/local/catalog/probabilities.xlsx`);
+  assert.equal(unavailableWorkbook.status, 503);
+  assert.match((await unavailableWorkbook.json()).error, /Probability catalogue is not ready/);
 
   const firstRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
     method: "POST",
@@ -1816,10 +1838,17 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   assert.equal(completedStatus.scheduledJob.running, false);
   assert.ok(completedStatus.scheduledJob.lastSuccessAt);
 
+  const workbookResponse = await fetch(`${origin}/api/local/catalog/probabilities.xlsx`);
+  assert.equal(workbookResponse.status, 200);
+  assert.equal(workbookResponse.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  assert.equal(workbookResponse.headers.get("content-disposition"), 'attachment; filename="bitcraft-item-probabilities.xlsx"');
+  assert.ok((await workbookResponse.arrayBuffer()).byteLength > 1000);
+
   const completedDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_entities").get().count, 3);
   assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes").get().count, 3);
   assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs").get().count, 1);
+  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_probability_snapshot").get().count, 1);
   assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 4);
   const legacyRow = completedDb.prepare("SELECT source, last_error FROM recipe_catalog_entries WHERE catalog_key = ?").get("items:999");
   const latestRunRow = completedDb.prepare("SELECT status, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count, recipe_count, byproduct_count, failure_count FROM game_catalog_refresh_runs ORDER BY id DESC LIMIT 1").get();
@@ -1852,6 +1881,7 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
   let cargoListRequests = 0;
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (gameDataProbabilityFixture(url, res)) return;
     if (url.pathname === "/api/items") {
       itemListRequests += 1;
       return json(res, { items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }, { id: "200", itemType: 0, name: "Timber", tag: "Plank", tier: 1 }], pagination: { page: 1, totalPages: 1, total: 2 } });
@@ -1885,6 +1915,9 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
+      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
+      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
       GAME_CATALOG_REFRESH_BATCH_SIZE: "1",
       GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
       GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS: "1000",
@@ -1934,6 +1967,7 @@ test("craft plan catalog refresh resets stale resume cursor counters when the sa
   const detailRequests = [];
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (gameDataProbabilityFixture(url, res)) return;
     if (url.pathname === "/api/items") {
       const page = Number(url.searchParams.get("page") || 1);
       if (page === 1) {
@@ -2032,6 +2066,9 @@ test("craft plan catalog refresh resets stale resume cursor counters when the sa
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
       BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
+      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
+      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
+      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
       GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
     },
     stdio: "ignore",

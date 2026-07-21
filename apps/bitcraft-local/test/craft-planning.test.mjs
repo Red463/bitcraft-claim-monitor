@@ -18,6 +18,7 @@ import {
   recipeKey,
 } from "../src/server/craftPlanning.mjs";
 import { createGameCatalogRepository } from "../src/server/gameCatalog.mjs";
+import { normalizeGameDataItemLists, normalizeGameDataResources } from "../src/server/itemProbability.mjs";
 
 const fishOilDetail = {
   item: { id: "900", name: "Fish Oil", itemType: 0, tag: "Oil" },
@@ -186,6 +187,158 @@ function createCatalogFixture(t) {
 function upsertCatalogDetails(repository, details) {
   for (const detail of details) repository.upsertDetail(detail, { updatedAt: CATALOG_UPDATED_AT });
 }
+
+test("local catalog planner uses normalized gathering probability, resource effort, full-resource yield, and safety buffer", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "1007577047", name: "T2 Berry Output", itemListId: "1423411753", tag: "Berry Output" },
+      extractionRecipes: [{
+        id: 78,
+        resourceId: 80,
+        resourceName: "Honeyberry Bush",
+        extractedItemStacks: [{ item_stack: { item_id: 1007577047, item_type: "Item", quantity: 1 }, probability: 0.06723 }],
+        levelRequirements: [{ skill: { name: "Foraging" }, level: 20 }],
+      }],
+    },
+    { item: { id: "2130004", name: "Simple Berry", tier: 2, tag: "Berry" } },
+    { item: { id: "115737343", name: "Simple Citric Berry", tier: 2, tag: "Berry" } },
+  ]);
+  repository.replaceProbabilitySnapshot({
+    itemLists: normalizeGameDataItemLists([{ id: 1423411753, possibilities: [
+      { probability: 1, items: [{ item_id: 2130004, item_type: "Item", quantity: 1 }] },
+      { probability: 0.02, items: [{ item_id: 115737343, item_type: "Item", quantity: 1 }] },
+    ] }]),
+    resources: normalizeGameDataResources([{ id: 80, name: "Honeyberry Bush", max_health: 595, on_destroy_yield: [] }]),
+    sourceUrl: "https://example.test/static",
+  });
+
+  const targetKey = recipeKey("items", "2130004");
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "2130004", kind: "items", name: "Simple Berry", quantity: 100 }],
+    multipliers: { [targetKey]: { multiplier: 1.1, note: "10% extra" } },
+  });
+  const catalog = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey: catalog.detailsByKey, catalogWarnings: catalog.warnings });
+  const step = plan.steps.find((row) => row.output.id === "2130004");
+  const expectedPerProgress = 0.06723 / 1.02;
+
+  assert.equal(step.yieldBasis, "per_progress");
+  assert.equal(step.expectedPerProgress, expectedPerProgress);
+  assert.equal(step.expectedPerResource, 39.2175);
+  assert.equal(step.resourceHealth, 595);
+  assert.equal(step.unbufferedCraftCount, Math.ceil(100 / expectedPerProgress));
+  assert.equal(step.craftCount, Math.ceil(110 / expectedPerProgress));
+  assert.equal(step.expectedEffort, step.craftCount);
+  assert.equal(step.expectedResourceEquivalents, step.craftCount / 595);
+  assert.equal(step.probabilityStatus, "expected");
+});
+
+test("local catalog planner exposes resource-completion-only outputs as full-resource routes", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "500", name: "Tree Output" },
+      extractionRecipes: [{
+        id: 90,
+        resourceId: 91,
+        extractedItemStacks: [{ item_stack: { item_id: 500, item_type: "Item", quantity: 1 }, probability: 1 }],
+        levelRequirements: [{ skill: { name: "Forestry" }, level: 1 }],
+      }],
+    },
+    { item: { id: "501", name: "Completion Seed" } },
+  ]);
+  repository.replaceProbabilitySnapshot({
+    itemLists: normalizeGameDataItemLists([{ id: 1, possibilities: [{ probability: 1, items: [] }] }]),
+    resources: normalizeGameDataResources([{ id: 91, name: "Test Tree", max_health: 100, on_destroy_yield: [
+      { item_id: 501, item_type: "Item", quantity: 2 },
+    ] }]),
+    sourceUrl: "https://example.test/static",
+  });
+
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "501", kind: "items", name: "Completion Seed", quantity: 10 }],
+  });
+  const catalog = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey: catalog.detailsByKey, catalogWarnings: catalog.warnings });
+  const step = plan.steps.find((row) => row.output.id === "501");
+
+  assert.equal(step.expectedPerProgress, 0.02);
+  assert.equal(step.expectedPerResource, 2);
+  assert.equal(step.resourceHealth, 100);
+  assert.equal(step.expectedEffort, 500);
+  assert.equal(step.expectedResourceEquivalents, 5);
+  assert.equal(step.probabilityStatus, "expected");
+});
+
+test("local catalog planner converts expected craft output into completions and total recipe work", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    {
+      item: { id: "3000", name: "Weighted Product Bundle", itemListId: "5000" },
+      craftingRecipes: [{
+        id: "make-weighted-bundle",
+        actions_required: 5,
+        craftedItemStacks: [{ item_id: "3000", item_type: "item", quantity: 1 }],
+        consumedItemStacks: [{ item_id: "3002", item_type: "item", quantity: 1 }],
+      }],
+    },
+    { item: { id: "3001", name: "Weighted Product", tier: 2 } },
+    { item: { id: "3002", name: "Crafting Input", tier: 2 } },
+  ]);
+  repository.replaceProbabilitySnapshot({
+    itemLists: normalizeGameDataItemLists([{ id: 5000, possibilities: [
+      { probability: 98, items: [{ item_id: 3001, item_type: "Item", quantity: 2 }] },
+      { probability: 2, items: [{ item_id: 3001, item_type: "Item", quantity: 53 }] },
+    ] }]),
+    resources: [],
+    sourceUrl: "https://example.test/static",
+  });
+
+  const targetKey = recipeKey("items", "3001");
+  const config = normalizeCraftPlanConfig({
+    enabled: true,
+    targets: [{ id: "3001", kind: "items", name: "Weighted Product", quantity: 9 }],
+    multipliers: { [targetKey]: { multiplier: 1.1 } },
+  });
+  const catalog = collectLocalCatalogCraftPlanDetails(repository, config.targets, config.routeOverrides);
+  const plan = computeCraftPlan({ config, detailsByKey: catalog.detailsByKey, catalogWarnings: catalog.warnings });
+  const step = plan.steps.find((row) => row.output.id === "3001");
+
+  assert.equal(step.expectedPerCraft, 3.02);
+  assert.equal(step.guaranteedYield, 2);
+  assert.equal(step.unbufferedCraftCount, 3);
+  assert.equal(step.craftCount, 4);
+  assert.equal(step.unbufferedExpectedEffort, 15);
+  assert.equal(step.expectedEffort, 20);
+  assert.equal(step.probabilityStatus, "expected");
+});
+
+test("local catalog planner disables probabilistic routes when a validated snapshot is required but unavailable", (t) => {
+  const { repository } = createCatalogFixture(t);
+  upsertCatalogDetails(repository, [
+    { item: { id: "4100", name: "Chance Output" } },
+    {
+      item: { id: "4101", name: "Chance Bundle" },
+      craftingRecipes: [{ id: "make-bundle", craftedItemStacks: [{ item_id: "4101", item_type: "item", quantity: 1 }] }],
+      itemListPossibilities: [{ targetId: "4100", targetItem: { id: "4100", name: "Chance Output" }, quantity: 1, chance: 0.5 }],
+    },
+  ]);
+
+  const catalog = collectLocalCatalogCraftPlanDetails(
+    repository,
+    [{ id: "4100", kind: "items", name: "Chance Output", quantity: 1 }],
+    {},
+    64,
+    [],
+    { requireValidatedProbabilities: true },
+  );
+
+  assert.equal(catalog.detailsByKey.get("items:4100")?.itemListPossibilities.length, 0);
+  assert.match(catalog.warnings.join("\n"), /validated probability snapshot unavailable/i);
+});
 
 test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and multipliers", () => {
   const config = normalizeCraftPlanConfig({

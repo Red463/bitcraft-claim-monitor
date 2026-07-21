@@ -229,9 +229,9 @@ test("How to get this separates route headings and producer buffer controls", ()
 
   assert.match(page, /craft-plan-route-heading/);
   assert.match(page, /craft-plan-buffer-settings/);
-  assert.match(page, /Crafts required/);
-  assert.match(page, /Estimated crafts/);
-  assert.match(page, /Estimated gathering actions/);
+  assert.match(page, /Recipe completions/);
+  assert.match(page, /Expected resource progress/);
+  assert.match(page, /total recipe actions/);
   assert.match(page, /Craft inputs/);
   assert.match(page, /Gather\/process/);
   assert.match(page, /does not increase the .* goal/);
