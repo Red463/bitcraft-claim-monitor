@@ -184,6 +184,8 @@ test("Craft Planning acquisition routes use accessible comparable cards", () => 
   assert.match(chooser, /acquisitionRouteMetrics/);
   assert.match(chooser, /No additional nodes needed/);
   assert.match(chooser, /Yield calculation unavailable/);
+  assert.match(chooser, /processing routes available/);
+  assert.match(chooser, /choose the source material you plan to use/);
 });
 
 test("Craft Planning keeps the preferred fishing route browser-local", () => {
