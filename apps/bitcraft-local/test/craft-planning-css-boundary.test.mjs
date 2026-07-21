@@ -29,6 +29,30 @@ test("Craft planning item details use a fixed viewport modal", () => {
   assert.match(closeMatch[1], /right:\s*18px/);
 });
 
+test("Craft planning item details use an intentional loading strip and close control", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /className="craft-plan-detail-loading" role="status"/);
+  assert.match(page, /className="craft-plan-detail-loading-icon" aria-hidden="true"/);
+  assert.match(page, /Updating item details/);
+  assert.match(page, /Showing saved planner data while current routes load\./);
+
+  const loadingMatch = css.match(/\.craft-plan-detail-loading\s*\{([^}]+)\}/);
+  assert.ok(loadingMatch, "detail loading-strip CSS should exist");
+  assert.match(loadingMatch[1], /display:\s*flex/);
+  assert.match(loadingMatch[1], /border-radius:\s*8px/);
+  assert.match(loadingMatch[1], /background:/);
+
+  const closeMatch = css.match(/\.craft-plan-need-detail \.modal-header \.icon-button\s*\{([^}]+)\}/);
+  assert.ok(closeMatch, "detail close-button CSS should exist");
+  assert.match(closeMatch[1], /width:\s*34px/);
+  assert.match(closeMatch[1], /height:\s*34px/);
+  assert.match(closeMatch[1], /border:/);
+  assert.match(closeMatch[1], /background:/);
+  assert.match(css, /\.craft-plan-need-detail \.modal-header \.icon-button:hover\s*\{/);
+});
+
 test("Craft planning needs board cells avoid item icons", () => {
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
   const cellBody = page.match(/function needCellNode[\s\S]+?function summaryStat/)?.[0] ?? "";

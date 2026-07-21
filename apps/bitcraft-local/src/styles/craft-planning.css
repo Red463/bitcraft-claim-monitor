@@ -398,6 +398,24 @@
   position: absolute;
   top: 16px;
   right: 18px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  appearance: none;
+  background: var(--panel-2);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 160ms ease-out, background 160ms ease-out, color 160ms ease-out;
+}
+.craft-plan-need-detail .modal-header .icon-button:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
 }
 .craft-plan-need-detail .modal-header h2 {
   margin: 0;
@@ -480,9 +498,38 @@
 .craft-plan-detail-loading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 16px 12px;
-  color: var(--text-muted);
+  gap: 10px;
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(101, 183, 250, 0.24);
+  border-radius: 8px;
+  background: rgba(101, 183, 250, 0.07);
+  color: var(--text);
+}
+.craft-plan-detail-loading-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(101, 183, 250, 0.12);
+  color: #65b7fa;
+}
+.craft-plan-detail-loading > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.craft-plan-detail-loading strong {
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+.craft-plan-detail-loading small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  text-wrap: pretty;
 }
 .craft-plan-route-options {
   display: grid;

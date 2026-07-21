@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.40.1-beta.4] - 2026-07-21
+
+### Changed
+
+- Improved the Craft Planning item-detail loading state while keeping saved stock, routes, and usage visible.
+- Restyled the item-detail close control to match the surrounding modal.
+
 ## [0.40.1-beta.3] - 2026-07-21
 
 ### Changed
