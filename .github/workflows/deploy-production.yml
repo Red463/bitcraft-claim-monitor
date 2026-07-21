@@ -2,6 +2,12 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+    inputs:
+      force_database_backup:
+        description: Create a manual database backup even when the schema is unchanged
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,7 +43,7 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment: production
     steps:
       - name: Configure pinned SSH identity
@@ -54,15 +60,22 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
+          FORCE_DATABASE_BACKUP: ${{ inputs.force_database_backup }}
         run: |
+          BACKUP_OPTION=""
+          if [[ "$FORCE_DATABASE_BACKUP" == "true" ]]; then
+            BACKUP_OPTION=" --force-backup"
+          fi
           set +e
           DEPLOY_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -- "$VPS_DEPLOY_USER@$VPS_HOST" \
-            "sudo /usr/local/bin/update-bitcraft-monitor --revision '$GITHUB_SHA'" 2>&1)"
+            "sudo /usr/local/bin/update-bitcraft-monitor --revision '$GITHUB_SHA'$BACKUP_OPTION" 2>&1)"
           DEPLOY_STATUS=$?
           set -e
 

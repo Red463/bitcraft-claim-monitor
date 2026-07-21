@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflowUrl = new URL("../../.github/workflows/deploy-production.yml", import.meta.url);
+const deploymentUrl = new URL("../../DEPLOYMENT.md", import.meta.url);
 
 test("production deployment is manual, main-only, and serialized", () => {
   const workflow = readFileSync(workflowUrl, "utf8");
@@ -30,4 +31,25 @@ test("workflow pins host identity and deploys the verified commit with system SS
   assert.match(workflow, /update-bitcraft-monitor --revision.*GITHUB_SHA/);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(workflow, /appleboy|ssh-action/);
+});
+
+test("workflow supports explicit backups and long-running SSH keepalives", () => {
+  const workflow = readFileSync(workflowUrl, "utf8");
+  assert.match(workflow, /force_database_backup:[\s\S]*type: boolean[\s\S]*default: false/);
+  assert.match(workflow, /deploy:[\s\S]*timeout-minutes: 45/);
+  assert.match(workflow, /ServerAliveInterval=30/);
+  assert.match(workflow, /ServerAliveCountMax=10/);
+  assert.match(workflow, /FORCE_DATABASE_BACKUP/);
+});
+
+test("deployment runbook explains the backup lifecycle and guarded cleanup", () => {
+  const deployment = readFileSync(deploymentUrl, "utf8");
+  assert.match(deployment, /database-schema-version/);
+  assert.match(deployment, /backup-bitcraft-monitor --dry-run-prune/);
+  assert.match(deployment, /backup-bitcraft-monitor --apply-prune/);
+  assert.match(deployment, /bitcraft-claim-monitor-backup\.timer/);
+  assert.match(deployment, /force_database_backup/);
+  assert.match(deployment, /seven daily/i);
+  assert.match(deployment, /three migration/i);
+  assert.match(deployment, /three manual/i);
 });
