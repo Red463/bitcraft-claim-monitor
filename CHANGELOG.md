@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.41.0-beta.2] - 2026-07-22
+
+### Changed
+
+- Consolidated passive-craft coverage into one Craft Planning source row per player, with craft, status, structure, expected-output, and guaranteed-output summaries.
+
+### Fixed
+
+- Prevented long passive-craft labels from overlapping expected and guaranteed output values in item details.
+
 ## [0.41.0-beta.1] - 2026-07-22
 
 ### Added

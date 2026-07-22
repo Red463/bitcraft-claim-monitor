@@ -349,6 +349,10 @@
 .craft-plan-tracked-crafts h3 { margin: 0 0 2px; }
 .craft-plan-tracked-crafts .craft-plan-detail-row > span { display: grid; gap: 2px; }
 .craft-plan-tracked-crafts .craft-plan-detail-row small { color: var(--muted); }
+.craft-plan-tracked-craft-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.craft-plan-tracked-craft-copy, .craft-plan-tracked-craft-totals { display: grid; min-width: 0; gap: 2px; }
+.craft-plan-tracked-craft-copy small { white-space: normal; overflow-wrap: anywhere; }
+.craft-plan-tracked-craft-totals { justify-items: end; text-align: right; }
 
 .craft-plan-need-cell {
   width: 100%;
@@ -716,6 +720,8 @@
   .craft-plan-need-detail { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   .craft-plan-need-detail-grid { grid-template-columns: 1fr; }
   .craft-plan-need-detail-grid .nested-card { max-height: none; }
+  .craft-plan-tracked-craft-row { grid-template-columns: 1fr; }
+  .craft-plan-tracked-craft-totals { justify-items: start; text-align: left; }
 }
 .craft-plan-row-section-button {
   width: 100%;
