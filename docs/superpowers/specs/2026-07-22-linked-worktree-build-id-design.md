@@ -16,7 +16,7 @@ Resolution order remains:
 2. Inspect the release root's `.git` metadata.
 3. If `.git` is a directory, preserve the existing normal-checkout behavior.
 4. If `.git` is a file beginning with `gitdir:`, resolve its absolute or repository-relative target and read `HEAD` from that Git directory.
-5. Return the first 12 characters of a valid 40-character revision. Return an empty string when metadata is missing or invalid.
+5. For the filesystem fallback, return the first 12 characters of a valid 40-character revision. Preserve the existing environment-variable behavior, and return an empty string when Git metadata is missing or invalid.
 
 The production release worktrees are detached, so their pointed-to `HEAD` contains the deployed revision directly. Existing symbolic-ref handling remains available for normal repositories.
 
