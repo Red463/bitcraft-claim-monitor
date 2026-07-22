@@ -41,6 +41,7 @@ jobs:
         run: node --test scripts/test/deploy-*.test.mjs
       - name: Validate systemd units
         run: |
+          test -x /usr/bin/node || sudo ln -s "$(command -v node)" /usr/bin/node
           systemd-analyze verify \
             deploy/bitcraft-claim-monitor.service \
             deploy/bitcraft-claim-monitor-worker.service \

@@ -9,12 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.41.1-beta.3] - 2026-07-22
+## [0.41.1-beta.4] - 2026-07-22
 
 ### Fixed
 
 - Fixed mixed-source Craft Planning items hiding their processing routes whenever a gathering route was available.
 - Fixed staged GitHub deployments returning an empty build ID, restoring active-tab update prompts and hidden-tab automatic refreshes.
+
+## [0.41.1-beta.3] - 2026-07-22
+
+### Fixed
+
+- Fixed production verification on GitHub runners where Node.js is installed outside the VPS system path.
 
 ## [0.41.1-beta.2] - 2026-07-22
 

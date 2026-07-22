@@ -25,10 +25,14 @@ test("deployment credentials are gated behind verification and production approv
 test("verification runs real systemd validation before deployment", () => {
   const workflow = readFileSync(workflowUrl, "utf8");
   const verifyJob = workflow.slice(workflow.indexOf("  verify:"), workflow.indexOf("  deploy:"));
+  const nodePathIndex = verifyJob.indexOf('sudo ln -s "$(command -v node)" /usr/bin/node');
+  const systemdVerifyIndex = verifyJob.indexOf("systemd-analyze verify");
 
   assert.match(verifyJob, /systemd-analyze verify/);
   assert.match(verifyJob, /deploy\/bitcraft-claim-monitor-backup\.service/);
   assert.match(verifyJob, /deploy\/bitcraft-claim-monitor-backup\.timer/);
+  assert.ok(nodePathIndex >= 0, "verifier must provide the production Node executable path");
+  assert.ok(systemdVerifyIndex > nodePathIndex, "production Node path must exist before systemd validation");
 });
 
 test("workflow pins host identity and deploys the verified commit with system SSH", () => {
