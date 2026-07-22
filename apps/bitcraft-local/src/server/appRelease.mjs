@@ -6,16 +6,36 @@ export function currentAppBuildId({
   repoRoot = "",
   readFileSync = defaultReadFileSync,
   joinPath = path.join,
+  isAbsolutePath = path.isAbsolute,
+  resolvePath = path.resolve,
 } = {}) {
   const envRevision = String(env.SOURCE_VERSION ?? env.RENDER_GIT_COMMIT ?? env.GITHUB_SHA ?? "").trim();
   if (envRevision) return envRevision.slice(0, 12);
   try {
-    const gitDir = joinPath(repoRoot, ".git");
+    let gitDir = joinPath(repoRoot, ".git");
+    try {
+      const pointer = readFileSync(gitDir, "utf8").trim();
+      if (/^gitdir:/i.test(pointer)) {
+        const target = pointer.slice(pointer.indexOf(":") + 1).trim();
+        if (!target) return "";
+        gitDir = isAbsolutePath(target) ? target : resolvePath(repoRoot, target);
+      }
+    } catch {
+      // A normal checkout has a .git directory rather than a pointer file.
+    }
     const head = readFileSync(joinPath(gitDir, "HEAD"), "utf8").trim();
     if (head.startsWith("ref:")) {
       const refPath = head.slice(5).trim();
-      const full = readFileSync(joinPath(gitDir, refPath), "utf8").trim();
-      return full.slice(0, 12);
+      let full;
+      try {
+        full = readFileSync(joinPath(gitDir, refPath), "utf8").trim();
+      } catch {
+        const commonTarget = readFileSync(joinPath(gitDir, "commondir"), "utf8").trim();
+        if (!commonTarget) return "";
+        const commonDir = isAbsolutePath(commonTarget) ? commonTarget : resolvePath(gitDir, commonTarget);
+        full = readFileSync(joinPath(commonDir, refPath), "utf8").trim();
+      }
+      return /^[a-f0-9]{40}$/i.test(full) ? full.slice(0, 12) : "";
     }
     if (/^[a-f0-9]{40}$/i.test(head)) return head.slice(0, 12);
   } catch {}

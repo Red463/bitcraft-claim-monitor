@@ -44,6 +44,56 @@ test("currentAppBuildId reads detached HEAD commits and safely falls back", () =
   }), "");
 });
 
+test("currentAppBuildId follows linked worktree gitdir pointers", () => {
+  const revision = "abcdef1234567890abcdef1234567890abcdef12";
+  const absoluteReads = new Map([
+    ["C:/release/.git", "gitdir: C:/source/.git/worktrees/release-abc\n"],
+    ["C:/source/.git/worktrees/release-abc/HEAD", `${revision}\n`],
+  ]);
+  const relativeReads = new Map([
+    ["C:/release/.git", "gitdir: ../source/.git/worktrees/release-abc\n"],
+    ["C:/source/.git/worktrees/release-abc/HEAD", `${revision}\n`],
+  ]);
+  const options = (reads, isAbsolutePath, resolvePath) => ({
+    env: {},
+    repoRoot: "C:/release",
+    readFileSync: (filePath) => {
+      if (!reads.has(filePath)) throw new Error(`Missing fixture path: ${filePath}`);
+      return reads.get(filePath);
+    },
+    joinPath: (...parts) => parts.join("/"),
+    isAbsolutePath,
+    resolvePath,
+  });
+
+  assert.equal(currentAppBuildId(options(absoluteReads, (value) => value.startsWith("C:/"), (root, value) => `${root}/${value}`)), "abcdef123456");
+  assert.equal(currentAppBuildId(options(relativeReads, () => false, () => "C:/source/.git/worktrees/release-abc")), "abcdef123456");
+});
+
+test("currentAppBuildId follows a linked worktree symbolic HEAD through commondir", () => {
+  const revision = "abcdef1234567890abcdef1234567890abcdef12";
+  const reads = new Map([
+    ["C:/release/.git", "gitdir: C:/source/.git/worktrees/release-abc\n"],
+    ["C:/source/.git/worktrees/release-abc/HEAD", "ref: refs/heads/codex/release-abc\n"],
+    ["C:/source/.git/worktrees/release-abc/commondir", "../..\n"],
+    ["C:/source/.git/refs/heads/codex/release-abc", `${revision}\n`],
+  ]);
+
+  const buildId = currentAppBuildId({
+    env: {},
+    repoRoot: "C:/release",
+    readFileSync: (filePath) => {
+      if (!reads.has(filePath)) throw new Error(`Missing fixture path: ${filePath}`);
+      return reads.get(filePath);
+    },
+    joinPath: (...parts) => parts.join("/"),
+    isAbsolutePath: (value) => value.startsWith("C:/"),
+    resolvePath: (root, value) => value === "../.." ? "C:/source/.git" : `${root}/${value}`,
+  });
+
+  assert.equal(buildId, "abcdef123456");
+});
+
 test("currentAppReleaseKey appends the build id when available", () => {
   assert.equal(currentAppReleaseKey({ appVersion: "1.0.0-beta.41", buildId: "abcdef123456" }), "1.0.0-beta.41+abcdef123456");
   assert.equal(currentAppReleaseKey({ appVersion: "1.0.0-beta.41", buildId: "" }), "1.0.0-beta.41");
