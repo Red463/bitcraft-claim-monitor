@@ -123,6 +123,51 @@ test("groupNeedCellActiveCrafts keeps passive craft metadata and identity separa
   assert.equal(crafts.find((craft) => craft.passive)?.locationUnknown, true);
 });
 
+test("groupNeedCellActiveCrafts consolidates passive crafts by player", () => {
+  const crafts = groupNeedCellActiveCrafts({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], activeCraftSources: [
+      { craftId: "passive-1", playerId: "player-mosswick", playerName: "Mosswick", buildingName: "Large Farming Field", quantity: 1, expectedQuantity: 1, guaranteedQuantity: 1, passive: true, completed: true, status: "Ready to collect" },
+      { craftId: "passive-2", playerId: "player-mosswick", playerName: "Mosswick", buildingName: "Large Farming Field", quantity: 1, expectedQuantity: 1, guaranteedQuantity: 1, passive: true, completed: true, status: "Ready to collect", locationUnknown: true },
+      { craftId: "passive-3", playerId: "player-mosswick", playerName: "Mosswick", buildingName: "Small Farming Field", quantity: 1, expectedQuantity: 1, guaranteedQuantity: 0, passive: true, completed: false, status: "Processing" },
+      { craftId: "passive-4", playerId: "player-other", playerName: "Other", buildingName: "Large Farming Field", quantity: 5, expectedQuantity: 5, guaranteedQuantity: 0, passive: true, completed: false, status: "Processing" },
+      { craftId: "active-1", playerId: "player-mosswick", playerName: "Mosswick", buildingName: "Farming Station", quantity: 2, expectedQuantity: 2, guaranteedQuantity: 2, passive: false, completed: false, status: "In progress" },
+    ] }],
+  });
+
+  assert.equal(crafts.length, 3);
+  const mosswick = crafts.find((craft) => craft.passiveGroup && craft.playerName === "Mosswick");
+  const ordinary = crafts.find((craft) => craft.craftId === "active-1");
+  assert.ok(mosswick);
+  assert.ok(ordinary);
+  assert.equal(mosswick.craftCount, 3);
+  assert.equal(mosswick.quantity, 3);
+  assert.equal(mosswick.expectedQuantity, 3);
+  assert.equal(mosswick.guaranteedQuantity, 2);
+  assert.equal(mosswick.readyCount, 2);
+  assert.equal(mosswick.processingCount, 1);
+  assert.deepEqual(mosswick.structures, [
+    { name: "Large Farming Field", count: 2 },
+    { name: "Small Farming Field", count: 1 },
+  ]);
+  assert.equal(mosswick.locationUnknown, true);
+  assert.equal(ordinary.passiveGroup, undefined);
+});
+
+test("groupNeedCellActiveCrafts falls back to player name for passive grouping", () => {
+  const crafts = groupNeedCellActiveCrafts({
+    ...roughLogCell,
+    items: [{ ...roughLogCell.items[0], activeCraftSources: [
+      { craftId: "passive-1", playerName: " Mosswick ", buildingName: "Large Farming Field", quantity: 1, expectedQuantity: 1, guaranteedQuantity: 0, passive: true, status: "Processing" },
+      { craftId: "passive-2", playerName: "mosswick", buildingName: "Large Farming Field", quantity: 1, expectedQuantity: 1, guaranteedQuantity: 0, passive: true, status: "Processing" },
+    ] }],
+  });
+
+  assert.equal(crafts.length, 1);
+  assert.equal(crafts[0].craftCount, 2);
+  assert.equal(crafts[0].expectedQuantity, 2);
+});
+
 test("groupNeedCellRecipeUsages groups repeated usages by output item", () => {
   const groups = groupNeedCellRecipeUsages(roughLogCell);
   assert.equal(groups.length, 2);

@@ -70,7 +70,57 @@ export function groupNeedCellActiveCrafts(cell: NeedCell): AnyRecord[] {
       } : { ...source });
     }
   }
-  return [...crafts.values()].sort((a, b) => Number(b.completed === true) - Number(a.completed === true) || String(a.playerName ?? "").localeCompare(String(b.playerName ?? "")));
+
+  const grouped: AnyRecord[] = [];
+  const passiveByPlayer = new Map<string, { craft: AnyRecord; structureCounts: Map<string, number> }>();
+  for (const craft of crafts.values()) {
+    if (craft.passive !== true) {
+      grouped.push(craft);
+      continue;
+    }
+
+    const playerId = String(craft.playerId ?? "").trim();
+    const playerName = String(craft.playerName ?? "").trim();
+    const playerIdentity = playerId || playerName.toLocaleLowerCase() || `unknown:${String(craft.craftId ?? craft.sourceId ?? grouped.length)}`;
+    const structureName = String(craft.buildingName ?? "Unknown structure").trim() || "Unknown structure";
+    const ready = craft.completed === true || String(craft.status ?? "").trim().toLocaleLowerCase() === "ready to collect";
+    const current = passiveByPlayer.get(playerIdentity) ?? {
+      craft: {
+        ...craft,
+        craftId: `passive-player:${playerIdentity}`,
+        playerName: playerName || "Unknown player",
+        quantity: 0,
+        expectedQuantity: 0,
+        guaranteedQuantity: 0,
+        passiveGroup: true,
+        craftCount: 0,
+        readyCount: 0,
+        processingCount: 0,
+        completed: false,
+        locationUnknown: false,
+      },
+      structureCounts: new Map<string, number>(),
+    };
+    current.craft.quantity += toQuantity(craft.quantity);
+    current.craft.expectedQuantity += toQuantity(craft.expectedQuantity ?? craft.quantity);
+    current.craft.guaranteedQuantity += toQuantity(craft.guaranteedQuantity);
+    current.craft.craftCount += 1;
+    current.craft.readyCount += ready ? 1 : 0;
+    current.craft.processingCount += ready ? 0 : 1;
+    current.craft.completed = current.craft.completed || ready;
+    current.craft.locationUnknown = current.craft.locationUnknown || craft.locationUnknown === true;
+    current.structureCounts.set(structureName, (current.structureCounts.get(structureName) ?? 0) + 1);
+    passiveByPlayer.set(playerIdentity, current);
+  }
+
+  for (const { craft, structureCounts } of passiveByPlayer.values()) {
+    craft.structures = [...structureCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    grouped.push(craft);
+  }
+
+  return grouped.sort((a, b) => Number(b.completed === true) - Number(a.completed === true) || String(a.playerName ?? "").localeCompare(String(b.playerName ?? "")));
 }
 
 export function groupNeedCellRecipeUsages(cell: NeedCell): GroupedNeedUsage[] {
