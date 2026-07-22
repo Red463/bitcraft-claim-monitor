@@ -628,9 +628,10 @@ function possibilityRecipesForTarget(target, detailsByKey) {
 
 function recipesForTarget(detail, target, detailsByKey = null) {
   const recipes = [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)];
-  const gatheringRoutes = recipes.filter(routeIsGathering);
-  return (gatheringRoutes.length ? gatheringRoutes : recipes)
-    .sort((a, b) => recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey));
+  return recipes.sort((a, b) => {
+    const gatheringOrder = Number(routeIsGathering(b)) - Number(routeIsGathering(a));
+    return gatheringOrder || recipeSortScore(a, target, detailsByKey) - recipeSortScore(b, target, detailsByKey);
+  });
 }
 
 function fishingRouteFamily(item) {
