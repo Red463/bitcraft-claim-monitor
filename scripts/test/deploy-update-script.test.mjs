@@ -74,10 +74,21 @@ test("VPS update script exposes verbose and public-check controls", () => {
 test("VPS updater creates backups only for migrations or an explicit force", () => {
   assert.match(script, /--force-backup/);
   assert.match(script, /database-schema-version/);
-  assert.match(script, /backup-bitcraft-monitor.*migration.*--revision/);
-  assert.match(script, /backup-bitcraft-monitor.*manual.*--revision/);
+  assert.match(script, /"\$BACKUP_HELPER_PATH" migration --revision/);
+  assert.match(script, /"\$BACKUP_HELPER_PATH" manual --revision/);
   assert.doesNotMatch(script, /create_predeploy_backup/);
   assert.doesNotMatch(script, /sqlite3[^\n]+\.backup/);
+});
+
+test("VPS updater stages the backup helper before validation and restores it after failure", () => {
+  assert.match(script, /BACKUP_HELPER_PATH="\$\{BACKUP_HELPER_PATH:-\/usr\/local\/bin\/backup-bitcraft-monitor\}"/);
+  assert.match(script, /stage_backup_helper\(\)/);
+  assert.match(script, /restore_staged_backup_helper\(\)/);
+  assert.match(script, /trap cleanup_staged_backup_helper EXIT/);
+  assert.match(
+    script,
+    /prepare_release "\$release_dir"[\s\S]*stage_backup_helper "\$release_dir"[\s\S]*validate_release_config "\$release_dir"[\s\S]*create_required_backup "\$backup_kind"/,
+  );
 });
 
 test("VPS update script prints concise readiness and failure diagnostics", () => {
