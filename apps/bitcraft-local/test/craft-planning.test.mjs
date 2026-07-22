@@ -2582,6 +2582,87 @@ test("computeCraftPlan keeps direct overrides when a Foraging workstation offers
     route.id === "possibility:gather-clay:items:3001" && route.routeType === "craft-byproduct"
   )), true);
 });
+
+test("computeCraftPlan keeps mixed gathering and processing routes selectable", () => {
+  const pebbles = { id: "3030001", name: "Sturdy Pebbles", itemType: 0, tag: "Pebbles", tier: 3 };
+  const stoneChunk = { id: "2003", name: "Sturdy Stone Chunk", itemType: 1, tag: "Chunk", tier: 3 };
+  const rubbleOutput = { id: "1512914014", name: "Ancient Rubble Drops", itemType: 0, tag: "Dungeon Item List", tier: 3 };
+  const pebblesOutput = { id: "3220007", name: "Sturdy Pebbles Output", itemType: 0, tag: "Pebbles", tier: 3 };
+  const detailsByKey = new Map([
+    [recipeKey("items", pebbles.id), { item: pebbles, craftingRecipes: [] }],
+    [recipeKey("items", rubbleOutput.id), {
+      item: rubbleOutput,
+      craftingRecipes: [{
+        id: "147405514",
+        name: "Gather from Ancient Rubble",
+        activityKind: "gathering",
+        gatheringSource: { label: "Ancient Rubble" },
+        resourceHealth: 100,
+        craftedItemStacks: [{ item_id: rubbleOutput.id, item_type: "item", quantity: 1 }],
+        craftedItems: [rubbleOutput],
+        consumedItemStacks: [],
+        consumedItems: [],
+      }],
+      itemListPossibilities: [{
+        targetId: pebbles.id,
+        targetItem: pebbles,
+        quantity: 0.1,
+        quantityIsExpected: true,
+        chance: 0.1,
+        guaranteedQuantity: 0,
+      }],
+    }],
+    [recipeKey("items", pebblesOutput.id), {
+      item: pebblesOutput,
+      craftingRecipes: [{
+        id: "303012",
+        name: "Smash Sturdy Stone Chunk into Sturdy Pebbles Output",
+        activityKind: "craft",
+        actionsRequired: 85,
+        craftedItemStacks: [{ item_id: pebblesOutput.id, item_type: "item", quantity: 1, guaranteedQuantity: 1 }],
+        craftedItems: [pebblesOutput],
+        consumedItemStacks: [{ item_id: stoneChunk.id, item_type: "cargo", quantity: 1 }],
+        consumedItems: [stoneChunk],
+      }],
+      itemListPossibilities: [{
+        targetId: pebbles.id,
+        targetItem: pebbles,
+        quantity: 11.87,
+        quantityIsExpected: true,
+        chance: 1,
+        guaranteedQuantity: 8,
+      }],
+    }],
+    [recipeKey("cargo", stoneChunk.id), { cargo: stoneChunk, craftingRecipes: [] }],
+  ]);
+  const target = { ...pebbles, kind: "items", quantity: 119 };
+
+  const defaultPlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({ enabled: true, targets: [target] }),
+    detailsByKey,
+  });
+  const defaultRoute = defaultPlan.materials.find((material) => material.id === pebbles.id)?.sourceRoutes?.[0];
+  assert.equal(defaultRoute?.routeType, "gathering-byproduct");
+  assert.deepEqual(defaultRoute?.alternatives.map((route) => route.id), [
+    "possibility:147405514:items:3030001",
+    "possibility:303012:items:3030001",
+  ]);
+
+  const processingRouteId = "possibility:303012:items:3030001";
+  const processingPlan = computeCraftPlan({
+    config: normalizeCraftPlanConfig({
+      enabled: true,
+      targets: [target],
+      routeOverrides: { [recipeKey("items", pebbles.id)]: processingRouteId },
+    }),
+    detailsByKey,
+  });
+  const processingRoute = processingPlan.materials.find((material) => material.id === pebbles.id)?.sourceRoutes?.[0];
+  assert.equal(processingRoute?.selectedRecipeId, processingRouteId);
+  assert.equal(processingRoute?.routeType, "craft-byproduct");
+  assert.equal(processingPlan.materials.find((material) => material.name === stoneChunk.name)?.required, 11);
+});
+
 test("collectLocalCatalogCraftPlanDetails builds a full recursive plan from normalized local catalog rows", (t) => {
   const { repository } = createCatalogFixture(t);
   upsertCatalogDetails(repository, [
@@ -3037,6 +3118,7 @@ test("collectLocalCatalogCraftPlanDetails treats recipe-less Sand and Clay Outpu
   ]), [
     ["possibility:gathering-output:items:5001:items:3001", "Clay", "gathering-byproduct", 0.02, null, null, 1],
     ["possibility:gathering-output:items:5002:items:3001", "Sand", "gathering-byproduct", 0.02, null, null, 1],
+    ["craft-gypsite", undefined, "craft", null, null, null, 1],
   ]);
   assert.equal(plan.materials.some((material) => material.name === "Rough Brick"), false);
 });
