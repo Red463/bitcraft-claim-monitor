@@ -15,6 +15,8 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { displayItemName } from "./market/listingUtils";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 
 const API = "/api/bitjita";
 
@@ -27,6 +29,7 @@ const CORE_MATERIAL_GROUPS = [
 ] as const;
 
 export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) {
+  const { request, trackPromise } = useManualRefresh();
   const [q, setQ] = React.useState("");
   const [containerQ, setContainerQ] = React.useState("");
   const [type, setType] = usePersistedState("inventory.type", "All");
@@ -44,12 +47,12 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
     }
     const controller = new AbortController();
     const resource = selectedItem.type === "Cargo" ? "cargo" : "items";
-    fetch(`${API}/${resource}/${selectedItem.itemId}`, { signal: controller.signal })
+    const refresh = fetch(`${API}/${resource}/${selectedItem.itemId}`, { headers: manualRefreshHeaders(request, "inventory"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`item detail HTTP ${response.status}`)))
-      .then(setItemDetail)
-      .catch(() => { if (!controller.signal.aborted) setItemDetail(null); });
+      .then(setItemDetail);
+    void trackPromise("inventory-item-detail", refresh).catch(() => {});
     return () => controller.abort();
-  }, [selectedItem?.itemId, selectedItem?.type]);
+  }, [selectedItem?.itemId, selectedItem?.type, request?.sequence, trackPromise]);
   const itemLookup = new Map([...(data.inventories.items ?? []), ...(data.inventories.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
   const containers = ((data.inventories.buildings ?? []) as AnyRecord[]).map((building) => {
     const items = (building.inventory ?? []).map((slot: AnyRecord, index: number) => {

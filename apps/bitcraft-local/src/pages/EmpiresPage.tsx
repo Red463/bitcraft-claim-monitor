@@ -15,6 +15,8 @@ import { resolveAllowedView } from "../navigation/routeState.ts";
 import { presentHexiteReserveSummary } from "./empires/hexitePresentation";
 import { EmpireDetailsDialog } from "./empires/EmpireDetailsDialog";
 import { SiegeDetailsDialog } from "./empires/SiegeDetailsDialog";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -22,11 +24,12 @@ type EmpireTab = "overview" | "watchtowers";
 type ActiveRegion = { regionId: string; regionName?: string; source?: string };
 
 function useEmpireRegions(includeRegionId?: string): ActiveRegion[] {
+  const { request, trackPromise } = useManualRefresh();
   const [regions, setRegions] = React.useState<ActiveRegion[]>([]);
   React.useEffect(() => {
     const controller = new AbortController();
     const include = includeRegionId && /^\d+$/.test(String(includeRegionId)) ? `?include=${encodeURIComponent(String(includeRegionId))}` : "";
-    fetch(`${LOCAL_API}/regions/active${include}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/regions/active${include}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`active regions HTTP ${response.status}`)))
       .then((payload) => {
         const rows = Array.isArray(payload.regions) ? payload.regions : [];
@@ -35,12 +38,13 @@ function useEmpireRegions(includeRegionId?: string): ActiveRegion[] {
           regionName: String(region.regionName ?? region.name ?? `Region ${region.regionId ?? ""}`),
           source: String(region.source ?? ""),
         })).filter((region: ActiveRegion) => /^\d+$/.test(region.regionId)));
-      })
+      });
+    void trackPromise("empire-regions", refresh)
       .catch(() => {
         if (!controller.signal.aborted && includeRegionId) setRegions([{ regionId: String(includeRegionId), regionName: `Region ${includeRegionId}`, source: "fallback" }]);
       });
     return () => controller.abort();
-  }, [includeRegionId]);
+  }, [includeRegionId, request?.sequence, trackPromise]);
   return regions;
 }
 
@@ -110,19 +114,21 @@ function distanceLabel(distance: number | null): string {
 }
 
 function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () => void }) {
+  const { request, trackPromise } = useManualRefresh();
   const [state, setState] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
   React.useEffect(() => {
     const controller = new AbortController();
     setState((current) => ({ ...current, loading: true, error: null }));
-    fetch(`${LOCAL_API}/empires/claim-members?claimId=${encodeURIComponent(String(claim.claimId ?? ""))}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/empires/claim-members?claimId=${encodeURIComponent(String(claim.claimId ?? ""))}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Claim members HTTP ${response.status}`)))
-      .then((payload) => setState({ data: payload, loading: false, error: null }))
+      .then((payload) => setState({ data: payload, loading: false, error: null }));
+    void trackPromise("empire-claim-members", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [claim.claimId]);
+  }, [claim.claimId, request?.sequence, trackPromise]);
   const members: AnyRecord[] = Array.isArray(state.data?.members) ? state.data.members : [];
   const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.claimRole ?? "Member")))).sort((a, b) => a.localeCompare(b)), [members]);
   const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.claimRole ?? "Member"))) : members;
@@ -244,6 +250,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
   );
 }
 export function Empires({ monitoredRegionId, access }: { monitoredRegionId: string; access?: EffectiveAccess | null }) {
+  const { request, trackPromise } = useManualRefresh();
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
   const empireTabs = React.useMemo(() => [
@@ -274,27 +281,29 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   React.useEffect(() => {
     const controller = new AbortController();
     setOverview((current) => ({ ...current, loading: true, error: null }));
-    fetch(`${LOCAL_API}/empires?regionId=${encodeURIComponent(regionId)}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/empires?regionId=${encodeURIComponent(regionId)}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Empires HTTP ${response.status}`)))
-      .then((payload) => setOverview({ data: payload, loading: false, error: null }))
+      .then((payload) => setOverview({ data: payload, loading: false, error: null }));
+    void trackPromise("empires-overview", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) setOverview((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [regionId]);
+  }, [regionId, request?.sequence, trackPromise]);
 
   React.useEffect(() => {
     if (currentTab !== "watchtowers") return;
     const controller = new AbortController();
     setWatchtowers((current) => ({ ...current, loading: true, error: null }));
-    fetch(`${LOCAL_API}/empires/watchtowers?regionId=${encodeURIComponent(regionId)}&inactiveDays=${encodeURIComponent(inactiveDays)}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/empires/watchtowers?regionId=${encodeURIComponent(regionId)}&inactiveDays=${encodeURIComponent(inactiveDays)}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Watchtowers HTTP ${response.status}`)))
-      .then((payload) => setWatchtowers({ data: payload, loading: false, error: null }))
+      .then((payload) => setWatchtowers({ data: payload, loading: false, error: null }));
+    void trackPromise("empires-watchtowers", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) setWatchtowers((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [currentTab, inactiveDays, regionId]);
+  }, [currentTab, inactiveDays, regionId, request?.sequence, trackPromise]);
 
   const overviewRows: AnyRecord[] = overview.data?.empires ?? [];
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];

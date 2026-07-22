@@ -21,6 +21,31 @@ test("server propagates a request-scoped bypass to live aggregate caches", () =>
   assert.match(server, /settlementProductionCrafts\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /passiveCraftSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /playerDetailSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
+  assert.match(server, /fetchCachedActiveRegions\(include,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /regionalEmpireOverview\(regionId,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /regionalEmpireDetails\(empireId,\s*regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /regionalEmpireClaimMembers\(claimId,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /regionalEmpireWatchtowers\(regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
+});
+
+test("every live page aggregate admits the guarded manual refresh identifier", () => {
+  for (const route of [
+    "/api/local/regions/active",
+    "/api/local/region/claims",
+    "/api/local/empires",
+    "/api/local/empires/details",
+    "/api/local/empires/claim-members",
+    "/api/local/empires/watchtowers",
+    "/api/local/market/history",
+    "/api/local/leaderboard",
+    "/api/local/history",
+  ]) {
+    const routeIndex = server.indexOf(`url.pathname === "${route}"`);
+    assert.notEqual(routeIndex, -1, `missing ${route}`);
+    const boundary = server.indexOf("\n    if (req.method", routeIndex + 10);
+    const handler = server.slice(routeIndex, boundary === -1 ? routeIndex + 1800 : boundary);
+    assert.match(handler, /manualRefreshAccess\(req, res\)/, `${route} should use the manual refresh guard`);
+  }
 });
 
 test("manual refresh identifiers are not added to the BitJita upstream URL", () => {

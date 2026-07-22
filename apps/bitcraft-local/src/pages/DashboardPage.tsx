@@ -20,12 +20,15 @@ import {
   formatNumber,
 } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
 import { buildMarketIncomeSummary } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
 export function Dashboard({ data, activity, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
+  const { request, trackPromise } = useManualRefresh();
   const { claim, members, market, construction, crafts } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
@@ -81,12 +84,12 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     if (!monitoredClaimId) return;
     let stale = false;
     const controller = new AbortController();
-    fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(monitoredClaimId)}`, { signal: controller.signal })
+    const refresh = fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(monitoredClaimId)}`, { headers: manualRefreshHeaders(request, "dashboard"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : null)
-      .then((body) => { if (!stale) setCraftPlan(body); })
-      .catch(() => { if (!stale) setCraftPlan(null); });
+      .then((body) => { if (!stale) setCraftPlan(body); });
+    void trackPromise("dashboard-craft-plan", refresh).catch(() => {});
     return () => { stale = true; controller.abort(); };
-  }, [claim.entityId, claim.id]);
+  }, [claim.entityId, claim.id, request?.sequence, trackPromise]);
   const gatherNextPreview = (Array.isArray(craftPlan?.gatherNext) ? craftPlan.gatherNext : []).flatMap((group: AnyRecord) => {
     const item = Array.isArray(group.items) ? group.items[0] : null;
     return item ? [{ ...item, section: group.section ?? item.section ?? "Other" }] : [];

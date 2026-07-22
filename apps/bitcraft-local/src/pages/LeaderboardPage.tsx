@@ -16,6 +16,8 @@ import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_N
 import type { LoadState } from "../types/app";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -42,6 +44,7 @@ export function Leaderboard({
   data: ReturnType<typeof normalizeData>;
   access?: EffectiveAccess | null;
 }) {
+  const { request, trackPromise } = useManualRefresh();
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   const [activeTab, setActiveTab] = usePersistedState<LeaderboardTab>("leaderboard.tab", "contribution");
   const [professionFilter, setProfessionFilter] = React.useState("All");
@@ -56,14 +59,15 @@ export function Leaderboard({
   React.useEffect(() => {
     const controller = new AbortController();
     setState((current) => ({ ...current, loading: true, error: null }));
-    fetch(`${LOCAL_API}/leaderboard?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/leaderboard?claimId=${encodeURIComponent(claimId)}`, { headers: manualRefreshHeaders(request, "leaderboard"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`leaderboard HTTP ${response.status}`)))
-      .then((payload) => setState({ data: payload, error: null, loading: false }))
+      .then((payload) => setState({ data: payload, error: null, loading: false }));
+    void trackPromise("leaderboard", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) setState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error), loading: false }));
       });
     return () => controller.abort();
-  }, [claimId, refreshToken]);
+  }, [claimId, refreshToken, request?.sequence, trackPromise]);
   const leaderboard = state.data ?? {};
   const contributionBoard = leaderboard.contribution ?? leaderboard;
   const excludedLeaderboardKeys = React.useMemo(() => new Set(excludedMemberIds.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean)), [excludedMemberIds]);

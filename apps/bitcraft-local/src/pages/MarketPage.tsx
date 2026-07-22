@@ -74,6 +74,8 @@ import { marketViewLocation, resolveAllowedView, type MarketViewId } from "../na
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
 import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
 import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "./market/listingUtils";
@@ -163,6 +165,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
   );
 }
 export function Market({ data, history, claimId, access, locationSearch, onQueryStateChange }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; onQueryStateChange: () => void }) {
+  const { request, trackPromise } = useManualRefresh();
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<MarketViewId>("market.view", "live");
   const [tab, setTab] = React.useState<"sell" | "buy">("sell");
@@ -213,15 +216,16 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
       return;
     }
     const controller = new AbortController();
-    setMemberHistory(null);
-    fetch(`${LOCAL_API}/market/history?claimId=${encodeURIComponent(claimId)}&limit=120&owner=${encodeURIComponent(memberFilter)}`, { signal: controller.signal })
+    if (!request) setMemberHistory(null);
+    const refresh = fetch(`${LOCAL_API}/market/history?claimId=${encodeURIComponent(claimId)}&limit=120&owner=${encodeURIComponent(memberFilter)}`, { headers: manualRefreshHeaders(request, "market"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market history HTTP ${response.status}`)))
-      .then((result) => setMemberHistory(result))
+      .then((result) => setMemberHistory(result));
+    void trackPromise("market-member-history", refresh)
       .catch(() => {
-        if (!controller.signal.aborted) setMemberHistory({ sales: [], topItems: [], daily: [], totals: {} });
+        if (!controller.signal.aborted) setMemberHistory((current: AnyRecord | null) => current ?? { sales: [], topItems: [], daily: [], totals: {} });
       });
     return () => controller.abort();
-  }, [claimId, memberFilter, history]);
+  }, [claimId, memberFilter, history, request?.sequence, trackPromise]);
   const analytics = memberFilter === "All" ? history : memberHistory;
   const apiTrades: AnyRecord[] = (analytics?.sales ?? [])
     .map((event: AnyRecord) => {

@@ -290,7 +290,7 @@ function DashboardApp() {
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
-  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active);
+  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
   const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
   const dealAlerts = useDealAlerts(dealRefreshToken);
   const dealAlertSource = React.useMemo(
@@ -671,7 +671,6 @@ function DashboardApp() {
     manualRefreshCoordinator.beginRequest(request.id);
     setManualRefreshClock(now);
     setManualRefreshRequest(request);
-    setHistoryRefreshToken((current) => current + 1);
     setNotificationRefreshToken((current) => current + 1);
     setDealRefreshToken((current) => current + 1);
   }, [active, manualRefreshCoordinator, manualRefreshRequest?.requestedAt, manualRefreshState.status]);

@@ -7,6 +7,8 @@ import type { AnyRecord } from "../../main-app-data";
 import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../../utils/format";
 import { presentHexiteReserveMetric } from "./hexitePresentation";
 import { coordinateText } from "./watchtowerPresentation";
+import { useManualRefresh } from "../../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../../refresh/manualRefresh.mjs";
 
 type EmpireDetailsState = {
   data: AnyRecord | null;
@@ -37,6 +39,7 @@ export function EmpireDetailsDialog({
   onClose,
   onBack,
 }: EmpireDetailsDialogProps) {
+  const { request, trackPromise } = useManualRefresh();
   const [tab, setTab] = React.useState<EmpireDetailsTab>("overview");
   const [retry, setRetry] = React.useState(0);
   const cacheKey = `${regionId}:${empireId}:${inactiveDays}`;
@@ -52,26 +55,27 @@ export function EmpireDetailsDialog({
 
   React.useEffect(() => {
     const cached = empireDetailsCache.get(cacheKey);
-    if (cached && retry === 0) {
+    if (!request && cached && retry === 0) {
       setState({ data: cached, loading: false, error: null });
       return;
     }
     const controller = new AbortController();
-    setState({ data: null, loading: true, error: null });
+    setState((current) => ({ data: current.data ?? cached ?? null, loading: true, error: null }));
     const params = new URLSearchParams({ empireId, regionId, inactiveDays });
-    fetch(`/api/local/empires/details?${params}`, { signal: controller.signal })
+    const refresh = fetch(`/api/local/empires/details?${params}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Empire details HTTP ${response.status}`)))
       .then((payload) => {
         empireDetailsCache.set(cacheKey, payload);
         setState({ data: payload, loading: false, error: null });
-      })
+      });
+    void trackPromise("empire-details", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) {
-          setState({ data: null, loading: false, error: error instanceof Error ? error.message : String(error) });
+          setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
         }
       });
     return () => controller.abort();
-  }, [cacheKey, empireId, inactiveDays, regionId, retry]);
+  }, [cacheKey, empireId, inactiveDays, regionId, retry, request?.sequence, trackPromise]);
 
   const data = state.data;
   const empire = data?.empire ?? {};

@@ -15,11 +15,14 @@ import { SKILL_IDS, SKILL_NAMES } from "../utils/professions";
 import { updateQueryState } from "../navigation";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { LoadState } from "../types/app";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { MapFocus } from "./map/mapUtils";
 
 const API = "/api/bitjita";
 
 export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOwnerName, defaultRegionId, onShowMap }: { refreshToken: number; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+  const { request, trackPromise } = useManualRefresh();
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
   const [regionId, setRegionId] = usePersistedState("public-crafts.region", defaultRegionId || monitoredRegionId || "All");
@@ -44,14 +47,15 @@ export function PublicCraftFinder({ refreshToken, monitoredRegionId, monitoredOw
     const controller = new AbortController();
     setState((previous) => ({ ...previous, loading: true, error: null }));
     const skillQuery = skillId === "All" ? "" : `&skillId=${encodeURIComponent(skillId)}`;
-    fetch(`${API}/crafts?completed=false${skillQuery}`, { signal: controller.signal })
+    const refresh = fetch(`${API}/crafts?completed=false${skillQuery}`, { headers: manualRefreshHeaders(request, "publiccrafts"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`crafts HTTP ${response.status}`)))
-      .then((payload) => setState({ data: payload, error: null, loading: false }))
+      .then((payload) => setState({ data: payload, error: null, loading: false }));
+    void trackPromise("public-crafts", refresh)
       .catch((error) => {
         if (!controller.signal.aborted) setState((previous) => ({ ...previous, error: error instanceof Error ? error.message : String(error), loading: false }));
       });
     return () => controller.abort();
-  }, [skillId, refreshToken]);
+  }, [skillId, refreshToken, request?.sequence, trackPromise]);
   const jobs: AnyRecord[] = state.data?.craftResults ?? [];
   const itemLookup = new Map([...(state.data?.items ?? []), ...(state.data?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
   const publicJobs: AnyRecord[] = jobs.filter((job) => job.isPublic === true && !job.completed).map((job): AnyRecord => {
