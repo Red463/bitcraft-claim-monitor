@@ -39,6 +39,15 @@ jobs:
         run: corepack pnpm --filter @workspace/bitcraft-local run build
       - name: Test deployment contracts
         run: node --test scripts/test/deploy-*.test.mjs
+      - name: Validate systemd units
+        run: |
+          systemd-analyze verify \
+            deploy/bitcraft-claim-monitor.service \
+            deploy/bitcraft-claim-monitor-worker.service \
+            deploy/bitcraft-monitor-collector.service \
+            deploy/bitcraft-monitor-collector.timer \
+            deploy/bitcraft-claim-monitor-backup.service \
+            deploy/bitcraft-claim-monitor-backup.timer
 
   deploy:
     needs: verify
