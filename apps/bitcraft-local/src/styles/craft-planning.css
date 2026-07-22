@@ -349,8 +349,9 @@
 .craft-plan-tracked-crafts h3 { margin: 0 0 2px; }
 .craft-plan-tracked-crafts .craft-plan-detail-row > span { display: grid; gap: 2px; }
 .craft-plan-tracked-crafts .craft-plan-detail-row small { color: var(--muted); }
-.craft-plan-tracked-craft-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.craft-plan-detail-row.craft-plan-tracked-craft-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
 .craft-plan-tracked-craft-copy, .craft-plan-tracked-craft-totals { display: grid; min-width: 0; gap: 2px; }
+.craft-plan-tracked-craft-copy > strong { white-space: normal; overflow-wrap: anywhere; }
 .craft-plan-tracked-craft-copy small { white-space: normal; overflow-wrap: anywhere; }
 .craft-plan-tracked-craft-totals { justify-items: end; text-align: right; }
 

@@ -198,7 +198,8 @@ test("Craft planning tracked crafts use grouped summaries and a non-overlapping 
   assert.match(page, /craft\.readyCount/);
   assert.match(page, /craft\.processingCount/);
   assert.match(page, /craft\.structures/);
-  assert.match(css, /\.craft-plan-tracked-craft-row\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(css, /\.craft-plan-detail-row\.craft-plan-tracked-craft-row\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(css, /\.craft-plan-tracked-craft-copy\s*>\s*strong\s*\{[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-tracked-craft-row\s*\{[^}]*grid-template-columns:\s*1fr/);
 });
 
