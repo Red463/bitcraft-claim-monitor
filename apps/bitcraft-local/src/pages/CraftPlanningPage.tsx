@@ -37,6 +37,26 @@ function quantity(value: unknown) {
   return formatNumber(Number(value) || 0, 0);
 }
 
+function passiveCraftStatusSummary(craft: AnyRecord) {
+  const craftCount = Math.max(1, Number(craft.craftCount) || 1);
+  const readyCount = Math.max(0, Number(craft.readyCount) || 0);
+  const processingCount = Math.max(0, Number(craft.processingCount) || 0);
+  return [
+    `${quantity(craftCount)} passive craft${craftCount === 1 ? "" : "s"}`,
+    readyCount > 0 ? `${quantity(readyCount)} ready` : "",
+    processingCount > 0 ? `${quantity(processingCount)} processing` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function passiveCraftStructureSummary(craft: AnyRecord) {
+  const structures = Array.isArray(craft.structures) ? craft.structures : [];
+  if (!structures.length) return String(craft.buildingName ?? "Unknown structure");
+  return structures.map((structure: AnyRecord) => {
+    const count = Math.max(1, Number(structure.count) || 1);
+    return `${String(structure.name ?? "Unknown structure")}${count > 1 ? ` ×${quantity(count)}` : ""}`;
+  }).join(" · ");
+}
+
 function completionTone(value: number) {
   if (value >= 100) return "is-complete";
   if (value >= 75) return "is-high";
@@ -277,13 +297,19 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
             )) : <p className="legend">{Number(selectedNeed.available) > 0 ? "Counted stock exists, but source details are unavailable." : "No counted stock found for this item."}</p>}
             {selectedNeedCrafts.length ? <div className="craft-plan-tracked-crafts">
               <h3><Factory size={16} /> Tracked crafts</h3>
-              {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row" key={String(craft.craftId ?? index)}>
-                <span>
-                  <strong>{craft.passive ? `Passive craft · ${craft.buildingName ?? "Unknown structure"}` : craft.buildingName ?? "Crafting station"}</strong>
-                  <small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small>
+              {selectedNeedCrafts.map((craft, index) => <div className="craft-plan-detail-row craft-plan-tracked-craft-row" key={String(craft.craftId ?? index)}>
+                <span className="craft-plan-tracked-craft-copy">
+                  {craft.passiveGroup ? <>
+                    <strong>{craft.playerName ?? "Unknown player"}</strong>
+                    <small>{passiveCraftStatusSummary(craft)}</small>
+                    <small>{passiveCraftStructureSummary(craft)}</small>
+                  </> : <>
+                    <strong>{craft.passive ? `Passive craft · ${craft.buildingName ?? "Unknown structure"}` : craft.buildingName ?? "Crafting station"}</strong>
+                    <small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small>
+                  </>}
                   {craft.locationUnknown ? <small>Location not reported by BitJita</small> : null}
                 </span>
-                <span><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
+                <span className="craft-plan-tracked-craft-totals"><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
               </div>)}
             </div> : null}
           </section>

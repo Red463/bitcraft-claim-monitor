@@ -187,6 +187,21 @@ test("Craft planning needs board row headings are allowed to wrap", () => {
   assert.match(rowButton, /overflow-wrap:\s*anywhere/);
 });
 
+test("Craft planning tracked crafts use grouped summaries and a non-overlapping responsive grid", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /craft-plan-tracked-craft-row/);
+  assert.match(page, /craft-plan-tracked-craft-copy/);
+  assert.match(page, /craft-plan-tracked-craft-totals/);
+  assert.match(page, /craft\.passiveGroup/);
+  assert.match(page, /craft\.readyCount/);
+  assert.match(page, /craft\.processingCount/);
+  assert.match(page, /craft\.structures/);
+  assert.match(css, /\.craft-plan-tracked-craft-row\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-tracked-craft-row\s*\{[^}]*grid-template-columns:\s*1fr/);
+});
+
 test("Craft planning targets default collapsed and expose an accessible persisted disclosure", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
