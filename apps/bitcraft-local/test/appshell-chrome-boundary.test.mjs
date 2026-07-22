@@ -15,6 +15,35 @@ test("floating action rail can be collapsed with persisted state and accessible 
   assert.match(appShell, /Show tools/);
 });
 
+test("global refresh uses a manual request lifecycle with consistent accessible feedback", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /createManualRefreshRequest/);
+  assert.match(appShell, /createManualRefreshTaskCoordinator/);
+  assert.match(appShell, /cooldownRemainingMs/);
+  assert.match(appShell, /ManualRefreshProvider/);
+  assert.match(appShell, /requestManualRefresh/);
+  assert.match(appShell, /manualRefreshRequest/);
+  assert.match(appShell, /manualRefreshCoordinator/);
+  assert.match(appShell, /aria-busy=\{manualRefreshIsRefreshing\}/);
+  assert.match(appShell, /aria-disabled=\{manualRefreshButtonDisabled\}/);
+  assert.match(appShell, /manualRefreshButtonLabel/);
+  assert.match(appShell, /is-refreshing/);
+  assert.match(appShell, /role="status"[^>]*aria-live="polite"/s);
+  assert.match(appShell, /Data refreshed/);
+  assert.match(appShell, /Refresh available in/);
+  assert.match(appShell, /<ManualRefreshProvider[\s\S]*\{activePanel\}[\s\S]*<\/ManualRefreshProvider>/);
+});
+
+test("automatic interval remains separate from the manual refresh request", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const automaticRefresh = appShell.match(/const intervalMs = appSettings\.refreshSeconds \* 1000;([\s\S]*?)\}, \[appSettings\.refreshSeconds\]\);/);
+
+  assert.ok(automaticRefresh, "expected the automatic refresh interval");
+  assert.match(automaticRefresh[1], /setRefreshToken/);
+  assert.doesNotMatch(automaticRefresh[1], /createManualRefreshRequest|setManualRefreshRequest/);
+});
+
 test("floating action rail CSS slides collapsed rail offscreen with reduced motion support", () => {
   const css = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
 

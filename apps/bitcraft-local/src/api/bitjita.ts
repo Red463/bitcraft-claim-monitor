@@ -1,6 +1,7 @@
 import React from "react";
 
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
 import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
@@ -136,7 +137,13 @@ function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now(), override
 function loadedState(data: AnyRecord, overrideCacheState?: string): LoadState<AnyRecord> {
   return { loading: false, error: null, data, ...freshnessFromPayload(data, Date.now(), overrideCacheState) };
 }
-export function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
+export function useBitjitaData(
+  refreshToken: number,
+  claimId: string,
+  activePanel: ActivePanel,
+  manualRefreshRequest: ManualRefreshRequest | null = null,
+  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
@@ -307,7 +314,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
       cancelled = true;
       controller.abort();
     };
-  }, [activePanel, claimId, refreshToken]);
+  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
 
   return state;
 }
