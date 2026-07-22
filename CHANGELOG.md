@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.41.1-beta.1] - 2026-07-22
+
+### Fixed
+
+- Fixed first-time deployment of the database backup service by staging its executable before systemd validation and restoring the previous helper if deployment fails.
+
 ## [0.41.0-beta.2] - 2026-07-22
 
 ### Changed
