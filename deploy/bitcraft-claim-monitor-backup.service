@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/local/bin/backup-bitcraft-monitor daily
+ExecStart=/bin/bash /usr/local/bin/backup-bitcraft-monitor daily
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

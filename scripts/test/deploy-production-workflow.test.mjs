@@ -22,6 +22,15 @@ test("deployment credentials are gated behind verification and production approv
   assert.match(workflow, /environment: production/);
 });
 
+test("verification runs real systemd validation before deployment", () => {
+  const workflow = readFileSync(workflowUrl, "utf8");
+  const verifyJob = workflow.slice(workflow.indexOf("  verify:"), workflow.indexOf("  deploy:"));
+
+  assert.match(verifyJob, /systemd-analyze verify/);
+  assert.match(verifyJob, /deploy\/bitcraft-claim-monitor-backup\.service/);
+  assert.match(verifyJob, /deploy\/bitcraft-claim-monitor-backup\.timer/);
+});
+
 test("workflow pins host identity and deploys the verified commit with system SSH", () => {
   const workflow = readFileSync(workflowUrl, "utf8");
   assert.match(workflow, /VPS_KNOWN_HOSTS/);

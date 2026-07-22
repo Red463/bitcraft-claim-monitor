@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.41.1-beta.2] - 2026-07-22
+
+### Fixed
+
+- Fixed initial validation of the database backup service when its backup helper has not yet been installed.
+
 ## [0.41.1-beta.1] - 2026-07-22
 
 ### Fixed
