@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.41.1-beta.3] - 2026-07-22
+
+### Fixed
+
+- Fixed production verification on GitHub runners where Node.js is installed outside the VPS system path.
+
 ## [0.41.1-beta.2] - 2026-07-22
 
 ### Fixed
