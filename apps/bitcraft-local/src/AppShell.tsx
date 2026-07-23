@@ -7,6 +7,7 @@ import "./styles/first-run-tour.css";
 import {
   ArrowDown,
   Bell,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -42,7 +43,7 @@ import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
-import { normalizeReleaseBuildId, releaseUpdateDecision } from "./utils/releaseUpdate";
+import { consumeAutomaticReleaseUpdate, markAutomaticReleaseUpdate, normalizeReleaseBuildId, releaseUpdateDecision } from "./utils/releaseUpdate";
 import { normalizeAppSettings } from "./utils/appSettings";
 import { applyMemberTrackingFilter } from "./utils/memberTracking";
 import { getTrackedOwnerName } from "./utils/ownership";
@@ -69,8 +70,10 @@ import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTas
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const CHANGELOG_URL = `${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md`;
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
+const RELEASE_UPDATED_NOTICE_MS = 8_000;
 const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
 
 type ManualRefreshState = {
@@ -187,6 +190,9 @@ function DashboardApp() {
   const appBuildIdRef = React.useRef("");
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
+  const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(
+    () => consumeAutomaticReleaseUpdate(window.sessionStorage),
+  );
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
@@ -468,6 +474,10 @@ function DashboardApp() {
   }, []);
   React.useEffect(() => {
     let cancelled = false;
+    function reloadForReleaseUpdate() {
+      markAutomaticReleaseUpdate(window.sessionStorage);
+      window.location.reload();
+    }
     function rememberBuildId(buildId: string) {
       appBuildIdRef.current = buildId;
       if (!cancelled) setAppBuildId(buildId);
@@ -483,13 +493,13 @@ function DashboardApp() {
         const decision = releaseUpdateDecision({ currentBuildId: appBuildIdRef.current, nextBuildId, documentHidden: document.hidden });
         if (decision === "remember") rememberBuildId(nextBuildId);
         if (decision === "prompt") showReleaseUpdate(nextBuildId);
-        if (decision === "reload") window.location.reload();
+        if (decision === "reload") reloadForReleaseUpdate();
       } catch {
         // A failed release check should not interrupt the dashboard.
       }
     }
     function handleReleaseVisibility() {
-      if (document.hidden && releaseUpdateBuildIdRef.current) window.location.reload();
+      if (document.hidden && releaseUpdateBuildIdRef.current) reloadForReleaseUpdate();
     }
     void checkReleaseBuild();
     const timer = window.setInterval(checkReleaseBuild, 60_000);
@@ -500,6 +510,11 @@ function DashboardApp() {
       document.removeEventListener("visibilitychange", handleReleaseVisibility);
     };
   }, []);
+  React.useEffect(() => {
+    if (!releaseUpdatedNotice) return undefined;
+    const timer = window.setTimeout(() => setReleaseUpdatedNotice(false), RELEASE_UPDATED_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [releaseUpdatedNotice]);
   React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
@@ -852,7 +867,28 @@ function DashboardApp() {
           </div>
         </footer>
       </main>
-      {releaseUpdateBuildId ? <div className="release-update-banner" role="status" aria-live="polite"><div><strong>Update available</strong><span>A newer version is ready. Refresh to use the latest app.</span></div><button className="toolbar-button primary" onClick={() => window.location.reload()}><RefreshCw size={14} /> Refresh now</button></div> : null}
+      {releaseUpdateBuildId ? (
+        <div className="release-update-banner" role="status" aria-live="polite">
+          <div>
+            <strong>Update available</strong>
+            <span>A newer version is ready. Refresh to use the latest app.</span>
+          </div>
+          <button className="toolbar-button primary" onClick={() => window.location.reload()}>
+            <RefreshCw size={14} /> Refresh now
+          </button>
+        </div>
+      ) : releaseUpdatedNotice ? (
+        <div className="release-update-banner is-updated" role="status" aria-live="polite">
+          <CheckCircle2 size={20} aria-hidden="true" />
+          <div>
+            <strong>App updated</strong>
+            <span>
+              You're now using the latest version.{" "}
+              <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">View changelog</a>
+            </span>
+          </div>
+        </div>
+      ) : null}
       <div className={`floating-actions ${narrowAwareFloatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
         <button
           className="floating-actions-toggle"
