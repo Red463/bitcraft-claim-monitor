@@ -60,6 +60,17 @@
 .floating-actions .floating-action-item {
   transition: border-color .16s ease, color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease, opacity .18s ease;
 }
+.floating-actions .floating-action-item.is-refreshing {
+  color: var(--active-color);
+  border-color: var(--active-border);
+  background: color-mix(in srgb, var(--active-bg) 34%, transparent);
+}
+.floating-action-item.is-refreshing svg {
+  animation: floating-refresh-spin .9s linear infinite;
+}
+@keyframes floating-refresh-spin {
+  to { transform: rotate(360deg); }
+}
 .floating-actions.floating-actions-collapsed .floating-action-item {
   opacity: 0;
   pointer-events: none;
@@ -139,6 +150,9 @@ body:has(.admin-loading-panel) .floating-actions {
   .floating-actions .floating-action-item,
   .floating-actions .floating-actions-toggle {
     transition: none;
+  }
+  .floating-action-item.is-refreshing svg {
+    animation: none !important;
   }
 }
 .release-update-banner {

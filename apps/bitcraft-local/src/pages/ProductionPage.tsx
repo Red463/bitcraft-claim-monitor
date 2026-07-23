@@ -16,12 +16,15 @@ import { normalizeData } from "../utils/normalize";
 import { SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import type { LoadState } from "../types/app";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
 export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
+  const { request, trackPromise } = useManualRefresh();
   const [state, setState] = React.useState<LoadState<AnyRecord[]>>({ data: null, error: null, loading: true });
   const memberKey = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean).join(",");
   React.useEffect(() => {
@@ -32,9 +35,9 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
     const controller = new AbortController();
     setState((previous) => previous.data ? { ...previous, loading: true, error: null } : { data: null, error: null, loading: true });
     const memberEntries = members.filter((member) => member.playerEntityId);
-    fetch(`${LOCAL_API}/passive-crafts`, {
+    const refresh = fetch(`${LOCAL_API}/passive-crafts`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...manualRefreshHeaders(request, "production") },
       body: JSON.stringify({ members: memberEntries.map((member) => ({
         playerEntityId: member.playerEntityId,
         userName: member.userName ?? member.username,
@@ -50,7 +53,8 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
         error: failures ? `${failures} member${failures === 1 ? "" : "s"} could not be loaded.` : null,
         loading: false,
       });
-    }).catch((error) => {
+    });
+    void trackPromise("production-passive-crafts", refresh).catch((error) => {
       if (controller.signal.aborted) return;
       setState((previous) => ({
         data: previous.data ?? [],
@@ -59,7 +63,7 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
       }));
     });
     return () => controller.abort();
-  }, [memberKey, refreshToken]);
+  }, [memberKey, refreshToken, request?.sequence, trackPromise]);
   const rows = state.data ?? [];
   return (
     <section className="settlement-passive-crafts">
@@ -87,6 +91,7 @@ export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRec
 }
 
 export function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
+  const { request, trackPromise } = useManualRefresh();
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
@@ -143,12 +148,13 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       setToolbeltTools(null);
     }
     setToolbeltError(false);
-    fetch(`${API}/players/${memberId}/inventories`, { signal: controller.signal })
+    const refresh = fetch(`${API}/players/${memberId}/inventories`, { headers: manualRefreshHeaders(request, "production"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`inventories HTTP ${response.status}`)))
-      .then((payload) => setToolbeltTools(playerToolbeltTools(payload)))
+      .then((payload) => setToolbeltTools(playerToolbeltTools(payload)));
+    void trackPromise("production-toolbelt", refresh)
       .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
     return () => controller.abort();
-  }, [selectedMember?.playerEntityId, refreshToken]);
+  }, [selectedMember?.playerEntityId, refreshToken, request?.sequence, trackPromise]);
   const selectCrafterPill = (name: string) => {
     if (!crafterMemberIdByName[name]) return;
     onSelectMember(selectedMemberName === name ? "All" : crafterMemberIdByName[name]);

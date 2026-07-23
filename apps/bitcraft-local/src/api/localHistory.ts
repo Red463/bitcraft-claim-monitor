@@ -1,6 +1,8 @@
 import React from "react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";
+import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
 import { localHistoryIncludeForPanel } from "./localHistoryInclude";
 
@@ -13,7 +15,13 @@ const LOCAL_API = "/api/local";
  * dashboard trend data, and market history are built from SQLite records
  * captured by the local server.
  */
-export function useLocalHistory(refreshToken: number, claimId: string, activePanel: ActivePanel): LocalHistoryState {
+export function useLocalHistory(
+  refreshToken: number,
+  claimId: string,
+  activePanel: ActivePanel,
+  manualRefreshRequest: ManualRefreshRequest | null = null,
+  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+): LocalHistoryState {
   const [state, setState] = React.useState<LocalHistoryState>({
     market: null,
     activity: [],
@@ -29,7 +37,7 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
       try {
         const include = localHistoryIncludeForPanel(activePanel);
         const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
-        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { signal: controller.signal });
+        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { headers: manualRefreshHeaders(manualRefreshRequest, activePanel), signal: controller.signal });
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
         const history = await response.json();
         const activity = history.activity ?? {};
@@ -42,16 +50,16 @@ export function useLocalHistory(refreshToken: number, claimId: string, activePan
           refreshToken: prev.refreshToken + 1,
         }));
       } catch (err) {
-        if (!controller.signal.aborted) {
-          setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
-        }
+        if (controller.signal.aborted) return;
+        setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
+        throw err;
       }
     }
-    load();
+    void trackManualRefreshPromise("local-history", load()).catch(() => {});
     return () => {
       controller.abort();
     };
-  }, [activePanel, claimId, refreshToken]);
+  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
 
   return state;
 }

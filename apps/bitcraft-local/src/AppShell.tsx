@@ -53,6 +53,8 @@ import type { AppSettings, UserAuthState, UserToastSettings } from "./types/sett
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
+import { ManualRefreshProvider, type ManualRefreshRequest } from "./refresh/ManualRefreshContext";
+import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTaskCoordinator, manualRefreshApplies } from "./refresh/manualRefresh.mjs";
 
 /*
  * Top-level browser application shell.
@@ -70,6 +72,13 @@ const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
 const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
+
+type ManualRefreshState = {
+  requestId: string;
+  status: "idle" | "refreshing" | "complete";
+  pendingTasks: string[];
+  errors: string[];
+};
 
 const Dashboard = React.lazy(() => import("./pages/DashboardPage").then(({ Dashboard }) => ({ default: Dashboard })));
 const Leaderboard = React.lazy(() => import("./pages/LeaderboardPage").then(({ Leaderboard }) => ({ default: Leaderboard })));
@@ -189,6 +198,14 @@ function DashboardApp() {
   const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
   const [dealRefreshToken, setDealRefreshToken] = React.useState(0);
   const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
+  const [manualRefreshRequest, setManualRefreshRequest] = React.useState<ManualRefreshRequest | null>(null);
+  const [manualRefreshState, setManualRefreshState] = React.useState<ManualRefreshState>({ requestId: "", status: "idle", pendingTasks: [], errors: [] });
+  const [manualRefreshClock, setManualRefreshClock] = React.useState(() => Date.now());
+  const manualRefreshSequenceRef = React.useRef(0);
+  const manualRefreshCompletionRef = React.useRef("");
+  const manualRefreshCoordinator = React.useMemo(() => createManualRefreshTaskCoordinator({
+    onStateChange: (nextState: ManualRefreshState) => setManualRefreshState(nextState),
+  }), []);
   const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
   const [mapFocus, setMapFocus] = usePersistedState<MapFocus>("map.focus", urlMapFocus());
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
@@ -250,7 +267,21 @@ function DashboardApp() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [mobileNavigationOpen]);
-  const state = useBitjitaData(refreshToken, claimId, active);
+  const trackManualRefreshPromise = React.useCallback(<T,>(taskKey: string, promise: Promise<T>): Promise<T> => {
+    const activeRequest = manualRefreshApplies(manualRefreshRequest, active) ? manualRefreshRequest : null;
+    if (!activeRequest) return promise;
+    const finish = manualRefreshCoordinator.beginTask(activeRequest.id, taskKey);
+    return promise
+      .then((result) => {
+        finish();
+        return result;
+      })
+      .catch((error) => {
+        finish(error);
+        throw error;
+      });
+  }, [active, manualRefreshCoordinator, manualRefreshRequest]);
+  const state = useBitjitaData(refreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
     // BitJita payloads vary by endpoint. Normalize them once here, then apply
@@ -259,7 +290,7 @@ function DashboardApp() {
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
-  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active);
+  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
   const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
   const dealAlerts = useDealAlerts(dealRefreshToken);
   const dealAlertSource = React.useMemo(
@@ -615,6 +646,49 @@ function DashboardApp() {
   const activePanel = isPageAllowed(active)
     ? panels[active] ?? panels.dashboard
     : <RestrictedAccessState title={activePageLabel} decision={activePageDecision} discordLoginEnabled={userAuth.discordLoginEnabled} onDiscordLogin={discordLogin} />;
+  const manualRefreshIsRefreshing = manualRefreshState.status === "refreshing";
+  const manualRefreshCooldownMs = cooldownRemainingMs(manualRefreshRequest?.requestedAt, manualRefreshClock);
+  const manualRefreshCooldownSeconds = Math.ceil(manualRefreshCooldownMs / 1000);
+  const manualRefreshHasErrors = manualRefreshState.status === "complete" && manualRefreshState.errors.length > 0;
+  const manualRefreshButtonDisabled = manualRefreshIsRefreshing || manualRefreshCooldownMs > 0;
+  const manualRefreshButtonLabel = manualRefreshIsRefreshing
+    ? `Refreshing ${activePageLabel} data`
+    : manualRefreshCooldownMs > 0
+      ? `${manualRefreshHasErrors ? "Refresh finished with issues. " : "Data refreshed. "}Refresh available in ${manualRefreshCooldownSeconds} seconds`
+      : "Refresh data now";
+  const manualRefreshStatusText = manualRefreshIsRefreshing
+    ? `${manualRefreshButtonLabel}. Current data remains visible.`
+    : manualRefreshState.status === "complete"
+      ? manualRefreshHasErrors
+        ? `Refresh finished with ${manualRefreshState.errors.length} ${manualRefreshState.errors.length === 1 ? "issue" : "issues"}. Current data remains visible.`
+        : "Data refreshed."
+      : "";
+  const requestManualRefresh = React.useCallback(() => {
+    const now = Date.now();
+    if (manualRefreshState.status === "refreshing" || cooldownRemainingMs(manualRefreshRequest?.requestedAt, now) > 0) return;
+    manualRefreshSequenceRef.current += 1;
+    const request = createManualRefreshRequest(active, manualRefreshSequenceRef.current, { now: () => now });
+    manualRefreshCoordinator.beginRequest(request.id);
+    setManualRefreshClock(now);
+    setManualRefreshRequest(request);
+    setNotificationRefreshToken((current) => current + 1);
+    setDealRefreshToken((current) => current + 1);
+  }, [active, manualRefreshCoordinator, manualRefreshRequest?.requestedAt, manualRefreshState.status]);
+  React.useEffect(() => {
+    if (!manualRefreshRequest) return undefined;
+    const timer = window.setTimeout(() => manualRefreshCoordinator.seal(manualRefreshRequest.id), 0);
+    return () => window.clearTimeout(timer);
+  }, [manualRefreshCoordinator, manualRefreshRequest]);
+  React.useEffect(() => {
+    if (!manualRefreshRequest || manualRefreshCooldownMs <= 0) return undefined;
+    const timer = window.setInterval(() => setManualRefreshClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [manualRefreshCooldownMs > 0, manualRefreshRequest?.id]);
+  React.useEffect(() => {
+    if (manualRefreshState.status !== "complete" || !manualRefreshState.requestId || manualRefreshCompletionRef.current === manualRefreshState.requestId) return;
+    manualRefreshCompletionRef.current = manualRefreshState.requestId;
+    setRouteStatus(manualRefreshState.errors.length > 0 ? "Refresh finished with issues. Current data remains visible." : "Data refreshed.");
+  }, [manualRefreshState.errors.length, manualRefreshState.requestId, manualRefreshState.status]);
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
     const staleWarning = state.stale
@@ -744,13 +818,18 @@ function DashboardApp() {
       {collapsedNavTooltip ? <span className="collapsed-nav-tooltip" aria-hidden="true" style={{ left: collapsedNavTooltip.left, top: collapsedNavTooltip.top }}>{collapsedNavTooltip.label}</span> : null}
       <main ref={mainRef} tabIndex={-1}>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
-        <div className={`page-refresh-line ${state.loading ? "is-visible" : ""}`} aria-hidden="true" />
+        <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
+        <div className={`page-refresh-line ${state.loading || manualRefreshIsRefreshing ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner warnings={apiWarnings} lastUpdated={lastUpdated} diagnostics={apiDiagnostics} />
             <div className="page-view" key={active}>
               <RouteErrorBoundary routeKey={active}>
-                <React.Suspense fallback={<RouteLoadingState label={activePageLabel} />}>{activePanel}</React.Suspense>
+                <React.Suspense fallback={<RouteLoadingState label={activePageLabel} />}>
+                  <ManualRefreshProvider page={active} request={manualRefreshRequest} coordinator={manualRefreshCoordinator}>
+                    {activePanel}
+                  </ManualRefreshProvider>
+                </React.Suspense>
               </RouteErrorBoundary>
             </div>
           </>
@@ -797,7 +876,17 @@ function DashboardApp() {
         >
           <KeyRound size={18} />
         </a> : null}
-        <button className="floating-action-item" onClick={() => { setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); setNotificationRefreshToken((x) => x + 1); setDealRefreshToken((x) => x + 1); }} aria-label="Refresh data now" title="Refresh data now" disabled={state.loading}><RefreshCw size={18} /></button>
+        <button
+          className={`floating-action-item ${manualRefreshIsRefreshing ? "is-refreshing" : ""}`}
+          onClick={requestManualRefresh}
+          aria-label={manualRefreshButtonLabel}
+          title={manualRefreshButtonLabel}
+          aria-busy={manualRefreshIsRefreshing}
+          aria-disabled={manualRefreshButtonDisabled}
+          disabled={manualRefreshButtonDisabled}
+        >
+          <RefreshCw size={18} />
+        </button>
         <button className="floating-action-item" onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
         <button className="floating-action-item notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
         <button className="floating-action-item floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>

@@ -26,6 +26,8 @@ import { formatCurrentSession, formatEquipmentSlot, formatNumber, timeAgo } from
 import { equippedCount, equipmentPresets, equipmentSlots, playerToolbeltTools, visibleEquipmentSlots } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
 import { memberClaimRole } from "../utils/ownership";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 
 const API = "/api/bitjita";
 
@@ -48,6 +50,7 @@ export function Members({
   onSelectMember: (id: string) => void;
   onMemberDetailsOpened?: () => void;
 }) {
+  const { request, trackPromise } = useManualRefresh();
   const [searchTerm, setSearchTerm] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [profile, setProfile] = React.useState<AnyRecord | null>(null);
@@ -80,16 +83,18 @@ export function Members({
     const controller = new AbortController();
     setProfileLoading(true);
     setProfileError(null);
-    Promise.all([
-      fetch(`${API}/players/${selectedId}/buffs`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/equipment`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/equipment/presets`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/inventories`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/housing`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/market-collections`, { signal: controller.signal }).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/traveler-tasks`, { signal: controller.signal }).then((response) => response.json()),
-    ]).then(([buffs, equipment, equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks]) => {
+    const requestOptions = { headers: manualRefreshHeaders(request, "members"), signal: controller.signal };
+    const refresh = Promise.all([
+      fetch(`${API}/players/${selectedId}/buffs`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/equipment`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/equipment/presets`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/inventories`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/housing`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/market-collections`, requestOptions).then((response) => response.json()),
+      fetch(`${API}/players/${selectedId}/traveler-tasks`, requestOptions).then((response) => response.json()),
+    ]);
+    void trackPromise("member-details", refresh).then(([buffs, equipment, equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks]) => {
       setProfile({ buffs, equipment, equipmentPresets: equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks });
     }).catch((error) => {
       if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : String(error));
@@ -97,7 +102,7 @@ export function Members({
       if (!controller.signal.aborted) setProfileLoading(false);
     });
     return () => controller.abort();
-  }, [selectedId]);
+  }, [selectedId, request?.sequence, trackPromise]);
   const passiveCraftSummaries = profile ? summarizePassiveCrafts(profile.passiveCrafts) : [];
   const currentEquipmentSlots = profile ? equipmentSlots(profile.equipment) : [];
   const gearPresets = profile ? equipmentPresets(profile.equipmentPresets, currentEquipmentSlots) : [];

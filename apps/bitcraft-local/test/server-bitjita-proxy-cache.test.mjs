@@ -112,3 +112,50 @@ test("BitJita proxy cache prunes expired and oldest entries", async () => {
 
   assert.equal(proxyCache.cacheSize(), 0);
 });
+
+test("BitJita proxy cache bypasses a fresh response when forceRefresh is requested", async () => {
+  let fetchCount = 0;
+  const proxyCache = createBitjitaProxyCache({
+    timeoutMs: 0,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return new Response(JSON.stringify({ request: fetchCount }), { status: 200 });
+    },
+  });
+  const upstream = new URL("https://bitjita.example/api/claims/12345678/inventories");
+
+  const initial = await proxyCache.fetchUpstreamCached(upstream);
+  const forced = await proxyCache.fetchUpstreamCached(upstream, { forceRefresh: true });
+  const cached = await proxyCache.fetchUpstreamCached(upstream);
+
+  assert.equal(fetchCount, 2);
+  assert.deepEqual(JSON.parse(initial.body.toString("utf8")), { request: 1 });
+  assert.deepEqual(JSON.parse(forced.body.toString("utf8")), { request: 2 });
+  assert.deepEqual(JSON.parse(cached.body.toString("utf8")), { request: 2 });
+  assert.equal(forced.cacheState, "miss");
+  assert.equal(cached.cacheState, "hit");
+});
+
+test("forced proxy requests still share identical in-flight upstream work", async () => {
+  let releaseFetch;
+  let fetchCount = 0;
+  const proxyCache = createBitjitaProxyCache({
+    timeoutMs: 0,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      await new Promise((resolve) => { releaseFetch = resolve; });
+      return new Response(JSON.stringify({ request: fetchCount }), { status: 200 });
+    },
+  });
+  const upstream = new URL("https://bitjita.example/api/crafts?completed=false");
+
+  const first = proxyCache.fetchUpstreamCached(upstream, { forceRefresh: true });
+  const second = proxyCache.fetchUpstreamCached(upstream, { forceRefresh: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFetch();
+  const [miss, deduped] = await Promise.all([first, second]);
+
+  assert.equal(fetchCount, 1);
+  assert.equal(miss.cacheState, "miss");
+  assert.equal(deduped.cacheState, "deduped");
+});

@@ -7,6 +7,8 @@ import { Dialog } from "../components/main/Dialog";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { formatNumber } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { CraftPlanningRouteChooser } from "./CraftPlanningRouteChooser";
@@ -102,6 +104,7 @@ function summaryStat(icon: React.ReactNode, label: string, value: unknown, detai
 }
 
 export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; refreshToken: number }) {
+  const { request, trackPromise } = useManualRefresh();
   const [plan, setPlan] = React.useState<AnyRecord | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -115,6 +118,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [targetsCollapsed, setTargetsCollapsed] = usePersistedState<boolean>("planning.targetsCollapsed", true);
   const targetsAreCollapsed = targetsCollapsed !== false;
   const [selectedNeed, setSelectedNeed] = React.useState<NeedCell | null>(null);
+  const selectedNeedRef = React.useRef<NeedCell | null>(null);
   const [detailSteps, setDetailSteps] = React.useState<AnyRecord[]>([]);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
@@ -124,6 +128,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [routeSavePendingId, setRouteSavePendingId] = React.useState<string | null>(null);
   const [bufferPercent, setBufferPercent] = React.useState("0");
   const [selectedSectionOverride, setSelectedSectionOverride] = React.useState<{ row: NeedRow; section: string; name: string } | null>(null);
+
+  React.useEffect(() => {
+    selectedNeedRef.current = selectedNeed;
+  }, [selectedNeed]);
 
   React.useEffect(() => {
     fetch(`${LOCAL_API}/admin/me`)
@@ -137,12 +145,15 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`${LOCAL_API}/craft-plan?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal })
+    const refresh = fetch(`${LOCAL_API}/craft-plan?claimId=${encodeURIComponent(claimId)}`, { headers: manualRefreshHeaders(request, "planning"), signal: controller.signal })
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-        if (!stale) setPlan(body);
-      })
+        if (stale) return;
+        setPlan(body);
+        if (request && selectedNeedRef.current) await openNeedDetail(selectedNeedRef.current);
+      });
+    void trackPromise("craft-plan", refresh)
       .catch((err) => {
         if (!stale && err.name !== "AbortError") setError(err instanceof Error ? err.message : String(err));
       })
@@ -153,7 +164,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       stale = true;
       controller.abort();
     };
-  }, [claimId, refreshToken, managerRefreshToken]);
+  }, [claimId, managerRefreshToken, refreshToken, request?.sequence, trackPromise]);
 
   async function openNeedDetail(cell: NeedCell) {
     const requestId = ++detailRequestRef.current;
@@ -165,9 +176,13 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     setDetailLoading(true);
     try {
       const keys = [...new Set(cell.items.map(itemKey).filter(Boolean))];
-      const response = await fetch(`${LOCAL_API}/craft-plan/detail?claimId=${encodeURIComponent(claimId)}&keys=${encodeURIComponent(keys.join(","))}`);
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      const detail = fetch(`${LOCAL_API}/craft-plan/detail?claimId=${encodeURIComponent(claimId)}&keys=${encodeURIComponent(keys.join(","))}`, { headers: manualRefreshHeaders(request, "planning") })
+        .then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+          return body;
+        });
+      const body = await trackPromise("craft-plan-detail", detail);
       if (requestId !== detailRequestRef.current) return;
       const detailedItems = new Map((Array.isArray(body.materials) ? body.materials : []).map((item: AnyRecord) => [itemKey(item), item]));
       const items = cell.items.map((item) => detailedItems.get(itemKey(item)) ?? item);

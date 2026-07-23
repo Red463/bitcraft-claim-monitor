@@ -56,6 +56,10 @@ import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editD
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { craftPlanCatalogLookup, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
+import {
+  MANUAL_REFRESH_HEADER,
+  createManualRefreshGuard,
+} from "./src/server/manualRefreshGuard.mjs";
 import { createRequestCoordinator } from "./src/server/requestCoordinator.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
@@ -2328,40 +2332,43 @@ async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
   }
   return detailsByKey;
 }
-async function computedCraftPlanResponse(claimId = getSettings().claimId) {
-  return (await computedCraftPlanWorkspace(claimId)).plan;
+async function computedCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
+  return (await computedCraftPlanWorkspace(claimId, options)).plan;
 }
 
-async function computedCompactCraftPlanResponse(claimId = getSettings().claimId) {
-  return (await computedCraftPlanWorkspace(claimId)).compact();
+async function computedCompactCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
+  return (await computedCraftPlanWorkspace(claimId, options)).compact();
 }
 
-async function computedCraftPlanWorkspace(claimId = getSettings().claimId) {
+async function computedCraftPlanWorkspace(claimId = getSettings().claimId, options = {}) {
   const normalizedClaimId = String(claimId ?? "").trim();
   const now = Date.now();
   const cached = craftPlanResponseCache.get(normalizedClaimId);
-  if (cached && cached.expiresAt > now) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
+  const forceRefresh = options.forceRefresh === true;
+  const refreshId = String(options.refreshId ?? "");
+  if (cached && cached.expiresAt > now && (!forceRefresh || cached.refreshId === refreshId)) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
   const existing = craftPlanResponseInflight.get(normalizedClaimId);
-  if (existing?.generation === craftPlanResponseGeneration) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
+  if (existing?.generation === craftPlanResponseGeneration && (!forceRefresh || existing.refreshId === refreshId)) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
   const generation = craftPlanResponseGeneration;
   const startedAt = Date.now();
   plannerTelemetry.freshCalculations += 1;
-  const promise = computedCraftPlanResponseFresh(normalizedClaimId).then((plan) => {
+  const promise = computedCraftPlanResponseFresh(normalizedClaimId, { forceRefresh }).then((plan) => {
     const workspace = createCraftPlanResponseWorkspace(plan);
     plannerTelemetry.lastDurationMs = Date.now() - startedAt;
     plannerTelemetry.lastCompletedAt = new Date().toISOString();
     if (generation === craftPlanResponseGeneration) {
-      craftPlanResponseCache.set(normalizedClaimId, { workspace, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS });
+      craftPlanResponseCache.set(normalizedClaimId, { workspace, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS, refreshId: forceRefresh ? refreshId : "" });
     }
     return workspace;
   }).finally(() => {
     if (craftPlanResponseInflight.get(normalizedClaimId)?.promise === promise) craftPlanResponseInflight.delete(normalizedClaimId);
   });
-  craftPlanResponseInflight.set(normalizedClaimId, { generation, promise });
+  craftPlanResponseInflight.set(normalizedClaimId, { generation, promise, refreshId: forceRefresh ? refreshId : "" });
   return promise;
 }
 
-async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
+async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, options = {}) {
+  const forceRefresh = options.forceRefresh === true;
   let config = storedCraftPlanConfig();
   if (!config.enabled || !config.targets.length) {
     const plan = computeCraftPlan({ config });
@@ -2369,7 +2376,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     return plan;
   }
   try {
-    const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`);
+    const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`, { forceRefresh });
     const reconciled = reconcileCraftPlanBuildingProgress(config, buildingsPayload);
     config = reconciled.changed ? saveCraftPlanConfig(reconciled.config) : reconciled.config;
   } catch {
@@ -2385,9 +2392,9 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     { requireValidatedProbabilities: true },
   );
   const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
-    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`).catch(() => ({ craftResults: [] })),
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`).catch(() => ({ members: [] })),
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`, { forceRefresh }).catch(() => ({ buildings: [] })),
+    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
+    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { forceRefresh }).catch(() => ({ members: [] })),
   ]);
   const memberNames = new Map(unwrap(membersPayload, "members", []).map((member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
@@ -2396,7 +2403,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
   const [playerCraftResults, playerPassiveCraftResults] = await Promise.all([
     Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
       try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, cache: true });
+        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, forceRefresh });
         return { playerId, payload, error: "" };
       } catch (error) {
         return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
@@ -2404,7 +2411,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
     })),
     Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
       try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { timeoutMs: 6000, cache: true });
+        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { timeoutMs: 6000, forceRefresh });
         return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload, error: "" };
       } catch (error) {
         return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
@@ -2427,7 +2434,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId) {
   for (const playerId of selectedPlayerInventoryIds(config.sourceRules)) {
     const label = memberNames.get(playerId) ?? playerId;
     try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
+      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, forceRefresh });
       const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push(enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.inventory, catalogWarnings));
@@ -2571,6 +2578,7 @@ const bitjitaProxyCache = createBitjitaProxyCache({
   maxEntries: UPSTREAM_CACHE_MAX_ENTRIES,
   timeoutMs: BITJITA_PROXY_TIMEOUT_MS,
 });
+const manualRefreshGuard = createManualRefreshGuard();
 
 function visitorSecuritySettings(includeSecrets = false) {
   return normalizeVisitorSecuritySettings(safeJson(statements.getSetting.get("visitor_security_json")?.value, {}), { includeSecrets });
@@ -5437,7 +5445,8 @@ async function syncProductionContributionsForSnapshot(claimId, craftsPayload, co
 
 async function fetchBitjita(pathname, options = {}) {
   if (!workerRequestCoordinator) return fetchBitjitaUncoordinated(pathname, options);
-  const key = `${options.cache === false ? "direct" : "cached"}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
+  const cacheMode = options.cache === false ? "direct" : options.forceRefresh ? "forced" : "cached";
+  const key = `${cacheMode}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
   return workerRequestCoordinator.run(key, () => fetchBitjitaUncoordinated(pathname, options));
 }
 
@@ -5462,7 +5471,7 @@ async function fetchBitjitaUncoordinated(pathname, options = {}) {
       }
       return response.json();
     }
-    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs });
+    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs, forceRefresh: options.forceRefresh === true });
   } catch (error) {
     bitjitaTelemetry.failures += 1;
     bitjitaTelemetry.lastFailureAt = new Date().toISOString();
@@ -5497,15 +5506,15 @@ async function fetchAllClaimListings(claimId, options = {}) {
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
 }
 
-async function fetchRegionClaimList(regionId) {
+async function fetchRegionClaimList(regionId, options = {}) {
   const key = String(regionId);
   const cached = regionClaimListCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
   const base = `/claims?regionId=${encodeURIComponent(key)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`);
+  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
   const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
   const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
     : [];
   const value = { ...first, claims: [first, ...pages].flatMap((page) => unwrap(page, "claims", [])), page: 1, totalPages };
   regionClaimListCache.set(key, { expiresAt: Date.now() + 5 * 60 * 1000, value });
@@ -5521,9 +5530,9 @@ function empireCacheGetAny(key) {
   return empireScoutCache.get(key)?.value ?? null;
 }
 
-async function empireCacheLoad(key, loader) {
+async function empireCacheLoad(key, loader, options = {}) {
   const cached = empireCacheGet(key);
-  if (cached) return cached;
+  if (!options.forceRefresh && cached) return cached;
   const inflight = empireScoutInflight.get(key);
   if (inflight) return inflight;
   const stale = empireCacheGetAny(key);
@@ -5631,12 +5640,12 @@ function normalizeEmpireOverviewRow(empire, regionalClaims) {
   };
 }
 
-async function regionalEmpireOverview(regionId) {
+async function regionalEmpireOverview(regionId, options = {}) {
   const key = `overview:${regionId}`;
   const overview = await empireCacheLoad(key, async () => {
     const [claimPayload, empirePayload] = await Promise.all([
-      fetchRegionClaimList(regionId),
-      fetchBitjita("/empires"),
+      fetchRegionClaimList(regionId, options),
+      fetchBitjita("/empires", { forceRefresh: options.forceRefresh === true }),
     ]);
     const claims = await enrichRegionalClaimOwners(unwrap(claimPayload, "claims", []));
     const regionalEmpireIds = new Set(claims.map(empireIdFromClaim).filter(Boolean));
@@ -5660,7 +5669,7 @@ async function regionalEmpireOverview(regionId) {
         largestEmpireName: largestEmpire?.name ?? null,
       },
     };
-  });
+  }, options);
   const activeSweep = empireHexiteRepository.activeSweep();
   const bootstrapFailure = activeSweep ? null : empireHexiteRepository.latestBootstrapFailure();
   return {
@@ -5824,16 +5833,16 @@ function normalizeEmpireTower(tower, empire, inactivity) {
   };
 }
 
-async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14) {
+async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14, options = {}) {
   const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
   const key = `details:${regionId}:${empireId}:${days}`;
   return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId);
+    const overview = await regionalEmpireOverview(regionId, options);
     const regionalEmpire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
 
     const [detailResult, towerResult] = await Promise.allSettled([
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+      fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
+      fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
     ]);
     if (!regionalEmpire && detailResult.status === "rejected") return null;
 
@@ -5884,21 +5893,21 @@ async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14) {
       partial: errors.length > 0,
       fetchedAt: new Date().toISOString(),
     };
-  });
+  }, options);
 }
 
-async function regionalEmpireClaimMembers(claimId) {
+async function regionalEmpireClaimMembers(claimId, options = {}) {
   const key = `claim-members:${claimId}`;
   return empireCacheLoad(key, async () => {
     const [claimPayload, membersPayload] = await Promise.all([
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
+      fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
+      fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
     ]);
     const rawClaim = claimPayload?.claim ?? claimPayload ?? { entityId: claimId };
     const claim = normalizeEmpireClaim(rawClaim);
     const errors = Array.isArray(membersPayload?.errors) ? [...membersPayload.errors] : [];
     const empireId = String(rawClaim?.empireEntityId ?? rawClaim?.empireId ?? "").trim();
-    const empireMembersPayload = empireId ? await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch((error) => {
+    const empireMembersPayload = empireId ? await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => {
       errors.push(`Empire ranks unavailable: ${errorMessage(error)}`);
       return null;
     }) : null;
@@ -5914,14 +5923,14 @@ async function regionalEmpireClaimMembers(claimId) {
       errors,
       fetchedAt: new Date().toISOString(),
     };
-  });
+  }, options);
 }
 
-async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
+async function regionalEmpireWatchtowers(regionId, inactiveDays = 14, options = {}) {
   const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
   const key = `watchtowers:${regionId}:${days}`;
   return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId);
+    const overview = await regionalEmpireOverview(regionId, options);
     const errors = [];
     const startedAt = Date.now();
     const deadlineMs = Math.max(5000, Math.min(BITJITA_FETCH_TIMEOUT_MS - 1500, 14_000));
@@ -5933,8 +5942,8 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
       }
       try {
         const [detailPayload, towerPayload] = await Promise.all([
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }),
+          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
+          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
         ]);
         const detailEmpire = detailPayload?.empire ?? empire;
         const members = unwrap(detailPayload, "members", []);
@@ -5974,7 +5983,7 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14) {
         activeTowers: towers.filter((tower) => tower.active).length,
       },
     };
-  });
+  }, options);
 }
 function buyOrderKey(listing) {
   return String(listing.entityId ?? listing.id ?? `${listing.claimEntityId ?? "claim"}:${listing.itemType ?? ""}:${listing.itemId ?? ""}:${listing.ownerEntityId ?? ""}:${listing.price ?? ""}`);
@@ -6761,11 +6770,11 @@ async function fetchCachedClaimDetail(claimId) {
   return value;
 }
 
-async function fetchCachedPlayerDetail(playerId) {
+async function fetchCachedPlayerDetail(playerId, options = {}) {
   const key = String(playerId);
   const cached = playerDetailCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(key)}`);
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/players/${encodeURIComponent(key)}`, { forceRefresh: options.forceRefresh === true });
   const value = payload.player ?? payload;
   playerDetailCache.set(key, { value, expiresAt: Date.now() + 60 * 1000 });
   return value;
@@ -6784,22 +6793,22 @@ function fallbackPlayerFromMember(member, error) {
   };
 }
 
-async function fetchCachedCraftContributions(craftId) {
+async function fetchCachedCraftContributions(craftId, options = {}) {
   const key = String(craftId);
   const cached = craftContributionCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`);
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`, { forceRefresh: options.forceRefresh === true });
   const value = payload.contributions ?? [];
   craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
   return value;
 }
 
-async function fetchAllRegionClaims(regionId) {
+async function fetchAllRegionClaims(regionId, options = {}) {
   const base = `/claims?regionId=${encodeURIComponent(regionId)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`);
+  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
   const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
   const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`))
+    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
     : [];
   const claims = [first, ...pages].flatMap((page) => unwrap(page, "claims", []));
   const details = await mapWithConcurrency(claims, 8, async (claim) => {
@@ -6818,11 +6827,11 @@ async function fetchAllRegionClaims(regionId) {
   };
 }
 
-async function fetchCachedRegionClaims(regionId) {
+async function fetchCachedRegionClaims(regionId, options = {}) {
   const key = String(regionId);
   const cached = regionCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await fetchAllRegionClaims(key);
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await fetchAllRegionClaims(key, options);
   regionCache.set(key, { expiresAt: Date.now() + 10 * 60 * 1000, value });
   return value;
 }
@@ -6862,15 +6871,15 @@ function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPa
   return "";
 }
 
-async function fetchCachedActiveRegions(extraRegionIds = []) {
+async function fetchCachedActiveRegions(extraRegionIds = [], options = {}) {
   const settings = getSettings();
   const overrideIds = parseRegionIds(settings.additionalActiveRegions);
   const includeIds = parseRegionIds(extraRegionIds.join(","));
   const cacheKey = [...overrideIds, ...includeIds].sort((a, b) => toNumber(a) - toNumber(b)).join(",");
-  if (activeRegionsCache && activeRegionsCache.key === cacheKey && activeRegionsCache.expiresAt > Date.now()) return activeRegionsCache.value;
+  if (!options.forceRefresh && activeRegionsCache && activeRegionsCache.key === cacheKey && activeRegionsCache.expiresAt > Date.now()) return activeRegionsCache.value;
   const [statusPayload, regionsPayload] = await Promise.all([
-    fetchBitjita("/regions/status").catch(() => ({ regions: [] })),
-    fetchBitjita("/regions").catch(() => []),
+    fetchBitjita("/regions/status", { forceRefresh: options.forceRefresh === true }).catch(() => ({ regions: [] })),
+    fetchBitjita("/regions", { forceRefresh: options.forceRefresh === true }).catch(() => []),
   ]);
   const byId = new Map();
   for (const row of unwrap(statusPayload, "regions", [])) {
@@ -6958,12 +6967,12 @@ function summarizePassiveCrafts(payload) {
   return Array.from(summaries.values()).sort((a, b) => b.sortTimestamp - a.sortTimestamp).slice(0, 8);
 }
 
-async function fetchCachedPassiveCrafts(member) {
+async function fetchCachedPassiveCrafts(member, options = {}) {
   const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
   if (!playerId) return { ok: false, error: "Missing player id" };
   const cached = passiveCraftsCache.get(playerId);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`);
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { forceRefresh: options.forceRefresh === true });
   const value = {
     ok: true,
     playerId,
@@ -7039,7 +7048,7 @@ async function passiveCraftSummaries(body) {
   return loadHelperCached(passiveCraftSummariesCache, passiveCraftSummariesInflight, cacheKey, PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS, async () => {
     const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
       try {
-        return await fetchCachedPassiveCrafts(member);
+        return await fetchCachedPassiveCrafts(member, { forceRefresh: body?.forceRefresh === true });
       } catch (error) {
         return {
           ok: false,
@@ -7058,7 +7067,7 @@ async function passiveCraftSummaries(body) {
       requested: uniqueMembers.length,
       failed: results.filter((result) => !result.ok).length,
     };
-  });
+  }, { forceRefresh: body?.forceRefresh === true });
 }
 
 async function playerDetailSummaries(body) {
@@ -7068,7 +7077,7 @@ async function playerDetailSummaries(body) {
     const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
       const playerId = String(member.playerEntityId ?? member.entityId ?? "");
       try {
-        const player = await fetchCachedPlayerDetail(playerId);
+        const player = await fetchCachedPlayerDetail(playerId, { forceRefresh: body?.forceRefresh === true });
         return { ok: true, player: { ...player, detailAvailable: true } };
       } catch (error) {
         return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
@@ -7080,7 +7089,7 @@ async function playerDetailSummaries(body) {
       failed: results.filter((result) => !result.ok).length,
       failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
     };
-  });
+  }, { forceRefresh: body?.forceRefresh === true });
 }
 function itemCatalogKey(item) {
   const id = item?.id ?? item?.entityId ?? item?.itemId;
@@ -7222,7 +7231,7 @@ async function dashboardData(claimId, options = {}) {
   const stale = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
   const request = (async () => {
     try {
-      const value = await dashboardDataFresh(id);
+      const value = await dashboardDataFresh(id, { forceRefresh: options.forceRefresh === true });
       const cachedAt = new Date().toISOString();
       dashboardDataCache.set(id, {
         value,
@@ -7252,38 +7261,39 @@ async function dashboardData(claimId, options = {}) {
   dashboardDataInflight.set(id, request);
   return request;
 }
-async function dashboardDataFresh(claimId) {
+async function dashboardDataFresh(claimId, options = {}) {
   const id = String(claimId ?? "").trim();
   if (!/^\d{8,}$/.test(id)) {
     const error = new Error("Choose a valid BitCraft settlement ID");
     error.statusCode = 400;
     throw error;
   }
+  const forceRefresh = options.forceRefresh === true;
   const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, researchPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
-    fetchBitjita(`/claims/${id}`),
-    fetchBitjita(`/claims/${id}/members`),
-    fetchBitjita(`/claims/${id}/citizens`).catch(() => ({ citizens: [] })),
-    fetchBitjita(`/claims/${id}/buildings`),
-    fetchBitjita(`/claims/${id}/construction`).catch(() => ({ projects: [] })),
-    fetchBitjita(`/claims/${id}/research`).catch(() => ({ research: [] })),
-    fetchAllClaimListings(id).catch(() => ({ listings: [] })),
-    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`).catch(() => ({ craftResults: [] })),
-    fetchBitjita("/regions/status").catch(() => ({ regions: [] })),
+    fetchBitjita(`/claims/${id}`, { forceRefresh }),
+    fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
+    fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
+    fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
+    fetchBitjita(`/claims/${id}/construction`, { forceRefresh }).catch(() => ({ projects: [] })),
+    fetchBitjita(`/claims/${id}/research`, { forceRefresh }).catch(() => ({ research: [] })),
+    fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
+    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
+    fetchBitjita("/regions/status", { forceRefresh }).catch(() => ({ regions: [] })),
   ]);
   const claim = claimPayload.claim ?? claimPayload;
   const members = unwrap(membersPayload, "members", []);
   const crafts = unwrap(craftsPayload, "craftResults", []);
   const [playerPayload, contributionEntries, region, tradeVolume] = await Promise.all([
-    playerDetailSummaries({ members }),
+    playerDetailSummaries({ members, forceRefresh }),
     mapWithConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
       try {
-        return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId)];
+        return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId, { forceRefresh })];
       } catch {
         return [String(craft.entityId), []];
       }
     }),
     claim?.regionId ? fetchCachedRegionClaims(claim.regionId).catch(() => ({ claims: [] })) : Promise.resolve({ claims: [] }),
-    claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
+    claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`, { forceRefresh }).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
   ]);
   return {
     claim: claimPayload,
@@ -9206,10 +9216,30 @@ async function proxyBitjita(req, url, res) {
   const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
   upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
   upstream.search = url.search;
-  if (!bitjitaProxyCache.hasFreshCache(upstream) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream);
+  const refresh = manualRefreshAccess(req, res);
+  if (!refresh) return;
+  const { forceRefresh } = refresh;
+  if ((forceRefresh || !bitjitaProxyCache.hasFreshCache(upstream)) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
+  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream, { forceRefresh });
   res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
   res.end(response.body);
+}
+
+function manualRefreshAccess(req, res) {
+  const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
+  const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
+  const decision = manualRefreshGuard.authorize(requestAddress(req), refreshId);
+  if (decision.allowed) return { forceRefresh: decision.forceRefresh, refreshId };
+  const status = decision.reason === "invalid-id" ? 400 : 429;
+  const headers = decision.retryAfterSeconds ? { "retry-after": String(decision.retryAfterSeconds) } : {};
+  send(res, status, {
+    error: status === 429
+      ? "Manual refresh is cooling down. Please try again shortly."
+      : "Invalid manual refresh identifier.",
+    source: "manual-refresh-guard",
+    retryAfter: decision.retryAfterSeconds,
+  }, headers);
+  return null;
 }
 
 const server = createServer(async (req, res) => {
@@ -9278,16 +9308,22 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan/detail") {
       try {
+        const refresh = manualRefreshAccess(req, res);
+        if (!refresh) return;
+        const { forceRefresh, refreshId } = refresh;
         const keys = String(url.searchParams.get("keys") ?? "").split(",").map((key) => key.trim()).filter(Boolean).slice(0, 20);
         if (!keys.length) return send(res, 400, { error: "At least one craft plan item key is required" });
-        return send(res, 200, craftPlanDetailResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId)), keys));
+        return send(res, 200, craftPlanDetailResponse(await computedCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId), { forceRefresh, refreshId }), keys));
       } catch (error) {
         return send(res, 502, { error: error instanceof Error ? error.message : "Unable to load craft plan details" });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/craft-plan") {
       try {
-        const compactPlan = await computedCompactCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId));
+        const refresh = manualRefreshAccess(req, res);
+        if (!refresh) return;
+        const { forceRefresh, refreshId } = refresh;
+        const compactPlan = await computedCompactCraftPlanResponse(String(url.searchParams.get("claimId") ?? getSettings().claimId), { forceRefresh, refreshId });
         plannerTelemetry.lastResponseBytes = Buffer.byteLength(JSON.stringify(compactPlan));
         return send(res, 200, compactPlan);
       } catch (error) {
@@ -9383,14 +9419,20 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
       if (!rateLimit(req, res, "region-claims", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      return send(res, 200, await fetchCachedRegionClaims(regionId));
+      return send(res, 200, await fetchCachedRegionClaims(regionId, { forceRefresh }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/regions/active") {
       if (!rateLimit(req, res, "regions-active", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const include = parseRegionIds(url.searchParams.get("include"));
-      return send(res, 200, await fetchCachedActiveRegions(include));
+      return send(res, 200, await fetchCachedActiveRegions(include, { forceRefresh }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
@@ -10120,10 +10162,13 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires") {
       if (!rateLimit(req, res, "empires", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       try {
-        return send(res, 200, await regionalEmpireOverview(regionId));
+        return send(res, 200, await regionalEmpireOverview(regionId, { forceRefresh }));
       } catch (error) {
         const cached = empireCacheGetAny(`overview:${regionId}`);
         if (cached) return send(res, 200, { ...cached, stale: true, partial: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
@@ -10142,13 +10187,16 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/details") {
       if (!rateLimit(req, res, "empire-details", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const empireId = String(url.searchParams.get("empireId") ?? "").trim();
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!empireId) return send(res, 400, { error: "Empire id is required" });
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
       try {
-        const details = await regionalEmpireDetails(empireId, regionId, inactiveDays);
+        const details = await regionalEmpireDetails(empireId, regionId, inactiveDays, { forceRefresh });
         return details ? send(res, 200, details) : send(res, 404, { error: "Empire not found in region" });
       } catch (error) {
         return send(res, 502, { error: "Empire details unavailable", errors: [errorMessage(error)] });
@@ -10156,21 +10204,27 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/claim-members") {
       if (!rateLimit(req, res, "empire-claim-members", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       if (!claimId) return send(res, 400, { error: "Claim id is required" });
       try {
-        return send(res, 200, await regionalEmpireClaimMembers(claimId));
+        return send(res, 200, await regionalEmpireClaimMembers(claimId, { forceRefresh }));
       } catch (error) {
         return send(res, 502, { claim: { claimId, name: `Claim ${claimId}` }, members: [], errors: [errorMessage(error)], fetchedAt: new Date().toISOString() });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/watchtowers") {
       if (!rateLimit(req, res, "empire-watchtowers", RATE_LIMITS.expensiveLocal)) return;
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
       try {
-        return send(res, 200, await regionalEmpireWatchtowers(regionId, inactiveDays));
+        return send(res, 200, await regionalEmpireWatchtowers(regionId, inactiveDays, { forceRefresh }));
       } catch (error) {
         const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
         const cached = empireCacheGetAny(`watchtowers:${regionId}:${days}`);
@@ -10191,35 +10245,56 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/buy-orders") {
       return send(res, 200, marketBuyOrders(url.searchParams.get("claimId") ?? getSettings().claimId, Object.fromEntries(url.searchParams.entries())));
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
       return send(res, 200, contributionLeaderboard(url.searchParams.get("claimId") ?? ""));
     }
     if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
       if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
-      return send(res, 200, await passiveCraftSummaries(await readJson(req, BODY_LIMITS.json)));
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
+      const body = await readJson(req, BODY_LIMITS.json);
+      return send(res, 200, await passiveCraftSummaries({ ...body, forceRefresh }));
     }
     if (req.method === "POST" && url.pathname === "/api/local/player-details") {
       if (!rateLimit(req, res, "player-details", RATE_LIMITS.expensiveLocal)) return;
-      return send(res, 200, await playerDetailSummaries(await readJson(req, BODY_LIMITS.json)));
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
+      const body = await readJson(req, BODY_LIMITS.json);
+      return send(res, 200, await playerDetailSummaries({ ...body, forceRefresh }));
     }
     if (req.method === "POST" && url.pathname === "/api/local/production/crafts") {
       if (!rateLimit(req, res, "production-crafts", RATE_LIMITS.expensiveLocal)) return;
-      return send(res, 200, await settlementProductionCrafts(await readJson(req, BODY_LIMITS.json)));
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const { forceRefresh } = refresh;
+      const body = await readJson(req, BODY_LIMITS.json);
+      return send(res, 200, await settlementProductionCrafts({ ...body, forceRefresh }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/dashboard-data") {
       if (!rateLimit(req, res, "dashboard-data", RATE_LIMITS.expensiveLocal)) return;
       try {
-        return send(res, 200, await dashboardData(url.searchParams.get("claimId") ?? ""));
+        const refresh = manualRefreshAccess(req, res);
+        if (!refresh) return;
+        const { forceRefresh } = refresh;
+        return send(res, 200, await dashboardData(url.searchParams.get("claimId") ?? "", { forceRefresh }));
       } catch (error) {
         return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load dashboard data" });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
       const allowed = new Set(["market", "activity", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;

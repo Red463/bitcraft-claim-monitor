@@ -1,6 +1,8 @@
 import React from "react";
 
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
+import { manualRefreshApplies, manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
@@ -136,7 +138,13 @@ function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now(), override
 function loadedState(data: AnyRecord, overrideCacheState?: string): LoadState<AnyRecord> {
   return { loading: false, error: null, data, ...freshnessFromPayload(data, Date.now(), overrideCacheState) };
 }
-export function useBitjitaData(refreshToken: number, claimId: string, activePanel: ActivePanel): LoadState<AnyRecord> {
+export function useBitjitaData(
+  refreshToken: number,
+  claimId: string,
+  activePanel: ActivePanel,
+  manualRefreshRequest: ManualRefreshRequest | null = null,
+  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
@@ -147,7 +155,9 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
     const cachedAgeMs = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
-    if (cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
+    const forced = manualRefreshApplies(manualRefreshRequest, activePanel);
+    const manualHeaders = manualRefreshHeaders(manualRefreshRequest, activePanel);
+    if (!forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
       setState({ loading: false, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: "browser-cache", stale: cached.stale });
       return;
     }
@@ -160,7 +170,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
     async function load() {
       try {
         async function request(path: string) {
-          const response = await fetch(`${API}${path}`, { signal: controller.signal });
+          const response = await fetch(`${API}${path}`, { headers: { ...manualHeaders }, signal: controller.signal });
           if (!response.ok) throw new Error(httpErrorMessage(path, response.status));
           return response.json();
         }
@@ -182,7 +192,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           // Dashboard combines data from several BitJita endpoints and local
           // history tables, so it stays behind a page-specific local aggregate
           // instead of duplicating that join logic in the browser.
-          const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { signal: controller.signal });
+          const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { headers: { ...manualHeaders }, signal: controller.signal });
           if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
           const raw = await response.json();
           const freshness = freshnessFromPayload(raw);
@@ -205,7 +215,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
             // batches those lookups and falls back to raw /crafts data on failure.
             const response = await fetch(`${LOCAL_API}/production/crafts`, {
               method: "POST",
-              headers: { "content-type": "application/json" },
+              headers: { "content-type": "application/json", ...manualHeaders },
               signal: controller.signal,
               body: JSON.stringify({ claimId, members }),
             });
@@ -233,7 +243,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
             // Player detail requests are batched server-side because each member
             // can require an individual BitJita lookup for online/session state.
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", ...manualHeaders },
             signal: controller.signal,
             body: JSON.stringify({ members }),
           })
@@ -276,7 +286,7 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
           readsRegionDetail ? request(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
         ]);
         raw.region = readsRegionDetail && claim?.regionId
-          ? await fetch(`${LOCAL_API}/region/claims?regionId=${encodeURIComponent(String(claim.regionId))}`, { signal: controller.signal })
+          ? await fetch(`${LOCAL_API}/region/claims?regionId=${encodeURIComponent(String(claim.regionId))}`, { headers: { ...manualHeaders }, signal: controller.signal })
             .then((response) => response.ok ? response.json() : Promise.reject(new Error(`region claims HTTP ${response.status}`)))
             .catch(() => ({ claims: [] }))
           : { claims: [] };
@@ -297,17 +307,17 @@ export function useBitjitaData(refreshToken: number, claimId: string, activePane
         pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
         if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
       } catch (err) {
-        if (!cancelled) {
-          setState((prev) => ({ ...prev, loading: false, error: err instanceof Error ? err.message : String(err), stale: Boolean(prev.data) || prev.stale }));
-        }
+        if (cancelled || controller.signal.aborted) return;
+        setState((prev) => ({ ...prev, loading: false, error: err instanceof Error ? err.message : String(err), stale: Boolean(prev.data) || prev.stale }));
+        throw err;
       }
     }
-    load();
+    void trackManualRefreshPromise("main-data", load()).catch(() => {});
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [activePanel, claimId, refreshToken]);
+  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
 
   return state;
 }

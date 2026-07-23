@@ -62,7 +62,7 @@ export function createBitjitaProxyCache(options = {}) {
     const requestedAt = now();
     const ttlMs = bitjitaProxyCacheTtl(upstream, { policies, defaultTtlMs });
     const cached = cache.get(key);
-    if (cached && cached.expiresAt > requestedAt) return { ...cached, cacheState: "hit" };
+    if (!requestOptions.forceRefresh && cached && cached.expiresAt > requestedAt) return { ...cached, cacheState: "hit" };
     const staleCandidate = cached && (cached.staleExpiresAt ?? cached.expiresAt) > requestedAt ? cached : null;
 
     const pending = inflight.get(key);
