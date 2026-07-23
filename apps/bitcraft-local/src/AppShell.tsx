@@ -664,6 +664,7 @@ function DashboardApp() {
   const manualRefreshIsRefreshing = manualRefreshState.status === "refreshing";
   const manualRefreshCooldownMs = cooldownRemainingMs(manualRefreshRequest?.requestedAt, manualRefreshClock);
   const manualRefreshCooldownSeconds = Math.ceil(manualRefreshCooldownMs / 1000);
+  const manualRefreshIsCoolingDown = !manualRefreshIsRefreshing && manualRefreshCooldownMs > 0;
   const manualRefreshHasErrors = manualRefreshState.status === "complete" && manualRefreshState.errors.length > 0;
   const manualRefreshButtonDisabled = manualRefreshIsRefreshing || manualRefreshCooldownMs > 0;
   const manualRefreshButtonLabel = manualRefreshIsRefreshing
@@ -913,7 +914,9 @@ function DashboardApp() {
           <KeyRound size={18} />
         </a> : null}
         <button
-          className={`floating-action-item ${manualRefreshIsRefreshing ? "is-refreshing" : ""}`}
+          className={`floating-action-item ${
+            manualRefreshIsRefreshing ? "is-refreshing" : manualRefreshIsCoolingDown ? "is-cooldown" : ""
+          }`}
           onClick={requestManualRefresh}
           aria-label={manualRefreshButtonLabel}
           title={manualRefreshButtonLabel}
@@ -921,7 +924,13 @@ function DashboardApp() {
           aria-disabled={manualRefreshButtonDisabled}
           disabled={manualRefreshButtonDisabled}
         >
-          <RefreshCw size={18} />
+          {manualRefreshIsCoolingDown ? (
+            <span className="refresh-cooldown-countdown" aria-hidden="true">
+              {manualRefreshCooldownSeconds}s
+            </span>
+          ) : (
+            <RefreshCw size={18} />
+          )}
         </button>
         <button className="floating-action-item" onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
         <button className="floating-action-item notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
