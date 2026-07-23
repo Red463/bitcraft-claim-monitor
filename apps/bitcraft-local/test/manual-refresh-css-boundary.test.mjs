@@ -15,3 +15,10 @@ test("manual refresh motion is removed for reduced-motion users", () => {
 
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.floating-action-item\.is-refreshing\s+svg\s*\{[^}]*animation:\s*none\s*!important/s);
 });
+
+test("manual refresh cooldown is visible without relying on colour alone", () => {
+  const css = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.floating-actions \.floating-action-item\.is-cooldown[\s\S]*?\{[^}]*border-color:[^}]*background:[^}]*opacity:\s*1/s);
+  assert.match(css, /\.refresh-cooldown-countdown\s*\{[^}]*min-width:[^}]*font:/s);
+});

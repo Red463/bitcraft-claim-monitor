@@ -433,4 +433,3 @@ Send two forced requests with different UUID headers from the same client inside
 Run: `git diff --check HEAD~5..HEAD` and `git status --short`.
 
 Expected: no whitespace errors and no generated logs, databases, or smoke-server files staged.
-

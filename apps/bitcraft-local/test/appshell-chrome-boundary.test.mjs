@@ -29,6 +29,11 @@ test("global refresh uses a manual request lifecycle with consistent accessible 
   assert.match(appShell, /aria-disabled=\{manualRefreshButtonDisabled\}/);
   assert.match(appShell, /manualRefreshButtonLabel/);
   assert.match(appShell, /is-refreshing/);
+  assert.match(appShell, /const manualRefreshIsCoolingDown = !manualRefreshIsRefreshing && manualRefreshCooldownMs > 0/);
+  assert.match(appShell, /manualRefreshIsCoolingDown \? "is-cooldown"/);
+  assert.match(appShell, /className="refresh-cooldown-countdown"/);
+  assert.match(appShell, /\{manualRefreshCooldownSeconds\}s/);
+  assert.match(appShell, /manualRefreshIsCoolingDown\s*\?\s*\(\s*<span[\s\S]*:\s*\(\s*<RefreshCw size=\{18\}/);
   assert.match(appShell, /role="status"[^>]*aria-live="polite"/s);
   assert.match(appShell, /Data refreshed/);
   assert.match(appShell, /Refresh available in/);
