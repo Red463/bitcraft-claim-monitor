@@ -247,6 +247,51 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_pending ON empire_hexite_targets (sweep_id, state, source_type, source_id);
   CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_empire ON empire_hexite_targets (sweep_id, empire_id, state);
+  CREATE TABLE IF NOT EXISTS empire_membership_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empire_id TEXT NOT NULL,
+    empire_name TEXT NOT NULL,
+    tracking_started_at TEXT NOT NULL,
+    last_success_at TEXT,
+    tracking_ended_at TEXT,
+    initial_roster_complete INTEGER NOT NULL DEFAULT 0,
+    last_cleanup_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS empire_membership_periods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tracking_session_id INTEGER NOT NULL,
+    empire_id TEXT NOT NULL,
+    player_entity_id TEXT NOT NULL,
+    player_name TEXT NOT NULL,
+    observed_joined_at TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    first_missing_at TEXT,
+    observed_left_at TEXT,
+    departure_confirmed_at TEXT,
+    period_ended_at TEXT,
+    end_reason TEXT CHECK (end_reason IS NULL OR end_reason IN ('departure', 'tracking_ended')),
+    initial_roster INTEGER NOT NULL DEFAULT 0,
+    rejoin INTEGER NOT NULL DEFAULT 0,
+    missing_checks INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (tracking_session_id) REFERENCES empire_membership_tracking(id)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_empire_membership_active_tracking
+    ON empire_membership_tracking ((1))
+    WHERE tracking_ended_at IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_empire_membership_open_period
+    ON empire_membership_periods (tracking_session_id, player_entity_id)
+    WHERE period_ended_at IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_empire_membership_current
+    ON empire_membership_periods (tracking_session_id, period_ended_at, observed_joined_at DESC, player_name);
+  CREATE INDEX IF NOT EXISTS idx_empire_membership_departures
+    ON empire_membership_periods (empire_id, end_reason, observed_left_at DESC, player_entity_id);
+  CREATE INDEX IF NOT EXISTS idx_empire_membership_retention
+    ON empire_membership_periods (period_ended_at)
+    WHERE period_ended_at IS NOT NULL;
   CREATE TABLE IF NOT EXISTS server_metric_buckets (
     bucket_at TEXT NOT NULL,
     process_role TEXT NOT NULL,
