@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 
 const AUDIT_RETENTION_DAYS = 14;
-const SENSITIVE_KEYS = /^(authorization|cookie|cookies|password|secret|session|token)$/i;
+const SENSITIVE_KEYS = /(authorization|cookie|password|secret|session|token)/i;
+
+function redactSensitiveText(value) {
+  return String(value)
+    .replace(/([?&](?:access_)?(?:token|secret|password|session|cookie)=)[^&#\s]+/gi, "$1[REDACTED]")
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [REDACTED]")
+    .replace(/("(?:authorization|cookie|password|secret|session|token)"\s*:\s*")[^"]+/gi, "$1[REDACTED]");
+}
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -20,11 +27,12 @@ function number(value) {
 }
 
 function text(value) {
-  return String(value ?? "").trim();
+  return redactSensitiveText(value ?? "").trim();
 }
 
 function sanitized(value) {
   if (Array.isArray(value)) return value.map(sanitized);
+  if (typeof value === "string") return redactSensitiveText(value);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value)
@@ -699,6 +707,7 @@ export function createCraftPlanProgressAuditRepository(db, {
 
   function status(claimId) {
     const state = stateFor(claimId);
+    const latest = latestSuccess(claimId);
     const counts = statements.craftPlanProgressAuditCounts.get(
       text(claimId),
       text(claimId),
@@ -715,6 +724,9 @@ export function createCraftPlanProgressAuditRepository(db, {
       eventCount: number(counts.event_count),
       storedBytes: number(counts.stored_bytes),
       retentionDays,
+      baselineRevision: text(latest?.baselineRevision) || null,
+      confirmedCompletion: latest ? number(latest?.progress?.confirmed ?? latest?.effortProgress?.confirmed?.overall?.completion) : null,
+      projectedCompletion: latest ? number(latest?.progress?.projected ?? latest?.effortProgress?.projected?.overall?.completion) : null,
     };
   }
 

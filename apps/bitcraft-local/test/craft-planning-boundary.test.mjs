@@ -286,6 +286,11 @@ test("Craft Planning manager exposes a lazy, resilient audit history tab", () =>
   assert.match(manager, /Download diagnostics/);
   assert.match(manager, /\["24h", "3d", "7d", "all"\]/);
   assert.match(manager, /progress-audit\/export\?range=/);
+  assert.match(manager, /URL\.createObjectURL/);
+  assert.match(manager, /URL\.revokeObjectURL/);
+  assert.match(manager, /Confirmed progress/);
+  assert.match(manager, /Projected progress/);
+  assert.match(manager, /Audit storage/);
 });
 
 test("Craft Planning manager renders presets as compact tier-only controls", () => {

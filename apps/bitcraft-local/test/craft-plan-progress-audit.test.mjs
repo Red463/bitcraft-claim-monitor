@@ -313,6 +313,9 @@ test("repository deduplicates, checkpoints, survives failures, and exports retai
   const recovered = repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 51 }));
   assert.equal(recovered.events.some((event) => event.type === "source_recovered"), true);
   assert.equal(repository.latestSuccess("1").effortProgress.confirmed.overall.completion, 51);
+  assert.equal(repository.status("1").confirmedCompletion, 51);
+  assert.equal(repository.status("1").projectedCompletion, 51);
+  assert.equal(repository.status("1").baselineRevision, "rev-a");
 
   const bundle = repository.exportRange("1", {
     label: "all",
@@ -336,4 +339,81 @@ test("repository records one baseline event and uses the new comparison epoch", 
   assert.equal(result.baselineChanged, true);
   assert.equal(result.events.some((event) => event.type === "progress_delta"), false);
   assert.match(result.baselineChange.reasons.join(" "), /target/i);
+});
+
+test("audit snapshots retain exact identities while redacting credential values", () => {
+  const snapshot = buildCraftPlanProgressSnapshot({
+    claimId: "1",
+    plan: {
+      config: {
+        targets: [{ id: "1", kind: "items", quantity: 10 }],
+        sourceRules: { storageContainerIds: ["Scholar Storage Exact ID"] },
+        apiToken: "must-not-export",
+      },
+      effortProgress: {
+        baselineRevision: "rev-a",
+        confirmed: { overall: { completion: 50 }, sections: {} },
+        projected: { overall: { completion: 50 }, sections: {} },
+        warnings: ["Request failed with Bearer must-not-export-either"],
+      },
+      materials: [{
+        key: "items:1",
+        name: "Ink",
+        required: 10,
+        missing: 5,
+        available: 5,
+        sources: [{ sourceId: "Scholar Storage Exact ID", label: "Tom's Scholar Storage", quantity: 5 }],
+      }],
+    },
+    sourceStatus: [{
+      sourceId: "Scholar Storage Exact ID",
+      label: "Tom's Scholar Storage",
+      available: false,
+      error: "https://example.test/items?token=must-not-export",
+    }],
+  });
+  const serialized = JSON.stringify(snapshot);
+  assert.match(serialized, /Scholar Storage Exact ID/);
+  assert.match(serialized, /Tom's Scholar Storage/);
+  assert.doesNotMatch(serialized, /must-not-export/);
+  assert.match(serialized, /\[REDACTED\]/);
+});
+
+test("audit export skips corrupt checkpoints with an explicit warning", () => {
+  const clock = { now: "2026-07-24T12:00:00.000Z" };
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaBootstrapSql);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCraftPlanProgressAuditRepository(db, {
+    statements: createPreparedStatements(db),
+    now: () => clock.now,
+    retentionDays: 14,
+  });
+  repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now }));
+  db.prepare("UPDATE craft_plan_progress_audit_snapshots SET payload_gzip = ?").run(Buffer.from("not-gzip"));
+
+  const bundle = repository.exportRange("1", { label: "24h", since: "2026-07-23T12:00:00.000Z" });
+  assert.equal(bundle.snapshots.length, 0);
+  assert.match(bundle.warnings.join(" "), /corrupt snapshot/i);
+  db.close();
+});
+
+test("audit pruning removes checkpoints and events older than retention", () => {
+  const clock = { now: "2026-07-01T12:00:00.000Z" };
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaBootstrapSql);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCraftPlanProgressAuditRepository(db, {
+    statements: createPreparedStatements(db),
+    now: () => clock.now,
+    retentionDays: 14,
+  });
+  repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 50 }));
+  repository.recordSuccess(fixtureSnapshot({ capturedAt: "2026-07-01T12:01:00.000Z", confirmed: 51 }));
+  clock.now = "2026-07-24T12:00:00.000Z";
+  repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 52 }));
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM craft_plan_progress_audit_snapshots WHERE captured_at < ?").get("2026-07-10T12:00:00.000Z").count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM craft_plan_progress_audit_events WHERE captured_at < ?").get("2026-07-10T12:00:00.000Z").count, 0);
+  db.close();
 });

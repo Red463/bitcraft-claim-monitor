@@ -230,6 +230,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [auditError, setAuditError] = React.useState<string | null>(null);
   const [progressAudit, setProgressAudit] = React.useState<AnyRecord | null>(null);
   const [progressAuditError, setProgressAuditError] = React.useState<string | null>(null);
+  const [auditDownloadRange, setAuditDownloadRange] = React.useState<string | null>(null);
+  const [auditDownloadError, setAuditDownloadError] = React.useState<string | null>(null);
   const catalogPollingActive = Boolean(
     catalogStatus?.scheduledJob?.running
     || catalogStatus?.scheduledJob?.metadata?.complete === false
@@ -303,6 +305,31 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setAuditLoaded(true);
   }, [csrfToken]);
 
+  async function downloadProgressAudit(range: string) {
+    setAuditDownloadRange(range);
+    setAuditDownloadError(null);
+    try {
+      const response = await fetch(`${LOCAL_API}/admin/craft-plan/progress-audit/export?range=${range}`, {
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `craft-plan-progress-audit-${range}.json.gz`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setAuditDownloadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuditDownloadRange(null);
+    }
+  }
+
   React.useEffect(() => {
     if (!open) return;
     void load();
@@ -318,6 +345,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setAuditError(null);
     setProgressAudit(null);
     setProgressAuditError(null);
+    setAuditDownloadRange(null);
+    setAuditDownloadError(null);
   }, [open]);
 
   React.useEffect(() => {
@@ -618,15 +647,19 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
               <div className="split-header">
                 <div><h4>Progress diagnostics</h4><p className="legend">A 14-day record of the inputs and changes behind the planner percentage.</p></div>
                 <div className="craft-plan-progress-downloads" aria-label="Download progress diagnostics">
-                  {["24h", "3d", "7d", "all"].map((range) => <a className="toolbar-button" href={`${LOCAL_API}/admin/craft-plan/progress-audit/export?range=${range}`} download key={range}><Download size={14} /> Download diagnostics ({range})</a>)}
+                  {["24h", "3d", "7d", "all"].map((range) => <button className="toolbar-button" type="button" onClick={() => void downloadProgressAudit(range)} disabled={auditDownloadRange != null} key={range}>{auditDownloadRange === range ? <LoaderCircle className="is-spinning" size={14} /> : <Download size={14} />} Download diagnostics ({range})</button>)}
                 </div>
               </div>
               {progressAuditError ? <div className="alert error">Progress diagnostics could not be loaded: {progressAuditError}</div> : null}
+              {auditDownloadError ? <div className="alert error">Diagnostics download failed: {auditDownloadError}</div> : null}
               {!progressAuditError && progressAudit ? <>
-                <div className="craft-plan-progress-audit-stats">
+                <div className="craft-plan-progress-audit-summary craft-plan-progress-audit-stats">
+                  <article><small>Confirmed progress</small><strong>{progressAudit.status?.confirmedCompletion == null ? "—" : `${formatNumber(progressAudit.status.confirmedCompletion, 1)}%`}</strong><span>Stock and guaranteed active output</span></article>
+                  <article><small>Projected progress</small><strong>{progressAudit.status?.projectedCompletion == null ? "—" : `${formatNumber(progressAudit.status.projectedCompletion, 1)}%`}</strong><span>Includes expected active-craft output</span></article>
                   <article><small>Last successful calculation</small><strong>{progressAudit.status?.lastSuccessfulAt ? timeAgo(progressAudit.status.lastSuccessfulAt) : "Not recorded"}</strong><span>{progressAudit.status?.lastSuccessfulAt ? dateLabel(progressAudit.status.lastSuccessfulAt) : "Waiting for a complete source refresh"}</span></article>
+                  <article><small>Baseline revision</small><strong>{progressAudit.status?.baselineRevision ? String(progressAudit.status.baselineRevision).slice(0, 12) : "Not recorded"}</strong><span>Changes when plan math inputs change</span></article>
                   <article><small>Full checkpoints</small><strong>{formatNumber(progressAudit.status?.snapshotCount ?? 0, 0)}</strong><span>At least every 6 hours or after a baseline change</span></article>
-                  <article><small>Recorded events</small><strong>{formatNumber(progressAudit.status?.eventCount ?? 0, 0)}</strong><span>{formatStoredBytes(progressAudit.status?.storedBytes)} stored · {formatNumber(progressAudit.status?.retentionDays ?? 14, 0)}-day retention</span></article>
+                  <article><small>Audit storage</small><strong>{formatStoredBytes(progressAudit.status?.storedBytes)}</strong><span>{formatNumber(progressAudit.status?.eventCount ?? 0, 0)} events · {formatNumber(progressAudit.status?.retentionDays ?? 14, 0)}-day retention</span></article>
                 </div>
                 {progressAudit.status?.lastError ? <div className="alert warning">Latest calculation used the last complete result: {progressAudit.status.lastError}</div> : null}
                 {progressAudit.status?.writeWarning ? <div className="alert warning">Audit recording warning: {progressAudit.status.writeWarning}</div> : null}
