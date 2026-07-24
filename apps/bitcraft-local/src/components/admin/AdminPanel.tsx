@@ -2067,7 +2067,7 @@ export function AdminPanel({
       {tab === "users" || tab === "accounts" ? (
         <AdminAccessSection
           tab={tab}
-          data={{ users, linkedAccounts, newUser, adminRoles, canManageAdmins, currentUserId: auth.user?.id }}
+          data={{ users, linkedAccounts, members: adminMemberRows, newUser, adminRoles, canManageAdmins, currentUserId: auth.user?.id }}
           pending={isBusyAction}
           error={messageKind === "error" ? message : null}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2078,6 +2078,17 @@ export function AdminPanel({
           onToggleStatus={(entry) => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
           onRefreshLinkedAccounts={() => run(refreshLinkedAccounts, undefined, "linked-accounts-refresh")}
           onAccountApproval={(account, status) => run(async () => { const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) }); setLinkedAccounts(result.accounts ?? []); }, `Account marked ${status}.`, `account-approval:${account.id}`)}
+          onCharacterAssignment={(account, member) => run(async () => {
+            const result = await api("/admin/user-accounts/character", {
+              method: "PUT",
+              body: JSON.stringify({
+                userId: account.id,
+                characterPlayerId: member ? memberTrackingId(member) : "",
+                characterName: member ? memberDisplayName(member) : "",
+              }),
+            });
+            setLinkedAccounts(result.accounts ?? []);
+          }, member ? "Character assigned and approved." : "Character unassigned.", `account-character:${account.id}`)}
         />
       ) : null}
 
