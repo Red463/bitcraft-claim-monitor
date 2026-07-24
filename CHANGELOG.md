@@ -22,6 +22,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Initial roster members are labelled as present when tracking began instead of being assigned an invented historical join date.
 - Departures now require two consecutive successful roster omissions, reducing false departures from incomplete upstream responses.
 
+## [0.42.1-beta.1] - 2026-07-24
+
+### Fixed
+
+- Ensured users are notified when a newer app build loads after automatic updates, the in-app refresh action, manual browser refreshes, or reopening the app.
+- Added immediate deployment checks when a background tab becomes visible, avoiding delays caused by suspended browser timers.
+
 ## [0.42.0-beta.1] - 2026-07-24
 
 ### Added

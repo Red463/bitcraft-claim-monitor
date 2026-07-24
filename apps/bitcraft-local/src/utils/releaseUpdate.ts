@@ -1,23 +1,23 @@
-export type ReleaseUpdateDecision = "ignore" | "remember" | "prompt" | "reload";
+export type ReleaseUpdateDecision = "ignore" | "remember" | "updated" | "prompt" | "reload";
 
-export const AUTOMATIC_RELEASE_UPDATE_KEY = "bitcraft.release.auto-updated";
+export const LAST_LOADED_RELEASE_BUILD_KEY = "bitcraft.release.last-loaded-build";
 
-type ReleaseUpdateStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+type ReleaseUpdateStorage = Pick<Storage, "getItem" | "setItem">;
 
-export function markAutomaticReleaseUpdate(storage: ReleaseUpdateStorage): boolean {
+export function readLastLoadedReleaseBuild(storage: ReleaseUpdateStorage): string {
   try {
-    storage.setItem(AUTOMATIC_RELEASE_UPDATE_KEY, "1");
-    return true;
+    return String(storage.getItem(LAST_LOADED_RELEASE_BUILD_KEY) ?? "").trim();
   } catch {
-    return false;
+    return "";
   }
 }
 
-export function consumeAutomaticReleaseUpdate(storage: ReleaseUpdateStorage): boolean {
+export function writeLastLoadedReleaseBuild(storage: ReleaseUpdateStorage, buildId: string): boolean {
+  const normalized = buildId.trim();
+  if (!normalized) return false;
   try {
-    const marked = storage.getItem(AUTOMATIC_RELEASE_UPDATE_KEY) === "1";
-    storage.removeItem(AUTOMATIC_RELEASE_UPDATE_KEY);
-    return marked;
+    storage.setItem(LAST_LOADED_RELEASE_BUILD_KEY, normalized);
+    return true;
   } catch {
     return false;
   }
@@ -29,10 +29,21 @@ export function normalizeReleaseBuildId(payload: unknown): string {
   return typeof buildId === "string" ? buildId.trim() : "";
 }
 
-export function releaseUpdateDecision({ currentBuildId, nextBuildId, documentHidden }: { currentBuildId: string; nextBuildId: string; documentHidden: boolean }): ReleaseUpdateDecision {
+export function releaseUpdateDecision({
+  currentBuildId,
+  lastLoadedBuildId,
+  nextBuildId,
+  documentHidden,
+}: {
+  currentBuildId: string;
+  lastLoadedBuildId: string;
+  nextBuildId: string;
+  documentHidden: boolean;
+}): ReleaseUpdateDecision {
   const current = currentBuildId.trim();
+  const lastLoaded = lastLoadedBuildId.trim();
   const next = nextBuildId.trim();
   if (!next || current === next) return "ignore";
-  if (!current) return "remember";
+  if (!current) return lastLoaded && lastLoaded !== next ? "updated" : "remember";
   return documentHidden ? "reload" : "prompt";
 }
