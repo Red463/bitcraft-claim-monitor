@@ -43,7 +43,12 @@ import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
-import { consumeAutomaticReleaseUpdate, markAutomaticReleaseUpdate, normalizeReleaseBuildId, releaseUpdateDecision } from "./utils/releaseUpdate";
+import {
+  normalizeReleaseBuildId,
+  readLastLoadedReleaseBuild,
+  releaseUpdateDecision,
+  writeLastLoadedReleaseBuild,
+} from "./utils/releaseUpdate";
 import { normalizeAppSettings } from "./utils/appSettings";
 import { applyMemberTrackingFilter } from "./utils/memberTracking";
 import { getTrackedOwnerName } from "./utils/ownership";
@@ -190,9 +195,7 @@ function DashboardApp() {
   const appBuildIdRef = React.useRef("");
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
-  const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(
-    () => consumeAutomaticReleaseUpdate(window.sessionStorage),
-  );
+  const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(false);
   const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
@@ -475,7 +478,6 @@ function DashboardApp() {
   React.useEffect(() => {
     let cancelled = false;
     function reloadForReleaseUpdate() {
-      markAutomaticReleaseUpdate(window.sessionStorage);
       window.location.reload();
     }
     function rememberBuildId(buildId: string) {
@@ -490,8 +492,22 @@ function DashboardApp() {
       try {
         const response = await fetch(`${LOCAL_API}/health`, { cache: "no-store" });
         const nextBuildId = normalizeReleaseBuildId(response.ok ? await response.json() : null);
-        const decision = releaseUpdateDecision({ currentBuildId: appBuildIdRef.current, nextBuildId, documentHidden: document.hidden });
-        if (decision === "remember") rememberBuildId(nextBuildId);
+        const lastLoadedBuildId = readLastLoadedReleaseBuild(window.localStorage);
+        const decision = releaseUpdateDecision({
+          currentBuildId: appBuildIdRef.current,
+          lastLoadedBuildId,
+          nextBuildId,
+          documentHidden: document.hidden,
+        });
+        if (decision === "remember") {
+          rememberBuildId(nextBuildId);
+          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
+        }
+        if (decision === "updated") {
+          rememberBuildId(nextBuildId);
+          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
+          if (!cancelled) setReleaseUpdatedNotice(true);
+        }
         if (decision === "prompt") showReleaseUpdate(nextBuildId);
         if (decision === "reload") reloadForReleaseUpdate();
       } catch {
@@ -499,7 +515,11 @@ function DashboardApp() {
       }
     }
     function handleReleaseVisibility() {
-      if (document.hidden && releaseUpdateBuildIdRef.current) reloadForReleaseUpdate();
+      if (document.hidden && releaseUpdateBuildIdRef.current) {
+        reloadForReleaseUpdate();
+        return;
+      }
+      void checkReleaseBuild();
     }
     void checkReleaseBuild();
     const timer = window.setInterval(checkReleaseBuild, 60_000);
