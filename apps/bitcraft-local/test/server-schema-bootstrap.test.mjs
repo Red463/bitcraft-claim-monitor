@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { applySchemaBootstrap, schemaBootstrapSql } from "../src/server/schemaBootstrap.mjs";
@@ -26,6 +27,8 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS empire_hexite_targets",
     "CREATE TABLE IF NOT EXISTS empire_hexite_sources",
     "CREATE TABLE IF NOT EXISTS empire_hexite_snapshots",
+    "CREATE TABLE IF NOT EXISTS empire_membership_tracking",
+    "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status",
@@ -34,6 +37,11 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated",
     "CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_events_claim_time",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_empire_membership_active_tracking",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_empire_membership_open_period",
+    "CREATE INDEX IF NOT EXISTS idx_empire_membership_current",
+    "CREATE INDEX IF NOT EXISTS idx_empire_membership_departures",
+    "CREATE INDEX IF NOT EXISTS idx_empire_membership_retention",
   ]) {
     assert.match(schemaBootstrapSql, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -48,4 +56,18 @@ test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
   applySchemaBootstrap(db);
 
   assert.deepEqual(statements, [schemaBootstrapSql]);
+});
+
+test("membership history schema is additive and preserves existing data", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)");
+  db.prepare("INSERT INTO app_settings VALUES (?, ?, ?)").run("claim_id", "123", "2026-07-24T00:00:00.000Z");
+
+  applySchemaBootstrap(db);
+  applySchemaBootstrap(db);
+
+  assert.equal(db.prepare("SELECT value FROM app_settings WHERE key = 'claim_id'").get().value, "123");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_tracking").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_periods").get().count, 0);
+  db.close();
 });

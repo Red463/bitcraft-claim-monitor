@@ -1,0 +1,120 @@
+.empire-membership-admin {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.empire-membership-toolbar,
+.empire-membership-filter-row,
+.empire-membership-search {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empire-membership-toolbar h3,
+.empire-membership-filter-row h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+
+.empire-membership-toolbar .legend,
+.empire-membership-filter-row .legend {
+  margin: 4px 0 0;
+}
+
+.empire-membership-search .search {
+  flex: 1 1 280px;
+  max-width: 520px;
+}
+
+.empire-membership-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.empire-membership-grid > .form-card {
+  min-width: 0;
+}
+
+.empire-membership-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.empire-membership-name,
+.empire-membership-grid td {
+  overflow-wrap: anywhere;
+}
+
+.empire-membership-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 52%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel-2));
+  color: var(--text);
+  border-radius: var(--radius-card);
+  padding: 10px 12px;
+}
+
+.empire-membership-warning svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.empire-membership-warning div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.empire-membership-warning span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.empire-membership-badge {
+  display: inline-flex;
+  max-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.empire-membership-badge.joined,
+.empire-membership-badge.rejoined {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+
+.empire-membership-badge.departed {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+@media (max-width: 900px) {
+  .empire-membership-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .empire-membership-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .empire-membership-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
