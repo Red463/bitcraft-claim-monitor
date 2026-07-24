@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, ClipboardList, History, LoaderCircle, MinusCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
+import { CheckCircle2, ClipboardList, Download, History, LoaderCircle, MinusCircle, Package, Plus, RefreshCw, Route, Save, Search, SlidersHorizontal, Target, Trash2, X, Zap } from "lucide-react";
 
 import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Dialog } from "../components/main/Dialog";
@@ -199,6 +199,17 @@ function formatCatalogMoment(value: unknown) {
   return text ? { summary: timeAgo(text), detail: dateLabel(text) } : { summary: "Never", detail: "Not available" };
 }
 
+function progressEventLabel(value: unknown) {
+  return firstText(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Planner change";
+}
+
+function formatStoredBytes(value: unknown) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${formatNumber(bytes, 0)} B`;
+  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, 1)} KB`;
+  return `${formatNumber(bytes / (1024 * 1024), 1)} MB`;
+}
+
 export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { open: boolean; onClose: () => void; csrfToken: string; onSaved: () => void }) {
   const [state, setState] = React.useState<AnyRecord | null>(null);
   const [config, setConfig] = React.useState<CraftPlanConfig>(emptyConfig());
@@ -217,6 +228,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [auditLoaded, setAuditLoaded] = React.useState(false);
   const [auditLoading, setAuditLoading] = React.useState(false);
   const [auditError, setAuditError] = React.useState<string | null>(null);
+  const [progressAudit, setProgressAudit] = React.useState<AnyRecord | null>(null);
+  const [progressAuditError, setProgressAuditError] = React.useState<string | null>(null);
   const catalogPollingActive = Boolean(
     catalogStatus?.scheduledJob?.running
     || catalogStatus?.scheduledJob?.metadata?.complete === false
@@ -271,15 +284,23 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const loadAudit = React.useCallback(async () => {
     setAuditLoading(true);
     setAuditError(null);
-    try {
-      const result = await adminApi("/admin/craft-plan/audit?limit=100");
-      setAuditRows(Array.isArray(result.auditLog) ? result.auditLog : []);
-    } catch (err) {
-      setAuditError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAuditLoading(false);
-      setAuditLoaded(true);
+    setProgressAuditError(null);
+    const [settingsResult, progressResult] = await Promise.allSettled([
+      adminApi("/admin/craft-plan/audit?limit=100"),
+      adminApi("/admin/craft-plan/progress-audit"),
+    ]);
+    if (settingsResult.status === "fulfilled") {
+      setAuditRows(Array.isArray(settingsResult.value.auditLog) ? settingsResult.value.auditLog : []);
+    } else {
+      setAuditError(settingsResult.reason instanceof Error ? settingsResult.reason.message : String(settingsResult.reason));
     }
+    if (progressResult.status === "fulfilled") {
+      setProgressAudit(progressResult.value);
+    } else {
+      setProgressAuditError(progressResult.reason instanceof Error ? progressResult.reason.message : String(progressResult.reason));
+    }
+    setAuditLoading(false);
+    setAuditLoaded(true);
   }, [csrfToken]);
 
   React.useEffect(() => {
@@ -295,6 +316,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setAuditLoaded(false);
     setAuditLoading(false);
     setAuditError(null);
+    setProgressAudit(null);
+    setProgressAuditError(null);
   }, [open]);
 
   React.useEffect(() => {
@@ -589,8 +612,40 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "buffers" ? <section className="craft-plan-manager-panel"><h3>Chance-drop safety buffers</h3><p className="legend">Add or edit a buffer from an item’s “How to get this” panel. Buffers increase planned gathering only; they do not change API drop rates or counted stock.</p>{Object.entries(config.multipliers).length ? Object.entries(config.multipliers).map(([key, value]) => { const item = [...config.targets, ...(Array.isArray(state?.plan?.materials) ? state.plan.materials : [])].find((candidate) => itemKey(candidate) === key); return <div className="admin-craft-plan-row" key={key}><strong>{item?.name ?? key}</strong><span>{formatNumber((value.multiplier - 1) * 100, 1)}% extra{value.note ? ` - ${value.note}` : ""}</span><button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.multipliers }; delete next[key]; return { ...current, multipliers: next }; })}><Trash2 size={14} /> Remove</button></div>; }) : <p className="legend">No chance-drop safety buffers are configured.</p>}</section> : null}
           {activeTab === "audit" ? <section className="craft-plan-manager-panel craft-plan-audit-panel">
-            <div className="split-header"><div><h3>Audit history</h3><p className="legend">Saved changes to plan visibility and counted inventory sources, newest first.</p></div>{auditError ? <button className="toolbar-button" type="button" onClick={() => void loadAudit()} disabled={auditLoading}><RefreshCw size={14} /> Retry audit</button> : null}</div>
+            <div className="split-header"><div><h3>Audit history</h3><p className="legend">Progress calculations, source changes, and saved configuration changes, newest first.</p></div>{auditError || progressAuditError ? <button className="toolbar-button" type="button" onClick={() => void loadAudit()} disabled={auditLoading}><RefreshCw size={14} /> Retry audit</button> : null}</div>
             {auditLoading ? <div className="craft-plan-audit-state" role="status"><LoaderCircle className="is-spinning" size={22} /><strong>Loading audit history</strong></div> : null}
+            {!auditLoading ? <section className="craft-plan-progress-diagnostics">
+              <div className="split-header">
+                <div><h4>Progress diagnostics</h4><p className="legend">A 14-day record of the inputs and changes behind the planner percentage.</p></div>
+                <div className="craft-plan-progress-downloads" aria-label="Download progress diagnostics">
+                  {["24h", "3d", "7d", "all"].map((range) => <a className="toolbar-button" href={`${LOCAL_API}/admin/craft-plan/progress-audit/export?range=${range}`} download key={range}><Download size={14} /> Download diagnostics ({range})</a>)}
+                </div>
+              </div>
+              {progressAuditError ? <div className="alert error">Progress diagnostics could not be loaded: {progressAuditError}</div> : null}
+              {!progressAuditError && progressAudit ? <>
+                <div className="craft-plan-progress-audit-stats">
+                  <article><small>Last successful calculation</small><strong>{progressAudit.status?.lastSuccessfulAt ? timeAgo(progressAudit.status.lastSuccessfulAt) : "Not recorded"}</strong><span>{progressAudit.status?.lastSuccessfulAt ? dateLabel(progressAudit.status.lastSuccessfulAt) : "Waiting for a complete source refresh"}</span></article>
+                  <article><small>Full checkpoints</small><strong>{formatNumber(progressAudit.status?.snapshotCount ?? 0, 0)}</strong><span>At least every 6 hours or after a baseline change</span></article>
+                  <article><small>Recorded events</small><strong>{formatNumber(progressAudit.status?.eventCount ?? 0, 0)}</strong><span>{formatStoredBytes(progressAudit.status?.storedBytes)} stored · {formatNumber(progressAudit.status?.retentionDays ?? 14, 0)}-day retention</span></article>
+                </div>
+                {progressAudit.status?.lastError ? <div className="alert warning">Latest calculation used the last complete result: {progressAudit.status.lastError}</div> : null}
+                {progressAudit.status?.writeWarning ? <div className="alert warning">Audit recording warning: {progressAudit.status.writeWarning}</div> : null}
+                <div className="craft-plan-progress-event-header"><h4>Recent progress events</h4><small>{Array.isArray(progressAudit.events) ? `${progressAudit.events.length} shown` : "None recorded"}</small></div>
+                {Array.isArray(progressAudit.events) && progressAudit.events.length ? <div className="craft-plan-progress-event-list">
+                  {progressAudit.events.map((event: AnyRecord) => <article className={`craft-plan-progress-event is-${String(event.eventType ?? "change").replaceAll("_", "-")}`} key={event.id}>
+                    <span className="craft-plan-progress-event-mark" aria-hidden="true" />
+                    <div>
+                      <header><strong>{progressEventLabel(event.eventType)}</strong><time dateTime={event.capturedAt} title={dateLabel(event.capturedAt)}>{timeAgo(event.capturedAt)}</time></header>
+                      <p>{event.summary || "Planner inputs changed."}</p>
+                      {Array.isArray(event.contributors) && event.contributors.length ? <small>Largest effects: {event.contributors.slice(0, 3).map((contributor: AnyRecord) => contributor.name || contributor.itemKey).join(", ")}</small> : null}
+                      {Array.isArray(event.reasons) && event.reasons.length ? <small>{event.reasons.join("; ")}</small> : null}
+                      {event.inference?.cause ? <small>Likely {event.inference.cause} ({event.inference.confidence ?? "estimated"} confidence)</small> : null}
+                    </div>
+                  </article>)}
+                </div> : <div className="craft-plan-audit-state compact"><History size={20} /><strong>No progress changes recorded yet.</strong><span>The first complete planner calculation creates the initial checkpoint.</span></div>}
+              </> : null}
+            </section> : null}
+            <div className="craft-plan-progress-event-header"><h4>Saved plan changes</h4><small>Visibility and counted source configuration</small></div>
             {!auditLoading && auditError ? <div className="alert error">Audit history could not be loaded: {auditError}</div> : null}
             {!auditLoading && !auditError && !auditRows.length ? <div className="craft-plan-audit-state"><History size={24} /><strong>No craft plan changes have been recorded yet.</strong><span>New saves will appear here when visibility or counted sources change.</span></div> : null}
             {!auditLoading && !auditError && auditRows.length ? <div className="craft-plan-audit-list">
