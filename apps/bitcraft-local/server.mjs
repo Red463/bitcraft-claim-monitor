@@ -3925,6 +3925,63 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
   }
 }
 
+async function sendDiscordCharacterLinkAdminAction(userRow, action, administrator, settings = getDiscordSettingsRaw()) {
+  const assigned = action === "assigned";
+  const eventType = assigned ? "character_link_assigned" : "character_link_unassigned";
+  const { channelId, channelKey } = discordModLogTarget(settings);
+  const accountName = String(userRow.discord_global_name || userRow.discord_username || "Discord user");
+  const characterName = String(userRow.character_name || "Unknown character");
+  const characterPlayerId = String(userRow.character_player_id || "");
+  const summary = `Character link ${assigned ? "assigned" : "unassigned"}: ${characterName}`;
+  const metadata = {
+    eventType,
+    enabled: Boolean(settings.enabled),
+    hasBotToken: Boolean(settings.botToken),
+    channelId,
+    channelKey,
+    administrator: String(administrator || "Administrator"),
+    accountId: userRow.id,
+    discordId: String(userRow.discord_id ?? ""),
+    discordUsername: String(userRow.discord_username ?? ""),
+    characterName,
+    characterPlayerId,
+  };
+  if (!settings.enabled || !settings.botToken || !channelId) {
+    const reason = "Discord disabled, bot token missing, or mod-log channel not configured";
+    recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata });
+    return { ok: true, skipped: true, reason };
+  }
+  try {
+    const response = await sendDiscordMessage({
+      embeds: [discordCommandEmbed(
+        assigned ? "Character Assigned" : "Character Unassigned",
+        `**${metadata.administrator}** ${assigned ? "assigned and approved" : "unassigned"} a BitCraft character for **${accountName}**.`,
+        [
+          { name: "Discord", value: `<@${userRow.discord_id}>`, inline: true },
+          { name: "Character", value: characterName, inline: true },
+          { name: "Player ID", value: characterPlayerId || "Not provided", inline: false },
+        ],
+        assigned ? 0x4ee28a : 0xf0c64f,
+      )],
+      allowed_mentions: { parse: [] },
+    }, settings, channelId);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType,
+      channelId,
+      channelKey,
+      summary,
+      metadata,
+      response: { id: response?.id, channel_id: response?.channel_id },
+    });
+    return { ok: true, skipped: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata });
+    return { ok: false, error: message };
+  }
+}
+
 function recordDiscordDelivery(status) {
   const occurredAt = new Date().toISOString();
   const record = { ...status, at: occurredAt };
@@ -10147,6 +10204,50 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
       }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/user-accounts/character") {
+        const body = await readJson(req, BODY_LIMITS.auth);
+        const userId = Number(body.userId);
+        const characterPlayerId = String(body.characterPlayerId ?? "").trim();
+        const characterName = String(body.characterName ?? "").trim();
+        if (!userId) return send(res, 400, { error: "Choose a Discord account" });
+        const target = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Linked account not found" });
+
+        if (!characterPlayerId && !characterName) {
+          statements.updateUserCharacter.run("", "", "unlinked", userId);
+          audit(user, "linked_account.character_unassigned", {
+            userId,
+            discordId: target.discord_id,
+            characterPlayerId: target.character_player_id,
+            characterName: target.character_name,
+          });
+          void sendDiscordCharacterLinkAdminAction(target, "unassigned", user.username);
+          return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
+        }
+
+        if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
+        if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
+        if (
+          String(target.character_status ?? "") === "approved"
+          && String(target.character_player_id ?? "")
+          && String(target.character_player_id) !== characterPlayerId
+        ) {
+          return send(res, 409, { error: "Unassign this account's approved character before assigning a different one" });
+        }
+        const existing = statements.approvedUserAccountByCharacterId.get(characterPlayerId, userId);
+        if (existing) return send(res, 409, { error: "This character is already approved for another Discord account. Unassign it there first." });
+
+        statements.updateUserCharacter.run(characterPlayerId, characterName, "approved", userId);
+        const assigned = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+        audit(user, "linked_account.character_assigned", {
+          userId,
+          discordId: target.discord_id,
+          characterPlayerId,
+          characterName,
+        });
+        void sendDiscordCharacterLinkAdminAction(assigned, "assigned", user.username);
+        return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
+      }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/user-accounts/approval") {
         const body = await readJson(req);
         const userId = Number(body.userId);
@@ -10154,6 +10255,11 @@ const server = createServer(async (req, res) => {
         if (!userId || !["pending", "approved", "rejected", "unlinked"].includes(status)) return send(res, 400, { error: "Choose an account and a valid link status" });
         const target = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Linked account not found" });
+        if (status === "approved") {
+          if (!target.character_player_id || !target.character_name) return send(res, 400, { error: "Choose a valid BitCraft character before approval" });
+          const existing = statements.approvedUserAccountByCharacterId.get(String(target.character_player_id), userId);
+          if (existing) return send(res, 409, { error: "This character is already approved for another Discord account. Unassign it there first." });
+        }
         statements.updateUserCharacterStatus.run(status, userId);
         audit(user, "linked_account.approval", { userId, discordId: target.discord_id, characterName: target.character_name, status });
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });

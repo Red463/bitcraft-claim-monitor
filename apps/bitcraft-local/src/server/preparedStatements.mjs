@@ -355,6 +355,14 @@ export function createPreparedStatements(db) {
   deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
   deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),
   updateUserCharacter: db.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = ? WHERE id = ?"),
+  approvedUserAccountByCharacterId: db.prepare(`
+    SELECT *
+    FROM user_accounts
+    WHERE character_player_id = ?
+      AND character_status = 'approved'
+      AND id <> ?
+    LIMIT 1
+  `),
   updateUserSettings: db.prepare("UPDATE user_accounts SET settings_json = ? WHERE id = ?"),
   listUserAccounts: db.prepare("SELECT * FROM user_accounts ORDER BY last_login_at DESC, created_at DESC"),
   updateUserCharacterStatus: db.prepare("UPDATE user_accounts SET character_status = ? WHERE id = ?"),

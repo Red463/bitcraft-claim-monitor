@@ -47,6 +47,7 @@ test("adminPermissionFor maps admin routes to the existing least-privilege permi
   assert.equal(adminPermissionFor("GET", "/api/local/admin/jobs"), "status.view");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/users"), "users.manage");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/user-accounts/approval"), "accounts.manage");
+  assert.equal(adminPermissionFor("PUT", "/api/local/admin/user-accounts/character"), "accounts.manage");
   assert.equal(adminPermissionFor("DELETE", "/api/local/admin/analytics"), "analytics.manage");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/analytics"), "analytics.view");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/tables"), "data.view");
