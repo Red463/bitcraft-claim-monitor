@@ -247,3 +247,74 @@ test("admin view reports current states and latest absent departures", () => {
   assert.equal(view.retentionDays, 365);
   db.close();
 });
+
+test("invalid roster responses cannot mutate retained membership", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  repo.syncRoster({ ...roster, observedAt: "2026-07-24T12:00:00.000Z" });
+  const before = db
+    .prepare("SELECT id, missing_checks, period_ended_at FROM empire_membership_periods ORDER BY id")
+    .all();
+
+  for (const payload of [
+    null,
+    {},
+    { empire: { entityId: "empire-1" }, members: [] },
+    { ...initialPayload, errors: ["upstream incomplete"] },
+    { ...initialPayload, members: [{ playerName: "Missing ID" }] },
+  ]) {
+    assert.throws(() => normalizeEmpireMembershipRoster(payload, "empire-1"));
+  }
+
+  const after = db
+    .prepare("SELECT id, missing_checks, period_ended_at FROM empire_membership_periods ORDER BY id")
+    .all();
+  assert.deepEqual(after, before);
+  db.close();
+});
+
+test("the 30-day summary includes events exactly at the cutoff", () => {
+  const { db, repository: repo } = repository();
+  repo.syncRoster({
+    empireId: "empire-1",
+    empireName: "Cairn",
+    members: [{ playerEntityId: "player-1", playerName: "Alice" }],
+    observedAt: "2026-06-01T12:00:00.000Z",
+  });
+  repo.syncRoster({
+    empireId: "empire-1",
+    empireName: "Cairn",
+    members: [
+      { playerEntityId: "player-1", playerName: "Alice" },
+      { playerEntityId: "player-2", playerName: "Bob" },
+    ],
+    observedAt: "2026-06-24T12:00:00.000Z",
+  });
+
+  const view = repo.adminView({ now: "2026-07-24T12:00:00.000Z" });
+  assert.equal(view.summary.joinedLast30Days, 1);
+  assert.equal(view.summary.rejoinsLast30Days, 0);
+  db.close();
+});
+
+test("departed history keeps only the latest departure for an inactive player", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  const aliceOnly = {
+    ...roster,
+    members: roster.members.filter((member) => member.playerEntityId === "player-1"),
+  };
+  repo.syncRoster({ ...roster, observedAt: "2026-07-01T00:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-02T00:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-02T00:01:00.000Z" });
+  repo.syncRoster({ ...roster, observedAt: "2026-07-03T00:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-04T00:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-04T00:01:00.000Z" });
+
+  const view = repo.adminView({ now: "2026-07-24T00:00:00.000Z" });
+  assert.equal(view.departedMembers.length, 1);
+  assert.equal(view.departedMembers[0].observedLeftAt, "2026-07-04T00:00:00.000Z");
+  assert.equal(view.departedMembers[0].previousStatus, "rejoined");
+  assert.equal(view.summary.departedLast30Days, 1);
+  db.close();
+});
