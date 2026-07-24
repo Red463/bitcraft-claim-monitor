@@ -91,6 +91,53 @@ test("confirmed effort projection ignores planning-only estimated coverage", () 
   assert.equal(result.overall.completion, 0);
 });
 
+test("effort progress exposes confirmed and projected active output separately", () => {
+  const baselinePlan = {
+    materials: [{ key: "items:ink", section: "Scholar", required: 100, missing: 100 }],
+    personalViews: { fishing: { tiers: [] } },
+  };
+  const currentPlan = {
+    materials: [{ key: "items:ink", section: "Scholar", required: 100, missing: 20 }],
+    confirmedEffortPlan: {
+      materials: [{ key: "items:ink", section: "Scholar", required: 100, missing: 40 }],
+      personalViews: { fishing: { tiers: [] } },
+    },
+    personalViews: { fishing: { tiers: [] } },
+  };
+  const result = calculateCraftPlanEffortProgress({
+    baselinePlan,
+    currentPlan,
+    weights: new Map([["items:ink", 1]]),
+  });
+
+  assert.equal(result.confirmed.overall.completion, 60);
+  assert.equal(result.projected.overall.completion, 80);
+  assert.equal(result.overall.completion, 60);
+  assert.strictEqual(result.sections, result.confirmed.sections);
+  assert.equal(result.projected.sections.Scholar.completion, 80);
+});
+
+test("projected completion is clamped to confirmed completion", () => {
+  const result = calculateCraftPlanEffortProgress({
+    baselinePlan: {
+      materials: [{ key: "items:x", section: "Other", required: 10, missing: 10 }],
+      personalViews: { fishing: { tiers: [] } },
+    },
+    currentPlan: {
+      materials: [{ key: "items:x", section: "Other", required: 10, missing: 9 }],
+      confirmedEffortPlan: {
+        materials: [{ key: "items:x", section: "Other", required: 10, missing: 4 }],
+        personalViews: { fishing: { tiers: [] } },
+      },
+      personalViews: { fishing: { tiers: [] } },
+    },
+    weights: new Map([["items:x", 1]]),
+  });
+
+  assert.equal(result.confirmed.overall.completion, 60);
+  assert.equal(result.projected.overall.completion, 60);
+});
+
 test("materials removed from the live requirement graph count as completed effort", () => {
   const baselinePlan = { materials: [
     { key: "items:plank", section: "Carpentry", bufferedRequired: 10, missing: 10 },

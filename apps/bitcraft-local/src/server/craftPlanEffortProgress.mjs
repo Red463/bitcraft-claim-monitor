@@ -236,8 +236,7 @@ function unavailableAggregate() {
 }
 
 export function unavailableCraftPlanEffortProgress() {
-  return {
-    modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+  const confirmed = {
     state: "unavailable",
     overall: unavailableAggregate(),
     sections: {},
@@ -250,6 +249,35 @@ export function unavailableCraftPlanEffortProgress() {
     },
     warnings: ["Effort progress is unavailable until the planner catalog refresh completes."],
   };
+  return {
+    modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    ...confirmed,
+    confirmed,
+    projected: confirmed,
+  };
+}
+
+function atLeastConfirmed(confirmed, projected) {
+  if (!confirmed || !projected) return projected;
+  if (confirmed.completion == null || projected.completion == null) return projected;
+  if (projected.completion >= confirmed.completion) return projected;
+  return {
+    ...projected,
+    remainingEffort: confirmed.remainingEffort,
+    completion: confirmed.completion,
+  };
+}
+
+function clampProjection(confirmed, projected) {
+  const sections = Object.fromEntries(Object.entries(projected.sections ?? {}).map(([name, value]) => [
+    name,
+    atLeastConfirmed(confirmed.sections?.[name], value),
+  ]));
+  return {
+    ...projected,
+    overall: atLeastConfirmed(confirmed.overall, projected.overall),
+    sections,
+  };
 }
 
 export function calculateCraftPlanEffortProgress({
@@ -257,7 +285,7 @@ export function calculateCraftPlanEffortProgress({
   currentPlan = {},
   weights = new Map(),
 } = {}) {
-  const currentEffortPlan = currentPlan?.confirmedEffortPlan ?? currentPlan;
+  const confirmedPlan = currentPlan?.confirmedEffortPlan ?? currentPlan;
   const calculateProjection = (baseline, current) => {
     if (!baseline.length) return {
       state: "empty",
@@ -316,8 +344,7 @@ export function calculateCraftPlanEffortProgress({
 
   const baseline = projectCraftPlanEffortMaterials(baselinePlan);
   if (!baseline.length) {
-    return {
-      modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+    const confirmed = {
       state: "empty",
       overall: { state: "empty", baselineEffort: 0, remainingEffort: 0, completion: 100 },
       sections: {},
@@ -330,26 +357,50 @@ export function calculateCraftPlanEffortProgress({
       },
       warnings: [],
     };
+    return {
+      modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+      ...confirmed,
+      confirmed,
+      projected: confirmed,
+    };
   }
 
-  const generic = calculateProjection(baseline, projectCraftPlanEffortMaterials(currentEffortPlan));
+  const confirmed = calculateProjection(baseline, projectCraftPlanEffortMaterials(confirmedPlan));
+  const projected = clampProjection(
+    confirmed,
+    calculateProjection(baseline, projectCraftPlanEffortMaterials(currentPlan)),
+  );
   const fishingVariants = {};
   for (const route of ["ocean", "lake"]) {
     const baselineRoutes = baselinePlan?.personalViews?.fishing?.tiers ?? [];
-    const currentRoutes = currentEffortPlan?.personalViews?.fishing?.tiers ?? [];
+    const confirmedRoutes = confirmedPlan?.personalViews?.fishing?.tiers ?? [];
+    const projectedRoutes = currentPlan?.personalViews?.fishing?.tiers ?? [];
     const routeAvailable = baselineRoutes.length > 0
       && baselineRoutes.every((tier) => tier?.routes?.[route]?.available === true)
-      && currentRoutes.every((tier) => tier?.routes?.[route]?.available === true);
+      && confirmedRoutes.every((tier) => tier?.routes?.[route]?.available === true)
+      && projectedRoutes.every((tier) => tier?.routes?.[route]?.available === true);
     if (!routeAvailable) continue;
-    const variant = calculateProjection(
-      projectCraftPlanEffortMaterials(baselinePlan, route),
-      projectCraftPlanEffortMaterials(currentEffortPlan, route),
+    const routeBaseline = projectCraftPlanEffortMaterials(baselinePlan, route);
+    const confirmedVariant = calculateProjection(
+      routeBaseline,
+      projectCraftPlanEffortMaterials(confirmedPlan, route),
     );
-    fishingVariants[route] = { route, ...variant };
+    const projectedVariant = clampProjection(
+      confirmedVariant,
+      calculateProjection(routeBaseline, projectCraftPlanEffortMaterials(currentPlan, route)),
+    );
+    fishingVariants[route] = {
+      route,
+      ...confirmedVariant,
+      confirmed: confirmedVariant,
+      projected: projectedVariant,
+    };
   }
   return {
     modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    ...generic,
+    ...confirmed,
+    confirmed,
+    projected,
     fishingVariants,
   };
 }

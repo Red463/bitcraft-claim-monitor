@@ -6,9 +6,58 @@ function stable(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
 }
 
+const emptySourceRules = {
+  storageContainerIds: [],
+  playerIds: [],
+  craftPlayerIds: [],
+  bankPlayerIds: [],
+  deployableContainerIds: [],
+};
+
+export function craftPlanBaselineConfig(config = {}) {
+  return {
+    ...config,
+    sourceRules: { ...emptySourceRules },
+    buildingProgress: {},
+  };
+}
+
+function semanticBaselineConfig(config = {}) {
+  const multipliers = Object.fromEntries(
+    Object.entries(config.multipliers ?? {})
+      .map(([key, value]) => [String(key), Number(value?.multiplier ?? value ?? 1)])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  return {
+    enabled: config.enabled !== false,
+    targets: (Array.isArray(config.targets) ? config.targets : []).map((target) => ({
+      id: String(target?.id ?? ""),
+      kind: String(target?.kind ?? "items"),
+      quantity: Number(target?.quantity ?? 0),
+    })),
+    routeOverrides: config.routeOverrides ?? {},
+    gatheredItemKeys: [...(config.gatheredItemKeys ?? [])].map(String).sort(),
+    multipliers,
+  };
+}
+
+export function craftPlanBaselineRevision(config, catalogRevision, modelVersion) {
+  return createHash("sha256")
+    .update(JSON.stringify(stable({
+      config: semanticBaselineConfig(config),
+      catalogRevision: String(catalogRevision ?? ""),
+      modelVersion: Number(modelVersion ?? 0),
+    })))
+    .digest("hex");
+}
+
 export function craftPlanEffortBaselineKey(config, catalogRevision, modelVersion) {
   return createHash("sha256")
-    .update(JSON.stringify(stable({ config, catalogRevision, modelVersion })))
+    .update(JSON.stringify(stable({
+      config: craftPlanBaselineConfig(config),
+      catalogRevision,
+      modelVersion,
+    })))
     .digest("hex");
 }
 
