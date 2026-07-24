@@ -479,7 +479,39 @@ export const schemaBootstrapSql = `
     config_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-  );  CREATE TABLE IF NOT EXISTS market_deal_watches (
+  );
+  CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    baseline_revision TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    full_snapshot INTEGER NOT NULL DEFAULT 1,
+    payload_gzip BLOB NOT NULL,
+    app_version TEXT NOT NULL,
+    build_id TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    baseline_revision TEXT,
+    event_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_state (
+    claim_id TEXT PRIMARY KEY,
+    last_fingerprint TEXT,
+    last_payload_gzip BLOB,
+    last_snapshot_id INTEGER,
+    last_full_snapshot_at TEXT,
+    last_success_at TEXT,
+    last_failure_fingerprint TEXT,
+    last_error TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS market_deal_watches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     discord_id TEXT NOT NULL,
@@ -763,6 +795,10 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
   CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time
+    ON craft_plan_progress_audit_snapshots (claim_id, captured_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_events_claim_time
+    ON craft_plan_progress_audit_events (claim_id, captured_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_deal_watches_user ON market_deal_watches (user_id, enabled, updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_deal_watches_scan ON market_deal_watches (claim_id, region_id, enabled, item_id, item_type);
   CREATE INDEX IF NOT EXISTS idx_market_deal_alerts_user ON market_deal_alerts (user_id, created_at DESC);

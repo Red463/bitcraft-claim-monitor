@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { gzipSync, gunzipSync } from "node:zlib";
 
 const AUDIT_RETENTION_DAYS = 14;
 const SENSITIVE_KEYS = /^(authorization|cookie|cookies|password|secret|session|token)$/i;
@@ -431,5 +432,339 @@ export function normalizeCraftPlanAuditRange(value, now = new Date().toISOString
   return {
     label,
     since: new Date(timestamp.getTime() - durations[label] * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+function gzipJson(value) {
+  return gzipSync(Buffer.from(JSON.stringify(value)));
+}
+
+function gunzipJson(value) {
+  if (!value) return null;
+  return JSON.parse(gunzipSync(Buffer.from(value)).toString("utf8"));
+}
+
+function parseEventRow(row) {
+  let payload = {};
+  try {
+    payload = JSON.parse(String(row?.payload_json ?? "{}"));
+  } catch {
+    payload = { type: text(row?.event_type), corrupt: true };
+  }
+  return {
+    id: number(row?.id),
+    capturedAt: text(row?.captured_at),
+    baselineRevision: text(row?.baseline_revision),
+    eventType: text(row?.event_type),
+    summary: text(row?.summary),
+    ...payload,
+  };
+}
+
+function eventSummary(event = {}) {
+  if (event.type === "progress_delta") {
+    const confirmed = number(event.confirmedDelta);
+    const projected = number(event.projectedDelta);
+    return `Confirmed ${confirmed >= 0 ? "+" : ""}${confirmed.toFixed(1)}%; projected ${projected >= 0 ? "+" : ""}${projected.toFixed(1)}%`;
+  }
+  if (event.type === "baseline_change") return `Plan baseline changed: ${(event.reasons ?? []).join("; ")}`;
+  if (event.type === "source_failure") return `${event.failures?.length ?? 0} planner source refresh failure(s)`;
+  if (event.type === "source_recovered") return "All counted planner sources recovered";
+  if (event.type === "stock_delta") return `${event.label || event.sourceId}: stock ${event.delta >= 0 ? "+" : ""}${event.delta}`;
+  if (event.type === "craft_added") return `${event.playerName || "Player"} craft added for ${event.itemKey}`;
+  if (event.type === "craft_removed") return `${event.playerName || "Player"} craft removed for ${event.itemKey}`;
+  return text(event.type).replaceAll("_", " ");
+}
+
+function normalizeFailures(failures = []) {
+  return (Array.isArray(failures) ? failures : []).map((failure) => ({
+    sourceId: text(failure?.sourceId),
+    label: text(failure?.label ?? failure?.sourceId ?? "Unknown source"),
+    type: text(failure?.type || "Planner source"),
+    error: text(failure?.error || "Refresh failed").slice(0, 300),
+  })).sort((left, right) => `${left.type}:${left.sourceId}:${left.label}`
+    .localeCompare(`${right.type}:${right.sourceId}:${right.label}`));
+}
+
+function hoursBetween(left, right) {
+  const first = new Date(left).getTime();
+  const second = new Date(right).getTime();
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return Number.POSITIVE_INFINITY;
+  return (second - first) / (60 * 60 * 1000);
+}
+
+export function createCraftPlanProgressAuditRepository(db, {
+  statements,
+  now = () => new Date().toISOString(),
+  retentionDays = AUDIT_RETENTION_DAYS,
+  pruneBatchSize = 500,
+} = {}) {
+  if (!db || !statements) throw new Error("Craft Plan progress audit requires a database and prepared statements.");
+
+  function stateFor(claimId) {
+    return statements.getCraftPlanProgressAuditState.get(text(claimId)) ?? null;
+  }
+
+  function updateState(claimId, values) {
+    statements.upsertCraftPlanProgressAuditState.run(
+      text(claimId),
+      values.lastFingerprint ?? null,
+      values.lastPayloadGzip ?? null,
+      values.lastSnapshotId ?? null,
+      values.lastFullSnapshotAt ?? null,
+      values.lastSuccessAt ?? null,
+      values.lastFailureFingerprint ?? null,
+      values.lastError ?? null,
+      values.updatedAt,
+    );
+  }
+
+  function latestSuccess(claimId) {
+    const state = stateFor(claimId);
+    try {
+      const payload = gunzipJson(state?.last_payload_gzip);
+      if (payload) return payload;
+    } catch {
+      // Fall through to durable historical checkpoints.
+    }
+    for (const row of statements.listLatestCraftPlanProgressSnapshots.all(text(claimId), 25)) {
+      try {
+        const payload = gunzipJson(row.payload_gzip);
+        if (payload) return payload;
+      } catch {
+        // Keep scanning older valid checkpoints.
+      }
+    }
+    return null;
+  }
+
+  function insertEvent(claimId, capturedAt, baselineRevision, event) {
+    statements.insertCraftPlanProgressEvent.run(
+      text(claimId),
+      capturedAt,
+      text(baselineRevision) || null,
+      text(event.type),
+      eventSummary(event),
+      JSON.stringify(event),
+    );
+  }
+
+  function prune(capturedAt = now()) {
+    const timestamp = new Date(capturedAt);
+    const cutoff = new Date(timestamp.getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const snapshotResult = statements.pruneCraftPlanProgressSnapshots.run(cutoff, pruneBatchSize);
+    const eventResult = statements.pruneCraftPlanProgressEvents.run(cutoff, pruneBatchSize);
+    return {
+      cutoff,
+      snapshotsDeleted: number(snapshotResult.changes),
+      eventsDeleted: number(eventResult.changes),
+    };
+  }
+
+  function recordSuccess(snapshot) {
+    const claimId = text(snapshot?.claimId);
+    const capturedAt = text(snapshot?.capturedAt || now());
+    if (!claimId) throw new Error("Craft Plan progress audit snapshot requires a claim ID.");
+    const state = stateFor(claimId);
+    const previous = latestSuccess(claimId);
+    const fingerprint = craftPlanProgressFingerprint(snapshot);
+    const baselineChanged = Boolean(previous)
+      && text(previous.baselineRevision) !== text(snapshot.baselineRevision);
+    const fullSnapshot = !previous
+      || baselineChanged
+      || hoursBetween(state?.last_full_snapshot_at, capturedAt) >= 6;
+    const duplicate = text(state?.last_fingerprint) === fingerprint;
+    const payloadGzip = duplicate && state?.last_payload_gzip
+      ? Buffer.from(state.last_payload_gzip)
+      : gzipJson(snapshot);
+
+    if (duplicate && !fullSnapshot) {
+      updateState(claimId, {
+        lastFingerprint: fingerprint,
+        lastPayloadGzip: payloadGzip,
+        lastSnapshotId: state?.last_snapshot_id,
+        lastFullSnapshotAt: state?.last_full_snapshot_at,
+        lastSuccessAt: capturedAt,
+        lastFailureFingerprint: state?.last_failure_fingerprint,
+        lastError: state?.last_error,
+        updatedAt: capturedAt,
+      });
+      return {
+        recorded: false,
+        fullSnapshot: false,
+        events: [],
+        baselineChanged: false,
+        baselineChange: null,
+        capturedAt,
+      };
+    }
+
+    const diff = previous
+      ? diffCraftPlanProgressSnapshots(previous, snapshot)
+      : { events: [], baselineChanged: false, baselineChange: null };
+    const events = [...diff.events];
+    if (state?.last_failure_fingerprint) {
+      events.push({
+        type: "source_recovered",
+        previousError: text(state.last_error),
+      });
+    }
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      let lastSnapshotId = state?.last_snapshot_id ?? null;
+      let lastFullSnapshotAt = state?.last_full_snapshot_at ?? null;
+      if (fullSnapshot) {
+        const result = statements.insertCraftPlanProgressSnapshot.run(
+          claimId,
+          capturedAt,
+          text(snapshot.baselineRevision),
+          fingerprint,
+          1,
+          payloadGzip,
+          text(snapshot?.metadata?.appVersion),
+          text(snapshot?.metadata?.buildId),
+        );
+        lastSnapshotId = result.lastInsertRowid;
+        lastFullSnapshotAt = capturedAt;
+      }
+      for (const event of events) insertEvent(claimId, capturedAt, snapshot.baselineRevision, event);
+      updateState(claimId, {
+        lastFingerprint: fingerprint,
+        lastPayloadGzip: payloadGzip,
+        lastSnapshotId,
+        lastFullSnapshotAt,
+        lastSuccessAt: capturedAt,
+        lastFailureFingerprint: null,
+        lastError: null,
+        updatedAt: capturedAt,
+      });
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    prune(capturedAt);
+    return {
+      recorded: true,
+      fullSnapshot,
+      events,
+      baselineChanged: diff.baselineChanged,
+      baselineChange: diff.baselineChange,
+      capturedAt,
+    };
+  }
+
+  function recordFailure(claimId, failures, capturedAt = now()) {
+    const normalized = normalizeFailures(failures);
+    const failureFingerprint = hash(normalized);
+    const current = stateFor(claimId);
+    const error = normalized.map((failure) => `${failure.label}: ${failure.error}`).join("; ").slice(0, 1000);
+    const changed = text(current?.last_failure_fingerprint) !== failureFingerprint;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      if (changed) {
+        insertEvent(claimId, capturedAt, current?.last_fingerprint ? latestSuccess(claimId)?.baselineRevision : "", {
+          type: "source_failure",
+          failures: normalized,
+        });
+      }
+      updateState(claimId, {
+        lastFingerprint: current?.last_fingerprint,
+        lastPayloadGzip: current?.last_payload_gzip,
+        lastSnapshotId: current?.last_snapshot_id,
+        lastFullSnapshotAt: current?.last_full_snapshot_at,
+        lastSuccessAt: current?.last_success_at,
+        lastFailureFingerprint: failureFingerprint,
+        lastError: error,
+        updatedAt: capturedAt,
+      });
+      db.exec("COMMIT");
+    } catch (failure) {
+      db.exec("ROLLBACK");
+      throw failure;
+    }
+    prune(capturedAt);
+    return { recorded: changed, capturedAt, failures: normalized };
+  }
+
+  function listEvents(claimId, {
+    since = new Date(new Date(now()).getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString(),
+    limit = 100,
+  } = {}) {
+    return statements.listCraftPlanProgressEvents
+      .all(text(claimId), text(since), Math.min(10_000, Math.max(1, Math.trunc(number(limit) || 100))))
+      .map(parseEventRow);
+  }
+
+  function status(claimId) {
+    const state = stateFor(claimId);
+    const counts = statements.craftPlanProgressAuditCounts.get(
+      text(claimId),
+      text(claimId),
+      text(claimId),
+      text(claimId),
+    ) ?? {};
+    return {
+      claimId: text(claimId),
+      lastSuccessfulAt: text(state?.last_success_at) || null,
+      lastFullSnapshotAt: text(state?.last_full_snapshot_at) || null,
+      lastError: text(state?.last_error) || null,
+      updatedAt: text(state?.updated_at) || null,
+      snapshotCount: number(counts.snapshot_count),
+      eventCount: number(counts.event_count),
+      storedBytes: number(counts.stored_bytes),
+      retentionDays,
+    };
+  }
+
+  function latestBaselineChange(claimId) {
+    const row = statements.latestCraftPlanBaselineChange.get(text(claimId));
+    return row ? parseEventRow(row) : null;
+  }
+
+  function exportRange(claimId, range) {
+    const warnings = [];
+    const checkpoint = statements.latestCraftPlanProgressSnapshotBefore.get(text(claimId), text(range.since));
+    const rows = statements.listCraftPlanProgressSnapshotsSince.all(text(claimId), text(range.since));
+    const uniqueRows = new Map();
+    if (checkpoint) uniqueRows.set(number(checkpoint.id), checkpoint);
+    for (const row of rows) uniqueRows.set(number(row.id), row);
+    const snapshots = [];
+    for (const row of [...uniqueRows.values()].sort((left, right) => text(left.captured_at).localeCompare(text(right.captured_at)))) {
+      try {
+        snapshots.push(gunzipJson(row.payload_gzip));
+      } catch {
+        warnings.push(`Skipped corrupt snapshot ${row.id}.`);
+      }
+    }
+    let effectiveSince = text(range.since);
+    if (!checkpoint && snapshots.length) {
+      effectiveSince = text(snapshots[0].capturedAt);
+      warnings.push("No valid checkpoint predates the requested range; reconstruction starts at the first retained full snapshot.");
+    }
+    return {
+      schemaVersion: 1,
+      generatedAt: text(now()),
+      retentionDays,
+      claimId: text(claimId),
+      requestedRange: text(range.label),
+      effectiveSince,
+      status: status(claimId),
+      snapshots,
+      events: listEvents(claimId, { since: effectiveSince, limit: 10_000 }),
+      warnings,
+    };
+  }
+
+  return {
+    recordSuccess,
+    recordFailure,
+    latestSuccess,
+    status,
+    listEvents,
+    latestBaselineChange,
+    exportRange,
+    prune,
   };
 }

@@ -16,6 +16,18 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   };
 
   const statements = createPreparedStatements(db);
+  for (const key of [
+    "insertCraftPlanProgressSnapshot",
+    "latestCraftPlanProgressSnapshot",
+    "latestCraftPlanProgressSnapshotBefore",
+    "listCraftPlanProgressSnapshotsSince",
+    "insertCraftPlanProgressEvent",
+    "listCraftPlanProgressEvents",
+    "upsertCraftPlanProgressAuditState",
+    "getCraftPlanProgressAuditState",
+    "pruneCraftPlanProgressSnapshots",
+    "pruneCraftPlanProgressEvents",
+  ]) assert.ok(statements[key], `${key} should be prepared`);
 
   for (const key of [
     "getSettlementState",

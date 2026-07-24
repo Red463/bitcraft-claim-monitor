@@ -11,6 +11,9 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS user_accounts",
     "CREATE TABLE IF NOT EXISTS market_deal_alerts",
     "CREATE TABLE IF NOT EXISTS craft_plan_settings",
+    "CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_snapshots",
+    "CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_events",
+    "CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_state",
     "CREATE TABLE IF NOT EXISTS production_jobs",
     "CREATE TABLE IF NOT EXISTS discord_delivery_log",
     "CREATE TABLE IF NOT EXISTS discord_notification_outbox",
@@ -29,6 +32,8 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time",
     "CREATE INDEX IF NOT EXISTS idx_domain_payload_claim",
     "CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated",
+    "CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time",
+    "CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_events_claim_time",
   ]) {
     assert.match(schemaBootstrapSql, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }

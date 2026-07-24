@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
   buildCraftPlanProgressSnapshot,
   craftPlanProgressFingerprint,
+  createCraftPlanProgressAuditRepository,
   diffCraftPlanProgressSnapshots,
   normalizeCraftPlanAuditRange,
   staleCraftPlanProgress,
 } from "../src/server/craftPlanProgressAudit.mjs";
+import { createPreparedStatements } from "../src/server/preparedStatements.mjs";
+import { schemaBootstrapSql } from "../src/server/schemaBootstrap.mjs";
+import { applyAdditiveColumnMigrations } from "../src/server/schemaMigrations.mjs";
 
 function fixtureSnapshot({
   capturedAt = "2026-07-24T10:00:00.000Z",
@@ -266,4 +271,69 @@ test("audit ranges are explicit and bounded by retention", () => {
     () => normalizeCraftPlanAuditRange("30d", "2026-07-24T12:00:00.000Z"),
     /invalid audit range/i,
   );
+});
+
+function createTestRepository(clock) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaBootstrapSql);
+  applyAdditiveColumnMigrations(db);
+  return createCraftPlanProgressAuditRepository(db, {
+    statements: createPreparedStatements(db),
+    now: () => clock.now,
+    retentionDays: 14,
+  });
+}
+
+test("repository deduplicates, checkpoints, survives failures, and exports retained history", () => {
+  const clock = { now: "2026-07-24T12:00:00.000Z" };
+  const repository = createTestRepository(clock);
+  const first = repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 50 }));
+  const duplicate = repository.recordSuccess(fixtureSnapshot({
+    capturedAt: "2026-07-24T12:01:00.000Z",
+    confirmed: 50,
+  }));
+  assert.equal(first.recorded, true);
+  assert.equal(first.fullSnapshot, true);
+  assert.equal(duplicate.recorded, false);
+
+  clock.now = "2026-07-24T18:01:00.000Z";
+  const heartbeat = repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 50 }));
+  assert.equal(heartbeat.fullSnapshot, true);
+
+  repository.recordFailure("1", [{ label: "Mosswick inventory", error: "HTTP 500" }], clock.now);
+  repository.recordFailure("1", [{ label: "Mosswick inventory", error: "HTTP 500" }], "2026-07-24T18:02:00.000Z");
+  assert.match(repository.status("1").lastError, /Mosswick inventory/);
+  assert.equal(
+    repository.listEvents("1", { since: "2026-07-24T18:00:00.000Z", limit: 100 })
+      .filter((event) => event.eventType === "source_failure").length,
+    1,
+  );
+
+  clock.now = "2026-07-24T18:03:00.000Z";
+  const recovered = repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 51 }));
+  assert.equal(recovered.events.some((event) => event.type === "source_recovered"), true);
+  assert.equal(repository.latestSuccess("1").effortProgress.confirmed.overall.completion, 51);
+
+  const bundle = repository.exportRange("1", {
+    label: "all",
+    since: "2026-07-10T18:03:00.000Z",
+  });
+  assert.equal(bundle.retentionDays, 14);
+  assert.equal(bundle.claimId, "1");
+  assert.ok(bundle.snapshots.length >= 1);
+  assert.equal(JSON.stringify(bundle).includes("HTTP 500"), true);
+});
+
+test("repository records one baseline event and uses the new comparison epoch", () => {
+  const clock = { now: "2026-07-24T12:00:00.000Z" };
+  const repository = createTestRepository(clock);
+  repository.recordSuccess(fixtureSnapshot({ capturedAt: clock.now, confirmed: 70, baselineRevision: "rev-a" }));
+  clock.now = "2026-07-24T12:10:00.000Z";
+  const next = fixtureSnapshot({ capturedAt: clock.now, confirmed: 50, baselineRevision: "rev-b" });
+  next.baselineInputs.config.targets[0].quantity = 200;
+  const result = repository.recordSuccess(next);
+  assert.equal(result.fullSnapshot, true);
+  assert.equal(result.baselineChanged, true);
+  assert.equal(result.events.some((event) => event.type === "progress_delta"), false);
+  assert.match(result.baselineChange.reasons.join(" "), /target/i);
 });
