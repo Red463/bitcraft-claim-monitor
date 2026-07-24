@@ -803,6 +803,26 @@ test("server collection paginates listings and protects production mutations", a
     },
     count: 4,
   });
+  const anonymousMembership = await fetch(`${origin}/api/local/admin/empire-membership`, {
+    headers: { origin },
+  });
+  assert.equal(anonymousMembership.status, 401);
+  const ownerMembership = await fetch(`${origin}/api/local/admin/empire-membership`, {
+    headers: {
+      cookie,
+      origin,
+      "content-type": "application/json",
+      "x-csrf-token": auth.csrfToken,
+    },
+  });
+  assert.equal(ownerMembership.status, 200);
+  const ownerMembershipBody = await ownerMembership.json();
+  assert.equal(ownerMembershipBody.tracking.empireName, "Test Empire");
+  assert.equal(ownerMembershipBody.summary.currentMembers, 4);
+  assert.equal(
+    ownerMembershipBody.currentMembers.every((member) => member.membershipStatus === "initial"),
+    true,
+  );
   await waitForCondition("regional buy-order cache", () => {
     const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
     const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count;
@@ -1268,6 +1288,14 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(viewerAuth.user.role, "viewer");
   const viewerStatus = await fetch(`${origin}/api/local/admin/status`, { headers: { cookie: viewerCookie, origin } });
   assert.equal(viewerStatus.status, 200);
+  const viewerMembership = await fetch(`${origin}/api/local/admin/empire-membership`, {
+    headers: { cookie: viewerCookie, origin },
+  });
+  assert.equal(viewerMembership.status, 200);
+  const viewerMembershipBody = await viewerMembership.json();
+  assert.equal(viewerMembershipBody.tracking.empireId, "empire-1");
+  assert.equal(Object.hasOwn(viewerMembershipBody, "adminUsers"), false);
+  assert.equal(Object.hasOwn(viewerMembershipBody, "settings"), false);
   const viewerSettingsMutation = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",
     headers: { cookie: viewerCookie, origin, "content-type": "application/json", "x-csrf-token": viewerAuth.csrfToken },

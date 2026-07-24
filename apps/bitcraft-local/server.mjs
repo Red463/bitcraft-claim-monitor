@@ -7968,6 +7968,22 @@ function collectorStatusPayload() {
   };
 }
 
+function empireMembershipAdminPayload() {
+  const view = empireMembershipRepository.adminView({ now: new Date().toISOString() });
+  const status = pollStatus.collectors.empireMembership ?? {};
+  return {
+    ...view,
+    collector: {
+      enabled: status.enabled !== false,
+      running: status.running === true,
+      lastAttemptAt: status.lastAttemptAt ?? null,
+      lastSuccessAt: status.lastSuccessAt ?? view.tracking?.lastSuccessAt ?? null,
+      lastError: status.lastError ?? null,
+      nextRunAt: status.nextRunAt ?? null,
+    },
+  };
+}
+
 async function runMarketListingsCollector(claimId, currentData, force = false) {
   if (!sideEffectCollectorDue("marketListings", force)) return;
   const startedAt = collectorAttempt("marketListings");
@@ -9719,6 +9735,9 @@ const server = createServer(async (req, res) => {
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
+      if (req.method === "GET" && url.pathname === "/api/local/admin/empire-membership") {
+        return send(res, 200, empireMembershipAdminPayload());
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/server-health") return send(res, 200, await serverHealthResponse(url, { includeDiagnosticBundle: url.searchParams.get("bundle") === "1" }));
       if (req.method === "GET" && url.pathname === "/api/local/admin/jobs") return send(res, 200, scheduledJobsStatus());
       if (req.method === "PUT" && url.pathname === "/api/local/admin/jobs") {
