@@ -1,7 +1,7 @@
 # Empire Membership History Design
 
-**Issue:** [#53 — Cairn Empire Join List](https://github.com/Red463/bitcraft-claim-monitor/issues/53)  
-**Status:** Approved design  
+**Issue:** [#53 — Cairn Empire Join List](https://github.com/Red463/bitcraft-claim-monitor/issues/53)
+**Status:** Approved design
 **Date:** 2026-07-24
 
 ## Summary
