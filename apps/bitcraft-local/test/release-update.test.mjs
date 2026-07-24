@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  consumeAutomaticReleaseUpdate,
-  markAutomaticReleaseUpdate,
+  LAST_LOADED_RELEASE_BUILD_KEY,
   normalizeReleaseBuildId,
+  readLastLoadedReleaseBuild,
   releaseUpdateDecision,
+  writeLastLoadedReleaseBuild,
 } from "../src/utils/releaseUpdate.ts";
 
 function memoryStorage() {
@@ -17,18 +18,52 @@ function memoryStorage() {
   };
 }
 
-test("release update decision stores the first build without prompting", () => {
-  assert.equal(releaseUpdateDecision({ currentBuildId: "", nextBuildId: "abc123", documentHidden: false }), "remember");
+test("first visit remembers the running build without an update notice", () => {
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "",
+    lastLoadedBuildId: "",
+    nextBuildId: "abc123",
+    documentHidden: false,
+  }), "remember");
 });
 
-test("release update decision ignores unchanged or missing build ids", () => {
-  assert.equal(releaseUpdateDecision({ currentBuildId: "abc123", nextBuildId: "abc123", documentHidden: false }), "ignore");
-  assert.equal(releaseUpdateDecision({ currentBuildId: "abc123", nextBuildId: "", documentHidden: false }), "ignore");
+test("a newly loaded build reports one completed update", () => {
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "",
+    lastLoadedBuildId: "abc123",
+    nextBuildId: "def456",
+    documentHidden: false,
+  }), "updated");
 });
 
-test("release update decision prompts visible tabs and reloads hidden tabs", () => {
-  assert.equal(releaseUpdateDecision({ currentBuildId: "abc123", nextBuildId: "def456", documentHidden: false }), "prompt");
-  assert.equal(releaseUpdateDecision({ currentBuildId: "abc123", nextBuildId: "def456", documentHidden: true }), "reload");
+test("an old running build prompts visibly and reloads while hidden", () => {
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "abc123",
+    lastLoadedBuildId: "abc123",
+    nextBuildId: "def456",
+    documentHidden: false,
+  }), "prompt");
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "abc123",
+    lastLoadedBuildId: "abc123",
+    nextBuildId: "def456",
+    documentHidden: true,
+  }), "reload");
+});
+
+test("the running build ignores unchanged and missing server builds", () => {
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "abc123",
+    lastLoadedBuildId: "abc123",
+    nextBuildId: "abc123",
+    documentHidden: false,
+  }), "ignore");
+  assert.equal(releaseUpdateDecision({
+    currentBuildId: "abc123",
+    lastLoadedBuildId: "abc123",
+    nextBuildId: "",
+    documentHidden: false,
+  }), "ignore");
 });
 
 test("release build ids are normalized from health payloads", () => {
@@ -37,24 +72,19 @@ test("release build ids are normalized from health payloads", () => {
   assert.equal(normalizeReleaseBuildId(null), "");
 });
 
-test("automatic update marker is consumed exactly once", () => {
+test("last loaded build storage is normalized and best effort", () => {
   const storage = memoryStorage();
-
-  assert.equal(markAutomaticReleaseUpdate(storage), true);
-  assert.equal(consumeAutomaticReleaseUpdate(storage), true);
-  assert.equal(consumeAutomaticReleaseUpdate(storage), false);
-});
-
-test("automatic update marker ignores invalid values and unavailable storage", () => {
-  const storage = memoryStorage();
-  storage.setItem("bitcraft.release.auto-updated", "unexpected");
-  assert.equal(consumeAutomaticReleaseUpdate(storage), false);
+  assert.equal(readLastLoadedReleaseBuild(storage), "");
+  assert.equal(writeLastLoadedReleaseBuild(storage, "  abc123  "), true);
+  assert.equal(storage.getItem(LAST_LOADED_RELEASE_BUILD_KEY), "abc123");
+  assert.equal(readLastLoadedReleaseBuild(storage), "abc123");
+  assert.equal(writeLastLoadedReleaseBuild(storage, "   "), false);
 
   const unavailable = {
     getItem() { throw new Error("storage unavailable"); },
     setItem() { throw new Error("storage unavailable"); },
     removeItem() { throw new Error("storage unavailable"); },
   };
-  assert.equal(markAutomaticReleaseUpdate(unavailable), false);
-  assert.equal(consumeAutomaticReleaseUpdate(unavailable), false);
+  assert.equal(readLastLoadedReleaseBuild(unavailable), "");
+  assert.equal(writeLastLoadedReleaseBuild(unavailable, "abc123"), false);
 });
