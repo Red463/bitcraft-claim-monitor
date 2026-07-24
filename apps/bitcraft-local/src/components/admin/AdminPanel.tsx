@@ -66,6 +66,8 @@ import { AdminAccessSection } from "./AdminAccessSection";
 import { AdminAnalyticsSection } from "./AdminAnalyticsSection";
 import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
 import { AdminDataSection } from "./AdminDataSection";
+import { AdminEmpireMembershipSection } from "./AdminEmpireMembershipSection";
+import type { EmpireMembershipAdminView } from "./AdminEmpireMembershipSection";
 import { ServerHealthSection } from "./ServerHealthSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
@@ -122,7 +124,7 @@ import { claimPendingAction, releasePendingAction } from "../../utils/pendingAct
 
 const LOCAL_API = "/api/local";
 
-type AdminTab = "status" | "server-health" | "analytics" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
+type AdminTab = "status" | "server-health" | "analytics" | "empire-membership" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 type AdminTabMeta = {
   key: AdminTab;
@@ -161,6 +163,7 @@ const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     label: "Insights",
     tabs: [
       { key: "analytics", label: "Analytics", description: "Usage, security, location, and request logs" },
+      { key: "empire-membership", label: "Empire Membership", description: "Observed joins, confirmed departures, and current empire members" },
       { key: "database", label: "Database", description: "SQLite inspection and exports" },
     ],
   },
@@ -240,6 +243,7 @@ export function AdminPanel({
   const [backups, setBackups] = React.useState<AnyRecord[]>([]);
   const [analyticsDays, setAnalyticsDays] = React.useState("30");
   const [analyticsData, setAnalyticsData] = React.useState<AnyRecord | null>(null);
+  const [empireMembershipData, setEmpireMembershipData] = React.useState<EmpireMembershipAdminView | null>(null);
   const [visitorSecurityData, setVisitorSecurityData] = React.useState<AnyRecord | null>(null);
   const [securityEventSearch, setSecurityEventSearch] = React.useState("");
   const [securityEventPage, setSecurityEventPage] = React.useState(1);
@@ -424,6 +428,10 @@ export function AdminPanel({
     setVisitorSecurityData(await api(`/admin/visitor-security?${securityParams.toString()}`));
   }
 
+  async function refreshEmpireMembership() {
+    setEmpireMembershipData(await api("/admin/empire-membership") as EmpireMembershipAdminView);
+  }
+
   async function refreshDiscordDiscovery() {
     const discovery = await api("/admin/discord/discovery");
     setDiscordDiscovery(discovery);
@@ -465,6 +473,7 @@ export function AdminPanel({
       if (botOnly && tab === "discord") await refreshDiscordDiscovery();
       if (botOnly && tab === "discord" && botSection === "commands") await refreshCustomCommands();
       if (tab === "analytics") await refreshAnalytics();
+      if (tab === "empire-membership") await refreshEmpireMembership();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
       if (tab === "accounts") await refreshLinkedAccounts();
@@ -750,7 +759,8 @@ export function AdminPanel({
   const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : visibleTabGroups.flatMap((group) => group.tabs), [botOnly, visibleTabGroups]);
   const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
   const activeTabGroup = activeTabMeta ? visibleTabGroups.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
-  const extractedTabOwnsMessage = tab === "analytics" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
+  const extractedTabOwnsMessage = tab === "analytics" || tab === "empire-membership" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
+  const tabLoadPending = [...pendingActions].some((key) => key.startsWith(`tab-load:${tab}:`));
   React.useEffect(() => { if (tab === "server-health" && !canViewServerHealth) setTab("status"); }, [tab, canViewServerHealth, setTab]);
   const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
   const loginRows: AnyRecord[] = Array.isArray(auditData.logins) ? auditData.logins : [];
@@ -1384,6 +1394,17 @@ export function AdminPanel({
             onAuditFilterChange={(filter) => { setAuditFilter(filter); setAuditVisibleCount(30); }}
             onLoadMoreAudit={() => setAuditVisibleCount((count) => count + 30)}
             onRefreshAudit={() => run(refreshAudit, undefined, "audit-refresh")}
+          />
+        </div>
+      ) : null}
+
+      {tab === "empire-membership" ? (
+        <div className="admin-section empire-membership-admin">
+          <AdminEmpireMembershipSection
+            data={empireMembershipData}
+            pending={tabLoadPending || isBusyAction("empire-membership-refresh")}
+            error={messageKind === "error" ? message : null}
+            onRefresh={() => run(refreshEmpireMembership, undefined, "empire-membership-refresh")}
           />
         </div>
       ) : null}
