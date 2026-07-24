@@ -14,6 +14,7 @@ export const COLLECTOR_PURPOSES: Record<string, string> = {
   buyOrders: "Updates the cached regional buy-order finder data.",
   region: "Refreshes regional settlement comparison data and region status diagnostics.",
   mapCatalog: "Updates map resource/catalog metadata used by map tools.",
+  empireMembership: "Records compact observed empire joins, confirmed departures, and rejoins without storing roster snapshots.",
   storageActivity: "Records storage deposit/withdrawal events when BitJita exposes them.",
   marketTrades: "Imports member market trade history for sales/activity views.",
 };

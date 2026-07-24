@@ -86,6 +86,10 @@ import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCache
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
+import {
+  createEmpireMembershipRepository,
+  normalizeEmpireMembershipRoster,
+} from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
@@ -323,6 +327,7 @@ const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
 let craftPlanProgressAuditWriteWarning = null;
 const gameCatalogRepository = createGameCatalogRepository(db);
 const empireHexiteRepository = createEmpireHexiteRepository(db);
+const empireMembershipRepository = createEmpireMembershipRepository(db);
 const runEmpireHexiteRefreshJob = createEmpireHexiteRefreshJob({
   repository: empireHexiteRepository,
   fetchJson: (pathname) => fetchBitjita(pathname, { cache: false }),
@@ -7976,6 +7981,48 @@ async function runMarketListingsCollector(claimId, currentData, force = false) {
   }
 }
 
+function claimEmpireId(claim) {
+  return String(claim?.empireEntityId ?? claim?.empireId ?? "").trim();
+}
+
+async function runEmpireMembershipCollector(claim, force = false) {
+  const key = "empireMembership";
+  if (!sideEffectCollectorDue(key, force)) return;
+  const startedAt = collectorAttempt(key, "Fetching current empire roster");
+  const observedAt = new Date().toISOString();
+  try {
+    const empireId = claimEmpireId(claim);
+    if (!empireId) {
+      const stopped = empireMembershipRepository.stopTracking({ observedAt });
+      setCollectorStatus(key, { rowCount: 0, trackingStopped: stopped.stopped });
+      collectorSuccess(key, startedAt);
+      return;
+    }
+    const payload = await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, {
+      timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS),
+      forceRefresh: true,
+    });
+    const roster = normalizeEmpireMembershipRoster(payload, empireId);
+    const result = empireMembershipRepository.syncRoster({ ...roster, observedAt });
+    setCollectorStatus(key, {
+      rowCount: result.currentMembers,
+      currentEmpireId: roster.empireId,
+      currentEmpireName: roster.empireName,
+      created: result.created,
+      updated: result.updated,
+      suspectedDepartures: result.suspected,
+      confirmedDepartures: result.closed,
+      pruned: result.pruned,
+    });
+    collectorSuccess(key, startedAt);
+  } catch (error) {
+    collectorFailure(key, startedAt, error);
+    console.warn(
+      `Empire membership collection failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 async function runProductionActivityCollector(claimId, currentData) {
   const productionResult = await syncProductionJobActivityForSnapshot(claimId, currentData.crafts, new Date().toISOString());
   for (const diagnostic of productionResult.diagnostics ?? []) recordDiscordDeliverySafe(diagnostic);
@@ -8017,6 +8064,7 @@ async function collectServerSnapshot(force = false) {
       buildingsCount: buildings.length,
       market: currentData.market ?? { listings: [] },
     });
+    await runEmpireMembershipCollector(claim, force);
     await runMarketListingsCollector(claimId, currentData, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);

@@ -53,6 +53,22 @@ test("side-effect collector intervals do not monopolize production", () => {
   assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
 });
 
+test("empire membership tracking has an independent bounded cadence", () => {
+  assert.deepEqual(domainCollectorDefaults.empireMembership, {
+    label: "Empire membership history",
+    intervalSeconds: 60,
+  });
+  const normalized = normalizeCollectorSettings({
+    empireMembership: { enabled: true, intervalSeconds: 5 },
+  });
+  assert.deepEqual(normalized.empireMembership, {
+    label: "Empire membership history",
+    enabled: true,
+    intervalSeconds: 15,
+  });
+  assert.equal(Object.hasOwn(collectorCurrentTables, "empireMembership"), false);
+});
+
 test("collector settings still clamp submitted intervals to the existing bounds", () => {
   const normalized = normalizeCollectorSettings({ marketListings: { intervalSeconds: 2 } });
 
