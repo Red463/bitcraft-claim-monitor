@@ -24,9 +24,28 @@ export type EffortProgressSummary = {
 export type CraftPlanningEffortView = {
   state: EffortState;
   route: FishingRoutePreference;
+  confirmed: {
+    overall: EffortAggregate;
+    sections: Record<string, EffortAggregate>;
+  };
+  projected: {
+    overall: EffortAggregate;
+    sections: Record<string, EffortAggregate>;
+  };
   overall: EffortAggregate;
   sections: Record<string, EffortAggregate>;
   warnings: string[];
+  stale: boolean;
+  staleSince: string | null;
+  lastSuccessfulAt: string | null;
+  unavailableSources: Array<{ sourceId?: string; label: string; type?: string; error?: string }>;
+  baselineRevision: string | null;
+  baselineChange: null | {
+    previousRevision?: string;
+    revision: string;
+    changedAt: string;
+    reasons: string[];
+  };
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -57,28 +76,79 @@ export function selectCraftPlanningEffortView(summary: unknown, route: FishingRo
   const root = record(summary);
   const variants = record(root.fishingVariants);
   const variant = record(variants[route]);
-  const baseSections = record(root.sections);
-  const variantSections = record(variant.sections);
-  const hasSelectedVariant = Object.keys(variant).length > 0;
+  const confirmedRoot = Object.keys(record(root.confirmed)).length ? record(root.confirmed) : root;
+  const projectedRoot = Object.keys(record(root.projected)).length ? record(root.projected) : confirmedRoot;
+  const confirmedVariant = Object.keys(record(variant.confirmed)).length
+    ? record(variant.confirmed)
+    : Object.keys(record(root.confirmed)).length ? {} : variant;
+  const projectedVariant = Object.keys(record(variant.projected)).length
+    ? record(variant.projected)
+    : Object.keys(record(root.projected)).length ? {} : confirmedVariant;
+  const hasConfirmedVariant = Object.keys(confirmedVariant).length > 0;
+  const hasProjectedVariant = Object.keys(projectedVariant).length > 0;
+  const baseSections = record(confirmedRoot.sections);
   const hasFishing = Object.prototype.hasOwnProperty.call(baseSections, "Fishing");
-  const selectedSections = { ...baseSections, ...variantSections };
-  const sectionEntries = Object.entries(selectedSections)
-    .map(([name, value]) => [name, aggregate(value)]);
+  const selectProjection = (
+    projection: Record<string, unknown>,
+    selectedVariant: Record<string, unknown>,
+    hasVariant: boolean,
+  ) => ({
+    overall: aggregate(hasVariant ? selectedVariant.overall : projection.overall),
+    sections: Object.fromEntries(Object.entries({
+      ...record(projection.sections),
+      ...(hasVariant ? record(selectedVariant.sections) : {}),
+    }).map(([name, value]) => [name, aggregate(value)])),
+  });
+  const confirmed = selectProjection(confirmedRoot, confirmedVariant, hasConfirmedVariant);
+  const projected = selectProjection(projectedRoot, projectedVariant, hasProjectedVariant);
   const validStates = new Set<EffortState>(["ready", "partial", "unavailable", "empty"]);
-  const state = validStates.has(String(root.state) as EffortState)
-    ? String(root.state) as EffortState
+  const stateValue = confirmedRoot.state ?? root.state;
+  const state = validStates.has(String(stateValue) as EffortState)
+    ? String(stateValue) as EffortState
     : "unavailable";
-  const variantWarnings = Array.isArray(variant.warnings) ? variant.warnings.map(String) : [];
+  const variantWarnings = [
+    ...(Array.isArray(confirmedVariant.warnings) ? confirmedVariant.warnings.map(String) : []),
+    ...(Array.isArray(projectedVariant.warnings) ? projectedVariant.warnings.map(String) : []),
+    ...(Array.isArray(variant.warnings) ? variant.warnings.map(String) : []),
+  ];
   const rootWarnings = Array.isArray(root.warnings) ? root.warnings.map(String) : [];
   const warnings = [...new Set([...variantWarnings, ...rootWarnings])];
-  if (hasFishing && !hasSelectedVariant) {
+  if (hasFishing && !hasConfirmedVariant) {
     warnings.unshift(`The selected ${route} Fishing route has no specialised effort estimate; showing the general Fishing estimate.`);
   }
+  const unavailableSources = Array.isArray(root.unavailableSources)
+    ? root.unavailableSources.map((source) => {
+      const value = record(source);
+      return {
+        sourceId: value.sourceId == null ? undefined : String(value.sourceId),
+        label: String(value.label ?? value.sourceId ?? "Unknown source"),
+        type: value.type == null ? undefined : String(value.type),
+        error: value.error == null ? undefined : String(value.error),
+      };
+    })
+    : [];
+  const baselineChangeValue = record(root.baselineChange);
+  const baselineChange = Object.keys(baselineChangeValue).length
+    ? {
+      previousRevision: baselineChangeValue.previousRevision == null ? undefined : String(baselineChangeValue.previousRevision),
+      revision: String(baselineChangeValue.revision ?? ""),
+      changedAt: String(baselineChangeValue.changedAt ?? ""),
+      reasons: Array.isArray(baselineChangeValue.reasons) ? baselineChangeValue.reasons.map(String) : [],
+    }
+    : null;
   return {
     state,
     route,
-    overall: aggregate(hasSelectedVariant ? variant.overall : root.overall),
-    sections: Object.fromEntries(sectionEntries),
+    confirmed,
+    projected,
+    overall: confirmed.overall,
+    sections: confirmed.sections,
     warnings: warnings.slice(0, 25),
+    stale: root.stale === true,
+    staleSince: root.staleSince == null ? null : String(root.staleSince),
+    lastSuccessfulAt: root.lastSuccessfulAt == null ? null : String(root.lastSuccessfulAt),
+    unavailableSources,
+    baselineRevision: root.baselineRevision == null ? null : String(root.baselineRevision),
+    baselineChange,
   };
 }

@@ -45,11 +45,13 @@
 .craft-plan-target-status span { color: var(--muted); font-size: 0.76rem; }
 .craft-plan-needs-header { min-width: 0; }
 .craft-plan-needs-heading-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 16px; min-width: 0; }
-.craft-plan-overall-progress { display: grid; grid-template-columns: auto minmax(120px, 180px); align-items: center; justify-self: end; gap: 4px 8px; width: min(320px, 34vw); }
-.craft-plan-overall-progress > span { display: flex; align-items: baseline; justify-content: flex-start; gap: 7px; }
+.craft-plan-overall-progress { display: grid; grid-template-columns: auto auto minmax(120px, 180px); align-items: center; justify-self: end; gap: 4px 10px; width: min(520px, 48vw); }
+.craft-plan-overall-progress > span { display: flex; align-items: baseline; justify-content: flex-start; gap: 7px; min-width: 0; }
 .craft-plan-overall-progress strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .craft-plan-overall-progress small, .craft-plan-overall-progress em { color: var(--muted); font-size: 0.74rem; font-style: normal; }
-.craft-plan-overall-progress > div { height: 6px; overflow: hidden; border-radius: 3px; background: rgba(139, 159, 184, 0.18); }
+.craft-plan-progress-projected { padding-left: 10px; border-left: 1px solid rgba(101, 183, 250, 0.3); }
+.craft-plan-progress-projected strong { color: #65b7fa !important; font-size: 0.95rem; }
+.craft-plan-progress-track { height: 6px; overflow: hidden; border-radius: 3px; background: rgba(139, 159, 184, 0.18); }
 .craft-plan-overall-progress i { display: block; height: 100%; }
 .craft-plan-overall-progress.is-critical strong { color: #ff7c82; }
 .craft-plan-overall-progress.is-critical i { background: #ff7c82; }
@@ -61,10 +63,16 @@
 .craft-plan-overall-progress.is-high i { background: #8fd47c; }
 .craft-plan-overall-progress.is-complete strong { color: var(--positive); }
 .craft-plan-overall-progress.is-complete i { background: var(--positive); }
-.craft-plan-overall-progress.is-unavailable > div { opacity: 0.35; }
+.craft-plan-overall-progress.is-unavailable .craft-plan-progress-track { opacity: 0.35; }
 .craft-plan-overall-progress.is-unavailable strong { color: var(--muted); }
 .craft-plan-overall-progress em { grid-column: 1 / -1; text-align: left; }
 .craft-plan-effort-note { color: var(--muted); }
+.craft-plan-progress-stale { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding: 7px 9px; border: 1px solid rgba(240, 198, 79, 0.28); border-radius: 7px; background: rgba(240, 198, 79, 0.07); color: var(--gold); }
+.craft-plan-progress-stale > span, .craft-plan-baseline-change > span { display: grid; gap: 1px; min-width: 0; }
+.craft-plan-progress-stale strong, .craft-plan-baseline-change strong { color: var(--gold) !important; font-size: 0.78rem; }
+.craft-plan-progress-stale small, .craft-plan-baseline-change small { overflow-wrap: anywhere; line-height: 1.35; }
+.craft-plan-baseline-change { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding: 7px 9px; border: 1px solid rgba(101, 183, 250, 0.28); border-radius: 7px; background: rgba(101, 183, 250, 0.07); color: #65b7fa; }
+.craft-plan-baseline-change strong { color: #65b7fa !important; }
 .warning-card { border-color: rgba(240, 198, 79, 0.35); }
 .admin-craft-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .admin-craft-plan-list { display: grid; gap: 8px; }
@@ -270,6 +278,7 @@
 .craft-plan-needs-section-label > span.is-high { color: #8fd47c; }
 .craft-plan-needs-section-label > span.is-complete { color: var(--positive); }
 .craft-plan-needs-section-label > span.is-unavailable { color: var(--muted); font-size: 0.69rem; text-transform: none; }
+.craft-plan-needs-section-label > span.is-projected { color: #65b7fa; font-size: 0.69rem; text-transform: none; }
 .craft-plan-needs-table tbody th { color: var(--text); font-size: 0.96rem; line-height: 1.15; text-align: left; background: rgba(255, 255, 255, 0.025); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .craft-plan-needs-table td { height: 60px; text-align: center; background: rgba(8, 13, 20, 0.42); }
 .craft-plan-need-cell { position: relative; display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; min-width: 0; color: var(--accent); }
@@ -614,7 +623,7 @@
 .craft-plan-need-cell.is-shortage:hover { background: rgba(240, 198, 79, 0.1); }
 .craft-plan-need-cell.is-blocked:hover,
 .craft-plan-need-cell.is-blocked:focus-visible { background: rgba(239, 100, 97, 0.16); outline-color: rgba(239, 100, 97, 0.72); }
-@media (max-width: 760px) { .craft-plan-needs-header { align-items: stretch; } .craft-plan-overall-progress { min-width: 0; grid-template-columns: auto minmax(100px, 1fr); } }
+@media (max-width: 760px) { .craft-plan-needs-header { align-items: stretch; } .craft-plan-overall-progress { min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .craft-plan-progress-track { grid-column: 1 / -1; } }
 .craft-plan-chance-summary { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid rgba(139, 159, 184, 0.16); }
 .craft-plan-primary-work { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border-radius: 8px; background: rgba(240, 198, 79, 0.07); }
 .craft-plan-primary-work > strong { color: var(--text); font-size: 1rem; line-height: 1.3; }
