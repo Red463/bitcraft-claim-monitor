@@ -9,6 +9,24 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.42.0-beta.1] - 2026-07-24
+
+### Added
+
+- Added a 14-day Craft Planning progress audit that records exact stock, craft, storage, target, route, catalogue, and configuration changes for debugging.
+- Added an admin audit timeline with current confirmed and projected progress, baseline revision, calculation health, change attribution, and a downloadable diagnostic archive.
+
+### Changed
+
+- Split Craft Planning progress into confirmed progress from current stock and guaranteed active crafts, and projected progress that also includes estimated probabilistic output.
+- Stabilised progress comparisons around a canonical plan baseline while continuing to reflect stock that is consumed, moved, or sold.
+- Updated Craft Planning and Discord reports to explain baseline changes, distinguish confirmed from projected progress, and warn when a calculation is using retained data after an upstream failure.
+
+### Fixed
+
+- Prevented partial source failures from replacing the last complete planner calculation with misleading incomplete progress.
+- Prevented sensitive credentials from entering progress audit diagnostics while retaining the player, storage, item, craft, and route identities needed for investigation.
+
 ## [0.41.1-beta.4] - 2026-07-22
 
 ### Fixed

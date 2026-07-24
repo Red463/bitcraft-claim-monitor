@@ -69,3 +69,41 @@ test("effort view preserves selected Fishing route and root warnings", () => {
   }, "lake");
   assert.deepEqual(selected.warnings, ["Lake route weight is unavailable", "Root warning"]);
 });
+
+test("effort view exposes confirmed, projected, stale, and baseline metadata", () => {
+  const selected = selectCraftPlanningEffortView({
+    state: "ready",
+    confirmed: {
+      state: "ready",
+      overall: { state: "ready", baselineEffort: 100, remainingEffort: 30, completion: 70 },
+      sections: { Scholar: { state: "ready", baselineEffort: 50, remainingEffort: 20, completion: 60 } },
+    },
+    projected: {
+      state: "ready",
+      overall: { state: "ready", baselineEffort: 100, remainingEffort: 20, completion: 80 },
+      sections: { Scholar: { state: "ready", baselineEffort: 50, remainingEffort: 10, completion: 80 } },
+    },
+    overall: { state: "ready", baselineEffort: 100, remainingEffort: 30, completion: 70 },
+    sections: { Scholar: { state: "ready", baselineEffort: 50, remainingEffort: 20, completion: 60 } },
+    stale: true,
+    staleSince: "2026-07-24T09:10:00.000Z",
+    lastSuccessfulAt: "2026-07-24T09:00:00.000Z",
+    unavailableSources: [{ sourceId: "player-1", label: "Mosswick inventory", type: "Player inventory", error: "HTTP 500" }],
+    baselineRevision: "rev-b",
+    baselineChange: {
+      previousRevision: "rev-a",
+      revision: "rev-b",
+      changedAt: "2026-07-24T08:30:00.000Z",
+      reasons: ["Selected routes changed"],
+    },
+  }, "ocean");
+
+  assert.equal(selected.confirmed.overall.completion, 70);
+  assert.equal(selected.projected.overall.completion, 80);
+  assert.equal(selected.overall.completion, 70);
+  assert.equal(selected.sections.Scholar.completion, 60);
+  assert.equal(selected.stale, true);
+  assert.equal(selected.unavailableSources[0].label, "Mosswick inventory");
+  assert.equal(selected.baselineRevision, "rev-b");
+  assert.deepEqual(selected.baselineChange?.reasons, ["Selected routes changed"]);
+});

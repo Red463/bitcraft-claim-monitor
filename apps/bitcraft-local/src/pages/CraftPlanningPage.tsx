@@ -9,7 +9,7 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import type { AnyRecord } from "../main-app-data";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
-import { formatNumber } from "../utils/format";
+import { formatNumber, timeAgo } from "../utils/format";
 import { CraftPlanManagerDialog } from "./CraftPlanManagerDialog";
 import { CraftPlanningRouteChooser } from "./CraftPlanningRouteChooser";
 import { applyPersonalFishingView, normalizeFishingRoutePreference, type FishingRoutePreference } from "./craftPlanningFishingView";
@@ -222,6 +222,11 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     () => selectCraftPlanningEffortView(plan?.effortProgress, normalizedFishingRoute),
     [plan?.effortProgress, normalizedFishingRoute],
   );
+  const confirmedCompletion = effortView.confirmed.overall.completion;
+  const projectedCompletion = effortView.projected.overall.completion;
+  const showProjectedCompletion = confirmedCompletion != null
+    && projectedCompletion != null
+    && projectedCompletion > confirmedCompletion;
   const filteredNeedsBoard = React.useMemo(
     () => filterNeedsBoard(personalBoard.board, selectedSections, shortagesOnly, needsSearch),
     [personalBoard.board, selectedSections, shortagesOnly, needsSearch],
@@ -663,7 +668,45 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
           </section>
 
           <section className="form-card craft-plan-section craft-plan-needs-board" data-tour="craft-planning-gather-next">
-            <div className="craft-plan-needs-header"><div className="craft-plan-needs-heading-content"><div><h3><Target size={17} /> Needs Board</h3><p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p></div><div className={`craft-plan-overall-progress ${effortView.overall.completion == null ? "is-unavailable" : completionTone(effortView.overall.completion)}`}><span><strong>{effortView.overall.completion == null ? "—" : `${effortView.overall.completion}%`}</strong><small>{effortView.overall.completion == null ? "Effort progress unavailable" : "Effort complete"}</small></span><div><i style={{ width: `${effortView.overall.completion ?? 0}%` }} /></div><em className="craft-plan-effort-note">Confirmed stock and guaranteed active crafts.</em></div></div></div>
+            <div className="craft-plan-needs-header">
+              <div className="craft-plan-needs-heading-content">
+                <div>
+                  <h3><Target size={17} /> Needs Board</h3>
+                  <p className="legend">Missing items grouped by activity. Crafted intermediates stay under their profession; gathered inputs stay under their source activity.</p>
+                </div>
+                <div className={`craft-plan-overall-progress ${confirmedCompletion == null ? "is-unavailable" : completionTone(confirmedCompletion)}`}>
+                  <span className="craft-plan-progress-confirmed" title="Confirmed progress uses tracked stock and guaranteed active or ready-to-collect output.">
+                    <strong>{confirmedCompletion == null ? "—" : `${confirmedCompletion}%`}</strong>
+                    <small>{confirmedCompletion == null ? "Effort progress unavailable" : "Confirmed progress"}</small>
+                  </span>
+                  {showProjectedCompletion ? (
+                    <span className="craft-plan-progress-projected" title="Projected progress also includes probabilistic expected output from tracked active crafts.">
+                      <strong>{projectedCompletion}%</strong>
+                      <small>Projected after active crafts</small>
+                    </span>
+                  ) : null}
+                  <div className="craft-plan-progress-track"><i style={{ width: `${confirmedCompletion ?? 0}%` }} /></div>
+                  <em className="craft-plan-effort-note">Confirmed stock and guaranteed active crafts.</em>
+                  {effortView.stale ? (
+                    <div className="craft-plan-progress-stale" role="status">
+                      <AlertTriangle size={14} />
+                      <span>
+                        <strong>{effortView.lastSuccessfulAt ? `Last confirmed ${timeAgo(effortView.lastSuccessfulAt)}` : "Confirmed progress temporarily unavailable"}</strong>
+                        <small>{effortView.unavailableSources.length
+                          ? `Waiting for ${effortView.unavailableSources.map((source) => source.label).join(", ")}`
+                          : "Waiting for counted planner sources"}</small>
+                      </span>
+                    </div>
+                  ) : null}
+                  {effortView.baselineChange ? (
+                    <div className="craft-plan-baseline-change" role="status">
+                      <AlertTriangle size={14} />
+                      <span><strong>Plan baseline changed</strong><small>{effortView.baselineChange.reasons.join("; ") || "Configured plan inputs changed."}</small></span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
             {personalBoard.board.length ? <div className="craft-plan-section-filters" aria-label="Filter needs board by activity">
               <label className="craft-plan-needs-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search Needs Board items" value={needsSearch} onChange={(event) => setNeedsSearch(event.target.value)} placeholder="Search items" /></label>
               <label className="craft-plan-list-only"><input type="checkbox" checked={shortagesOnly} onChange={(event) => setShortagesOnly(event.target.checked)} /> Shortages only</label>
@@ -682,10 +725,14 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                     {NEED_COLUMNS.map((column) => <col className="craft-plan-needs-data-column" key={column} />)}
                   </colgroup>
                   {filteredNeedsBoard.map((group) => {
-                    const sectionCompletion = effortView.sections[group.section]?.completion ?? null;
+                    const sectionCompletion = effortView.confirmed.sections[group.section]?.completion ?? null;
+                    const projectedSectionCompletion = effortView.projected.sections[group.section]?.completion ?? null;
+                    const showProjectedSection = sectionCompletion != null
+                      && projectedSectionCompletion != null
+                      && projectedSectionCompletion > sectionCompletion;
                     return (
                     <tbody key={group.section}>
-                      <tr className="craft-plan-needs-section-row"><th><div className="craft-plan-needs-section-heading"><span className="craft-plan-needs-section-label">{group.section} <span className={sectionCompletion == null ? "is-unavailable" : completionTone(sectionCompletion)}>{sectionCompletion == null ? "Effort unavailable" : `${sectionCompletion}%`}</span></span>{group.section === "Fishing" ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
+                      <tr className="craft-plan-needs-section-row"><th><div className="craft-plan-needs-section-heading"><span className="craft-plan-needs-section-label">{group.section} <span className={sectionCompletion == null ? "is-unavailable" : completionTone(sectionCompletion)}>{sectionCompletion == null ? "Effort unavailable" : `${sectionCompletion}% confirmed`}</span>{showProjectedSection ? <span className="is-projected">{projectedSectionCompletion}% projected</span> : null}</span>{group.section === "Fishing" ? <div className="craft-plan-fishing-route" role="group" aria-label="Preferred fishing route">
                         <button type="button" className={normalizedFishingRoute === "ocean" ? "active" : ""} aria-pressed={normalizedFishingRoute === "ocean"} onClick={() => setFishingRoute("ocean")}>Ocean</button>
                         <button type="button" className={normalizedFishingRoute === "lake" ? "active" : ""} aria-pressed={normalizedFishingRoute === "lake"} onClick={() => setFishingRoute("lake")}>Lake</button>
                         {!personalBoard.available && personalBoard.reason ? <small role="status" aria-live="polite">{personalBoard.reason}</small> : null}

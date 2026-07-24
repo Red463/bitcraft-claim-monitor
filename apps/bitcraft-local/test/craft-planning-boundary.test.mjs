@@ -88,7 +88,7 @@ test("Craft Planning page renders read-only plan sections with an admin-only man
   assert.match(page, /filterNeedsBoard\(personalBoard\.board, selectedSections, shortagesOnly, needsSearch\)/);
   assert.match(page, /No matching items in the selected Needs Board filters/);
   assert.match(page, /Shortages only/);
-  assert.match(page, /effortView\.sections\[group\.section\]/);
+  assert.match(page, /effortView\.confirmed\.sections\[group\.section\]/);
   assert.doesNotMatch(page, /craft-plan-effort-warning/);
   assert.doesNotMatch(page, /effortView\.warnings(?:\[0\]|\.join)/);
   assert.doesNotMatch(page, /effortView\.overall\.completion == null && effortView\.warnings\[0\]/);
@@ -278,6 +278,19 @@ test("Craft Planning manager exposes a lazy, resilient audit history tab", () =>
   assert.match(manager, /enabled/);
   assert.match(manager, /disabled/);
   assert.match(manager, /setAuditLoaded\(false\)/);
+  assert.match(manager, /\/admin\/craft-plan\/progress-audit/);
+  assert.match(manager, /Progress diagnostics/);
+  assert.match(manager, /Last successful calculation/);
+  assert.match(manager, /Full checkpoints/);
+  assert.match(manager, /Recent progress events/);
+  assert.match(manager, /Download diagnostics/);
+  assert.match(manager, /\["24h", "3d", "7d", "all"\]/);
+  assert.match(manager, /progress-audit\/export\?range=/);
+  assert.match(manager, /URL\.createObjectURL/);
+  assert.match(manager, /URL\.revokeObjectURL/);
+  assert.match(manager, /Confirmed progress/);
+  assert.match(manager, /Projected progress/);
+  assert.match(manager, /Audit storage/);
 });
 
 test("Craft Planning manager renders presets as compact tier-only controls", () => {
@@ -409,7 +422,8 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /groupNeedCellSourceRoutes\(selectedNeed, detailSteps\)/);
   assert.match(page, /item\.hasSourceRoutes/);
   assert.match(page, /selectCraftPlanningEffortView/);
-  assert.match(page, /Effort complete/);
+  assert.match(page, /Confirmed progress/);
+  assert.match(page, /Projected after active crafts/);
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);

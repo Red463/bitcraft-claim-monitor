@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { inflateRawSync } from "node:zlib";
+import { gzipSync, inflateRawSync } from "node:zlib";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,18 @@ import {
   compactCraftPlanEffortInput,
   unavailableCraftPlanEffortProgress,
 } from "./src/server/craftPlanEffortProgress.mjs";
-import { createCraftPlanEffortBaselineCache, craftPlanEffortBaselineKey } from "./src/server/craftPlanEffortCache.mjs";
+import {
+  craftPlanBaselineConfig,
+  craftPlanBaselineRevision,
+  createCraftPlanEffortBaselineCache,
+  craftPlanEffortBaselineKey,
+} from "./src/server/craftPlanEffortCache.mjs";
+import {
+  buildCraftPlanProgressSnapshot,
+  createCraftPlanProgressAuditRepository,
+  normalizeCraftPlanAuditRange,
+  staleCraftPlanProgress,
+} from "./src/server/craftPlanProgressAudit.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
@@ -305,6 +316,11 @@ const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
 
 const statements = createPreparedStatements(db);
+const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
+  statements,
+  retentionDays: 14,
+});
+let craftPlanProgressAuditWriteWarning = null;
 const gameCatalogRepository = createGameCatalogRepository(db);
 const empireHexiteRepository = createEmpireHexiteRepository(db);
 const runEmpireHexiteRefreshJob = createEmpireHexiteRefreshJob({
@@ -2336,8 +2352,41 @@ async function computedCraftPlanResponse(claimId = getSettings().claimId, option
   return (await computedCraftPlanWorkspace(claimId, options)).plan;
 }
 
+async function craftPlanSourceResult(source, load) {
+  try {
+    return { source, value: await load(), error: "" };
+  } catch (error) {
+    return {
+      source,
+      value: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function computedCompactCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
   return (await computedCraftPlanWorkspace(claimId, options)).compact();
+}
+
+function craftPlanBaselineChangeSince(claimId, since = "") {
+  try {
+    const change = craftPlanProgressAudit.latestBaselineChange(claimId);
+    if (!change) return null;
+    const changedAt = new Date(change.changedAt ?? change.capturedAt).getTime();
+    const threshold = since ? new Date(since).getTime() : Number.NEGATIVE_INFINITY;
+    return Number.isFinite(changedAt) && (!Number.isFinite(threshold) || changedAt > threshold) ? change : null;
+  } catch (error) {
+    console.warn(`Craft Plan baseline audit read failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function craftPlanWithBaselineChange(plan, baselineChange) {
+  const { baselineChange: ignored, ...effortProgress } = plan?.effortProgress ?? {};
+  return {
+    ...plan,
+    effortProgress: baselineChange ? { ...effortProgress, baselineChange } : effortProgress,
+  };
 }
 
 async function computedCraftPlanWorkspace(claimId = getSettings().claimId, options = {}) {
@@ -2391,11 +2440,22 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     [],
     { requireValidatedProbabilities: true },
   );
-  const [inventoriesPayload, publicCraftsPayload, membersPayload] = await Promise.all([
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`, { forceRefresh }).catch(() => ({ buildings: [] })),
-    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
+  const [inventoriesResult, publicCraftsResult, membersPayload] = await Promise.all([
+    craftPlanSourceResult(
+      { sourceId: String(claimId), label: "Settlement inventories", type: "Settlement storage" },
+      () => fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`, { forceRefresh }),
+    ),
+    craftPlanSourceResult(
+      { sourceId: String(claimId), label: "Settlement active crafts", type: "Tracked crafts" },
+      () => fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }),
+    ),
     fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { forceRefresh }).catch(() => ({ members: [] })),
   ]);
+  const inventoriesPayload = inventoriesResult.value ?? { buildings: [] };
+  const publicCraftsPayload = publicCraftsResult.value ?? { craftResults: [] };
+  const sourceFailures = [inventoriesResult, publicCraftsResult]
+    .filter((result) => result.error)
+    .map((result) => ({ ...result.source, error: result.error }));
   const memberNames = new Map(unwrap(membersPayload, "members", []).map((member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     return [playerId, String(member.userName ?? member.username ?? playerId)];
@@ -2425,6 +2485,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   const passiveCraftSourceErrors = playerPassiveCraftResults
     .filter((result) => result.error)
     .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerName} passive crafts`, type: "Tracked passive crafts", error: result.error }));
+  sourceFailures.push(...craftSourceErrors, ...passiveCraftSourceErrors);
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const bankSources = [];
@@ -2445,11 +2506,20 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
       deployableSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.deployables, catalogWarnings));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      sourceFailures.push({
+        sourceId: playerId,
+        label: `${label} inventories`,
+        type: "Player inventories",
+        error: message,
+      });
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push({ sourceId: playerId, label: `${label} inventory`, type: "Player inventory", unavailable: true, error: message, items: [] });
       }
       if (bankPlayerIds.has(playerId)) {
         bankSources.push({ sourceId: `${playerId}:banks`, label: `${label} banks`, type: "Player bank", playerId, playerName: label, unavailable: true, error: message, items: [] });
+      }
+      if (config.sourceRules.deployableContainerIds.length) {
+        deployableSources.push({ sourceId: `${playerId}:deployables`, label: `${label} deployables`, type: "Player deployable", playerId, playerName: label, unavailable: true, error: message, items: [] });
       }
     }
   }
@@ -2474,11 +2544,13 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   }
   const catalogRevision = gameCatalogRepository.getEffortWeightRevision(CRAFT_PLAN_EFFORT_MODEL_VERSION);
   const weights = gameCatalogRepository.getEffortWeights(CRAFT_PLAN_EFFORT_MODEL_VERSION);
-  const baselineKey = craftPlanEffortBaselineKey(config, catalogRevision, CRAFT_PLAN_EFFORT_MODEL_VERSION);
+  const baselineRevision = craftPlanBaselineRevision(config, catalogRevision, CRAFT_PLAN_EFFORT_MODEL_VERSION);
+  const baselineConfig = craftPlanBaselineConfig(config);
+  const baselineKey = craftPlanEffortBaselineKey(baselineConfig, catalogRevision, CRAFT_PLAN_EFFORT_MODEL_VERSION);
   const baselineStartedAt = Date.now();
   const statsBefore = craftPlanEffortBaselineCache.stats();
   const baselinePlan = await craftPlanEffortBaselineCache.getOrCreate(baselineKey, async () => (
-    compactCraftPlanEffortInput(computeCraftPlan({ config, detailsByKey, catalogWarnings }))
+    compactCraftPlanEffortInput(computeCraftPlan({ config: baselineConfig, detailsByKey, catalogWarnings }))
   ));
   const baselineStats = craftPlanEffortBaselineCache.stats();
   if (baselineStats.misses > statsBefore.misses) plannerTelemetry.lastBaselineDurationMs = Date.now() - baselineStartedAt;
@@ -2487,14 +2559,112 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   plannerTelemetry.baselineInflightReuse = baselineStats.inflightReuse;
   plannerTelemetry.baselineEntries = baselineStats.entries;
   plannerTelemetry.baselineBytes = baselineStats.bytes;
-  livePlan.effortProgress = calculateCraftPlanEffortProgress({ baselinePlan, currentPlan: livePlan, weights });
+  livePlan.effortProgress = {
+    ...calculateCraftPlanEffortProgress({ baselinePlan, currentPlan: livePlan, weights }),
+    baselineRevision,
+  };
+
+  const sourceStatus = [
+    ...storageSources,
+    ...playerSources,
+    ...bankSources,
+    ...deployableSources,
+  ].map((source) => ({
+    sourceId: String(source?.sourceId ?? ""),
+    label: String(source?.label ?? source?.sourceId ?? "Planner source"),
+    type: String(source?.type ?? "Planner source"),
+    available: source?.unavailable !== true,
+    error: source?.unavailable ? String(source?.error ?? "Unavailable") : "",
+  }));
+  sourceStatus.push(
+    { ...inventoriesResult.source, available: !inventoriesResult.error, error: inventoriesResult.error },
+    { ...publicCraftsResult.source, available: !publicCraftsResult.error, error: publicCraftsResult.error },
+    ...playerCraftResults.map((result) => ({
+      sourceId: String(result.playerId),
+      label: `${memberNames.get(String(result.playerId)) ?? result.playerId} crafts`,
+      type: "Tracked crafts",
+      available: !result.error,
+      error: result.error,
+    })),
+    ...playerPassiveCraftResults.map((result) => ({
+      sourceId: String(result.playerId),
+      label: `${result.playerName} passive crafts`,
+      type: "Tracked passive crafts",
+      available: !result.error,
+      error: result.error,
+    })),
+  );
+
+  const capturedAt = new Date().toISOString();
+  if (!sourceFailures.length) {
+    livePlan.effortProgress.lastSuccessfulAt = capturedAt;
+    try {
+      const auditResult = craftPlanProgressAudit.recordSuccess(buildCraftPlanProgressSnapshot({
+        claimId,
+        plan: livePlan,
+        sourceStatus,
+        weights,
+        metadata: {
+          capturedAt,
+          appVersion,
+          buildId: currentAppBuildId(),
+          catalogRevision,
+          modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
+        },
+      }));
+      const recentBaselineCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const baselineChange = auditResult.baselineChange ?? craftPlanBaselineChangeSince(claimId, recentBaselineCutoff);
+      livePlan.effortProgress.baselineChange = baselineChange?.changedAt > recentBaselineCutoff ? baselineChange : null;
+      craftPlanProgressAuditWriteWarning = null;
+    } catch (error) {
+      craftPlanProgressAuditWriteWarning = {
+        at: capturedAt,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      };
+      console.warn(`Craft Plan progress audit write failed: ${craftPlanProgressAuditWriteWarning.error}`);
+    }
+  } else {
+    try {
+      craftPlanProgressAudit.recordFailure(claimId, sourceFailures, capturedAt);
+      craftPlanProgressAuditWriteWarning = null;
+    } catch (error) {
+      craftPlanProgressAuditWriteWarning = {
+        at: capturedAt,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      };
+      console.warn(`Craft Plan progress audit failure write failed: ${craftPlanProgressAuditWriteWarning.error}`);
+    }
+    let lastSuccess = null;
+    try {
+      lastSuccess = craftPlanProgressAudit.latestSuccess(claimId);
+    } catch (error) {
+      craftPlanProgressAuditWriteWarning = {
+        at: capturedAt,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      };
+      console.warn(`Craft Plan progress audit recovery read failed: ${craftPlanProgressAuditWriteWarning.error}`);
+    }
+    livePlan.effortProgress = lastSuccess?.effortProgress
+      ? staleCraftPlanProgress(lastSuccess.effortProgress, sourceFailures, capturedAt)
+      : unavailableCraftPlanEffortProgress();
+    livePlan.effortProgress.baselineChange = craftPlanBaselineChangeSince(
+      claimId,
+      new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    );
+    livePlan.unavailableSources = [
+      ...(Array.isArray(livePlan.unavailableSources) ? livePlan.unavailableSources : []),
+      ...sourceFailures,
+    ];
+  }
   return livePlan;
 }
 
 async function craftPlanDiscordReport(profession = "") {
   try {
     const plan = await computedCraftPlanResponse(getSettings().claimId);
-    return buildCraftPlanDiscordReport(plan, profession);
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const reportPlan = craftPlanWithBaselineChange(plan, craftPlanBaselineChangeSince(getSettings().claimId, cutoff));
+    return buildCraftPlanDiscordReport(reportPlan, profession);
   } catch (error) {
     return {
       ...buildUnavailableCraftPlanDiscordReport(),
@@ -2546,9 +2716,12 @@ async function dispatchScheduledCraftPlanReports() {
           try { plan = await computedCraftPlanResponse(getSettings().claimId); }
           catch { planUnavailable = true; }
         }
+        const lastSent = statements.latestSentDiscordCraftPlanReportOccurrence.get(rule.id);
+        const baselineChange = craftPlanBaselineChangeSince(getSettings().claimId, lastSent?.updated_at ?? "");
+        const reportPlan = plan ? craftPlanWithBaselineChange(plan, baselineChange) : null;
         const report = planUnavailable
           ? buildUnavailableCraftPlanDiscordReport()
-          : buildCraftPlanDiscordReport(plan, rule.reportType === "profession" ? rule.profession : "");
+          : buildCraftPlanDiscordReport(reportPlan, rule.reportType === "profession" ? rule.profession : "");
         await enqueueDiscordActivity("craft_plan_report", report.title, occurrence.scheduledAt, {
           sourceKey: `craft-plan-report:${rule.id}:${occurrence.key}`,
           ruleId: rule.id,
@@ -9893,6 +10066,31 @@ const server = createServer(async (req, res) => {
           .then((result) => audit(user, "craft_plan.catalog_refresh_completed", { key, metadata: result.metadata }))
           .catch((error) => console.warn(`Manual scheduled job ${key} failed: ${error instanceof Error ? error.message : String(error)}`));
         return send(res, 202, { ...craftPlanCatalogRefreshStatus(), result: { ok: true, key, started: true } });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/progress-audit") {
+        const claimId = getSettings().claimId;
+        return send(res, 200, {
+          status: {
+            ...craftPlanProgressAudit.status(claimId),
+            writeWarning: craftPlanProgressAuditWriteWarning,
+          },
+          events: craftPlanProgressAudit.listEvents(claimId, { limit: 100 }),
+        });
+      }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/progress-audit/export") {
+        if (!rateLimit(req, res, "craft-plan-progress-audit-export", RATE_LIMITS.expensiveLocal)) return;
+        let range;
+        try {
+          range = normalizeCraftPlanAuditRange(url.searchParams.get("range"), new Date().toISOString());
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : "Invalid audit range." });
+        }
+        const bundle = craftPlanProgressAudit.exportRange(getSettings().claimId, range);
+        const bytes = gzipSync(Buffer.from(JSON.stringify(bundle)));
+        return sendBinary(res, 200, bytes, "application/gzip", {
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="craft-plan-progress-audit-${range.label}.json.gz"`,
+        });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/audit") {
         const limit = craftPlanAuditLimit(url.searchParams.get("limit"));

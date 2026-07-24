@@ -90,7 +90,10 @@ test("Craft planning needs board uses one continuous compact matrix with status 
   assert.match(css, /\.craft-plan-need-cell\.is-blocked/);
   assert.match(css, /\.craft-plan-need-cell\.has-active/);
   assert.match(page, /selectCraftPlanningEffortView/);
-  assert.match(page, /Effort complete/);
+  assert.match(page, /Confirmed progress/);
+  assert.match(page, /Projected after active crafts/);
+  assert.match(page, /Last confirmed/);
+  assert.match(page, /Plan baseline changed/);
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);
@@ -100,6 +103,9 @@ test("Craft planning needs board uses one continuous compact matrix with status 
   assert.match(css, /\.craft-plan-needs-legend/);
   assert.match(css, /\.craft-plan-needs-legend \.covered \{ color: var\(--good\); \}/);
   assert.match(css, /\.craft-plan-needs-legend \.short \{ color: var\(--gold\); \}/);
+  assert.match(css, /\.craft-plan-progress-projected\s*\{/);
+  assert.match(css, /\.craft-plan-progress-stale\s*\{/);
+  assert.match(css, /\.craft-plan-baseline-change\s*\{/);
 });
 test("Craft planning section override dialog has a structured viewport modal header", () => {
   const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
@@ -171,6 +177,8 @@ test("Craft Planning audit history uses a compact responsive timeline", () => {
   assert.match(css, /\.craft-plan-audit-entry\s*\{[^}]*grid-template-columns:/);
   assert.match(css, /\.craft-plan-audit-change\.is-enabled/);
   assert.match(css, /\.craft-plan-audit-change\.is-disabled/);
+  assert.match(css, /\.craft-plan-progress-audit-summary\s*\{/);
+  assert.match(css, /\.craft-plan-progress-event\s*\{/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.craft-plan-audit-entry\s*\{[^}]*grid-template-columns:\s*1fr/);
 });
 

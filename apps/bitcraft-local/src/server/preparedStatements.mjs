@@ -75,7 +75,99 @@ export function createPreparedStatements(db) {
     INSERT INTO craft_plan_settings (plan_key, config_json, created_at, updated_at)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(plan_key) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at
-  `),  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
+  `),
+  insertCraftPlanProgressSnapshot: db.prepare(`
+    INSERT INTO craft_plan_progress_audit_snapshots (
+      claim_id, captured_at, baseline_revision, fingerprint, full_snapshot,
+      payload_gzip, app_version, build_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  latestCraftPlanProgressSnapshot: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_snapshots
+    WHERE claim_id = ?
+    ORDER BY captured_at DESC, id DESC
+    LIMIT 1
+  `),
+  latestCraftPlanProgressSnapshotBefore: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_snapshots
+    WHERE claim_id = ? AND captured_at <= ?
+    ORDER BY captured_at DESC, id DESC
+    LIMIT 1
+  `),
+  listLatestCraftPlanProgressSnapshots: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_snapshots
+    WHERE claim_id = ?
+    ORDER BY captured_at DESC, id DESC
+    LIMIT ?
+  `),
+  listCraftPlanProgressSnapshotsSince: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_snapshots
+    WHERE claim_id = ? AND captured_at >= ?
+    ORDER BY captured_at ASC, id ASC
+  `),
+  insertCraftPlanProgressEvent: db.prepare(`
+    INSERT INTO craft_plan_progress_audit_events (
+      claim_id, captured_at, baseline_revision, event_type, summary, payload_json
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  listCraftPlanProgressEvents: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_events
+    WHERE claim_id = ? AND captured_at >= ?
+    ORDER BY captured_at ASC, id ASC
+    LIMIT ?
+  `),
+  latestCraftPlanBaselineChange: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_events
+    WHERE claim_id = ? AND event_type = 'baseline_change'
+    ORDER BY captured_at DESC, id DESC
+    LIMIT 1
+  `),
+  upsertCraftPlanProgressAuditState: db.prepare(`
+    INSERT INTO craft_plan_progress_audit_state (
+      claim_id, last_fingerprint, last_payload_gzip, last_snapshot_id,
+      last_full_snapshot_at, last_success_at, last_failure_fingerprint,
+      last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(claim_id) DO UPDATE SET
+      last_fingerprint = excluded.last_fingerprint,
+      last_payload_gzip = excluded.last_payload_gzip,
+      last_snapshot_id = excluded.last_snapshot_id,
+      last_full_snapshot_at = excluded.last_full_snapshot_at,
+      last_success_at = excluded.last_success_at,
+      last_failure_fingerprint = excluded.last_failure_fingerprint,
+      last_error = excluded.last_error,
+      updated_at = excluded.updated_at
+  `),
+  getCraftPlanProgressAuditState: db.prepare(`
+    SELECT * FROM craft_plan_progress_audit_state WHERE claim_id = ?
+  `),
+  craftPlanProgressAuditCounts: db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM craft_plan_progress_audit_snapshots WHERE claim_id = ?) AS snapshot_count,
+      (SELECT COUNT(*) FROM craft_plan_progress_audit_events WHERE claim_id = ?) AS event_count,
+      COALESCE((SELECT SUM(LENGTH(payload_gzip)) FROM craft_plan_progress_audit_snapshots WHERE claim_id = ?), 0)
+        + COALESCE((SELECT SUM(LENGTH(payload_json)) FROM craft_plan_progress_audit_events WHERE claim_id = ?), 0)
+        AS stored_bytes
+  `),
+  pruneCraftPlanProgressSnapshots: db.prepare(`
+    DELETE FROM craft_plan_progress_audit_snapshots
+    WHERE id IN (
+      SELECT id FROM craft_plan_progress_audit_snapshots
+      WHERE captured_at < ?
+      ORDER BY id ASC
+      LIMIT ?
+    )
+  `),
+  pruneCraftPlanProgressEvents: db.prepare(`
+    DELETE FROM craft_plan_progress_audit_events
+    WHERE id IN (
+      SELECT id FROM craft_plan_progress_audit_events
+      WHERE captured_at < ?
+      ORDER BY id ASC
+      LIMIT ?
+    )
+  `),
+  dealWatchCountForUser: db.prepare("SELECT COUNT(*) AS count FROM market_deal_watches WHERE user_id = ? AND claim_id = ?"),
   dealWatchByUserItem: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?"),
   dealWatchByIdForUser: db.prepare("SELECT * FROM market_deal_watches WHERE id = ? AND user_id = ?"),
   listDealWatchesForUser: db.prepare("SELECT * FROM market_deal_watches WHERE user_id = ? AND claim_id = ? ORDER BY enabled DESC, updated_at DESC"),
@@ -336,6 +428,7 @@ export function createPreparedStatements(db) {
     VALUES (?, ?, ?, 'claimed', ?, ?)
   `),
   getDiscordCraftPlanReportOccurrence: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ?"),
+  latestSentDiscordCraftPlanReportOccurrence: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND status = 'sent' ORDER BY updated_at DESC LIMIT 1"),
   deleteDiscordCraftPlanReportOccurrence: db.prepare("DELETE FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ? AND status = 'claimed'"),
   updateDiscordCraftPlanReportOccurrence: db.prepare("UPDATE discord_craft_plan_report_occurrences SET status = ?, discord_message_id = ?, last_error = ?, updated_at = ? WHERE rule_id = ? AND occurrence_key = ?"),
   recentDiscordCraftPlanReportOccurrences: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences ORDER BY scheduled_at DESC LIMIT ?"),

@@ -27,6 +27,9 @@ test("Craft Planner commands acknowledge before calculating and run after the re
 test("server dispatches deduplicated scheduled Craft Planner reports", () => {
   assert.match(server, /dispatchScheduledCraftPlanReports/);
   assert.match(server, /claimDiscordCraftPlanReportOccurrence/);
+  assert.match(server, /latestSentDiscordCraftPlanReportOccurrence/);
+  assert.match(server, /craftPlanBaselineChangeSince/);
+  assert.match(server, /24 \* 60 \* 60 \* 1000/);
   assert.match(server, /craft_plan_report/);
   assert.match(server, /setInterval\(dispatchScheduledCraftPlanReports, 60 \* 1000\)/);
 });

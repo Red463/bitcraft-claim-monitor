@@ -52,6 +52,8 @@ export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/access-control") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/craft-plan/catalog-refresh") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/craft-plan/audit") return "audit.view";
+  if (pathname === "/api/local/admin/craft-plan/progress-audit") return "audit.view";
+  if (pathname === "/api/local/admin/craft-plan/progress-audit/export") return "data.export";
   if (pathname === "/api/local/admin/craft-plan") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/poll" || pathname === "/api/local/admin/collect-now" || pathname === "/api/local/admin/diagnostics") return "data.manage";
   if (pathname.startsWith("/api/local/admin/jobs")) return method === "GET" ? "status.view" : "data.manage";
