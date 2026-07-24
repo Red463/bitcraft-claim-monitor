@@ -428,6 +428,7 @@ export function createPreparedStatements(db) {
     VALUES (?, ?, ?, 'claimed', ?, ?)
   `),
   getDiscordCraftPlanReportOccurrence: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ?"),
+  latestSentDiscordCraftPlanReportOccurrence: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND status = 'sent' ORDER BY updated_at DESC LIMIT 1"),
   deleteDiscordCraftPlanReportOccurrence: db.prepare("DELETE FROM discord_craft_plan_report_occurrences WHERE rule_id = ? AND occurrence_key = ? AND status = 'claimed'"),
   updateDiscordCraftPlanReportOccurrence: db.prepare("UPDATE discord_craft_plan_report_occurrences SET status = ?, discord_message_id = ?, last_error = ?, updated_at = ? WHERE rule_id = ? AND occurrence_key = ?"),
   recentDiscordCraftPlanReportOccurrences: db.prepare("SELECT * FROM discord_craft_plan_report_occurrences ORDER BY scheduled_at DESC LIMIT ?"),

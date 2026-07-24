@@ -46,6 +46,7 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     "markDiscordNotificationFailed",
     "claimDiscordCraftPlanReportOccurrence",
     "getDiscordCraftPlanReportOccurrence",
+    "latestSentDiscordCraftPlanReportOccurrence",
     "deleteDiscordCraftPlanReportOccurrence",
     "pruneDiscordCraftPlanReportOccurrences",
     "setDiscordYouTubeChannelDiscordChannel",

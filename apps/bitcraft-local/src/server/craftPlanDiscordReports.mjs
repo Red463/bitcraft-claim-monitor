@@ -93,6 +93,15 @@ function relevantMaterials(plan = {}) {
   });
 }
 
+function reportMaterialKey(material = {}) {
+  const key = String(material.key ?? "").trim();
+  if (key) return key;
+  const id = String(material.id ?? material.itemId ?? "").trim();
+  if (!id) return "";
+  const kind = String(material.kind ?? (Number(material.itemType) === 1 ? "cargo" : "items"));
+  return `${kind}:${id}`;
+}
+
 export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "") {
   if (!plan.enabled) return { state: "disabled", title: craftPlanReportTitle(plan), message: "Craft Planner is disabled." };
   if (!Array.isArray(plan.targets) || plan.targets.length === 0) return { state: "empty", title: craftPlanReportTitle(plan), message: "Craft Planner has no configured targets." };
@@ -102,15 +111,27 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
 
   const all = relevantMaterials(plan);
   const selected = profession ? all.filter((material) => materialProfession(material) === profession) : all;
+  const hasConfirmedMaterials = Array.isArray(plan.confirmedEffortPlan?.materials);
+  const confirmedMaterials = relevantMaterials({
+    ...plan,
+    materials: hasConfirmedMaterials ? plan.confirmedEffortPlan.materials : plan.materials,
+  });
+  const confirmedByKey = new Map(confirmedMaterials.map((material) => [reportMaterialKey(material), material]).filter(([key]) => key));
+  const confirmedFor = (entries) => hasConfirmedMaterials
+    ? entries.map((material) => confirmedByKey.get(reportMaterialKey(material)) ?? material)
+    : entries;
   if (profession && selected.length === 0) return { state: "empty_profession", title, message: `${profession} has no requirements in the current plan.`, profession };
 
-  const effort = plan.effortProgress?.fishingVariants?.ocean ?? plan.effortProgress;
-  const overallEffort = profession ? effortSectionForProfession(effort, profession) : effort?.overall;
-  if (!effort || overallEffort?.completion == null) {
+  const effortStatus = plan.effortProgress ?? {};
+  const effort = effortStatus?.fishingVariants?.ocean ?? effortStatus;
+  const confirmedEffort = effort?.confirmed ?? effortStatus?.confirmed ?? effort;
+  const projectedEffort = effort?.projected ?? effortStatus?.projected ?? confirmedEffort;
+  const overallEffort = profession ? effortSectionForProfession(confirmedEffort, profession) : confirmedEffort?.overall;
+  if (!confirmedEffort || overallEffort?.completion == null) {
     return {
       state: "unavailable",
       title,
-      message: boundedEffortWarning(plan.effortProgress),
+      message: boundedEffortWarning(effortStatus),
       ...(profession ? { profession } : {}),
     };
   }
@@ -123,12 +144,12 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     byProfession.get(name).push(material);
   }
   const professionEntries = [...byProfession.entries()].filter(([name]) => !profession || name === profession);
-  const unresolvedProfession = professionEntries.some(([name]) => effortSectionForProfession(effort, name)?.completion == null);
+  const unresolvedProfession = professionEntries.some(([name]) => effortSectionForProfession(confirmedEffort, name)?.completion == null);
   if (unresolvedProfession) {
     return {
       state: "unavailable",
       title,
-      message: boundedEffortWarning(plan.effortProgress),
+      message: boundedEffortWarning(effortStatus),
       ...(profession ? { profession } : {}),
     };
   }
@@ -137,10 +158,34 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     .filter((item) => item.missing > 0)
     .sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name))
     .slice(0, profession ? 10 : 5);
-  const overall = { ...summarize(selected), completion: number(overallEffort.completion) };
+  const projectedOverallEffort = profession ? effortSectionForProfession(projectedEffort, profession) : projectedEffort?.overall;
+  const selectedSummary = summarize(selected);
+  const confirmedSummary = summarize(confirmedFor(selected));
+  const overall = {
+    ...confirmedSummary,
+    ...(selectedSummary.estimatedCraftOutput > 0 ? { estimatedCraftOutput: selectedSummary.estimatedCraftOutput } : {}),
+    completion: number(overallEffort.completion),
+    ...(projectedOverallEffort?.completion != null && number(projectedOverallEffort.completion) > number(overallEffort.completion)
+      ? { projectedCompletion: number(projectedOverallEffort.completion) }
+      : {}),
+  };
   const professions = professionEntries
-    .map(([name, entries]) => ({ name, ...summarize(entries), completion: number(effortSectionForProfession(effort, name).completion) }))
+    .map(([name, entries]) => {
+      const confirmed = effortSectionForProfession(confirmedEffort, name);
+      const projected = effortSectionForProfession(projectedEffort, name);
+      return {
+        name,
+        ...summarize(confirmedFor(entries)),
+        completion: number(confirmed.completion),
+        ...(projected?.completion != null && number(projected.completion) > number(confirmed.completion)
+          ? { projectedCompletion: number(projected.completion) }
+          : {}),
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
+  const unavailableSources = (Array.isArray(effortStatus.unavailableSources) ? effortStatus.unavailableSources : [])
+    .map((source) => safeDiscordText(source?.label ?? source?.sourceId ?? "Planner source", 100))
+    .filter(Boolean);
 
   return {
     state: shortages.length === 0 ? "complete" : "ready",
@@ -149,7 +194,21 @@ export function buildCraftPlanDiscordReport(plan = {}, requestedProfession = "")
     overall,
     professions,
     shortages,
-    ...(effortSectionForProfession(effort, "Fishing") || plan.effortProgress?.fishingVariants?.ocean ? { fishingRoute: "ocean" } : {}),
+    ...(effortStatus.stale ? {
+      stale: true,
+      lastSuccessfulAt: String(effortStatus.lastSuccessfulAt ?? ""),
+      unavailableSources,
+    } : {}),
+    ...(effortStatus.baselineChange ? {
+      baselineChange: {
+        changedAt: String(effortStatus.baselineChange.changedAt ?? ""),
+        reasons: (Array.isArray(effortStatus.baselineChange.reasons) ? effortStatus.baselineChange.reasons : [])
+          .map((reason) => safeDiscordText(reason, 180))
+          .filter(Boolean)
+          .slice(0, 5),
+      },
+    } : {}),
+    ...(effortSectionForProfession(confirmedEffort, "Fishing") || plan.effortProgress?.fishingVariants?.ocean ? { fishingRoute: "ocean" } : {}),
     calculatedAt: String(plan.totals?.calculatedAt ?? plan.calculatedAt ?? new Date().toISOString()),
   };
 }
@@ -281,7 +340,10 @@ export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https:
       allowed_mentions: { parse: [] },
     };
   }
-  const summary = `${progressSummary(report.overall)}\nEffort complete from confirmed stock and guaranteed active crafts`;
+  const summary = `${progressSummary(report.overall)}\nConfirmed progress from stock and guaranteed active crafts`;
+  const projectedNote = number(report.overall.projectedCompletion) > number(report.overall.completion)
+    ? `Projected after active crafts: ${progressSummary({ completion: report.overall.projectedCompletion })}`
+    : "";
   const coverage = `${Math.round(number(report.overall.covered)).toLocaleString()} of ${Math.round(number(report.overall.required)).toLocaleString()} units covered`;
   const requirements = `${Math.round(number(report.overall.completedItems)).toLocaleString()} of ${Math.round(number(report.overall.totalItems)).toLocaleString()} requirements complete`;
   const professionFields = report.profession ? [] : (report.professions ?? []).map((entry) => ({
@@ -294,7 +356,13 @@ export function buildCraftPlanDiscordEmbed(report = {}, { dashboardUrl = "https:
     ? `*${Math.floor(number(report.overall.estimatedCraftOutput)).toLocaleString()} estimated active-craft items are shown but not counted toward progress.*`
     : "";
   const routeNote = report.fishingRoute === "ocean" ? "Fishing route: Ocean" : "";
-  const description = [summary, coverage, requirements, routeNote, estimateNote, `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
+  const staleNote = report.stale
+    ? `⚠️ Showing the last complete calculation${report.lastSuccessfulAt ? ` from <t:${Math.floor(new Date(report.lastSuccessfulAt).getTime() / 1000)}:R>` : ""}${report.unavailableSources?.length ? `; waiting for ${report.unavailableSources.join(", ")}` : ""}.`
+    : "";
+  const baselineNote = report.baselineChange?.reasons?.length
+    ? `ℹ️ Plan baseline changed: ${report.baselineChange.reasons.join("; ")}.`
+    : "";
+  const description = [summary, projectedNote, coverage, requirements, routeNote, estimateNote, staleNote, baselineNote, `\n[Open Craft Planner](${dashboardUrl})`].filter(Boolean).join("\n").slice(0, 4000);
   return {
     embeds: [{
       title: safeDiscordText(report.title || "Crafting Progress", 256),

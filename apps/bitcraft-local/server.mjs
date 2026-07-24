@@ -2368,6 +2368,27 @@ async function computedCompactCraftPlanResponse(claimId = getSettings().claimId,
   return (await computedCraftPlanWorkspace(claimId, options)).compact();
 }
 
+function craftPlanBaselineChangeSince(claimId, since = "") {
+  try {
+    const change = craftPlanProgressAudit.latestBaselineChange(claimId);
+    if (!change) return null;
+    const changedAt = new Date(change.changedAt ?? change.capturedAt).getTime();
+    const threshold = since ? new Date(since).getTime() : Number.NEGATIVE_INFINITY;
+    return Number.isFinite(changedAt) && (!Number.isFinite(threshold) || changedAt > threshold) ? change : null;
+  } catch (error) {
+    console.warn(`Craft Plan baseline audit read failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+function craftPlanWithBaselineChange(plan, baselineChange) {
+  const { baselineChange: ignored, ...effortProgress } = plan?.effortProgress ?? {};
+  return {
+    ...plan,
+    effortProgress: baselineChange ? { ...effortProgress, baselineChange } : effortProgress,
+  };
+}
+
 async function computedCraftPlanWorkspace(claimId = getSettings().claimId, options = {}) {
   const normalizedClaimId = String(claimId ?? "").trim();
   const now = Date.now();
@@ -2591,8 +2612,9 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
           modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
         },
       }));
-      livePlan.effortProgress.baselineChange = auditResult.baselineChange
-        ?? craftPlanProgressAudit.latestBaselineChange(claimId);
+      const recentBaselineCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const baselineChange = auditResult.baselineChange ?? craftPlanBaselineChangeSince(claimId, recentBaselineCutoff);
+      livePlan.effortProgress.baselineChange = baselineChange?.changedAt > recentBaselineCutoff ? baselineChange : null;
       craftPlanProgressAuditWriteWarning = null;
     } catch (error) {
       craftPlanProgressAuditWriteWarning = {
@@ -2612,10 +2634,23 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
       };
       console.warn(`Craft Plan progress audit failure write failed: ${craftPlanProgressAuditWriteWarning.error}`);
     }
-    const lastSuccess = craftPlanProgressAudit.latestSuccess(claimId);
+    let lastSuccess = null;
+    try {
+      lastSuccess = craftPlanProgressAudit.latestSuccess(claimId);
+    } catch (error) {
+      craftPlanProgressAuditWriteWarning = {
+        at: capturedAt,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      };
+      console.warn(`Craft Plan progress audit recovery read failed: ${craftPlanProgressAuditWriteWarning.error}`);
+    }
     livePlan.effortProgress = lastSuccess?.effortProgress
       ? staleCraftPlanProgress(lastSuccess.effortProgress, sourceFailures, capturedAt)
       : unavailableCraftPlanEffortProgress();
+    livePlan.effortProgress.baselineChange = craftPlanBaselineChangeSince(
+      claimId,
+      new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    );
     livePlan.unavailableSources = [
       ...(Array.isArray(livePlan.unavailableSources) ? livePlan.unavailableSources : []),
       ...sourceFailures,
@@ -2627,7 +2662,9 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
 async function craftPlanDiscordReport(profession = "") {
   try {
     const plan = await computedCraftPlanResponse(getSettings().claimId);
-    return buildCraftPlanDiscordReport(plan, profession);
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const reportPlan = craftPlanWithBaselineChange(plan, craftPlanBaselineChangeSince(getSettings().claimId, cutoff));
+    return buildCraftPlanDiscordReport(reportPlan, profession);
   } catch (error) {
     return {
       ...buildUnavailableCraftPlanDiscordReport(),
@@ -2679,9 +2716,12 @@ async function dispatchScheduledCraftPlanReports() {
           try { plan = await computedCraftPlanResponse(getSettings().claimId); }
           catch { planUnavailable = true; }
         }
+        const lastSent = statements.latestSentDiscordCraftPlanReportOccurrence.get(rule.id);
+        const baselineChange = craftPlanBaselineChangeSince(getSettings().claimId, lastSent?.updated_at ?? "");
+        const reportPlan = plan ? craftPlanWithBaselineChange(plan, baselineChange) : null;
         const report = planUnavailable
           ? buildUnavailableCraftPlanDiscordReport()
-          : buildCraftPlanDiscordReport(plan, rule.reportType === "profession" ? rule.profession : "");
+          : buildCraftPlanDiscordReport(reportPlan, rule.reportType === "profession" ? rule.profession : "");
         await enqueueDiscordActivity("craft_plan_report", report.title, occurrence.scheduledAt, {
           sourceKey: `craft-plan-report:${rule.id}:${occurrence.key}`,
           ruleId: rule.id,

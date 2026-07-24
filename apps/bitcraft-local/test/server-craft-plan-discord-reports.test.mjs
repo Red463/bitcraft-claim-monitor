@@ -69,6 +69,59 @@ test("Discord overview uses server effort progress", () => {
   assert.equal(report.fishingRoute, "ocean");
 });
 
+test("Discord reports lead with confirmed progress and explain projected, stale, and baseline states", () => {
+  const confirmed = makeEffortProgress({ overall: 72.5, Forestry: 70, Carpentry: 60, Tailoring: 50 });
+  const projected = makeEffortProgress({ overall: 78.5, Forestry: 76, Carpentry: 64, Tailoring: 55 });
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials,
+    effortProgress: {
+      ...confirmed,
+      confirmed,
+      projected,
+      stale: true,
+      lastSuccessfulAt: "2026-07-24T08:00:00.000Z",
+      unavailableSources: [{ label: "Mosswick storage" }],
+      baselineChange: { reasons: ["Selected routes changed"], changedAt: "2026-07-24T07:00:00.000Z" },
+    },
+  });
+
+  assert.equal(report.overall.completion, 72.5);
+  assert.equal(report.overall.projectedCompletion, 78.5);
+  assert.equal(report.stale, true);
+  assert.deepEqual(report.unavailableSources, ["Mosswick storage"]);
+  assert.deepEqual(report.baselineChange.reasons, ["Selected routes changed"]);
+  const description = buildCraftPlanDiscordEmbed(report).embeds[0].description;
+  assert.match(description, /Confirmed progress/);
+  assert.match(description, /Projected after active crafts/);
+  assert.match(description, /last complete calculation/i);
+  assert.match(description, /Selected routes changed/);
+});
+
+test("Discord coverage counts use the confirmed-only material plan", () => {
+  const report = buildCraftPlanDiscordReport({
+    enabled: true,
+    targets: [{}],
+    materials: [{
+      key: "items:1", name: "Ink", section: "Scholar", required: 100, available: 20,
+      guaranteedInProgress: 10, estimatedInProgress: 40, missing: 30, hasRecipeUsages: true,
+    }],
+    confirmedEffortPlan: {
+      materials: [{
+        key: "items:1", name: "Ink", section: "Scholar", required: 140, available: 20,
+        guaranteedInProgress: 10, estimatedInProgress: 0, missing: 110, hasRecipeUsages: true,
+      }],
+    },
+    effortProgress: makeEffortProgress({ overall: 25, Scholar: 25 }),
+  });
+
+  assert.equal(report.overall.required, 140);
+  assert.equal(report.overall.covered, 30);
+  assert.equal(report.overall.estimatedCraftOutput, 40);
+  assert.equal(report.shortages[0].missing, 30);
+});
+
 test("Discord refuses a raw fallback when effort is unavailable", () => {
   const report = buildCraftPlanDiscordReport({
     enabled: true,
