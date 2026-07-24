@@ -88,3 +88,162 @@ test("unchanged rosters update in place and preserve the baseline", () => {
   );
   db.close();
 });
+
+test("departures require two complete omissions and recovery cancels suspicion", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  repo.syncRoster({ ...roster, observedAt: "2026-07-24T12:00:00.000Z" });
+
+  const aliceOnly = {
+    ...roster,
+    members: roster.members.filter((member) => member.playerEntityId === "player-1"),
+  };
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-24T12:01:00.000Z" });
+  assert.equal(
+    db.prepare("SELECT missing_checks FROM empire_membership_periods WHERE player_entity_id = 'player-2'").get()
+      .missing_checks,
+    1,
+  );
+
+  repo.syncRoster({ ...roster, observedAt: "2026-07-24T12:02:00.000Z" });
+  assert.equal(
+    db.prepare("SELECT missing_checks FROM empire_membership_periods WHERE player_entity_id = 'player-2'").get()
+      .missing_checks,
+    0,
+  );
+
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-24T12:03:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-24T12:04:00.000Z" });
+  const departed = db
+    .prepare("SELECT * FROM empire_membership_periods WHERE player_entity_id = 'player-2'")
+    .get();
+  assert.equal(departed.observed_left_at, "2026-07-24T12:03:00.000Z");
+  assert.equal(departed.departure_confirmed_at, "2026-07-24T12:04:00.000Z");
+  assert.equal(departed.end_reason, "departure");
+  db.close();
+});
+
+test("a confirmed return creates a rejoin and hides the old departure", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  const aliceOnly = {
+    ...roster,
+    members: roster.members.filter((member) => member.playerEntityId === "player-1"),
+  };
+  repo.syncRoster({ ...roster, observedAt: "2026-07-01T12:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-02T12:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-02T12:01:00.000Z" });
+  repo.syncRoster({ ...roster, observedAt: "2026-07-03T12:00:00.000Z" });
+
+  const periods = db
+    .prepare("SELECT * FROM empire_membership_periods WHERE player_entity_id = 'player-2' ORDER BY id")
+    .all();
+  assert.equal(periods.length, 2);
+  assert.equal(periods[1].rejoin, 1);
+  assert.equal(periods[1].observed_joined_at, "2026-07-03T12:00:00.000Z");
+  assert.equal(repo.adminView({ now: "2026-07-24T12:00:00.000Z" }).departedMembers.length, 0);
+  db.close();
+});
+
+test("changing empire ends the prior session without recording departures", () => {
+  const { db, repository: repo } = repository();
+  const cairn = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  repo.syncRoster({ ...cairn, observedAt: "2026-07-24T12:00:00.000Z" });
+  repo.syncRoster({
+    empireId: "empire-2",
+    empireName: "Second Empire",
+    members: [{ playerEntityId: "player-9", playerName: "Nina" }],
+    observedAt: "2026-07-24T13:00:00.000Z",
+  });
+
+  const oldRows = db
+    .prepare("SELECT end_reason, observed_left_at FROM empire_membership_periods WHERE empire_id = 'empire-1'")
+    .all();
+  assert.equal(
+    oldRows.every((row) => row.end_reason === "tracking_ended" && row.observed_left_at === null),
+    true,
+  );
+  assert.equal(repo.adminView({ now: "2026-07-24T13:01:00.000Z" }).tracking.empireId, "empire-2");
+  db.close();
+});
+
+test("stopping tracking is idempotent and does not invent departures", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  repo.syncRoster({ ...roster, observedAt: "2026-07-24T12:00:00.000Z" });
+
+  assert.deepEqual(repo.stopTracking({ observedAt: "2026-07-24T13:00:00.000Z" }), {
+    stopped: true,
+    endedPeriods: 2,
+  });
+  assert.deepEqual(repo.stopTracking({ observedAt: "2026-07-24T13:01:00.000Z" }), {
+    stopped: false,
+    endedPeriods: 0,
+  });
+  assert.equal(
+    db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM empire_membership_periods WHERE end_reason = 'tracking_ended' AND observed_left_at IS NULL",
+      )
+      .get().count,
+    2,
+  );
+  db.close();
+});
+
+test("weekly cleanup removes only ended periods older than 365 days", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  repo.syncRoster({ ...roster, observedAt: "2025-07-01T00:00:00.000Z" });
+  repo.stopTracking({ observedAt: "2025-07-02T00:00:00.000Z" });
+  const result = repo.syncRoster({ ...roster, observedAt: "2026-07-24T00:00:00.000Z" });
+  assert.equal(result.pruned, 2);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM empire_membership_periods WHERE period_ended_at IS NULL").get()
+      .count,
+    2,
+  );
+  db.close();
+});
+
+test("admin view reports current states and latest absent departures", () => {
+  const { db, repository: repo } = repository();
+  const roster = normalizeEmpireMembershipRoster(initialPayload, "empire-1");
+  const aliceOnly = {
+    ...roster,
+    members: roster.members.filter((member) => member.playerEntityId === "player-1"),
+  };
+  repo.syncRoster({ ...roster, observedAt: "2026-06-01T12:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-20T12:00:00.000Z" });
+  repo.syncRoster({ ...aliceOnly, observedAt: "2026-07-20T12:01:00.000Z" });
+  repo.syncRoster({
+    ...aliceOnly,
+    members: [
+      ...aliceOnly.members,
+      { playerEntityId: "player-3", playerName: "Cara" },
+    ],
+    observedAt: "2026-07-21T12:00:00.000Z",
+  });
+
+  const view = repo.adminView({ now: "2026-07-24T12:00:00.000Z" });
+  assert.equal(view.tracking.empireName, "Cairn");
+  assert.deepEqual(view.summary, {
+    currentMembers: 2,
+    joinedLast30Days: 1,
+    departedLast30Days: 1,
+    rejoinsLast30Days: 0,
+  });
+  assert.deepEqual(
+    view.currentMembers.map((member) => [member.playerName, member.membershipStatus]),
+    [
+      ["Cara", "joined"],
+      ["Alice", "initial"],
+    ],
+  );
+  assert.deepEqual(
+    view.departedMembers.map((member) => [member.playerName, member.observedLeftAt, member.previousStatus]),
+    [["Bob", "2026-07-20T12:00:00.000Z", "joined"]],
+  );
+  assert.equal(view.retentionDays, 365);
+  db.close();
+});

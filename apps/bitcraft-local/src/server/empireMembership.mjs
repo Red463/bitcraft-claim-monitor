@@ -81,6 +81,13 @@ export function createEmpireMembershipRepository(db) {
           updated_at = ?
       WHERE id = ?
     `),
+    endSession: db.prepare(`
+      UPDATE empire_membership_tracking
+      SET tracking_ended_at = ?,
+          updated_at = ?
+      WHERE id = ?
+        AND tracking_ended_at IS NULL
+    `),
     openPeriods: db.prepare(`
       SELECT *
       FROM empire_membership_periods
@@ -113,7 +120,94 @@ export function createEmpireMembershipRepository(db) {
           updated_at = ?
       WHERE id = ?
     `),
+    markFirstMissing: db.prepare(`
+      UPDATE empire_membership_periods
+      SET first_missing_at = ?,
+          missing_checks = 1,
+          updated_at = ?
+      WHERE id = ?
+    `),
+    confirmDeparture: db.prepare(`
+      UPDATE empire_membership_periods
+      SET observed_left_at = ?,
+          departure_confirmed_at = ?,
+          period_ended_at = ?,
+          end_reason = 'departure',
+          updated_at = ?
+      WHERE id = ?
+    `),
+    endOpenPeriods: db.prepare(`
+      UPDATE empire_membership_periods
+      SET period_ended_at = ?,
+          end_reason = 'tracking_ended',
+          observed_left_at = NULL,
+          departure_confirmed_at = NULL,
+          updated_at = ?
+      WHERE tracking_session_id = ?
+        AND period_ended_at IS NULL
+    `),
+    previousPeriod: db.prepare(`
+      SELECT id
+      FROM empire_membership_periods
+      WHERE empire_id = ?
+        AND player_entity_id = ?
+      LIMIT 1
+    `),
+    latestCleanup: db.prepare(`
+      SELECT MAX(last_cleanup_at) AS last_cleanup_at
+      FROM empire_membership_tracking
+    `),
+    pruneEndedPeriods: db.prepare(`
+      DELETE FROM empire_membership_periods
+      WHERE period_ended_at IS NOT NULL
+        AND period_ended_at < ?
+    `),
+    markCleanup: db.prepare(`
+      UPDATE empire_membership_tracking
+      SET last_cleanup_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `),
+    currentPeriods: db.prepare(`
+      SELECT *
+      FROM empire_membership_periods
+      WHERE tracking_session_id = ?
+        AND period_ended_at IS NULL
+    `),
+    departedPeriods: db.prepare(`
+      SELECT *
+      FROM empire_membership_periods
+      WHERE empire_id = ?
+        AND end_reason = 'departure'
+        AND observed_left_at IS NOT NULL
+      ORDER BY observed_left_at DESC, id DESC
+    `),
   };
+
+  function cleanupIfDue(sessionId, observedAt) {
+    const lastCleanupAt = statements.latestCleanup.get()?.last_cleanup_at;
+    const observedMs = Date.parse(observedAt);
+    const cleanupIntervalMs = EMPIRE_MEMBERSHIP_CLEANUP_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+    if (
+      lastCleanupAt &&
+      Number.isFinite(observedMs) &&
+      observedMs - Date.parse(lastCleanupAt) < cleanupIntervalMs
+    ) {
+      return 0;
+    }
+    const cutoff = new Date(
+      observedMs - EMPIRE_MEMBERSHIP_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const pruned = Number(statements.pruneEndedPeriods.run(cutoff).changes);
+    statements.markCleanup.run(observedAt, observedAt, sessionId);
+    return pruned;
+  }
+
+  function endSession(sessionId, observedAt) {
+    const endedPeriods = Number(statements.endOpenPeriods.run(observedAt, observedAt, sessionId).changes);
+    statements.endSession.run(observedAt, observedAt, sessionId);
+    return endedPeriods;
+  }
 
   function createBaseline({ empireId, empireName, members, observedAt }) {
     const insert = statements.insertSession.run(empireId, empireName, observedAt, observedAt, observedAt);
@@ -134,6 +228,7 @@ export function createEmpireMembershipRepository(db) {
       );
     }
     statements.markSessionComplete.run(empireName, observedAt, observedAt, sessionId);
+    const pruned = cleanupIfDue(sessionId, observedAt);
     return {
       sessionId,
       initialRoster: true,
@@ -141,7 +236,7 @@ export function createEmpireMembershipRepository(db) {
       updated: 0,
       suspected: 0,
       closed: 0,
-      pruned: 0,
+      pruned,
       currentMembers: members.length,
     };
   }
@@ -153,27 +248,61 @@ export function createEmpireMembershipRepository(db) {
         return createBaseline({ empireId, empireName, members, observedAt });
       }
       if (activeSession.empire_id !== empireId) {
-        throw new Error("Cannot synchronize a different empire while tracking is active");
+        endSession(activeSession.id, observedAt);
+        return createBaseline({ empireId, empireName, members, observedAt });
       }
 
       const membersById = new Map(members.map((member) => [member.playerEntityId, member]));
       let updated = 0;
+      let suspected = 0;
+      let closed = 0;
+      let created = 0;
       for (const period of statements.openPeriods.all(activeSession.id)) {
         const member = membersById.get(period.player_entity_id);
-        if (!member) continue;
-        statements.markSeen.run(member.playerName, observedAt, observedAt, period.id);
-        updated += 1;
+        if (member) {
+          statements.markSeen.run(member.playerName, observedAt, observedAt, period.id);
+          membersById.delete(period.player_entity_id);
+          updated += 1;
+          continue;
+        }
+        if (Number(period.missing_checks) < 1) {
+          statements.markFirstMissing.run(observedAt, observedAt, period.id);
+          suspected += 1;
+          continue;
+        }
+        const leftAt = period.first_missing_at || observedAt;
+        statements.confirmDeparture.run(leftAt, observedAt, leftAt, observedAt, period.id);
+        closed += 1;
+      }
+
+      for (const member of membersById.values()) {
+        const rejoin = statements.previousPeriod.get(empireId, member.playerEntityId) ? 1 : 0;
+        statements.insertPeriod.run(
+          activeSession.id,
+          empireId,
+          member.playerEntityId,
+          member.playerName,
+          observedAt,
+          observedAt,
+          observedAt,
+          0,
+          rejoin,
+          observedAt,
+          observedAt,
+        );
+        created += 1;
       }
       statements.markSessionComplete.run(empireName, observedAt, observedAt, activeSession.id);
+      const pruned = cleanupIfDue(activeSession.id, observedAt);
 
       return {
         sessionId: activeSession.id,
         initialRoster: false,
-        created: 0,
+        created,
         updated,
-        suspected: 0,
-        closed: 0,
-        pruned: 0,
+        suspected,
+        closed,
+        pruned,
         currentMembers: Number(
           db
             .prepare(
@@ -187,20 +316,98 @@ export function createEmpireMembershipRepository(db) {
 
   return {
     syncRoster,
-    stopTracking() {
-      return { stopped: false, endedPeriods: 0 };
+    stopTracking({ observedAt }) {
+      return transaction(db, () => {
+        const activeSession = statements.activeSession.get();
+        if (!activeSession) return { stopped: false, endedPeriods: 0 };
+        return {
+          stopped: true,
+          endedPeriods: endSession(activeSession.id, observedAt),
+        };
+      });
     },
     adminView({ now }) {
+      const activeSession = statements.activeSession.get();
+      if (!activeSession) {
+        return {
+          tracking: null,
+          summary: {
+            currentMembers: 0,
+            joinedLast30Days: 0,
+            departedLast30Days: 0,
+            rejoinsLast30Days: 0,
+          },
+          currentMembers: [],
+          departedMembers: [],
+          retentionDays: EMPIRE_MEMBERSHIP_RETENTION_DAYS,
+          generatedAt: now,
+        };
+      }
+
+      const currentRows = statements.currentPeriods.all(activeSession.id);
+      const currentIds = new Set(currentRows.map((row) => row.player_entity_id));
+      const currentMembers = currentRows
+        .map((row) => ({
+          id: Number(row.id),
+          playerEntityId: row.player_entity_id,
+          playerName: row.player_name,
+          membershipStatus: row.initial_roster ? "initial" : row.rejoin ? "rejoined" : "joined",
+          observedJoinedAt: row.observed_joined_at,
+          firstSeenAt: row.first_seen_at,
+          lastSeenAt: row.last_seen_at,
+        }))
+        .sort((a, b) => {
+          if (a.observedJoinedAt && b.observedJoinedAt) {
+            return b.observedJoinedAt.localeCompare(a.observedJoinedAt) || a.playerName.localeCompare(b.playerName);
+          }
+          if (a.observedJoinedAt) return -1;
+          if (b.observedJoinedAt) return 1;
+          return a.playerName.localeCompare(b.playerName);
+        });
+
+      const latestDepartures = new Map();
+      for (const row of statements.departedPeriods.all(activeSession.empire_id)) {
+        if (currentIds.has(row.player_entity_id) || latestDepartures.has(row.player_entity_id)) continue;
+        latestDepartures.set(row.player_entity_id, {
+          id: Number(row.id),
+          playerEntityId: row.player_entity_id,
+          playerName: row.player_name,
+          observedLeftAt: row.observed_left_at,
+          departureConfirmedAt: row.departure_confirmed_at,
+          previousStatus: row.rejoin ? "rejoined" : "joined",
+        });
+      }
+      const departedMembers = [...latestDepartures.values()];
+      const thirtyDaysAgo = new Date(Date.parse(now) - 30 * 24 * 60 * 60 * 1000).toISOString();
+
       return {
-        tracking: null,
-        summary: {
-          currentMembers: 0,
-          joinedLast30Days: 0,
-          departedLast30Days: 0,
-          rejoinsLast30Days: 0,
+        tracking: {
+          sessionId: Number(activeSession.id),
+          empireId: activeSession.empire_id,
+          empireName: activeSession.empire_name,
+          trackingStartedAt: activeSession.tracking_started_at,
+          lastSuccessAt: activeSession.last_success_at,
         },
-        currentMembers: [],
-        departedMembers: [],
+        summary: {
+          currentMembers: currentMembers.length,
+          joinedLast30Days: currentMembers.filter(
+            (member) =>
+              member.membershipStatus === "joined" &&
+              member.observedJoinedAt &&
+              member.observedJoinedAt >= thirtyDaysAgo,
+          ).length,
+          departedLast30Days: departedMembers.filter(
+            (member) => member.observedLeftAt >= thirtyDaysAgo,
+          ).length,
+          rejoinsLast30Days: currentMembers.filter(
+            (member) =>
+              member.membershipStatus === "rejoined" &&
+              member.observedJoinedAt &&
+              member.observedJoinedAt >= thirtyDaysAgo,
+          ).length,
+        },
+        currentMembers,
+        departedMembers,
         retentionDays: EMPIRE_MEMBERSHIP_RETENTION_DAYS,
         generatedAt: now,
       };
