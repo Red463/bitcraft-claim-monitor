@@ -6,6 +6,7 @@ import { DashboardCardHeader, DashboardMetric, DashboardTrend } from "../compone
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { ItemIcon } from "../components/main/ItemDisplay";
 import { PageHeader } from "../components/main/PageHeader";
+import { Segmented } from "../components/main/Segmented";
 import {
   claimSupplyCap,
   claimSupplyRunOutAt,
@@ -18,17 +19,19 @@ import {
   formatCurrentSession,
   formatDaysAndHours,
   formatNumber,
+  shortDateLabel,
 } from "../utils/format";
 import { normalizeData } from "../utils/normalize";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
-import { buildMarketIncomeSummary } from "./market/marketAnalytics";
+import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 
 export function Dashboard({ data, activity, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   const { request, trackPromise } = useManualRefresh();
+  const [marketIncomeRange, setMarketIncomeRange] = React.useState<MarketIncomeRangeDays>(7);
   const { claim, members, market, construction, crafts } = data;
   const supplies = toNumber(claim.supplies);
   const supplyCap = claimSupplyCap(claim);
@@ -71,10 +74,21 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const marketIncome = buildMarketIncomeSummary(Array.isArray(marketHistory?.daily) ? marketHistory.daily : [], lastUpdated ?? new Date());
-  const confirmedMarketSales = toNumber(marketHistory?.totals?.salesCount) || marketIncome.salesCount;
-  const confirmedMarketUnits = toNumber(marketHistory?.totals?.unitsSold) || marketIncome.unitsSold;
-  const confirmedMarketIncome = toNumber(marketHistory?.totals?.totalValue) || marketIncome.totalValue;
+  const marketTotals = marketHistory?.totals ?? {};
+  const storedMarketIncome = marketTotals.trackedValue ?? marketTotals.totalValue;
+  const marketIncome = buildMarketIncomeSummary(
+    Array.isArray(marketHistory?.daily) ? marketHistory.daily : [],
+    lastUpdated ?? new Date(),
+    marketIncomeRange,
+    storedMarketIncome == null ? undefined : toNumber(storedMarketIncome),
+  );
+  const confirmedMarketSales = marketTotals.confirmedSales == null && marketTotals.salesCount == null
+    ? marketIncome.salesCount
+    : toNumber(marketTotals.confirmedSales ?? marketTotals.salesCount);
+  const confirmedMarketUnits = marketTotals.confirmedUnits == null && marketTotals.unitsSold == null
+    ? marketIncome.unitsSold
+    : toNumber(marketTotals.confirmedUnits ?? marketTotals.unitsSold);
+  const confirmedMarketIncome = storedMarketIncome == null ? marketIncome.totalValue : toNumber(storedMarketIncome);
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
@@ -163,12 +177,26 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
 
       <section className="dashboard-main-grid">
         <article className="dashboard-card dashboard-card-chart">
-          <DashboardCardHeader title="Market Income Total Over Time" icon={<CircleDollarSign size={15} />} action="Cumulative Sales" />
+          <DashboardCardHeader
+            title="Market Income Total Over Time"
+            icon={<CircleDollarSign size={15} />}
+            control={(
+              <Segmented<`${MarketIncomeRangeDays}`>
+                label="Market income range"
+                options={MARKET_INCOME_RANGES}
+                value={String(marketIncomeRange) as `${MarketIncomeRangeDays}`}
+                onChange={(value) => setMarketIncomeRange(Number(value) as MarketIncomeRangeDays)}
+              />
+            )}
+          />
           <div className="dashboard-money-row">
             <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
             <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
-          <DashboardTrend points={marketIncome.trend} suffix="g" ariaLabel="Cumulative market income trend" emptyMessage="No confirmed market sales tracked yet." />
+          {marketIncome.partialRange && marketIncome.availableStartDay
+            ? <p className="dashboard-chart-coverage">Stored sales begin {shortDateLabel(marketIncome.availableStartDay)}.</p>
+            : null}
+          <DashboardTrend points={marketIncome.trend} suffix="g" yAxisLabel="Cumulative gold" ariaLabel="Cumulative market income trend" emptyMessage="No confirmed market sales tracked yet." />
         </article>
         <article className="dashboard-card dashboard-card-supply">
           <DashboardCardHeader title="Supply Status" icon={<Package size={15} />} />

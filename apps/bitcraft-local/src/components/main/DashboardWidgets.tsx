@@ -2,7 +2,7 @@ import React from "react";
 import { TrendingUp } from "lucide-react";
 
 import { LiveValue } from "./Stats";
-import { formatNumber, shortDateLabel, timestampMs } from "../../utils/format";
+import { formatCompactNumber, formatNumber, shortDateLabel, timestampMs } from "../../utils/format";
 
 export function DashboardMetric({
   icon,
@@ -35,16 +35,36 @@ export function DashboardMetric({
   );
 }
 
-export function DashboardCardHeader({ title, icon, action, onClick }: { title: string; icon?: React.ReactNode; action?: string; onClick?: () => void }) {
+export function DashboardCardHeader({ title, icon, action, onClick, control }: { title: string; icon?: React.ReactNode; action?: string; onClick?: () => void; control?: React.ReactNode }) {
   return (
     <header className="dashboard-card-header">
       <h3>{icon ? <span className="dashboard-card-title-icon">{icon}</span> : null}{title}</h3>
-      {action ? onClick ? <button onClick={onClick}>{action}</button> : <span className="dashboard-card-range">{action}</span> : null}
+      {control ? <div className="dashboard-chart-controls">{control}</div> : action ? onClick ? <button onClick={onClick}>{action}</button> : <span className="dashboard-card-range">{action}</span> : null}
     </header>
   );
 }
 
-export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily trend appears after snapshots exist for at least two days.", ariaLabel = "Dashboard trend" }: { points: Array<{ at: string; value: number }>; suffix?: string; emptyMessage?: string; ariaLabel?: string }) {
+function niceChartStep(range: number, intervalCount = 3): number {
+  const roughStep = Math.max(range / intervalCount, Number.EPSILON);
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return factor * magnitude;
+}
+
+export function DashboardTrend({
+  points,
+  suffix = "",
+  emptyMessage = "Daily trend appears after snapshots exist for at least two days.",
+  ariaLabel = "Dashboard trend",
+  yAxisLabel = "Value",
+}: {
+  points: Array<{ at: string; value: number }>;
+  suffix?: string;
+  emptyMessage?: string;
+  ariaLabel?: string;
+  yAxisLabel?: string;
+}) {
   const [activePointIndex, setActivePointIndex] = React.useState<number | null>(null);
   const summaryId = React.useId();
   const datedPoints = points
@@ -56,56 +76,61 @@ export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily tren
   }
   const width = 560;
   const height = 230;
-  const pad = 18;
-  const dayMs = 24 * 60 * 60 * 1000;
+  const plotLeft = 62;
+  const plotRight = 12;
+  const plotTop = 24;
+  const plotBottom = height - 18;
   const latestSnapshot = datedPoints[datedPoints.length - 1];
-  const end = new Date(latestSnapshot.ms);
-  end.setHours(23, 59, 59, 999);
-  const start = new Date(end.getTime() - 6 * dayMs);
-  start.setHours(0, 0, 0, 0);
-  const startMs = start.getTime();
-  const endMs = end.getTime();
-  const dailyPoints = new Map<number, { at: string; value: number; ms: number; dayMs: number }>();
+  const dailyPoints = new Map<string, { at: string; value: number; ms: number }>();
   for (const point of datedPoints) {
-    if (point.ms < startMs || point.ms > endMs) continue;
-    const day = new Date(point.ms);
-    day.setHours(12, 0, 0, 0);
-    const dayMs = day.getTime();
-    const existing = dailyPoints.get(dayMs);
-    if (!existing || point.ms >= existing.ms) dailyPoints.set(dayMs, { ...point, dayMs });
+    const day = new Date(point.ms).toISOString().slice(0, 10);
+    const existing = dailyPoints.get(day);
+    if (!existing || point.ms >= existing.ms) dailyPoints.set(day, point);
   }
-  const chartPoints = [...dailyPoints.values()].sort((a, b) => a.dayMs - b.dayMs);
+  const chartPoints = [...dailyPoints.values()].sort((a, b) => a.ms - b.ms);
   if (chartPoints.length < 2) {
     return <div className="dashboard-chart-empty"><TrendingUp size={18} /><span>{emptyMessage}</span></div>;
   }
+  const startMs = chartPoints[0].ms;
+  const endMs = chartPoints[chartPoints.length - 1].ms;
   const values = chartPoints.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const isFlat = max === min;
-  const range = Math.max(max - min, 1);
-  const xForDay = (dayMsValue: number) => pad + ((dayMsValue - startMs) / Math.max(endMs - startMs, 1)) * (width - pad * 2);
-  const yForValue = (value: number) => isFlat ? height / 2 : height - pad - ((value - min) / range) * (height - pad * 2);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue;
+  const padding = valueRange > 0 ? valueRange * 0.08 : Math.max(Math.abs(maxValue) * 0.02, 1);
+  const paddedMin = Math.max(0, minValue - padding);
+  const paddedMax = maxValue + padding;
+  const yStep = niceChartStep(Math.max(paddedMax - paddedMin, 1));
+  const yMin = Math.floor(paddedMin / yStep) * yStep;
+  const yMax = Math.max(yMin + yStep, Math.ceil(paddedMax / yStep) * yStep);
+  const yTicks = Array.from({ length: Math.round((yMax - yMin) / yStep) + 1 }, (_, index) => yMin + index * yStep);
+  const xForTime = (time: number) => plotLeft + ((time - startMs) / Math.max(endMs - startMs, 1)) * (width - plotLeft - plotRight);
+  const yForValue = (value: number) => plotBottom - ((value - yMin) / Math.max(yMax - yMin, 1)) * (plotBottom - plotTop);
   const path = chartPoints.map((point, index) => {
-    const x = xForDay(point.dayMs);
+    const x = xForTime(point.ms);
     const y = yForValue(point.value);
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
-  const areaPath = `${path} L${width - pad},${height - pad} L${pad},${height - pad} Z`;
+  const firstX = xForTime(chartPoints[0].ms);
+  const latestX = xForTime(latestSnapshot.ms);
+  const areaPath = `${path} L${latestX},${plotBottom} L${firstX},${plotBottom} Z`;
   const latest = chartPoints[chartPoints.length - 1];
   const first = chartPoints[0];
   const summaryText = `${ariaLabel}: ${formatNumber(first.value)}${suffix} on ${shortDateLabel(first.at)}, ending at ${formatNumber(latest.value)}${suffix} on ${shortDateLabel(latest.at)}, across ${chartPoints.length} daily snapshots.`;
-  const latestX = xForDay(latest.dayMs);
   const latestY = yForValue(latest.value);
-  const axisDays = Array.from({ length: 7 }, (_, index) => new Date(startMs + index * dayMs));
+  const axisPointCount = Math.min(7, chartPoints.length);
+  const axisPoints = Array.from({ length: axisPointCount }, (_, index) => (
+    chartPoints[Math.round((index / Math.max(axisPointCount - 1, 1)) * (chartPoints.length - 1))]
+  ));
   const activePoint = activePointIndex == null ? null : chartPoints[activePointIndex] ?? null;
-  const activeX = activePoint ? xForDay(activePoint.dayMs) : 0;
+  const activeX = activePoint ? xForTime(activePoint.ms) : 0;
   const activeY = activePoint ? yForValue(activePoint.value) : 0;
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     if (bounds.width <= 0) return;
     const pointerX = ((event.clientX - bounds.left) / bounds.width) * width;
     const nearestIndex = chartPoints.reduce((bestIndex, point, index) => (
-      Math.abs(xForDay(point.dayMs) - pointerX) < Math.abs(xForDay(chartPoints[bestIndex].dayMs) - pointerX) ? index : bestIndex
+      Math.abs(xForTime(point.ms) - pointerX) < Math.abs(xForTime(chartPoints[bestIndex].ms) - pointerX) ? index : bestIndex
     ), 0);
     setActivePointIndex(nearestIndex);
   };
@@ -119,15 +144,24 @@ export function DashboardTrend({ points, suffix = "", emptyMessage = "Daily tren
             <stop offset="100%" stopColor="rgba(247, 200, 54, 0)" />
           </linearGradient>
         </defs>
-        {[0.25, 0.5, 0.75].map((y) => <line key={y} x1="0" x2={width} y1={height * y} y2={height * y} className="dashboard-chart-grid" />)}
+        <g role="group" aria-label={yAxisLabel}>
+          {yTicks.map((tick) => {
+            const y = yForValue(tick);
+            return <g key={tick}>
+              <line x1={plotLeft} x2={width - plotRight} y1={y} y2={y} className="dashboard-chart-grid" />
+              <text x={plotLeft - 9} y={y + 4} textAnchor="end" className="dashboard-chart-y-axis">{formatCompactNumber(tick)}{suffix}</text>
+            </g>;
+          })}
+        </g>
         {chartPoints.length >= 3 ? <path d={areaPath} className="dashboard-chart-area" /> : null}
         <path d={path} className="dashboard-chart-line" />
         <circle cx={latestX} cy={latestY} r="5" className="dashboard-chart-dot" />
-        {activePoint ? <><line x1={activeX} x2={activeX} y1={pad} y2={height - pad} className="dashboard-chart-guide" /><circle cx={activeX} cy={activeY} r="6" className="dashboard-chart-active-dot" /></> : null}
-        {chartPoints.map((point) => <circle key={point.dayMs} cx={xForDay(point.dayMs)} cy={yForValue(point.value)} r="12" className="dashboard-chart-hit" aria-hidden="true" />)}
+        {activePoint ? <><line x1={activeX} x2={activeX} y1={plotTop} y2={plotBottom} className="dashboard-chart-guide" /><circle cx={activeX} cy={activeY} r="6" className="dashboard-chart-active-dot" /></> : null}
+        {chartPoints.map((point) => <circle key={point.ms} cx={xForTime(point.ms)} cy={yForValue(point.value)} r="12" className="dashboard-chart-hit" aria-hidden="true" />)}
       </svg>
       {activePoint ? <div className="dashboard-chart-tooltip" style={{ left: `${Math.max(12, Math.min(88, (activeX / width) * 100))}%` }} role="status"><span>{shortDateLabel(activePoint.at)}</span><strong>{formatNumber(activePoint.value)}{suffix}</strong></div> : null}
-      <div className="dashboard-chart-axis">{axisDays.map((day) => <span key={day.toISOString()}>{shortDateLabel(day.toISOString())}</span>)}</div>
+      <span className="dashboard-chart-y-title">{yAxisLabel}</span>
+      <div className="dashboard-chart-axis" style={{ gridTemplateColumns: `repeat(${axisPoints.length}, minmax(0, 1fr))` }}>{axisPoints.map((point) => <span key={point.ms}>{shortDateLabel(point.at)}</span>)}</div>
     </div>
   );
 }
