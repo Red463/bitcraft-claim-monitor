@@ -70,6 +70,9 @@ test("policy contains the approved legal subjects, providers, and retention rule
   assert.ok(policy.retention.some(({ key, days }) => key === "analytics-events" && days === 90));
   assert.ok(policy.retention.some(({ key, days }) => key === "deletion-ledger" && days === 90));
   assert.ok(policy.retention.some(({ key, months }) => key === "inactive-accounts" && months === 24));
+  assert.match(JSON.stringify(policy.terms.sections), /administrator-assisted deletion/i);
+  assert.match(JSON.stringify(policy.privacy.sections), /authorised administrator can delete an ordinary app account/i);
+  assert.match(JSON.stringify(policy.privacy.sections), /separate administrator identity and Discord server membership/i);
 });
 
 test("deployment overrides affect the published policy and stable digests", () => {

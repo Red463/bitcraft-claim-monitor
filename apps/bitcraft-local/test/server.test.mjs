@@ -1511,11 +1511,48 @@ test("server collection paginates listings and protects production mutations", a
     "character_link_assigned",
   ]);
   assert.equal(failedUnassignmentNotice.status, "failed");
+
+  const wrongAdminDeletionConfirmation = await fetch(`${origin}/api/local/admin/user-accounts/privacy`, {
+    method: "DELETE",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, confirmation: "delete" }),
+  });
+  assert.equal(wrongAdminDeletionConfirmation.status, 400);
+
+  const adminDeletionEvidenceDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const adminIdentitiesBeforeDeletion = Number(adminDeletionEvidenceDb.prepare("SELECT COUNT(*) AS count FROM admin_users").get().count);
+  adminDeletionEvidenceDb.close();
+  failedDiscordRecipients.add("333333333333333333");
+  const administratorAssistedDeletion = await fetch(`${origin}/api/local/admin/user-accounts/privacy`, {
+    method: "DELETE",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, confirmation: "DELETE" }),
+  });
+  failedDiscordRecipients.delete("333333333333333333");
+  assert.equal(administratorAssistedDeletion.status, 200);
+  const administratorAssistedDeletionBody = await administratorAssistedDeletion.json();
+  assert.equal(administratorAssistedDeletionBody.receipt.deleted.user_accounts, 1);
+  assert.equal(administratorAssistedDeletionBody.notification.ok, false);
+
+  const removedAccountDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  assert.equal(removedAccountDb.prepare("SELECT id FROM user_accounts WHERE id = ?").get(secondUserId), undefined);
+  assert.equal(Number(removedAccountDb.prepare("SELECT COUNT(*) AS count FROM admin_users").get().count), adminIdentitiesBeforeDeletion);
+  const adminDeletionAudit = removedAccountDb.prepare(`
+    SELECT details_json FROM admin_audit_log
+    WHERE action = 'privacy.account_admin_removed'
+    ORDER BY id DESC LIMIT 1
+  `).get();
+  removedAccountDb.close();
+  assert.ok(adminDeletionAudit);
+  assert.equal(adminDeletionAudit.details_json.includes("333333333333333333"), false);
+  assert.equal(adminDeletionAudit.details_json.includes("SecondUser"), false);
+  assert.equal(JSON.parse(adminDeletionAudit.details_json).receiptId, administratorAssistedDeletionBody.receipt.receiptId);
+
   const saveAccessControl = await fetch(`${origin}/api/local/admin/access-control`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ rules: {
-      "page:market": { mode: "specificUsers", allowedDiscordIds: ["222222222222222222", "invalid"] },
+      "page:market": { mode: "specificUsers", allowedDiscordIds: ["222222222222222222", "333333333333333333", "invalid"] },
       "page:map": { mode: "verified" },
       "tab:market:live": { mode: "discord" },
     } }),

@@ -165,7 +165,7 @@ For VPS deployment and updates, use [`DEPLOYMENT.md`](../DEPLOYMENT.md).
 
 The canonical legal policy is `apps/bitcraft-local/src/legal/legalPolicy.mjs`; `/terms` and `/privacy` render from that source. Production startup requires `LEGAL_CONFIGURATION_CONFIRMED=true`. If document meaning changes, update the legal version/effective date, review both rendered documents, and verify that an existing session receives the next-visit acceptance gate.
 
-User privacy mutations live under `/api/local/auth/privacy/*`. Keep them same-origin, session-derived-CSRF protected, explicit, and idempotent. Export is the intentional stale-legal exception. Full account deletion additionally requires a matching Discord reauthentication no older than ten minutes and exact `DELETE` confirmation.
+User privacy mutations live under `/api/local/auth/privacy/*`. Keep them same-origin, session-derived-CSRF protected, explicit, and idempotent. Export is the intentional stale-legal exception. Full self-service account deletion additionally requires a matching Discord reauthentication no older than ten minutes and exact `DELETE` confirmation. Administrator-assisted deletion uses `DELETE /api/local/admin/user-accounts/privacy`, requires `accounts.manage`, admin CSRF, and exact `DELETE` confirmation, and must call the same signed deletion coordinator rather than direct SQL.
 
 Production requires:
 

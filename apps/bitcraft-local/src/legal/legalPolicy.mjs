@@ -171,7 +171,8 @@ function termsSections(operator) {
       title: "Suspension and termination",
       paragraphs: [
         "Access may be restricted for security, abuse prevention, Discord or community moderation, operational, or legal reasons. Where appropriate, you will receive a reason and may request review.",
-        "You may stop using the service, unlink your character, or delete your ordinary app account using the available self-service controls.",
+        "You may stop using the service, unlink your character, or delete your ordinary app account using the available self-service controls. An authorised administrator may also delete the ordinary app account to action an assisted deletion request or where reasonably necessary for security, abuse prevention, legal compliance, or operation of the service.",
+        "Deleting an ordinary app account does not remove Discord server membership or a separately authorised administrator identity. The app attempts a Discord direct notice after administrator-assisted deletion, but delivery failure does not undo the deletion.",
       ],
     },
     {
@@ -315,7 +316,7 @@ function privacySections(operator) {
       id: "rights",
       title: "Your rights",
       paragraphs: [
-        `Depending on applicable law, you may request access, correction, deletion, restriction, portability, or object to processing, and you may withdraw consent. Use Privacy & Data or email ${operator.privacyEmail}. Identity checks use only what is reasonably necessary. Requests are normally answered within one month.`,
+        `Depending on applicable law, you may request access, correction, deletion, restriction, portability, or object to processing, and you may withdraw consent. Use Privacy & Data or email ${operator.privacyEmail}. An authorised administrator can carry out an assisted account deletion where appropriate. Identity checks use only what is reasonably necessary. Requests are normally answered within one month.`,
         "There is no solely automated decision-making that produces legal or similarly significant effects.",
       ],
     },
@@ -324,6 +325,7 @@ function privacySections(operator) {
       title: "Deletion, backups, and inactive accounts",
       paragraphs: [
         "Self-service tools can export data, unlink a character, clear preferences, remove market data, withdraw analytics consent, and delete an ordinary app account after recent Discord reauthentication.",
+        "An authorised administrator can delete an ordinary app account through the same protected deletion process. This removes associated live app data, including specific-user access-list entries, preserves any separate administrator identity and Discord server membership, and retains only de-identified or pseudonymised records where required. A Discord direct notice is attempted after completion; failure to deliver it does not restore the data.",
         "Live data is removed immediately. Restricted encrypted backups expire within their stated windows. A separate HMAC deletion-restoration ledger, containing no plaintext identity, is replayed before a restored database goes public so an older backup does not restore a deleted account.",
         "Accounts inactive for 24 months are deleted after a warning attempt about 30 days beforehand. Delivery failure does not extend retention.",
       ],
@@ -375,4 +377,3 @@ export function legalPolicyForEnvironment(env = {}) {
     notice: "These documents describe this service and are not legal advice to users or other operators.",
   });
 }
-

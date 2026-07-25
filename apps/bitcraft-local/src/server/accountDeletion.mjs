@@ -104,6 +104,29 @@ function scrubDeliveryRows(db, account) {
   return changed;
 }
 
+function removeAccessControlAllowlistEntries(db, discordId, updatedAt) {
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'access_control_json'").get();
+  const config = safeJson(row?.value);
+  if (!config || typeof config !== "object" || Array.isArray(config)) return 0;
+  const rules = config.rules;
+  if (!rules || typeof rules !== "object" || Array.isArray(rules)) return 0;
+
+  let removed = 0;
+  for (const rule of Object.values(rules)) {
+    if (!rule || typeof rule !== "object" || Array.isArray(rule) || !Array.isArray(rule.allowedDiscordIds)) continue;
+    rule.allowedDiscordIds = rule.allowedDiscordIds.filter((value) => {
+      if (String(value ?? "").trim() !== String(discordId)) return true;
+      removed += 1;
+      return false;
+    });
+  }
+  if (removed) {
+    db.prepare("UPDATE app_settings SET value = ?, updated_at = ? WHERE key = 'access_control_json'")
+      .run(JSON.stringify(config), updatedAt);
+  }
+  return removed;
+}
+
 export function deletedSubjectMarker(discordId, deletionKey) {
   return `deleted:${createHmac("sha256", deletionKey)
     .update(`discord:${String(discordId)}`)
@@ -147,6 +170,7 @@ export function deleteUserAccount(db, {
     deleted.discord_temp_bans = count(db.prepare("DELETE FROM discord_temp_bans WHERE user_id = ?").run(discordId));
     deleted.user_legal_acceptances = count(db.prepare("DELETE FROM user_legal_acceptances WHERE user_id = ?").run(userId));
     deleted.user_sessions = count(db.prepare("DELETE FROM user_sessions WHERE user_id = ?").run(userId));
+    deleted.access_control_allowlist_entries = removeAccessControlAllowlistEntries(db, discordId, deletedAt);
 
     const anonymized = {
       discord_mod_cases: anonymizeModerationCases(db, current, anonymizedSubject),

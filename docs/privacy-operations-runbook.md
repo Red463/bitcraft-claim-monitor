@@ -13,7 +13,7 @@ This is an operational checklist, not legal advice. Preserve the minimum evidenc
 4. For access/portability, provide the app JSON export and explain exclusions for other users, secrets, security material, and public BitJita game data.
 5. For correction, correct account identity/link data where supported or remove the incorrect link. Public BitJita data must be corrected at its source.
 6. For objection/restriction, withdraw analytics, disable optional processing, and document any processing that must remain for security/legal claims.
-7. For erasure, use recent Discord reauthentication and account deletion. If self-service is impossible, verify the requester, create a protected operational record, and use the same deletion coordinator—never direct ad-hoc SQL.
+7. For erasure, use recent Discord reauthentication and self-service account deletion. If self-service is impossible, verify the requester, create a protected operational record, then use **Admin → Linked Accounts → Delete account data** and type `DELETE`. This uses the same signed deletion coordinator; never use direct ad-hoc SQL. The deletion remains complete if its Discord DM fails.
 8. Reply with the non-sensitive receipt and scope. Keep privacy correspondence in Proton only as needed, normally no longer than 24 months unless a dispute or legal obligation requires longer.
 
 ## Deletion and restore safety

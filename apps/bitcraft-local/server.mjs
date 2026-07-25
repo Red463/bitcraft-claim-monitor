@@ -3490,7 +3490,26 @@ function authStatus(req) {
 }
 
 function accessControlConfig() {
-  return normalizeAccessControlConfig(safeJson(statements.getSetting.get("access_control_json")?.value, {}));
+  return accessControlConfigForCurrentAccounts(safeJson(statements.getSetting.get("access_control_json")?.value, {}));
+}
+
+function accessControlConfigForCurrentAccounts(value) {
+  const config = normalizeAccessControlConfig(value);
+  const currentDiscordIds = new Set(
+    db.prepare("SELECT discord_id FROM user_accounts").all()
+      .map((account) => String(account.discord_id ?? "").trim())
+      .filter(Boolean),
+  );
+  const rules = Object.fromEntries(Object.entries(config.rules).map(([targetId, rule]) => [
+    targetId,
+    {
+      ...rule,
+      allowedDiscordIds: rule.mode === "specificUsers"
+        ? rule.allowedDiscordIds.filter((discordId) => currentDiscordIds.has(discordId))
+        : [],
+    },
+  ]));
+  return normalizeAccessControlConfig({ rules });
 }
 
 function accessControlSubject(req) {
@@ -10764,14 +10783,71 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/access-control") {
         const body = await readJson(req, BODY_LIMITS.settings);
-        const config = normalizeAccessControlConfig(body);
         const updatedAt = new Date().toISOString();
-        statements.upsertSetting.run("access_control_json", JSON.stringify(config), updatedAt);
-        audit(user, "access_control.update", { rules: Object.keys(config.rules).length });
+        let config;
+        try {
+          db.exec("BEGIN IMMEDIATE");
+          config = accessControlConfigForCurrentAccounts(body);
+          statements.upsertSetting.run("access_control_json", JSON.stringify(config), updatedAt);
+          audit(user, "access_control.update", { rules: Object.keys(config.rules).length });
+          db.exec("COMMIT");
+        } catch (error) {
+          try { db.exec("ROLLBACK"); } catch {}
+          throw error;
+        }
         return send(res, 200, adminAccessControlResponse());
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/user-accounts") {
         return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
+      }
+      if (req.method === "DELETE" && url.pathname === "/api/local/admin/user-accounts/privacy") {
+        const body = await readJson(req, BODY_LIMITS.auth);
+        const userId = Number(body.userId);
+        if (!userId) return send(res, 400, { error: "Choose a Discord account" });
+        if (body.confirmation !== "DELETE") return send(res, 400, { error: 'Type "DELETE" exactly to confirm account deletion' });
+        const target = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+        if (!target) return send(res, 404, { error: "Linked account not found" });
+
+        const receipt = coordinatePrivacyDeletion({
+          ledgerPath: privacyLedgerPath,
+          key: privacyLedgerKey(),
+          discordId: target.discord_id,
+          deleteAccount: (operationId) => deleteUserAccount(db, {
+            userId: target.id,
+            discordId: target.discord_id,
+            deletionKey: privacyDeletionKey(),
+            randomUUID: () => operationId,
+          }),
+        });
+        audit(user, "privacy.account_admin_removed", { receiptId: receipt.receiptId });
+
+        let notification;
+        try {
+          await sendDiscordDirectMessage(target.discord_id, {
+            content: `An administrator has removed your ${legalPolicy.operator.projectName} app account and associated app data. Your Discord server membership and any separate administrator identity were not changed. Contact ${legalPolicy.operator.privacyEmail} if you believe this was a mistake.`,
+            allowed_mentions: { parse: [] },
+          });
+          notification = { ok: true };
+          recordDiscordDeliverySafe({
+            status: "sent",
+            eventType: "privacy_account_admin_removed",
+            channelKey: "dm",
+            summary: "Administrator-assisted account deletion notice sent",
+            metadata: { receiptId: receipt.receiptId },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          notification = { ok: false, error: message };
+          recordDiscordDeliverySafe({
+            status: "failed",
+            eventType: "privacy_account_admin_removed",
+            channelKey: "dm",
+            summary: "Administrator-assisted account deletion notice failed",
+            error: message,
+            metadata: { receiptId: receipt.receiptId },
+          });
+        }
+        return send(res, 200, { ok: true, receipt, notification });
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/user-accounts/character") {
         const body = await readJson(req, BODY_LIMITS.auth);

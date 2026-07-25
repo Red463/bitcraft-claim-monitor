@@ -4,13 +4,15 @@ import { DatabaseSync } from "node:sqlite";
 
 import { deleteUserAccount, deletedSubjectMarker } from "../src/server/accountDeletion.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
+import { applyAdditiveColumnMigrations } from "../src/server/schemaMigrations.mjs";
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
   applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
   const now = "2026-07-25T12:00:00.000Z";
-  db.prepare("INSERT INTO admin_users (username, password_hash, role, created_at) VALUES ('Thomas', 'hash', 'owner', ?)").run(now);
+  db.prepare("INSERT INTO admin_users (username, password_hash, role, discord_id, created_at) VALUES ('Thomas', 'hash', 'owner', '111111111111111111', ?)").run(now);
   const insert = db.prepare(`
     INSERT INTO user_accounts (
       discord_id, discord_username, discord_global_name, discord_avatar,
@@ -58,10 +60,17 @@ function fixture() {
       metadata_json, response_json, occurred_at
     ) VALUES ('test', 'sent', ?, 'dm', 'dm', NULL, NULL, ?, NULL, ?)
   `).run("Sent to Thomas for Timber Wolf", JSON.stringify({ discordId: "111111111111111111" }), now);
+  db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('access_control_json', ?, ?)").run(JSON.stringify({
+    rules: {
+      "page:market": { mode: "specificUsers", allowedDiscordIds: ["111111111111111111", "222222222222222222"] },
+      "page:map": { mode: "specificUsers", allowedDiscordIds: ["111111111111111111"] },
+      "page:members": { mode: "verified", allowedDiscordIds: [] },
+    },
+  }), now);
   return { db, userId, otherUserId, now };
 }
 
-test("full account deletion removes account data, anonymizes retained records, and preserves owner identity", () => {
+test("full account deletion removes account data, de-identifies retained records, and preserves owner identity", () => {
   const { db, userId, otherUserId, now } = fixture();
   const receipt = deleteUserAccount(db, {
     userId,
@@ -78,13 +87,18 @@ test("full account deletion removes account data, anonymizes retained records, a
   assert.equal(receipt.deleted.user_legal_acceptances, 1);
   assert.equal(receipt.deleted.market_deal_watches, 1);
   assert.equal(receipt.deleted.market_deal_alerts, 1);
+  assert.equal(receipt.deleted.access_control_allowlist_entries, 2);
   assert.equal(receipt.anonymized.discord_mod_cases, 1);
   assert.equal(receipt.anonymized.admin_audit_log, 1);
   assert.equal(receipt.anonymized.discord_delivery_log, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM user_accounts WHERE id = ?").get(userId).count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM user_accounts WHERE id = ?").get(otherUserId).count, 1);
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE username = 'Thomas' AND role = 'owner'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE username = 'Thomas' AND role = 'owner' AND discord_id = '111111111111111111'").get().count, 1);
   assert.equal(db.prepare("SELECT user_id FROM discord_mod_cases").get().user_id, marker);
+  const accessControl = JSON.parse(db.prepare("SELECT value FROM app_settings WHERE key = 'access_control_json'").get().value);
+  assert.deepEqual(accessControl.rules["page:market"].allowedDiscordIds, ["222222222222222222"]);
+  assert.deepEqual(accessControl.rules["page:map"].allowedDiscordIds, []);
+  assert.equal(accessControl.rules["page:members"].mode, "verified");
   const retainedText = JSON.stringify({
     moderation: db.prepare("SELECT * FROM discord_mod_cases").all(),
     audit: db.prepare("SELECT * FROM admin_audit_log").all(),
