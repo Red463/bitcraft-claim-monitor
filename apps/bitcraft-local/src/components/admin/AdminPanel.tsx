@@ -125,6 +125,8 @@ import { claimPendingAction, releasePendingAction } from "../../utils/pendingAct
 
 const LOCAL_API = "/api/local";
 
+class FallbackMemberLoadError extends Error {}
+
 type AdminTab = "status" | "server-health" | "analytics" | "empire-membership" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 type AdminTabMeta = {
@@ -238,6 +240,7 @@ export function AdminPanel({
   const [fallbackMembers, setFallbackMembers] = React.useState<AnyRecord[]>([]);
   const [membersLoading, setMembersLoading] = React.useState(false);
   const [membersError, setMembersError] = React.useState<string | null>(null);
+  const fallbackMembersRequest = React.useRef(0);
   const [accessControlState, setAccessControlState] = React.useState<{ config: AccessControlConfig; accounts: AppUser[] } | null>(null);
   const [newUser, setNewUser] = React.useState({ discordId: "", displayName: "", role: "admin" });
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
@@ -317,6 +320,7 @@ export function AdminPanel({
         setMessage(success);
       }
     } catch (error) {
+      if (error instanceof FallbackMemberLoadError) return;
       setMessageKind("error");
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -375,24 +379,35 @@ export function AdminPanel({
   }
 
   async function refreshFallbackMembers() {
+    const requestGeneration = ++fallbackMembersRequest.current;
     if (members.length) {
       setFallbackMembers([]);
       setMembersError(null);
+      setMembersLoading(false);
       return;
     }
 
     setMembersLoading(true);
     setMembersError(null);
     try {
-      setFallbackMembers(await loadAdminSettlementMembers(settings.claimId));
+      const loadedMembers = await loadAdminSettlementMembers(settings.claimId);
+      if (requestGeneration !== fallbackMembersRequest.current) return;
+      setFallbackMembers(loadedMembers);
     } catch (error) {
+      if (requestGeneration !== fallbackMembersRequest.current) return;
       setFallbackMembers([]);
       const detail = error instanceof Error ? error.message : String(error);
       setMembersError(`Unable to load settlement characters. ${detail}`);
-      throw error;
+      throw new FallbackMemberLoadError(detail);
     } finally {
-      setMembersLoading(false);
+      if (requestGeneration === fallbackMembersRequest.current) setMembersLoading(false);
     }
+  }
+
+  async function refreshLinkedAccountsAndFallbackMembers() {
+    const [linkedAccountsResult, fallbackMembersResult] = await Promise.allSettled([refreshLinkedAccounts(), refreshFallbackMembers()]);
+    if (linkedAccountsResult.status === "rejected") throw linkedAccountsResult.reason;
+    if (fallbackMembersResult.status === "rejected") throw fallbackMembersResult.reason;
   }
 
   async function refreshAccessControl() {
@@ -502,7 +517,7 @@ export function AdminPanel({
       if (tab === "empire-membership") await refreshEmpireMembership();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
-      if (tab === "accounts") await Promise.all([refreshLinkedAccounts(), refreshFallbackMembers()]);
+      if (tab === "accounts") await refreshLinkedAccountsAndFallbackMembers();
       if (tab === "configuration") await refreshAccessControl();
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
@@ -2116,7 +2131,7 @@ export function AdminPanel({
           tab={tab}
           data={{ users, linkedAccounts, members: adminMemberRows, newUser, adminRoles, canManageAdmins, currentUserId: auth.user?.id }}
           pending={isBusyAction}
-          error={messageKind === "error" && (tab !== "accounts" || !membersError) ? message : null}
+          error={messageKind === "error" ? message : null}
           membersLoading={membersLoading}
           membersError={membersError}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2125,7 +2140,7 @@ export function AdminPanel({
           onRoleChange={(entry, role) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}
           onClearSessions={(entry) => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}
           onToggleStatus={(entry) => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
-          onRefreshLinkedAccounts={() => run(async () => { await Promise.all([refreshLinkedAccounts(), refreshFallbackMembers()]); }, undefined, "linked-accounts-refresh")}
+          onRefreshLinkedAccounts={() => run(refreshLinkedAccountsAndFallbackMembers, undefined, "linked-accounts-refresh")}
           onAccountApproval={(account, status) => run(async () => { const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) }); setLinkedAccounts(result.accounts ?? []); }, `Account marked ${status}.`, `account-approval:${account.id}`)}
           onCharacterAssignment={(account, member) => run(async () => {
             const result = await api("/admin/user-accounts/character", {
