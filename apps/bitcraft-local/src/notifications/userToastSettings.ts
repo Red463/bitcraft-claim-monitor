@@ -3,16 +3,16 @@ import type { NotificationSoundId, NotificationSoundType, UserToastSettings } fr
 export type NotificationSoundSettings = Pick<UserToastSettings, "soundEnabled" | "soundId" | "soundVolume" | "soundByType">;
 
 export const DEFAULT_NOTIFICATION_SOUND_SETTINGS: NotificationSoundSettings = {
-  soundEnabled: true,
+  soundEnabled: false,
   soundId: "alert-pop",
   soundVolume: 0.55,
   soundByType: {},
 };
 
 export const DEFAULT_USER_TOAST_SETTINGS: UserToastSettings = {
-  marketListings: true,
-  marketSales: true,
-  production: true,
+  marketListings: false,
+  marketSales: false,
+  production: false,
   ...DEFAULT_NOTIFICATION_SOUND_SETTINGS,
 };
 

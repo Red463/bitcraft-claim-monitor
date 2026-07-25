@@ -182,13 +182,13 @@ test("every listed notification sound option is accepted by settings normalizati
 
 test("normalizeNotificationSoundSettings falls back for missing or corrupted saved sound settings", () => {
   assert.deepEqual(normalizeNotificationSoundSettings(null), {
-    soundEnabled: true,
+    soundEnabled: false,
     soundId: "alert-pop",
     soundVolume: 0.55,
     soundByType: {},
   });
   assert.deepEqual(normalizeNotificationSoundSettings({ soundEnabled: "no", soundId: "unknown-tone", soundVolume: Number.NaN }), {
-    soundEnabled: true,
+    soundEnabled: false,
     soundId: "alert-pop",
     soundVolume: 0.55,
     soundByType: {},
@@ -233,18 +233,18 @@ test("normalizeUserToastSettings restores malformed browser toast settings safel
     soundVolume: 5,
   }), {
     marketListings: false,
-    marketSales: true,
-    production: true,
+    marketSales: false,
+    production: false,
     soundEnabled: false,
     soundId: "alert-pop",
     soundVolume: 1,
     soundByType: {},
   });
   assert.deepEqual(normalizeUserToastSettings("bad saved value"), {
-    marketListings: true,
-    marketSales: true,
-    production: true,
-    soundEnabled: true,
+    marketListings: false,
+    marketSales: false,
+    production: false,
+    soundEnabled: false,
     soundId: "alert-pop",
     soundVolume: 0.55,
     soundByType: {},
