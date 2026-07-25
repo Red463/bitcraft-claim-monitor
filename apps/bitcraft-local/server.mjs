@@ -134,6 +134,7 @@ import {
   createUserDataExport,
   unlinkUserCharacter,
 } from "./src/server/userPrivacy.mjs";
+import { deleteUserAccount } from "./src/server/accountDeletion.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -3493,6 +3494,15 @@ function oauthStateSecret() {
   });
 }
 
+function privacyDeletionKey() {
+  const keyName = "privacy_deletion_hmac_key";
+  const stored = String(statements.getSecret.get(keyName)?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  statements.upsertSecret.run(keyName, generated, new Date().toISOString());
+  return generated;
+}
+
 function authStateCookie(state, returnTo, options = {}) {
   return oauthStateCookie(state, returnTo, {
     secret: oauthStateSecret(),
@@ -3531,6 +3541,28 @@ async function handleDiscordOAuthStart(req, res) {
   });
 }
 
+async function handleDiscordPrivacyReauthStart(req, res) {
+  const user = requireAppUser(req, res, { allowStaleLegal: true });
+  if (!user) return;
+  const config = discordOAuthConfig(req);
+  if (!config.enabled) return send(res, 503, { error: "Discord login is not configured on this server" });
+  const sessionToken = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
+  if (!sessionToken) return send(res, 401, { error: "Discord sign-in required" });
+  const state = randomBytes(24).toString("base64url");
+  return send(res, 200, {
+    authorizeUrl: buildDiscordAuthorizeUrl({ config, state }),
+  }, {
+    "set-cookie": authStateCookie(state, "/?privacy=delete-ready", {
+      purpose: "privacy-delete",
+      reauth: {
+        userId: user.id,
+        discordId: user.discord_id,
+        sessionTokenHash: sessionTokenHash(sessionToken),
+      },
+    }),
+  });
+}
+
 async function handleDiscordOAuthCallback(req, res, url) {
   const config = discordOAuthConfig(req);
   const stateCookie = readAuthStateCookie(req);
@@ -3544,7 +3576,24 @@ async function handleDiscordOAuthCallback(req, res, url) {
     return true;
   }
   const returnTo = callbackDecision.returnTo;
-  if (!isCurrentOAuthLegalAcceptance(stateCookie.legal, legalSnapshot)) {
+  const privacyReauth = stateCookie.purpose === "privacy-delete";
+  let reauthUser = null;
+  let reauthSessionTokenHash = "";
+  if (privacyReauth) {
+    reauthUser = getAppUser(req);
+    const sessionToken = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
+    reauthSessionTokenHash = sessionToken ? sessionTokenHash(sessionToken) : "";
+    if (
+      !reauthUser
+      || Number(stateCookie.reauth?.userId) !== Number(reauthUser.id)
+      || String(stateCookie.reauth?.discordId) !== String(reauthUser.discord_id)
+      || String(stateCookie.reauth?.sessionTokenHash) !== reauthSessionTokenHash
+    ) {
+      return send(res, 403, { error: "The deletion reauthentication session no longer matches", code: "privacy_reauthentication_mismatch" }, {
+        "set-cookie": clearAuthStateCookie(),
+      });
+    }
+  } else if (!isCurrentOAuthLegalAcceptance(stateCookie.legal, legalSnapshot)) {
     res.writeHead(302, { location: "/?auth=discord-error&reason=legal", "set-cookie": clearAuthStateCookie() });
     res.end();
     return true;
@@ -3558,6 +3607,22 @@ async function handleDiscordOAuthCallback(req, res, url) {
   if (!profileResponse.ok) throw new Error(`Discord profile lookup failed: ${profileResponse.status}`);
   const profile = await profileResponse.json();
   const loginAt = new Date().toISOString();
+  if (privacyReauth) {
+    if (String(profile?.id ?? "") !== String(reauthUser.discord_id)) {
+      return send(res, 403, { error: "Reauthenticate with the Discord account currently signed in", code: "privacy_reauthentication_account_mismatch" }, {
+        "set-cookie": clearAuthStateCookie(),
+      });
+    }
+    const updated = statements.updateUserSessionReauthenticatedAt.run(loginAt, reauthSessionTokenHash, reauthUser.id);
+    if (Number(updated.changes) !== 1) {
+      return send(res, 403, { error: "The signed-in session is no longer available", code: "privacy_reauthentication_session_missing" }, {
+        "set-cookie": clearAuthStateCookie(),
+      });
+    }
+    res.writeHead(302, { location: "/?privacy=delete-ready", "set-cookie": clearAuthStateCookie() });
+    res.end();
+    return true;
+  }
   const account = discordOAuthProfileAccount(profile, loginAt);
   statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
   const user = statements.userByDiscordId.get(account.discordId);
@@ -3620,6 +3685,22 @@ function requireAppUser(req, res, options = {}) {
   }
   if (!options.allowStaleLegal && rejectStaleLegalAcceptance(res, user)) return null;
   return user;
+}
+
+function requireRecentAppUserReauthentication(req, res, user, now = new Date()) {
+  const token = sessionTokenFromRequest(req, APP_USER_SESSION_COOKIE_NAME);
+  const tokenHash = token ? sessionTokenHash(token) : "";
+  const session = tokenHash ? statements.appUserSessionByToken.get(tokenHash, user.id) : null;
+  const reauthenticatedAt = Date.parse(String(session?.reauthenticated_at ?? ""));
+  const ageMs = now.getTime() - reauthenticatedAt;
+  if (!Number.isFinite(reauthenticatedAt) || ageMs < 0 || ageMs > 10 * 60 * 1000) {
+    send(res, 403, {
+      error: "Reauthenticate with Discord before deleting your account",
+      code: "recent_discord_reauthentication_required",
+    });
+    return null;
+  }
+  return { tokenHash, session };
 }
 
 function adminStatus(req) {
@@ -9843,6 +9924,58 @@ const server = createServer(async (req, res) => {
         "existing-session",
       );
       return send(res, 200, authStatus(req));
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/auth/privacy/reauth/start") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      return handleDiscordPrivacyReauthStart(req, res);
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/local/auth/privacy/account") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res, { allowStaleLegal: true });
+      if (!user) return;
+      const body = await readJson(req, BODY_LIMITS.auth);
+      if (body.confirmation !== "DELETE") return send(res, 400, { error: 'Type "DELETE" exactly to confirm account deletion' });
+      if (!requireRecentAppUserReauthentication(req, res, user)) return;
+      const receipt = deleteUserAccount(db, {
+        userId: user.id,
+        discordId: user.discord_id,
+        deletionKey: privacyDeletionKey(),
+      });
+      let notification;
+      try {
+        await sendDiscordDirectMessage(user.discord_id, {
+          content: `${legalPolicy.operator.projectName} has completed your requested app-account deletion. Your Discord server membership and any separate administrator identity were not changed.`,
+          allowed_mentions: { parse: [] },
+        });
+        notification = { ok: true };
+        recordDiscordDeliverySafe({
+          status: "sent",
+          eventType: "privacy_account_deleted",
+          channelKey: "dm",
+          summary: "Account deletion confirmation sent",
+          metadata: { receiptId: receipt.receiptId },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notification = { ok: false, error: message };
+        recordDiscordDeliverySafe({
+          status: "failed",
+          eventType: "privacy_account_deleted",
+          channelKey: "dm",
+          summary: "Account deletion confirmation failed",
+          error: message,
+          metadata: { receiptId: receipt.receiptId },
+        });
+      }
+      return send(res, 200, { ok: true, receipt, notification }, {
+        "set-cookie": [
+          clearAppUserSession(req),
+          clearBrowserCookie("claim_monitor_analytics_consent_v2"),
+          clearBrowserCookie("claim_monitor_analytics_consent"),
+          clearBrowserCookie("claim_monitor_analytics_visitor"),
+          clearBrowserCookie("claim_monitor_analytics_session"),
+        ],
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/auth/privacy/export") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;

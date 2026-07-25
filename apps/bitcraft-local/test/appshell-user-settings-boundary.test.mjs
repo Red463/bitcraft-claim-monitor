@@ -97,3 +97,19 @@ test("Privacy & Data provides self-service export and granular removal with in-a
   assert.match(appShell, /accountSettingsSyncPause/);
   assert.match(legalAcceptance, /auth\/privacy\/export/);
 });
+
+test("account deletion requires purpose-bound Discord reauthentication and typed confirmation", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const deletion = readFileSync(new URL("../src/components/main/AccountDeletionDialog.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/user-settings.css", import.meta.url), "utf8");
+
+  assert.match(appShell, /<AccountDeletionDialog/);
+  assert.match(deletion, /auth\/privacy\/reauth\/start/);
+  assert.match(deletion, /auth\/privacy\/account/);
+  assert.match(deletion, /confirmation !== "DELETE"/);
+  assert.match(deletion, /Reauthenticate with Discord/);
+  assert.match(deletion, /10 minutes/);
+  assert.match(css, /\.account-deletion-dialog\s*\{[^}]*max-height:\s*calc\(100vh - 32px\);[^}]*overflow:\s*hidden;/s);
+  assert.match(css, /\.account-deletion-body\s*\{[^}]*overflow:\s*auto;/s);
+  assert.doesNotMatch(deletion, /window\.confirm/);
+});

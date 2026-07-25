@@ -13,6 +13,7 @@ type PrivacyDataSectionProps = {
   onUserChanged: (user: AppUser, reason: "character" | "settings") => void;
   onAnalyticsCleared: () => void;
   onResetBrowserSettings: () => void;
+  onDeleteAccount: () => void;
 };
 
 const ACTION_COPY: Record<DestructiveAction, { title: string; detail: string; confirm: string }> = {
@@ -53,6 +54,7 @@ export function PrivacyDataSection({
   onUserChanged,
   onAnalyticsCleared,
   onResetBrowserSettings,
+  onDeleteAccount,
 }: PrivacyDataSectionProps) {
   const [confirming, setConfirming] = React.useState<DestructiveAction | null>(null);
   const [busy, setBusy] = React.useState<DestructiveAction | "export" | null>(null);
@@ -184,6 +186,11 @@ export function PrivacyDataSection({
             <BarChart3 size={18} />
             <div><strong>Withdraw analytics and clear this browser</strong><span>Remove identifiable analytics for this browser/session and ask again before any future analytics collection.</span></div>
             <button className="toolbar-button" disabled={busy != null} onClick={() => confirmAction("analytics")}>Clear</button>
+          </article>
+          <article className="privacy-action-row privacy-account-delete">
+            <Trash2 size={18} />
+            <div><strong>Delete my account and personal data</strong><span>Requires a recent Discord reauthentication and exact typed confirmation. This does not remove a separate administrator login.</span></div>
+            <button className="toolbar-button danger" disabled={busy != null} onClick={onDeleteAccount}>Delete account</button>
           </article>
         </div>
       )}

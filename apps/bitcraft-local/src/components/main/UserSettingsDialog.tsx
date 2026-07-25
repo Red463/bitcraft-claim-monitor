@@ -73,6 +73,7 @@ export type UserSettingsDialogProps = {
   onOpenAdmin: () => void;
   onPrivacyUserChanged: (user: AppUser, reason: "character" | "settings") => void;
   onAnalyticsCleared: () => void;
+  onDeleteAccount: () => void;
   onResetSettings: () => void;
   onClose: () => void;
   modal?: boolean;
@@ -96,6 +97,7 @@ export function UserSettingsDialog({
   onOpenAdmin,
   onPrivacyUserChanged,
   onAnalyticsCleared,
+  onDeleteAccount,
   onResetSettings,
   onClose,
   modal = true,
@@ -503,6 +505,7 @@ export function UserSettingsDialog({
               onUserChanged={onPrivacyUserChanged}
               onAnalyticsCleared={onAnalyticsCleared}
               onResetBrowserSettings={onResetSettings}
+              onDeleteAccount={onDeleteAccount}
             />
           ) : null}
           </div>

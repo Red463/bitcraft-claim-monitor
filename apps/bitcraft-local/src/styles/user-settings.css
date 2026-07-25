@@ -108,6 +108,22 @@
 .privacy-confirm-panel strong { color: var(--text); font-size: 13px; }
 .privacy-confirm-panel span { color: var(--muted); font-size: 11px; line-height: 1.4; }
 .privacy-status { margin: 0; border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--good) 8%, transparent); color: var(--good); padding: 8px 10px; font-size: 12px; }
+.privacy-account-delete { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); }
+.account-deletion-overlay { z-index: 1280; }
+.account-deletion-dialog { width: min(650px, calc(100vw - 28px)); max-height: calc(100vh - 32px); overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto; }
+.account-deletion-body { min-height: 0; overflow: auto; display: grid; gap: 11px; padding-right: 4px; }
+.account-deletion-body > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.account-deletion-body a { color: var(--active-color); }
+.account-deletion-reauth { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 11px; display: grid; gap: 7px; }
+.account-deletion-reauth strong { color: var(--text); }
+.account-deletion-reauth span { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.account-deletion-reauth button { justify-self: start; }
+.account-deletion-confirm { max-width: 300px; }
+.account-deletion-confirm input { text-transform: none; letter-spacing: .08em; font-weight: 800; }
+.account-deletion-complete { display: grid; place-items: center; gap: 10px; text-align: center; padding: 20px 10px; }
+.account-deletion-complete > svg { color: var(--good); }
+.account-deletion-complete p { max-width: 500px; margin: 0; color: var(--muted); line-height: 1.5; }
+.account-deletion-complete code { color: var(--text); user-select: all; }
 
 @media (max-width: 860px) {
   .settings-shell,

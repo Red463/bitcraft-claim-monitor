@@ -34,6 +34,7 @@ import { UserSettingsDialog } from "./components/main/UserSettingsDialog";
 import { BuyMeCoffeeButton, DiscordIcon } from "./components/main/SupportLinks";
 import { CookieBanner, DedicatedLegalPage, DiscordSignInPrompt, HelpCenter, PrivacyDialog, TermsDialog } from "./components/main/LegalDialogs";
 import { LegalAcceptanceDialog, type PublicLegalPolicy } from "./components/main/LegalAcceptanceDialog";
+import { AccountDeletionDialog } from "./components/main/AccountDeletionDialog";
 import { FirstRunTourManager } from "./components/main/FirstRunTourManager";
 import { useBrowserNotificationSmoke } from "./notifications/useBrowserNotificationSmoke";
 import { useBrowserNotificationSources } from "./notifications/useBrowserNotificationSources";
@@ -244,6 +245,7 @@ function DashboardApp() {
   const [tourReplayToken, setTourReplayToken] = React.useState(0);
   const [userSettingsOpen, setUserSettingsOpen] = React.useState(false);
   const [privacyOpen, setPrivacyOpen] = React.useState(false);
+  const [accountDeletionOpen, setAccountDeletionOpen] = React.useState(() => new URLSearchParams(window.location.search).get("privacy") === "delete-ready");
   const [termsOpen, setTermsOpen] = React.useState(false);
   const [consent, setConsent] = React.useState<AnalyticsConsent>(() => readAnalyticsConsent());
   const [noticeOpen, setNoticeOpen] = React.useState(false);
@@ -482,6 +484,17 @@ function DashboardApp() {
   const handleAnalyticsCleared = React.useCallback(() => {
     withdrawAnalyticsConsent();
     setConsent(null);
+  }, []);
+  const handleAccountDeleted = React.useCallback(() => {
+    withdrawAnalyticsConsent();
+    setConsent(null);
+    setUserSettingsOpen(false);
+    setUserAuth((current) => ({
+      ...current,
+      user: null,
+      csrfToken: null,
+      legal: { ...current.legal, acceptedAt: null, requiresAcceptance: false },
+    }));
   }, []);
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
@@ -1047,20 +1060,22 @@ function DashboardApp() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={() => discordLogin()} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onPrivacyUserChanged={handlePrivacyUserChanged} onAnalyticsCleared={handleAnalyticsCleared} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onPrivacyUserChanged={handlePrivacyUserChanged} onAnalyticsCleared={handleAnalyticsCleared} onDeleteAccount={() => setAccountDeletionOpen(true)} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter activePage={active} version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
       {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
-      {publicLegalPolicy && (legalAcceptanceOpen || Boolean(userAuth.user && userAuth.legal.requiresAcceptance)) ? (
+      {publicLegalPolicy && !accountDeletionOpen && (legalAcceptanceOpen || Boolean(userAuth.user && userAuth.legal.requiresAcceptance)) ? (
         <LegalAcceptanceDialog
           mode={userAuth.user && userAuth.legal.requiresAcceptance ? "existing-session" : "login"}
           policy={publicLegalPolicy}
           onContinue={userAuth.user && userAuth.legal.requiresAcceptance ? acceptCurrentLegalPolicy : startDiscordLogin}
           onClose={() => setLegalAcceptanceOpen(false)}
           onLogout={userAuth.user && userAuth.legal.requiresAcceptance ? discordLogout : undefined}
+          onDeleteAccount={userAuth.user && userAuth.legal.requiresAcceptance ? () => setAccountDeletionOpen(true) : undefined}
         />
       ) : null}
+      {accountDeletionOpen ? <AccountDeletionDialog auth={userAuth} onDeleted={handleAccountDeleted} onClose={() => setAccountDeletionOpen(false)} /> : null}
       <FirstRunTourManager activePage={active} enabled={active !== "admin" && consent != null && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen && !(!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user)} showAccountStep={userAuth.discordLoginEnabled} replayToken={tourReplayToken} onNavigate={(panel) => navigate(panel)} onVisibilityChange={setTourVisible} />
       <AppPopupManager activePage={active} enabled={active !== "admin" && !tourVisible && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen} />
     </div>

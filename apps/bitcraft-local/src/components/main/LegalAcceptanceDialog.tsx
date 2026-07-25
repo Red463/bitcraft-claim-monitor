@@ -21,6 +21,7 @@ type LegalAcceptanceDialogProps = {
   onContinue: (acceptance: { acceptedTerms: true; ageConfirmed: true }) => Promise<void>;
   onClose: () => void;
   onLogout?: () => Promise<void>;
+  onDeleteAccount?: () => void;
 };
 
 export function LegalAcceptanceDialog({
@@ -29,6 +30,7 @@ export function LegalAcceptanceDialog({
   onContinue,
   onClose,
   onLogout,
+  onDeleteAccount,
 }: LegalAcceptanceDialogProps) {
   const [acceptedTerms, setAcceptedTerms] = React.useState(false);
   const [ageConfirmed, setAgeConfirmed] = React.useState(false);
@@ -111,6 +113,7 @@ export function LegalAcceptanceDialog({
           {busy ? "Please wait…" : mode === "login" ? "Continue with Discord" : "Accept and continue"}
         </button>
         {isExistingSession ? <a className="toolbar-button" href="/api/local/auth/privacy/export"><Download size={14} /> Download my data</a> : null}
+        {isExistingSession && onDeleteAccount ? <button className="toolbar-button danger" disabled={busy} onClick={onDeleteAccount}>Delete account</button> : null}
         {isExistingSession && onLogout ? <button className="toolbar-button" disabled={busy} onClick={() => void signOut()}>Sign out</button> : null}
         {!isExistingSession ? <button className="toolbar-button" disabled={busy} onClick={onClose}>Cancel</button> : null}
       </footer>

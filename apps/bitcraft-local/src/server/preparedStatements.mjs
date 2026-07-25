@@ -354,6 +354,7 @@ export function createPreparedStatements(db) {
   insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at, reauthenticated_at) VALUES (?, ?, ?, ?, ?)"),
   deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
   deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),
+  appUserSessionByToken: db.prepare("SELECT * FROM user_sessions WHERE token_hash = ? AND user_id = ?"),
   updateUserSessionReauthenticatedAt: db.prepare("UPDATE user_sessions SET reauthenticated_at = ? WHERE token_hash = ? AND user_id = ?"),
   currentUserLegalAcceptance: db.prepare(`
     SELECT *

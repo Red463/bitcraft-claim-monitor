@@ -40,6 +40,7 @@ export function oauthStateCookie(state, returnTo, {
   secure = false,
   purpose = "login",
   legal = null,
+  reauth = null,
   now = () => new Date(),
 } = {}) {
   const payload = JSON.stringify({
@@ -47,6 +48,7 @@ export function oauthStateCookie(state, returnTo, {
     returnTo: safeReturnPath(returnTo),
     purpose,
     legal,
+    ...(reauth ? { reauth } : {}),
     createdAt: now().toISOString(),
   });
   return serializeHttpOnlyCookie(DISCORD_OAUTH_STATE_COOKIE_NAME, signedOAuthStateValue(payload, secret), {

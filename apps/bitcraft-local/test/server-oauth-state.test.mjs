@@ -105,3 +105,27 @@ test("clearOAuthStateCookie keeps the existing clear-cookie shape", () => {
     "bitcraft_discord_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
   );
 });
+
+test("privacy deletion OAuth state is purpose-bound to one user session", () => {
+  const secret = "state-secret";
+  const reauth = {
+    userId: 7,
+    discordId: "111111111111111111",
+    sessionTokenHash: "current-session-hash",
+  };
+  const cookie = oauthStateCookie("privacy-state", "/?privacy=delete-ready", {
+    secret,
+    purpose: "privacy-delete",
+    reauth,
+    now: () => new Date("2026-07-25T12:00:00.000Z"),
+  });
+  const payload = readOAuthStateCookie(
+    { headers: { cookie } },
+    secret,
+    { now: () => new Date("2026-07-25T12:05:00.000Z") },
+  );
+
+  assert.equal(payload.purpose, "privacy-delete");
+  assert.deepEqual(payload.reauth, reauth);
+  assert.equal(payload.legal, null);
+});

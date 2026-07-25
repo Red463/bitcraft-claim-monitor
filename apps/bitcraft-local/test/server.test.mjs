@@ -1246,6 +1246,31 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(staleSettings.status, 428);
   assert.equal((await staleSettings.json()).code, "legal_acceptance_required");
+  const staleExport = await fetch(`${origin}/api/local/auth/privacy/export`, { headers: { cookie: staleCookie, origin } });
+  assert.equal(staleExport.status, 200);
+  assert.match(staleExport.headers.get("content-disposition"), /timbersteel-claim-monitor-data-/);
+  assert.doesNotMatch(await staleExport.text(), /stale-legal-test-session/);
+  const wrongDeleteConfirmation = await fetch(`${origin}/api/local/auth/privacy/account`, {
+    method: "DELETE",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ confirmation: "delete" }),
+  });
+  assert.equal(wrongDeleteConfirmation.status, 400);
+  const missingDeleteReauth = await fetch(`${origin}/api/local/auth/privacy/account`, {
+    method: "DELETE",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ confirmation: "DELETE" }),
+  });
+  assert.equal(missingDeleteReauth.status, 403);
+  assert.equal((await missingDeleteReauth.json()).code, "recent_discord_reauthentication_required");
+  const deletionReauthStart = await fetch(`${origin}/api/local/auth/privacy/reauth/start`, {
+    method: "POST",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: "{}",
+  });
+  assert.equal(deletionReauthStart.status, 200);
+  assert.match((await deletionReauthStart.json()).authorizeUrl, /^https:\/\/discord\.com\/oauth2\/authorize/);
+  assert.match(deletionReauthStart.headers.get("set-cookie"), /bitcraft_discord_oauth_state=/);
   const rejectedLegalAcceptance = await fetch(`${origin}/api/local/auth/legal/accept`, {
     method: "POST",
     headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
@@ -1259,6 +1284,22 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(acceptedLegal.status, 200);
   assert.equal((await acceptedLegal.json()).legal.requiresAcceptance, false);
+  const deletionReadyDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  deletionReadyDb.prepare("UPDATE user_sessions SET reauthenticated_at = ? WHERE token_hash = ?")
+    .run(new Date().toISOString(), createHash("sha256").update(staleSessionToken).digest("hex"));
+  deletionReadyDb.close();
+  const deletedAccount = await fetch(`${origin}/api/local/auth/privacy/account`, {
+    method: "DELETE",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ confirmation: "DELETE" }),
+  });
+  assert.equal(deletedAccount.status, 200);
+  const deletionReceipt = await deletedAccount.json();
+  assert.equal(deletionReceipt.receipt.deleted.user_accounts, 1);
+  assert.equal(deletionReceipt.notification.ok, false);
+  assert.match(deletedAccount.headers.get("set-cookie"), /bitcraft_user_session=;/);
+  const deletedAuth = await fetch(`${origin}/api/local/auth/me`, { headers: { cookie: staleCookie, origin } }).then((response) => response.json());
+  assert.equal(deletedAuth.user, null);
   const savedAccountSettings = await fetch(`${origin}/api/local/auth/settings`, {
     method: "PUT",
     headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
