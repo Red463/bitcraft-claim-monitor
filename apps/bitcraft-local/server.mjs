@@ -273,6 +273,7 @@ const marketTradeJobBudget = normalizeJobBudget({
   maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
   batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
 });
+const MARKET_DAILY_HISTORY_LIMIT = 365;
 const gameCatalogRefreshJobBudget = normalizeJobBudget({
   maxRuntimeMs: process.env.GAME_CATALOG_REFRESH_MAX_RUNTIME_MS ?? 30000,
   batchSize: process.env.GAME_CATALOG_REFRESH_BATCH_SIZE ?? 250,
@@ -8510,8 +8511,8 @@ function marketHistory(claimId, limit, owner = "") {
     WHERE claim_id = ?${tradeOwnerClause}
     GROUP BY day
     ORDER BY day DESC
-    LIMIT 30
-  `).all(...tradeArgs).reverse();
+    LIMIT ?
+  `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
   const lifecycleTotals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,

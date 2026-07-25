@@ -85,6 +85,19 @@
 .dashboard-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dashboard-card-header h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--card-title); text-transform: uppercase; font-size: 12px; font-weight: 800; letter-spacing: .055em; }
 .dashboard-card-title-icon { display: inline-flex; color: var(--active-color); }
+.dashboard-chart-controls { display: flex; justify-content: flex-end; }
+.dashboard-chart-controls .segmented { flex-wrap: nowrap; }
+.dashboard-chart-controls .segmented > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.dashboard-chart-controls .segmented button { min-height: 26px; padding: 0 8px; border-radius: 999px; font-size: 11px; }
 .dashboard-card-header button {
   min-height: 31px;
   border: 1px solid rgba(118,134,157,.32);
@@ -113,9 +126,12 @@
 .dashboard-money-row span { font-size: 14px; font-weight: 800; color: #b6c0ce; }
 .dashboard-money-row span.negative { color: var(--danger); }
 .dashboard-money-row span.positive { color: var(--good); }
+.dashboard-chart-coverage { margin: -5px 0 -3px; color: #8f9aaa; font-size: 11px; line-height: 1.35; }
 .dashboard-chart { position: relative; display: grid; gap: 7px; }
 .dashboard-chart svg { width: 100%; height: 230px; overflow: visible; }
 .dashboard-chart-grid { stroke: rgba(154,168,190,.12); stroke-width: 1; }
+.dashboard-chart-y-axis { fill: #8f9aaa; font-size: 11px; }
+.dashboard-chart-y-title { fill: #8f9aaa; font-size: 11px; pointer-events: none; }
 .dashboard-chart-area { fill: url(#dashboardAreaGold); }
 .dashboard-chart-line { fill: none; stroke: var(--active-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 8px color-mix(in srgb, var(--active-color) 28%, transparent)); }
 .dashboard-chart-dot { fill: var(--active-color); stroke: var(--card-top); stroke-width: 3; }
@@ -128,10 +144,10 @@
 .dashboard-chart-tooltip strong { color: var(--active-color); font-size: 13px; }
 .dashboard-chart-axis {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
   color: #8f9aaa;
   font-size: 12px;
   gap: 5px;
+  padding: 0 12px 0 62px;
 }
 .dashboard-chart-axis span { min-width: 0; text-align: center; white-space: nowrap; }
 .dashboard-chart-axis span:first-child { text-align: left; }
@@ -286,6 +302,11 @@
 
 @container (max-width: 900px) {
   .dashboard-kpis { grid-template-columns: 1fr; }
+}
+
+@container (max-width: 520px) {
+  .dashboard-card-chart .dashboard-card-header { align-items: flex-start; flex-direction: column; }
+  .dashboard-chart-controls { width: 100%; justify-content: flex-start; }
 }
 
 @media (max-width: 900px) {
