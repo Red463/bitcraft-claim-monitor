@@ -43,7 +43,7 @@ import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from 
 import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
-import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, type AnalyticsConsent } from "./utils/analytics";
+import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
 import {
   normalizeReleaseBuildId,
   readLastLoadedReleaseBuild,
@@ -56,7 +56,7 @@ import { getTrackedOwnerName } from "./utils/ownership";
 import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
 import type { ActivePanel } from "./types/app";
-import type { AppSettings, UserAuthState, UserToastSettings } from "./types/settings";
+import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./types/settings";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
@@ -249,6 +249,7 @@ function DashboardApp() {
   const [noticeOpen, setNoticeOpen] = React.useState(false);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const [accountSettingsHydratedFor, setAccountSettingsHydratedFor] = React.useState("");
+  const accountSettingsSyncPause = React.useRef<{ target: string; settled: boolean } | null>(null);
   const showCollapsedNavTooltip = React.useCallback((anchor: HTMLAnchorElement, label: string) => {
     if (!sidebarCollapsed || mobileNavigationOpen) return;
     const rect = anchor.getBoundingClientRect();
@@ -435,7 +436,17 @@ function DashboardApp() {
     const discordId = userAuth.user?.discordId ?? "";
     if (!discordId || accountSettingsHydratedFor !== `${discordId}:${accountSettingsFingerprint}`) return;
     const settings = { ...(userAuth.user?.settings ?? {}), density, toastSettings: normalizedUserToastSettings, theme: browserTheme, sidebarCollapsed, sidebarGroups, selectedMemberId };
-    if (JSON.stringify(settings) === accountSettingsFingerprint) return;
+    const settingsFingerprint = JSON.stringify(settings);
+    const pausedSync = accountSettingsSyncPause.current;
+    if (pausedSync) {
+      if (settingsFingerprint === pausedSync.target) {
+        pausedSync.settled = true;
+        return;
+      }
+      else if (pausedSync.settled) accountSettingsSyncPause.current = null;
+      else return;
+    }
+    if (settingsFingerprint === accountSettingsFingerprint) return;
     const timeout = window.setTimeout(() => {
       void syncAccountSettings(settings).catch(() => undefined);
     }, 600);
@@ -448,6 +459,30 @@ function DashboardApp() {
     if (!response.ok) throw new Error(body.error ?? "Unable to save Discord notification preference");
     setUserAuth((current) => ({ ...current, user: body.user }));
   }, [userAuth.csrfToken, userAuth.user?.settings]);
+  const handlePrivacyUserChanged = React.useCallback((user: AppUser, reason: "character" | "settings") => {
+    if (reason === "settings") {
+      const defaults = {
+        density: "comfortable" as const,
+        toastSettings: normalizeUserToastSettings(DEFAULT_USER_TOAST_SETTINGS),
+        theme: DEFAULT_THEME,
+        sidebarCollapsed: false,
+        sidebarGroups: DEFAULT_SIDEBAR_GROUPS,
+        selectedMemberId: "All",
+      };
+      accountSettingsSyncPause.current = { target: JSON.stringify(defaults), settled: false };
+      setDensity(defaults.density);
+      setUserToastSettings(defaults.toastSettings);
+      setBrowserTheme(defaults.theme);
+      setSidebarCollapsed(defaults.sidebarCollapsed);
+      setSidebarGroups(defaults.sidebarGroups);
+      setSelectedMemberId(defaults.selectedMemberId);
+    }
+    setUserAuth((current) => ({ ...current, user }));
+  }, [setBrowserTheme, setDensity, setSelectedMemberId, setSidebarCollapsed, setSidebarGroups, setUserToastSettings]);
+  const handleAnalyticsCleared = React.useCallback(() => {
+    withdrawAnalyticsConsent();
+    setConsent(null);
+  }, []);
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
@@ -1012,7 +1047,7 @@ function DashboardApp() {
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={() => discordLogin()} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
-      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
+      {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onPrivacyUserChanged={handlePrivacyUserChanged} onAnalyticsCleared={handleAnalyticsCleared} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter activePage={active} version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}

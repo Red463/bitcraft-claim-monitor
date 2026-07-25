@@ -39,6 +39,18 @@ export function setAnalyticsPreference(consent: Exclude<AnalyticsConsent, null>)
   }
 }
 
+export function currentAnalyticsSessionId(): string {
+  return window.sessionStorage.getItem(ANALYTICS_SESSION_KEY) ?? "";
+}
+
+export function withdrawAnalyticsConsent() {
+  analyticsConsent = null;
+  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${cookieSuffix(0)}`;
+  document.cookie = `claim_monitor_analytics_consent=${cookieSuffix(0)}`;
+  document.cookie = `${ANALYTICS_VISITOR_COOKIE}=${cookieSuffix(0)}`;
+  window.sessionStorage.removeItem(ANALYTICS_SESSION_KEY);
+}
+
 function analyticsSessionId(): string | null {
   if (analyticsConsent !== "accepted") return null;
   let visitorId = getCookie(ANALYTICS_VISITOR_COOKIE);

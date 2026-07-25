@@ -1,5 +1,5 @@
 import React from "react";
-import { ExternalLink, MessageCircle, ShieldCheck, X } from "lucide-react";
+import { Download, ExternalLink, MessageCircle, ShieldCheck, X } from "lucide-react";
 
 import { Dialog } from "./Dialog";
 
@@ -110,6 +110,7 @@ export function LegalAcceptanceDialog({
           {mode === "login" ? <MessageCircle size={14} /> : <ShieldCheck size={14} />}
           {busy ? "Please wait…" : mode === "login" ? "Continue with Discord" : "Accept and continue"}
         </button>
+        {isExistingSession ? <a className="toolbar-button" href="/api/local/auth/privacy/export"><Download size={14} /> Download my data</a> : null}
         {isExistingSession && onLogout ? <button className="toolbar-button" disabled={busy} onClick={() => void signOut()}>Sign out</button> : null}
         {!isExistingSession ? <button className="toolbar-button" disabled={busy} onClick={onClose}>Cancel</button> : null}
       </footer>

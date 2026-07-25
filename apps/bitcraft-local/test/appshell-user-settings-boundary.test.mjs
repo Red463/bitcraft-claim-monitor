@@ -79,3 +79,21 @@ test("User settings keeps tabs fixed and gives content the bounded scroll region
   assert.match(css, /\.settings-grid\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none;[^}]*overflow:\s*auto;/s);
   assert.doesNotMatch(css, /\.settings-grid\s*\{[^}]*max-height:\s*calc\(100vh - 170px\)/s);
 });
+
+test("Privacy & Data provides self-service export and granular removal with in-app confirmation", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const dialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
+  const privacy = readFileSync(new URL("../src/components/main/PrivacyDataSection.tsx", import.meta.url), "utf8");
+  const legalAcceptance = readFileSync(new URL("../src/components/main/LegalAcceptanceDialog.tsx", import.meta.url), "utf8");
+
+  assert.match(dialog, /Privacy & Data/);
+  assert.match(dialog, /<PrivacyDataSection/);
+  assert.match(privacy, /auth\/privacy\/export/);
+  assert.match(privacy, /auth\/privacy\/\$\{action\}/);
+  for (const action of ["character", "settings", "market-data", "analytics"]) assert.match(privacy, new RegExp(`"${action}"`));
+  assert.match(privacy, /role="alertdialog"/);
+  assert.doesNotMatch(privacy, /window\.confirm/);
+  assert.match(appShell, /withdrawAnalyticsConsent/);
+  assert.match(appShell, /accountSettingsSyncPause/);
+  assert.match(legalAcceptance, /auth\/privacy\/export/);
+});

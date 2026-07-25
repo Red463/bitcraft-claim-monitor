@@ -127,6 +127,13 @@ import {
   characterLinkAssignmentCorrectiveDm,
   characterLinkUnassignedDm,
 } from "./src/server/characterLinkNotifications.mjs";
+import {
+  clearCurrentBrowserAnalytics,
+  clearUserMarketData,
+  clearUserSettings,
+  createUserDataExport,
+  unlinkUserCharacter,
+} from "./src/server/userPrivacy.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -3425,6 +3432,10 @@ function clearAppUserSession(req) {
   return clearHttpSessionCookie(APP_USER_SESSION_COOKIE_NAME, { secure: isProduction });
 }
 
+function clearBrowserCookie(name) {
+  return `${name}=; Path=/; SameSite=Lax; Max-Age=0${isProduction ? "; Secure" : ""}`;
+}
+
 function authStatus(req) {
   const user = getAppUser(req);
   const config = discordOAuthConfig(req);
@@ -3720,7 +3731,7 @@ function recordAnalyticsEvent(body, req) {
   const eventName = String(body.eventName ?? "");
   const page = String(body.page ?? "");
   const cookies = parseCookies(req);
-  if (cookies.claim_monitor_analytics_consent !== "accepted") throw new Error("Analytics consent is required");
+  if ((cookies.claim_monitor_analytics_consent_v2 ?? cookies.claim_monitor_analytics_consent) !== "accepted") throw new Error("Analytics consent is required");
   const visitorId = String(cookies.claim_monitor_analytics_visitor ?? "");
   const sessionId = String(body.sessionId ?? "");
   if (!analyticsEvents.has(eventName) || !analyticsPages.has(page)) throw new Error("Unknown analytics event");
@@ -9832,6 +9843,107 @@ const server = createServer(async (req, res) => {
         "existing-session",
       );
       return send(res, 200, authStatus(req));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/auth/privacy/export") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUserSession(req, res, { allowStaleLegal: true });
+      if (!user) return;
+      const exportedAt = new Date();
+      const payload = createUserDataExport(db, {
+        userId: user.id,
+        discordId: user.discord_id,
+        legalVersion: legalSnapshot.version,
+        now: () => exportedAt,
+      });
+      return send(res, 200, payload, {
+        "cache-control": "no-store",
+        "content-disposition": `attachment; filename="timbersteel-claim-monitor-data-${exportedAt.toISOString().slice(0, 10)}.json"`,
+      });
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/local/auth/privacy/character") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      let deleted;
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        deleted = unlinkUserCharacter(db, { userId: user.id });
+        if (deleted.userAccounts > 0) {
+          audit({ id: user.id, username: user.discord_username }, "privacy.character_link_removed", {
+            userId: user.id,
+            discordId: user.discord_id,
+            characterPlayerId: user.character_player_id,
+            characterName: user.character_name,
+          });
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        try { db.exec("ROLLBACK"); } catch {}
+        throw error;
+      }
+      let notification = null;
+      if (deleted.userAccounts > 0) {
+        const userNotification = await sendDiscordCharacterLinkUserNotice(user, "unassigned", "You");
+        const adminNotification = await sendDiscordCharacterLinkAdminAction(user, "unassigned", user.discord_username);
+        notification = { user: userNotification, admin: adminNotification };
+      }
+      return send(res, 200, { ok: true, deleted, user: publicAppUser(getAppUser(req)), notification });
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/local/auth/privacy/settings") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      const deleted = clearUserSettings(db, { userId: user.id });
+      if (deleted.userAccounts > 0) {
+        audit({ id: user.id, username: user.discord_username }, "privacy.saved_settings_removed", {
+          userId: user.id,
+          discordId: user.discord_id,
+        });
+      }
+      return send(res, 200, { ok: true, deleted, user: publicAppUser(getAppUser(req)) });
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/local/auth/privacy/market-data") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      const deleted = clearUserMarketData(db, { userId: user.id });
+      if (deleted.marketDealAlerts > 0 || deleted.marketDealWatches > 0) {
+        audit({ id: user.id, username: user.discord_username }, "privacy.market_data_removed", {
+          userId: user.id,
+          discordId: user.discord_id,
+          deleted,
+        });
+      }
+      return send(res, 200, { ok: true, deleted });
+    }
+    if (req.method === "DELETE" && url.pathname === "/api/local/auth/privacy/analytics") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res);
+      if (!user) return;
+      const body = await readJson(req, BODY_LIMITS.auth);
+      const cookies = parseCookies(req);
+      const visitorId = String(cookies.claim_monitor_analytics_visitor ?? "");
+      const sessionId = String(body.analyticsSessionId ?? "");
+      const validAnalyticsId = (value) => /^[a-zA-Z0-9-]{16,80}$/.test(value);
+      const deleted = clearCurrentBrowserAnalytics(db, {
+        visitorKey: validAnalyticsId(visitorId) ? createHash("sha256").update(visitorId).digest("hex") : "",
+        sessionKey: validAnalyticsId(sessionId) ? createHash("sha256").update(sessionId).digest("hex") : "",
+      });
+      if (deleted.analyticsEvents > 0) {
+        audit({ id: user.id, username: user.discord_username }, "privacy.current_browser_analytics_removed", {
+          userId: user.id,
+          discordId: user.discord_id,
+          deleted,
+        });
+      }
+      return send(res, 200, { ok: true, deleted }, {
+        "set-cookie": [
+          clearBrowserCookie("claim_monitor_analytics_consent_v2"),
+          clearBrowserCookie("claim_monitor_analytics_consent"),
+          clearBrowserCookie("claim_monitor_analytics_visitor"),
+          clearBrowserCookie("claim_monitor_analytics_session"),
+        ],
+      });
     }
     if (req.method === "PUT" && url.pathname === "/api/local/auth/character") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;

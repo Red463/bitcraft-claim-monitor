@@ -35,10 +35,11 @@ import {
   type ThemeRangeKey,
   type ThemeSettings,
 } from "../../theme";
-import type { AppSettings, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
+import type { AppSettings, AppUser, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
 import { memberDisplayName } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
 import { Dialog } from "./Dialog";
+import { PrivacyDataSection } from "./PrivacyDataSection";
 
 /**
  * Browser-local preferences dialog.
@@ -70,6 +71,8 @@ export type UserSettingsDialogProps = {
   onDiscordMarketSaleDmChange: (enabled: boolean) => Promise<void>;
   showAdminTools: boolean;
   onOpenAdmin: () => void;
+  onPrivacyUserChanged: (user: AppUser, reason: "character" | "settings") => void;
+  onAnalyticsCleared: () => void;
   onResetSettings: () => void;
   onClose: () => void;
   modal?: boolean;
@@ -91,6 +94,8 @@ export function UserSettingsDialog({
   onDiscordMarketSaleDmChange,
   showAdminTools,
   onOpenAdmin,
+  onPrivacyUserChanged,
+  onAnalyticsCleared,
   onResetSettings,
   onClose,
   modal = true,
@@ -226,7 +231,7 @@ export function UserSettingsDialog({
               ["account", "Account", MessageCircle],
               ["theme", "Theme", Star],
               ["preferences", "Preferences", Bell],
-              ["data", "Local data", HardDrive],
+              ["data", "Privacy & Data", HardDrive],
             ] as const).map(([id, label, Icon]) => (
               <button key={id} className={settingsSection === id ? "active" : ""} onClick={() => setSettingsSection(id)}>
                 <Icon size={15} /><span>{label}</span>
@@ -492,11 +497,14 @@ export function UserSettingsDialog({
               })}
             </div>
           </section> : null}
-          {settingsSection === "data" ? <section>
-            <h3>Reset</h3>
-            <p className="legend">Reset this browser's local app preferences. Admin settings and settlement data are not affected.</p>
-            <button className="toolbar-button" onClick={onResetSettings}><RefreshCw size={14} /> Reset my settings</button>
-          </section> : null}
+          {settingsSection === "data" ? (
+            <PrivacyDataSection
+              auth={auth}
+              onUserChanged={onPrivacyUserChanged}
+              onAnalyticsCleared={onAnalyticsCleared}
+              onResetBrowserSettings={onResetSettings}
+            />
+          ) : null}
           </div>
         </div>
     </Dialog>
