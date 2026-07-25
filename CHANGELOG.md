@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.45.0-beta.3] - 2026-07-25
+
+### Added
+
+- Added 7-day, 30-day, and one-year ranges to the market income chart, with a visible cumulative-gold axis and clear messaging when only partial history is available.
+
+### Changed
+
+- New users now start with in-app notifications and notification sounds disabled, while existing saved preferences remain unchanged.
+- Reduced the market income card's visible copy while retaining an accessible chart description for screen readers.
+
+### Fixed
+
+- Fixed compact gold values displaying as `Kg`; abbreviated values now use `K`, `M`, or `B`.
+
 ## [0.45.0-beta.2] - 2026-07-25
 
 ### Changed
