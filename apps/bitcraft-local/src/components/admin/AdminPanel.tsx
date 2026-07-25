@@ -63,6 +63,7 @@ import {
 import { TablePanel, ToolbarButton } from "../main/AppChrome";
 import { AdminPopupsSection } from "./AdminPopupsSection";
 import { AdminAccessSection } from "./AdminAccessSection";
+import { loadAdminSettlementMembers } from "./adminSettlementMembers";
 import { AdminAnalyticsSection } from "./AdminAnalyticsSection";
 import { AdminCraftPlanSection } from "./AdminCraftPlanSection";
 import { AdminDataSection } from "./AdminDataSection";
@@ -234,6 +235,9 @@ export function AdminPanel({
   const [tableOffset, setTableOffset] = React.useState(0);
   const [users, setUsers] = React.useState<AnyRecord[]>([]);
   const [linkedAccounts, setLinkedAccounts] = React.useState<AppUser[]>([]);
+  const [fallbackMembers, setFallbackMembers] = React.useState<AnyRecord[]>([]);
+  const [membersLoading, setMembersLoading] = React.useState(false);
+  const [membersError, setMembersError] = React.useState<string | null>(null);
   const [accessControlState, setAccessControlState] = React.useState<{ config: AccessControlConfig; accounts: AppUser[] } | null>(null);
   const [newUser, setNewUser] = React.useState({ discordId: "", displayName: "", role: "admin" });
   const [auditData, setAuditData] = React.useState<AnyRecord>({ auditLog: [], logins: [] });
@@ -370,6 +374,27 @@ export function AdminPanel({
     setLinkedAccounts((await api("/admin/user-accounts")).accounts ?? []);
   }
 
+  async function refreshFallbackMembers() {
+    if (members.length) {
+      setFallbackMembers([]);
+      setMembersError(null);
+      return;
+    }
+
+    setMembersLoading(true);
+    setMembersError(null);
+    try {
+      setFallbackMembers(await loadAdminSettlementMembers(settings.claimId));
+    } catch (error) {
+      setFallbackMembers([]);
+      const detail = error instanceof Error ? error.message : String(error);
+      setMembersError(`Unable to load settlement characters. ${detail}`);
+      throw error;
+    } finally {
+      setMembersLoading(false);
+    }
+  }
+
   async function refreshAccessControl() {
     const result = await api("/admin/access-control");
     setAccessControlState({
@@ -464,7 +489,8 @@ export function AdminPanel({
   }, []);
   React.useEffect(() => setDraft(settings), [settings]);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
-  const adminMemberRows = React.useMemo(() => [...members].sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b))), [members]);
+  const effectiveMembers = members.length ? members : fallbackMembers;
+  const adminMemberRows = React.useMemo(() => [...effectiveMembers].sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b))), [effectiveMembers]);
   React.useEffect(() => {
     if (!auth?.authenticated) return;
     run(async () => {
@@ -476,13 +502,13 @@ export function AdminPanel({
       if (tab === "empire-membership") await refreshEmpireMembership();
       if (tab === "database") await refreshTables();
       if (tab === "users") await refreshUsers();
-      if (tab === "accounts") await refreshLinkedAccounts();
+      if (tab === "accounts") await Promise.all([refreshLinkedAccounts(), refreshFallbackMembers()]);
       if (tab === "configuration") await refreshAccessControl();
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
       if (tab === "backups") await refreshBackups();
     }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}`);
-  }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize]);
+  }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize, settings.claimId, members.length]);
   const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
   React.useEffect(() => {
     if (!auth?.authenticated || tab !== "status" || !scheduledJobsRunning) return;
@@ -2090,14 +2116,16 @@ export function AdminPanel({
           tab={tab}
           data={{ users, linkedAccounts, members: adminMemberRows, newUser, adminRoles, canManageAdmins, currentUserId: auth.user?.id }}
           pending={isBusyAction}
-          error={messageKind === "error" ? message : null}
+          error={messageKind === "error" && (tab !== "accounts" || !membersError) ? message : null}
+          membersLoading={membersLoading}
+          membersError={membersError}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
           onNewUserChange={setNewUser}
           onAddUser={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.", "admin-user-add")}
           onRoleChange={(entry, role) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}
           onClearSessions={(entry) => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}
           onToggleStatus={(entry) => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
-          onRefreshLinkedAccounts={() => run(refreshLinkedAccounts, undefined, "linked-accounts-refresh")}
+          onRefreshLinkedAccounts={() => run(async () => { await Promise.all([refreshLinkedAccounts(), refreshFallbackMembers()]); }, undefined, "linked-accounts-refresh")}
           onAccountApproval={(account, status) => run(async () => { const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) }); setLinkedAccounts(result.accounts ?? []); }, `Account marked ${status}.`, `account-approval:${account.id}`)}
           onCharacterAssignment={(account, member) => run(async () => {
             const result = await api("/admin/user-accounts/character", {

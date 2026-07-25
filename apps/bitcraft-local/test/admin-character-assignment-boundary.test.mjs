@@ -13,7 +13,7 @@ test("Linked Accounts exposes direct assignment and explicit unassignment", () =
   assert.match(access, /Unassign character/);
   assert.match(access, /memberTrackingId\(member\)/);
   assert.match(access, /account\.characterStatus === "approved"/);
-  assert.match(access, /disabled=\{!selectedMember \|\| selectedCharacterUnavailable \|\| pending/);
+  assert.match(access, /disabled=\{membersLoading \|\| !selectedMember \|\| selectedCharacterUnavailable \|\| pending/);
 });
 
 test("AdminPanel sends the selected member to the secured character route", () => {
@@ -22,6 +22,26 @@ test("AdminPanel sends the selected member to the secured character route", () =
   assert.match(panel, /\/admin\/user-accounts\/character/);
   assert.match(panel, /memberTrackingId\(member\)/);
   assert.match(panel, /memberDisplayName\(member\)/);
+});
+
+test("Linked Accounts loads a panel-owned roster only when no members were supplied", () => {
+  assert.match(panel, /import\s*\{\s*loadAdminSettlementMembers\s*\}\s*from\s*["']\.\/adminSettlementMembers["']/);
+  assert.match(panel, /const\s*\[fallbackMembers,\s*setFallbackMembers\]\s*=\s*React\.useState<AnyRecord\[\]>/);
+  assert.match(panel, /if\s*\(members\.length\)\s*\{/);
+  assert.match(panel, /loadAdminSettlementMembers\(settings\.claimId\)/);
+  assert.match(panel, /const\s+effectiveMembers\s*=\s*members\.length\s*\?\s*members\s*:\s*fallbackMembers/);
+  assert.match(panel, /<AdminAccessSection[\s\S]*membersLoading=\{membersLoading\}/);
+  assert.match(panel, /<AdminAccessSection[\s\S]*membersError=\{membersError\}/);
+});
+
+test("Linked Accounts makes roster loading, empty, and failure states actionable", () => {
+  assert.match(access, /membersLoading:\s*boolean/);
+  assert.match(access, /membersError\?:\s*string\s*\|\s*null/);
+  assert.match(access, /Loading settlement characters\.\.\./);
+  assert.match(access, /No settlement characters available/);
+  assert.match(access, /membersError[^]*role="alert"/);
+  assert.match(access, /Refresh and retry\./);
+  assert.match(access, /disabled=\{membersLoading \|\| !data\.members\.length \|\| pending\(`account-character:\$\{account\.id\}`\)\}/);
 });
 
 test("Linked account assignment remains dense and becomes single-column on narrow screens", () => {
