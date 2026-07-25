@@ -21,6 +21,7 @@ export const additiveColumnMigrations = [
   { table: "admin_users", column: "discord_global_name", definition: "TEXT" },
   { table: "admin_users", column: "discord_avatar", definition: "TEXT" },
   { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
+  { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
   { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
   { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
   { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },

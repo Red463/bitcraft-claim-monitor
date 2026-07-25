@@ -109,7 +109,7 @@
 .privacy-confirm-panel span { color: var(--muted); font-size: 11px; line-height: 1.4; }
 .privacy-status { margin: 0; border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--good) 8%, transparent); color: var(--good); padding: 8px 10px; font-size: 12px; }
 .privacy-account-delete { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); }
-.account-deletion-overlay { z-index: 1280; }
+.account-deletion-overlay { z-index: calc(var(--z-cookie) + 1); }
 .account-deletion-dialog { width: min(650px, calc(100vw - 28px)); max-height: calc(100vh - 32px); overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto; }
 .account-deletion-body { min-height: 0; overflow: auto; display: grid; gap: 11px; padding-right: 4px; }
 .account-deletion-body > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }

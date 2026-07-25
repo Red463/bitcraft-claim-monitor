@@ -2,6 +2,21 @@
 
 Status date: 2026-06-29
 
+## Privacy release gates (2026-07-25)
+
+These owner actions remain mandatory before deploying the legal/privacy feature:
+
+- [ ] Complete the ICO data-protection fee self-assessment.
+- [ ] Obtain solicitor review of the Terms, Privacy Policy, both legitimate-interest assessments, England/Wales wording, international transfers, 18+ approach, and the absence of a published postal address.
+- [ ] Confirm and document HostWorld volume and provider-snapshot encryption at rest. If this cannot be confirmed, production is blocked until equivalent host/filesystem or application-layer database encryption is deployed.
+- [ ] Provision `/etc/bitcraft-claim-monitor/backup-encryption.key` as root-owned mode `0600`.
+- [ ] Provision `/etc/bitcraft-claim-monitor/privacy-ledger.key` as root-owned, group `bitcraft`, mode `0640`.
+- [ ] Provision an independently preserved current deletion ledger that cannot roll back with the database volume/provider snapshot.
+- [ ] Run and record an encrypted-backup restore plus deletion-ledger replay on Linux.
+- [ ] Update the Discord Developer Portal Terms and Privacy URLs.
+- [ ] Verify Namecheap, Proton, GitHub, Buy Me a Coffee, Discord, BitJita, and HostWorld disclosures against the live arrangement.
+- [ ] Inventory legacy plaintext backups; after encrypted restore verification, either re-encrypt required recovery points or remove them through the guarded cleanup flow.
+
 This audit tracks public-release readiness for the maintained app at `apps/bitcraft-local`. It records evidence from the current codebase and the remaining work that must be verified before the release-readiness goal can be marked complete.
 
 ## Current Handoff Summary

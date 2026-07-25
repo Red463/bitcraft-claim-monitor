@@ -350,7 +350,7 @@ export function createPreparedStatements(db) {
       discord_avatar = excluded.discord_avatar,
       last_login_at = excluded.last_login_at
   `),
-  updateUserLastLogin: db.prepare("UPDATE user_accounts SET last_login_at = ? WHERE id = ?"),
+  updateUserLastLogin: db.prepare("UPDATE user_accounts SET last_login_at = ?, inactivity_warning_sent_at = NULL WHERE id = ?"),
   insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at, reauthenticated_at) VALUES (?, ?, ?, ?, ?)"),
   deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
   deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),

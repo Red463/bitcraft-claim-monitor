@@ -161,3 +161,18 @@ node scripts/start-bitcraft-local-smoke.mjs --restart
 The smoke server serves `http://127.0.0.1:18449/`. Notification matrix probes can use `?page=<panel>&smokeNotification=<type>&smokeRun=<id>` on loopback only; this verifies the normal toast/drawer UI path with sample notices, not live BitJita production queue diffs or signed-in deal-alert source rows.
 
 For VPS deployment and updates, use [`DEPLOYMENT.md`](../DEPLOYMENT.md).
+## Legal and Privacy Changes
+
+The canonical legal policy is `apps/bitcraft-local/src/legal/legalPolicy.mjs`; `/terms` and `/privacy` render from that source. Production startup requires `LEGAL_CONFIGURATION_CONFIRMED=true`. If document meaning changes, update the legal version/effective date, review both rendered documents, and verify that an existing session receives the next-visit acceptance gate.
+
+User privacy mutations live under `/api/local/auth/privacy/*`. Keep them same-origin, session-derived-CSRF protected, explicit, and idempotent. Export is the intentional stale-legal exception. Full account deletion additionally requires a matching Discord reauthentication no older than ten minutes and exact `DELETE` confirmation.
+
+Production requires:
+
+```text
+PRIVACY_LEDGER_PATH=/var/backups/bitcraft-claim-monitor/privacy-deletion-ledger.jsonl
+PRIVACY_LEDGER_KEY_FILE=/etc/bitcraft-claim-monitor/privacy-ledger.key
+BACKUP_ENCRYPTION_KEY_FILE=/etc/bitcraft-claim-monitor/backup-encryption.key
+```
+
+Never put these keys in Git, SQLite, logs, command arguments, or the backup directory. A restore is incomplete until the newest independently preserved deletion ledger is verified and replayed. See `docs/privacy-operations-runbook.md`.

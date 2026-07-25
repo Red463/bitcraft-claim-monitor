@@ -653,6 +653,15 @@ Route permissions are mapped by `adminPermissionFor` in `server.mjs`.
 - `docs/polling-and-jobs.md`: background polling, scheduled jobs, rate limits, and failure modes.
 - `docs/frontend-pages.md`: ownership map for each page/component after further frontend modularization.
 - `docs/deployment-runbook.md`: production update script, rollback, backup, Caddy, and systemd troubleshooting.
+- `docs/privacy-operations-runbook.md`: legal configuration, data-rights requests, deletion-ledger recovery, encrypted backups, incidents, and retention operations.
+
+## Legal And Privacy Controls
+
+The service is operated worldwide for adults aged 18+ by Thomas Bush, operating as Timbersteel Claim Monitor (a project/trading name, not a separate company). Discord sign-in requires current Terms acceptance and age confirmation. Analytics remains optional and separately consented.
+
+Authenticated users can download a scoped JSON export; unlink a character; clear synced preferences, market watches/alerts, or current-browser analytics; and permanently delete their ordinary app account after recent matching Discord reauthentication. A separate administrator identity is intentionally preserved. Completed deletion is written to an independently retained signed ledger and replayed at startup so an older SQLite restore cannot silently recreate an account.
+
+Production backups are AES-256-GCM encrypted and require protected external key files. Runtime keys and the current deletion ledger must not be stored in SQLite or rolled back with the selected database recovery point.
 - `docs/testing.md`: browser smoke server, test commands, and regression areas.
 
 ## Accuracy Requirements

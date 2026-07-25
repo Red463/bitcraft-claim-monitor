@@ -135,6 +135,12 @@ import {
   unlinkUserCharacter,
 } from "./src/server/userPrivacy.mjs";
 import { deleteUserAccount } from "./src/server/accountDeletion.mjs";
+import {
+  coordinatePrivacyDeletion,
+  readDeletionLedger,
+  replayPrivacyDeletions,
+} from "./src/server/privacyDeletionLedger.mjs";
+import { runPrivacyRetention } from "./src/server/privacyRetention.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -289,6 +295,8 @@ const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
+const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
+  ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
 const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
@@ -1103,6 +1111,29 @@ async function runGeoipRefreshJob({ jobKey } = {}) {
   };
 }
 
+async function runPrivacyRetentionJob() {
+  return runPrivacyRetention(db, {
+    now: new Date(),
+    sendInactiveWarning: async (account) => {
+      await sendDiscordDirectMessage(account.discordId, {
+        content: `${legalPolicy.operator.projectName} has not seen this app account used recently. It is scheduled for automatic deletion in about 30 days. Sign in again to keep it, or use Settings → Privacy & Data to export or delete it now.`,
+        allowed_mentions: { parse: [] },
+      });
+    },
+    deleteInactiveAccount: async (account) => coordinatePrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId: account.discordId,
+      deleteAccount: (operationId) => deleteUserAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        randomUUID: () => operationId,
+      }),
+    }),
+  });
+}
+
 // Scheduled jobs are registered here rather than scattered through route
 // handlers so Admin can expose a consistent enable/run/status surface for each
 // background task. Jobs should report progress in metadata when they can run for
@@ -1157,6 +1188,13 @@ const scheduledJobRegistry = {
     schedule: "weekly@1@00:00",
     enabled: false,
     run: runGeoipRefreshJob,
+  },
+  "privacy-retention": {
+    label: "Privacy retention",
+    description: "Applies published personal-data retention periods, sends inactivity warnings, and deletes accounts inactive for 24 months.",
+    schedule: "daily@02:30",
+    enabled: true,
+    run: runPrivacyRetentionJob,
   },
 };
 
@@ -3501,6 +3539,28 @@ function privacyDeletionKey() {
   const generated = randomBytes(32).toString("base64url");
   statements.upsertSecret.run(keyName, generated, new Date().toISOString());
   return generated;
+}
+
+function privacyLedgerKey() {
+  const keyFile = String(process.env.PRIVACY_LEDGER_KEY_FILE ?? "").trim();
+  if (keyFile) {
+    const key = readFileSync(keyFile, "utf8").trim();
+    if (!key) throw new Error("Privacy deletion ledger key file is empty");
+    return key;
+  }
+  if (isProduction && !isTestRuntime) throw new Error("PRIVACY_LEDGER_KEY_FILE is required in production");
+  return privacyDeletionKey();
+}
+
+function privacyLedgerVerificationKeys() {
+  const current = privacyLedgerKey();
+  const previous = String(process.env.PRIVACY_LEDGER_PREVIOUS_KEY_FILES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((keyFile) => readFileSync(keyFile, "utf8").trim())
+    .filter(Boolean);
+  return [current, ...previous];
 }
 
 function authStateCookie(state, returnTo, options = {}) {
@@ -9936,10 +9996,16 @@ const server = createServer(async (req, res) => {
       const body = await readJson(req, BODY_LIMITS.auth);
       if (body.confirmation !== "DELETE") return send(res, 400, { error: 'Type "DELETE" exactly to confirm account deletion' });
       if (!requireRecentAppUserReauthentication(req, res, user)) return;
-      const receipt = deleteUserAccount(db, {
-        userId: user.id,
+      const receipt = coordinatePrivacyDeletion({
+        ledgerPath: privacyLedgerPath,
+        key: privacyLedgerKey(),
         discordId: user.discord_id,
-        deletionKey: privacyDeletionKey(),
+        deleteAccount: (operationId) => deleteUserAccount(db, {
+          userId: user.id,
+          discordId: user.discord_id,
+          deletionKey: privacyDeletionKey(),
+          randomUUID: () => operationId,
+        }),
       });
       let notification;
       try {
@@ -11274,6 +11340,26 @@ if (!isTestRuntime) {
   };
   setTimeout(persistMetrics, applicationMetricInitialDelayMs(processRole));
 }
+
+function replayCurrentPrivacyDeletionLedger() {
+  const key = privacyLedgerKey();
+  const keys = privacyLedgerVerificationKeys();
+  const records = readDeletionLedger(privacyLedgerPath, keys);
+  const accounts = db.prepare("SELECT id, discord_id AS discordId FROM user_accounts").all();
+  return replayPrivacyDeletions({
+    records,
+    accounts,
+    key,
+    keys,
+    deleteAccount: (account) => deleteUserAccount(db, {
+      userId: account.id,
+      discordId: account.discordId,
+      deletionKey: privacyDeletionKey(),
+    }),
+  });
+}
+
+replayCurrentPrivacyDeletionLedger();
 
 if (processRoleConfig.serveHttp) {
   server.listen(port, host, () => {

@@ -141,7 +141,8 @@ export const schemaBootstrapSql = `
     character_status TEXT NOT NULL DEFAULT 'unlinked',
     settings_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    last_login_at TEXT
+    last_login_at TEXT,
+    inactivity_warning_sent_at TEXT
   );
   CREATE TABLE IF NOT EXISTS user_sessions (
     token_hash TEXT PRIMARY KEY,

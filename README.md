@@ -244,6 +244,20 @@ When accepted, first-party cookies store the user's consent and a random browser
 
 The app does not include BitCraft usernames, selected member identities, typed search text, admin credentials, item IDs, item names, region query values, or database contents in analytics events. Visitors may withdraw permission at any time through **Privacy & Analytics**, which removes the analytics browser identifier.
 
+The canonical legal pages are `/terms` and `/privacy`. The default deployment identifies the controller as **Thomas Bush, operating as Timbersteel Claim Monitor**; Timbersteel Claim Monitor is a project/trading name, not a company or separate legal entity. Contact: `privacy@timbersteeltrade.com`. Other operators must override and review:
+
+```text
+LEGAL_CONTROLLER_NAME
+LEGAL_PROJECT_NAME
+LEGAL_PRIVACY_EMAIL
+LEGAL_CONTROLLER_COUNTRY
+LEGAL_GOVERNING_LAW
+LEGAL_MINIMUM_AGE
+LEGAL_CONFIGURATION_CONFIRMED=true
+```
+
+Discord Developer Portal fields should point to `https://timbersteeltrade.com/terms` and `https://timbersteeltrade.com/privacy`, with the configured OAuth redirect URI. Legal acceptance is separate from optional analytics consent. Signed-in users can export, unlink, clear granular data, or delete their account under **User Settings → Privacy & Data**. A `LEGAL_VERSION` or document-content change requires a reviewed version/effective-date update and prompts existing users on their next visit.
+
 Separately from optional analytics cookies, the server records short-term request security logs for abuse prevention and operational diagnostics. These records include the request time, route group, status class, user-agent hash, anonymised IP prefix, hashed IP, and the full IP address for a limited retention window. Full IP retention defaults to 7 days, and older records keep only anonymised/hash data. If a local GeoIP database source is configured, the server can also attach approximate country/city statistics without sending visitor IPs to a third-party lookup service. The GeoIP refresh job supports simple JSON/CSV sources and MaxMind GeoLite2 City CSV ZIP downloads using separate MaxMind account ID and license key fields in Admin configuration.
 
 The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics. This is separate from browser analytics consent and is required for the bot features to operate.

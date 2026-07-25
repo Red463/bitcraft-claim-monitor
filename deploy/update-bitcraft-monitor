@@ -8,6 +8,8 @@ CURRENT_LINK="${CURRENT_LINK:-$APP_ROOT/current}"
 DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor}"
 BACKUP_HELPER_PATH="${BACKUP_HELPER_PATH:-/usr/local/bin/backup-bitcraft-monitor}"
+BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor/backup-crypto.mjs}"
+PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor/replay-privacy-deletions.mjs}"
 LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
 RUN_USER="${RUN_USER:-bitcraft}"
@@ -257,15 +259,30 @@ prepare_release() {
 stage_backup_helper() {
   local release_dir="$1"
   local candidate="$release_dir/deploy/backup-bitcraft-monitor"
+  local crypto_candidate="$release_dir/deploy/backup-crypto.mjs"
+  local replay_candidate="$release_dir/deploy/replay-privacy-deletions.mjs"
   [[ -f "$candidate" ]] || {
     printf "Candidate backup helper is missing: %s\n" "$candidate" >&2
     return 1
   }
+  [[ -f "$crypto_candidate" ]] || {
+    printf "Candidate backup crypto helper is missing: %s\n" "$crypto_candidate" >&2
+    return 1
+  }
+  [[ -f "$replay_candidate" ]] || {
+    printf "Candidate privacy replay helper is missing: %s\n" "$replay_candidate" >&2
+    return 1
+  }
   run_logged "Validating database backup helper" bash -n "$candidate"
+  run_logged "Validating database backup crypto helper" node --check "$crypto_candidate"
+  run_logged "Validating privacy replay helper" node --check "$replay_candidate"
   if [[ -e "$BACKUP_HELPER_PATH" ]]; then
     backup_helper_snapshot="$(mktemp "${TMPDIR:-/tmp}/bitcraft-backup-helper.XXXXXX")"
     install -m 0755 "$BACKUP_HELPER_PATH" "$backup_helper_snapshot"
   fi
+  install -d -o root -g root -m 0755 "$(dirname "$BACKUP_CRYPTO_HELPER_PATH")"
+  install -m 0755 "$crypto_candidate" "$BACKUP_CRYPTO_HELPER_PATH"
+  install -m 0755 "$replay_candidate" "$PRIVACY_REPLAY_HELPER_PATH"
   install -m 0755 "$candidate" "$BACKUP_HELPER_PATH"
   backup_helper_staged=1
 }
@@ -362,6 +379,7 @@ validate_release_config() {
 
 install_release_config() {
   local release_dir="$1"
+  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
   install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor.service" \
     /etc/systemd/system/bitcraft-claim-monitor.service
   install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-worker.service" \
