@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.45.1-beta.1] - 2026-07-25
+
+### Added
+
+- Added Linked Accounts access to the dedicated Discord bot control page.
+
+### Fixed
+
+- Fixed the administrator character selector appearing empty after opening or refreshing the Admin or Bot Control pages directly.
+- Prevented older settlement-roster requests from replacing characters loaded for a newer settlement.
+- Improved roster loading, empty, and failure feedback without hiding linked-account action errors.
+
 ## [0.45.0-beta.2] - 2026-07-25
 
 ### Changed
