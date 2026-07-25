@@ -22,6 +22,15 @@ export function isCurrentLegalAcceptance(row, expected) {
     && Number(row.age_confirmed) === 1;
 }
 
+export function isCurrentOAuthLegalAcceptance(acceptance, expected) {
+  return Boolean(acceptance)
+    && String(acceptance.version) === expected.version
+    && String(acceptance.termsDigest) === expected.termsDigest
+    && String(acceptance.privacyDigest) === expected.privacyDigest
+    && acceptance.ageConfirmed === true
+    && Number.isFinite(Date.parse(acceptance.acceptedAt));
+}
+
 export function publicLegalStatus(row, expected) {
   const current = isCurrentLegalAcceptance(row, expected);
   return {

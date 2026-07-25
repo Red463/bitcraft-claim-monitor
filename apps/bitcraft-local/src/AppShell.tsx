@@ -196,7 +196,12 @@ function DashboardApp() {
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(false);
-  const [userAuth, setUserAuth] = React.useState<UserAuthState>({ user: null, discordLoginEnabled: false });
+  const [userAuth, setUserAuth] = React.useState<UserAuthState>({
+    user: null,
+    csrfToken: null,
+    discordLoginEnabled: false,
+    legal: { version: "", termsDigest: "", privacyDigest: "", acceptedAt: null, requiresAcceptance: false },
+  });
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
@@ -349,11 +354,11 @@ function DashboardApp() {
   }, []);
   const linkDiscordCharacter = React.useCallback(async (member: AnyRecord | null) => {
     const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.userName ?? member.username ?? member.playerUsername ?? member.name ?? "") } : {};
-    const response = await fetch(`${LOCAL_API}/auth/character`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const response = await fetch(`${LOCAL_API}/auth/character`, { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": String(userAuth.csrfToken ?? "") }, body: JSON.stringify(payload) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save character link request");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, []);
+  }, [userAuth.csrfToken]);
   const accountSettingsFingerprint = React.useMemo(() => JSON.stringify(userAuth.user?.settings ?? {}), [userAuth.user?.settings]);
   const applyAccountSettings = React.useCallback((saved: AnyRecord) => {
     if (saved.density === "comfortable" || saved.density === "compact") setDensity(saved.density);
@@ -374,11 +379,11 @@ function DashboardApp() {
     setAccountSettingsHydratedFor(`${discordId}:${accountSettingsFingerprint}`);
   }, [accountSettingsFingerprint, applyAccountSettings, userAuth.user?.discordId, userAuth.user?.settings]);
   const syncAccountSettings = React.useCallback(async (settings: AnyRecord) => {
-    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
+    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": String(userAuth.csrfToken ?? "") }, body: JSON.stringify({ settings }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to sync account settings");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, []);
+  }, [userAuth.csrfToken]);
   React.useEffect(() => {
     const discordId = userAuth.user?.discordId ?? "";
     if (!discordId || accountSettingsHydratedFor !== `${discordId}:${accountSettingsFingerprint}`) return;
@@ -391,11 +396,11 @@ function DashboardApp() {
   }, [accountSettingsFingerprint, accountSettingsHydratedFor, browserTheme, density, normalizedUserToastSettings, selectedMemberId, sidebarCollapsed, sidebarGroups, syncAccountSettings, userAuth.user?.discordId, userAuth.user?.settings]);
   const setDiscordMarketSaleDm = React.useCallback(async (enabled: boolean) => {
     const settings = { ...(userAuth.user?.settings ?? {}), discordMarketSaleDm: enabled };
-    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings }) });
+    const response = await fetch(`${LOCAL_API}/auth/settings`, { method: "PUT", headers: { "content-type": "application/json", "x-csrf-token": String(userAuth.csrfToken ?? "") }, body: JSON.stringify({ settings }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Unable to save Discord notification preference");
     setUserAuth((current) => ({ ...current, user: body.user }));
-  }, [userAuth.user?.settings]);
+  }, [userAuth.csrfToken, userAuth.user?.settings]);
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);

@@ -13,8 +13,8 @@ import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
-import { originFromRequest as requestOriginFromRequest, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
-import { csrfToken } from "./src/server/httpCsrf.mjs";
+import { originFromRequest as requestOriginFromRequest, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
+import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
@@ -114,6 +114,14 @@ import {
   readOAuthStateCookie,
   resolveOAuthStateSecret,
 } from "./src/server/oauthState.mjs";
+import { legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
+import { legalPolicyDigests } from "./src/server/legalPolicyDigest.mjs";
+import {
+  currentLegalSnapshot,
+  isCurrentLegalAcceptance,
+  isCurrentOAuthLegalAcceptance,
+  publicLegalStatus,
+} from "./src/server/legalAcceptance.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -220,6 +228,9 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(root, "dist");
 const isProduction = process.env.NODE_ENV === "production";
 const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_ENV === "test";
+const legalPolicy = legalPolicyForEnvironment(process.env);
+const legalDigests = legalPolicyDigests(legalPolicy);
+const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
@@ -3409,7 +3420,15 @@ function clearAppUserSession(req) {
 function authStatus(req) {
   const user = getAppUser(req);
   const config = discordOAuthConfig(req);
-  return { user: publicAppUser(user), discordLoginEnabled: config.enabled };
+  const acceptance = user ? statements.currentUserLegalAcceptance.get(user.id) : null;
+  return {
+    user: publicAppUser(user),
+    csrfToken: user ? appUserCsrfToken(req) : null,
+    discordLoginEnabled: config.enabled,
+    legal: user
+      ? publicLegalStatus(acceptance, legalSnapshot)
+      : { ...legalSnapshot, acceptedAt: null, requiresAcceptance: false },
+  };
 }
 
 function accessControlConfig() {
@@ -3455,8 +3474,12 @@ function oauthStateSecret() {
   });
 }
 
-function authStateCookie(state, returnTo) {
-  return oauthStateCookie(state, returnTo, { secret: oauthStateSecret(), secure: isProduction });
+function authStateCookie(state, returnTo, options = {}) {
+  return oauthStateCookie(state, returnTo, {
+    secret: oauthStateSecret(),
+    secure: isProduction,
+    ...options,
+  });
 }
 
 function clearAuthStateCookie() {
@@ -3467,17 +3490,26 @@ function readAuthStateCookie(req) {
   return readOAuthStateCookie(req, oauthStateSecret());
 }
 
-async function handleDiscordOAuthStart(req, res, url) {
+async function handleDiscordOAuthStart(req, res) {
+  if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin Discord sign-in rejected" });
+  const body = await readJson(req, BODY_LIMITS.auth);
+  if (body.acceptedTerms !== true || body.ageConfirmed !== true) {
+    return send(res, 400, { error: "Accept the Terms and Privacy Policy and confirm that you are at least 18" });
+  }
   const config = discordOAuthConfig(req);
   if (!config.enabled) return send(res, 503, { error: "Discord login is not configured on this server" });
   const state = randomBytes(24).toString("base64url");
-  const returnTo = url.searchParams.get("returnTo");
-  res.writeHead(302, {
-    location: buildDiscordAuthorizeUrl({ config, state }),
-    "set-cookie": authStateCookie(state, returnTo),
+  const acceptedAt = new Date().toISOString();
+  const legal = {
+    ...legalSnapshot,
+    ageConfirmed: true,
+    acceptedAt,
+  };
+  return send(res, 200, {
+    authorizeUrl: buildDiscordAuthorizeUrl({ config, state }),
+  }, {
+    "set-cookie": authStateCookie(state, body.returnTo, { purpose: "login", legal }),
   });
-  res.end();
-  return true;
 }
 
 async function handleDiscordOAuthCallback(req, res, url) {
@@ -3493,6 +3525,11 @@ async function handleDiscordOAuthCallback(req, res, url) {
     return true;
   }
   const returnTo = callbackDecision.returnTo;
+  if (!isCurrentOAuthLegalAcceptance(stateCookie.legal, legalSnapshot)) {
+    res.writeHead(302, { location: "/?auth=discord-error&reason=legal", "set-cookie": clearAuthStateCookie() });
+    res.end();
+    return true;
+  }
   const tokenRequest = discordOAuthTokenRequest({ config, code: callbackDecision.code });
   const tokenResponse = await fetch(tokenRequest.url, tokenRequest.init);
   if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed: ${tokenResponse.status}`);
@@ -3506,6 +3543,15 @@ async function handleDiscordOAuthCallback(req, res, url) {
   statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
   const user = statements.userByDiscordId.get(account.discordId);
   statements.updateUserLastLogin.run(loginAt, user.id);
+  statements.insertUserLegalAcceptance.run(
+    user.id,
+    stateCookie.legal.version,
+    stateCookie.legal.termsDigest,
+    stateCookie.legal.privacyDigest,
+    1,
+    stateCookie.legal.acceptedAt,
+    "discord-oauth",
+  );
   const session = createAppUserSession(user.id);
   const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
   const redirect = discordOAuthSuccessRedirect({
@@ -3519,16 +3565,41 @@ async function handleDiscordOAuthCallback(req, res, url) {
   return true;
 }
 
-function requireAppUser(req, res) {
+function rejectStaleLegalAcceptance(res, user) {
+  const acceptance = statements.currentUserLegalAcceptance.get(user.id);
+  if (!isCurrentLegalAcceptance(acceptance, legalSnapshot)) {
+    send(res, 428, {
+      error: "Accept the current Terms and Privacy Policy to continue",
+      code: "legal_acceptance_required",
+      legal: publicLegalStatus(acceptance, legalSnapshot),
+    });
+    return true;
+  }
+  return false;
+}
+
+function requireAppUserSession(req, res, { allowStaleLegal = false } = {}) {
   const user = getAppUser(req);
   if (!user) {
     send(res, 401, { error: "Discord sign-in required" });
     return null;
   }
+  if (!allowStaleLegal && rejectStaleLegalAcceptance(res, user)) return null;
+  return user;
+}
+
+function requireAppUser(req, res, options = {}) {
+  const user = requireAppUserSession(req, res, { allowStaleLegal: true });
+  if (!user) return null;
   if (!sameOriginRequest(req)) {
     send(res, 403, { error: "Cross-origin account request rejected" });
     return null;
   }
+  if (!validCsrfHeader(appUserCsrfToken(req), req.headers["x-csrf-token"])) {
+    send(res, 403, { error: "Invalid account request token" });
+    return null;
+  }
+  if (!options.allowStaleLegal && rejectStaleLegalAcceptance(res, user)) return null;
   return user;
 }
 
@@ -9646,11 +9717,21 @@ const server = createServer(async (req, res) => {
         return send(res, error?.statusCode ?? 502, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
       }
     }
+    if (req.method === "GET" && url.pathname === "/api/local/legal") {
+      return send(res, 200, { ...legalPolicy, ...legalDigests });
+    }
     if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
     if (req.method === "GET" && url.pathname === "/api/local/access-control/effective") return send(res, 200, publicEffectiveAccess(accessControlConfig(), accessControlSubject(req)));
     if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      return handleDiscordOAuthStart(req, res, url);
+      const returnTo = safeReturnPath(url.searchParams.get("returnTo"));
+      res.writeHead(302, { location: `/?legal=required&returnTo=${encodeURIComponent(returnTo)}` });
+      res.end();
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/auth/discord/start") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      return handleDiscordOAuthStart(req, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/auth/discord/callback") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
@@ -9658,7 +9739,32 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/local/auth/logout") {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin sign-out rejected" });
-      return send(res, 200, { ok: true, user: null, discordLoginEnabled: discordOAuthConfig(req).enabled }, { "set-cookie": clearAppUserSession(req) });
+      return send(res, 200, {
+        ok: true,
+        user: null,
+        csrfToken: null,
+        discordLoginEnabled: discordOAuthConfig(req).enabled,
+        legal: { ...legalSnapshot, acceptedAt: null, requiresAcceptance: false },
+      }, { "set-cookie": clearAppUserSession(req) });
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/auth/legal/accept") {
+      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
+      const user = requireAppUser(req, res, { allowStaleLegal: true });
+      if (!user) return;
+      const body = await readJson(req, BODY_LIMITS.auth);
+      if (body.acceptedTerms !== true || body.ageConfirmed !== true) {
+        return send(res, 400, { error: "Accept the Terms and Privacy Policy and confirm that you are at least 18" });
+      }
+      statements.insertUserLegalAcceptance.run(
+        user.id,
+        legalSnapshot.version,
+        legalSnapshot.termsDigest,
+        legalSnapshot.privacyDigest,
+        1,
+        new Date().toISOString(),
+        "existing-session",
+      );
+      return send(res, 200, authStatus(req));
     }
     if (req.method === "PUT" && url.pathname === "/api/local/auth/character") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
@@ -10463,7 +10569,9 @@ const server = createServer(async (req, res) => {
       return send(res, 200, recordSettlementState(await readJson(req, BODY_LIMITS.snapshot)));
     }
     if (url.pathname === "/api/local/market/deal-watches") {
-      const appUser = requireAppUser(req, res);
+      const appUser = req.method === "GET"
+        ? requireAppUserSession(req, res)
+        : requireAppUser(req, res);
       if (!appUser) return;
       const claimId = String(url.searchParams.get("claimId") ?? getSettings().claimId ?? "").trim();
       if (req.method === "GET") {
@@ -10523,7 +10631,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/deal-alerts") {
-      const appUser = requireAppUser(req, res);
+      const appUser = requireAppUserSession(req, res);
       if (!appUser) return;
       const limit = Math.min(Math.max(toNumber(url.searchParams.get("limit")) || 50, 1), 100);
       return send(res, 200, {

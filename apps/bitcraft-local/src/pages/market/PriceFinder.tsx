@@ -124,7 +124,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,

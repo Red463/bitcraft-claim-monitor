@@ -98,7 +98,7 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
@@ -135,7 +135,7 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
         body: JSON.stringify(patch),
       });
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
@@ -152,7 +152,10 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
     if (!id) return;
     setWatchBusy(id);
     try {
-      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "x-csrf-token": String(authState.csrfToken ?? "") },
+      });
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {

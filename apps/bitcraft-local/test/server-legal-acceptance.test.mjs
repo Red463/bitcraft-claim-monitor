@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   currentLegalSnapshot,
   isCurrentLegalAcceptance,
+  isCurrentOAuthLegalAcceptance,
   publicLegalStatus,
   routeAllowedWithoutCurrentAcceptance,
 } from "../src/server/legalAcceptance.mjs";
@@ -27,6 +28,22 @@ test("acceptance is current only when version, both digests, and age confirmatio
   assert.equal(isCurrentLegalAcceptance({ ...current, terms_digest: "old" }, expected), false);
   assert.equal(isCurrentLegalAcceptance({ ...current, privacy_digest: "old" }, expected), false);
   assert.equal(isCurrentLegalAcceptance({ ...current, age_confirmed: 0 }, expected), false);
+});
+
+test("OAuth acceptance is current only when the signed policy snapshot, age confirmation, and timestamp are valid", () => {
+  const current = {
+    version: "2026-07-25",
+    termsDigest: "terms",
+    privacyDigest: "privacy",
+    ageConfirmed: true,
+    acceptedAt: "2026-07-25T12:00:00.000Z",
+  };
+  assert.equal(isCurrentOAuthLegalAcceptance(current, expected), true);
+  assert.equal(isCurrentOAuthLegalAcceptance({ ...current, version: "2026-07-24" }, expected), false);
+  assert.equal(isCurrentOAuthLegalAcceptance({ ...current, termsDigest: "old" }, expected), false);
+  assert.equal(isCurrentOAuthLegalAcceptance({ ...current, privacyDigest: "old" }, expected), false);
+  assert.equal(isCurrentOAuthLegalAcceptance({ ...current, ageConfirmed: false }, expected), false);
+  assert.equal(isCurrentOAuthLegalAcceptance({ ...current, acceptedAt: "invalid" }, expected), false);
 });
 
 test("public status reveals the current requirement without exposing stored digests from stale rows", () => {

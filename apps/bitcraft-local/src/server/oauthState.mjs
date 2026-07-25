@@ -35,8 +35,20 @@ export function verifySignedOAuthStateValue(value, secret) {
   return encoded;
 }
 
-export function oauthStateCookie(state, returnTo, { secret, secure = false } = {}) {
-  const payload = JSON.stringify({ state, returnTo: safeReturnPath(returnTo) });
+export function oauthStateCookie(state, returnTo, {
+  secret,
+  secure = false,
+  purpose = "login",
+  legal = null,
+  now = () => new Date(),
+} = {}) {
+  const payload = JSON.stringify({
+    state,
+    returnTo: safeReturnPath(returnTo),
+    purpose,
+    legal,
+    createdAt: now().toISOString(),
+  });
   return serializeHttpOnlyCookie(DISCORD_OAUTH_STATE_COOKIE_NAME, signedOAuthStateValue(payload, secret), {
     maxAge: DISCORD_OAUTH_STATE_MAX_AGE_SECONDS,
     secure,
@@ -47,11 +59,16 @@ export function clearOAuthStateCookie({ secure = false } = {}) {
   return serializeHttpOnlyCookie(DISCORD_OAUTH_STATE_COOKIE_NAME, "", { maxAge: 0, secure });
 }
 
-export function readOAuthStateCookie(req, secret) {
+export function readOAuthStateCookie(req, secret, { now = () => new Date() } = {}) {
   try {
     const encoded = verifySignedOAuthStateValue(parseCookies(req)[DISCORD_OAUTH_STATE_COOKIE_NAME], secret);
     if (!encoded) return null;
-    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    const createdAt = Date.parse(payload.createdAt);
+    const ageMs = now().getTime() - createdAt;
+    if (!Number.isFinite(createdAt) || ageMs < -30_000 || ageMs > DISCORD_OAUTH_STATE_MAX_AGE_SECONDS * 1000) return null;
+    if (!["login", "privacy-delete"].includes(payload.purpose)) return null;
+    return payload;
   } catch {
     return null;
   }

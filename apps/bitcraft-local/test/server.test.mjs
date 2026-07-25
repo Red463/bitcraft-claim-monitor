@@ -7,9 +7,13 @@ import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { legalPolicyForEnvironment } from "../src/legal/legalPolicy.mjs";
+import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
 
 const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const claimId = "1369094286777412590";
+const legalPolicy = legalPolicyForEnvironment({});
+const legalDigests = legalPolicyDigests(legalPolicy);
 
 function json(res, body, status = 200) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -441,6 +445,7 @@ test("server collection paginates listings and protects production mutations", a
     env: {
       ...process.env,
       NODE_ENV: "production",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "false",
@@ -914,17 +919,24 @@ test("server collection paginates listings and protects production mutations", a
   const dealUserId = dealDb.prepare("SELECT id FROM user_accounts WHERE discord_id = 'deal-discord-user'").get().id;
   dealDb.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .run(createHash("sha256").update(dealSessionToken).digest("hex"), dealUserId, new Date(Date.now() + 86400000).toISOString(), new Date().toISOString());
+  dealDb.prepare(`
+    INSERT INTO user_legal_acceptances (
+      user_id, legal_version, terms_digest, privacy_digest,
+      age_confirmed, accepted_at, source
+    ) VALUES (?, ?, ?, ?, 1, ?, 'oauth')
+  `).run(dealUserId, legalPolicy.version, legalDigests.termsDigest, legalDigests.privacyDigest, new Date().toISOString());
   dealDb.close();
   const dealCookie = `bitcraft_user_session=${encodeURIComponent(dealSessionToken)}`;
+  const dealCsrfToken = createHash("sha256").update(`csrf:${dealSessionToken}`).digest("base64url");
   const createdDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
     method: "POST",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ regionId: "19", itemId: 30, itemType: 0, itemName: "Leather", tier: 2, rarity: "Common", iconAssetName: "leather.png" }),
   });
   assert.equal(createdDealWatch.status, 201);
   const duplicateDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
     method: "POST",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ regionId: "19", itemId: 30, itemType: 0, itemName: "Leather" }),
   });
   assert.equal(duplicateDealWatch.status, 409);
@@ -1128,9 +1140,29 @@ test("server collection paginates listings and protects production mutations", a
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
   assert.equal(authStatus.discordLoginEnabled, true);
   assert.equal(authStatus.user, null);
-  const oauthStart = await fetch(`${origin}/api/local/auth/discord/start?returnTo=%2F%3Fpage%3Dmembers`, { redirect: "manual" });
-  assert.equal(oauthStart.status, 302);
-  const oauthLocation = oauthStart.headers.get("location");
+  assert.equal(authStatus.csrfToken, null);
+  assert.equal(authStatus.legal.requiresAcceptance, false);
+  const publicLegal = await fetch(`${origin}/api/local/legal`).then((response) => response.json());
+  assert.equal(publicLegal.version, legalPolicy.version);
+  assert.equal(publicLegal.termsDigest, legalDigests.termsDigest);
+  assert.equal(publicLegal.privacyDigest, legalDigests.privacyDigest);
+  const legacyOauthStart = await fetch(`${origin}/api/local/auth/discord/start?returnTo=%2F%3Fpage%3Dmembers`, { redirect: "manual" });
+  assert.equal(legacyOauthStart.status, 302);
+  assert.match(legacyOauthStart.headers.get("location"), /^\/\?legal=required/);
+  const rejectedOauthStart = await fetch(`${origin}/api/local/auth/discord/start`, {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({ returnTo: "/?page=members", acceptedTerms: true, ageConfirmed: false }),
+  });
+  assert.equal(rejectedOauthStart.status, 400);
+  const oauthStart = await fetch(`${origin}/api/local/auth/discord/start`, {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({ returnTo: "/?page=members", acceptedTerms: true, ageConfirmed: true }),
+  });
+  assert.equal(oauthStart.status, 200);
+  const oauthStartBody = await oauthStart.json();
+  const oauthLocation = oauthStartBody.authorizeUrl;
   const oauthCookie = oauthStart.headers.get("set-cookie");
   assert.match(oauthLocation, /^https:\/\/discord\.com\/oauth2\/authorize/);
   assert.match(oauthCookie, /bitcraft_discord_oauth_state=/);
@@ -1151,9 +1183,43 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ characterPlayerId: "player-1", characterName: "Tester" }),
   });
   assert.equal(anonymousCharacterLink.status, 401);
+  const staleSessionToken = "stale-legal-test-session";
+  const staleDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  staleDb.prepare(`
+    INSERT INTO user_accounts (discord_id, discord_username, character_status, settings_json, created_at, last_login_at)
+    VALUES ('stale-legal-user', 'StaleLegal', 'unlinked', '{}', ?, ?)
+  `).run(new Date().toISOString(), new Date().toISOString());
+  const staleUserId = Number(staleDb.prepare("SELECT id FROM user_accounts WHERE discord_id = 'stale-legal-user'").get().id);
+  staleDb.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    .run(createHash("sha256").update(staleSessionToken).digest("hex"), staleUserId, new Date(Date.now() + 86400000).toISOString(), new Date().toISOString());
+  staleDb.close();
+  const staleCookie = `bitcraft_user_session=${encodeURIComponent(staleSessionToken)}`;
+  const staleAuth = await fetch(`${origin}/api/local/auth/me`, { headers: { cookie: staleCookie, origin } }).then((response) => response.json());
+  assert.equal(staleAuth.legal.requiresAcceptance, true);
+  assert.ok(staleAuth.csrfToken);
+  const staleSettings = await fetch(`${origin}/api/local/auth/settings`, {
+    method: "PUT",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ settings: { density: "compact" } }),
+  });
+  assert.equal(staleSettings.status, 428);
+  assert.equal((await staleSettings.json()).code, "legal_acceptance_required");
+  const rejectedLegalAcceptance = await fetch(`${origin}/api/local/auth/legal/accept`, {
+    method: "POST",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ acceptedTerms: true, ageConfirmed: false }),
+  });
+  assert.equal(rejectedLegalAcceptance.status, 400);
+  const acceptedLegal = await fetch(`${origin}/api/local/auth/legal/accept`, {
+    method: "POST",
+    headers: { cookie: staleCookie, origin, "content-type": "application/json", "x-csrf-token": staleAuth.csrfToken },
+    body: JSON.stringify({ acceptedTerms: true, ageConfirmed: true }),
+  });
+  assert.equal(acceptedLegal.status, 200);
+  assert.equal((await acceptedLegal.json()).legal.requiresAcceptance, false);
   const savedAccountSettings = await fetch(`${origin}/api/local/auth/settings`, {
     method: "PUT",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ settings: { density: "compact", selectedMemberId: "player-42", toastSettings: { marketListings: false, marketSales: true, production: false } } }),
   });
   assert.equal(savedAccountSettings.status, 200);
@@ -1168,20 +1234,20 @@ test("server collection paginates listings and protects production mutations", a
   approvedLinkDb.close();
   const blockedRelink = await fetch(`${origin}/api/local/auth/character`, {
     method: "PUT",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ characterPlayerId: "87654321", characterName: "Different Character" }),
   });
   assert.equal(blockedRelink.status, 409);
   assert.match((await blockedRelink.json()).error, /unlink/i);
   const unlinkApprovedCharacter = await fetch(`${origin}/api/local/auth/character`, {
     method: "PUT",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ characterPlayerId: "", characterName: "" }),
   });
   assert.equal(unlinkApprovedCharacter.status, 200);
   const relinkAfterUnlink = await fetch(`${origin}/api/local/auth/character`, {
     method: "PUT",
-    headers: { cookie: dealCookie, origin, "content-type": "application/json" },
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
     body: JSON.stringify({ characterPlayerId: "87654321", characterName: "Different Character" }),
   });
   assert.equal(relinkAfterUnlink.status, 200);
@@ -1701,6 +1767,7 @@ test("background polling failures keep the server online", async (t) => {
     env: {
       ...process.env,
       NODE_ENV: "production",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "true",
@@ -1869,6 +1936,7 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
     env: {
       ...process.env,
       NODE_ENV: "production",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "false",
@@ -2055,6 +2123,7 @@ test("craft plan catalog refresh pauses cleanly and schedules an automatic conti
     env: {
       ...process.env,
       NODE_ENV: "production",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "false",
@@ -2206,6 +2275,7 @@ test("craft plan catalog refresh resets stale resume cursor counters when the sa
     env: {
       ...process.env,
       NODE_ENV: "production",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
       ENABLE_SERVER_POLLING: "false",

@@ -33,16 +33,41 @@ test("signedOAuthStateValue and verifySignedOAuthStateValue round-trip and rejec
 
 test("OAuth state cookies clamp return paths and read only valid signed payloads", () => {
   const secret = "state-secret";
-  const cookie = oauthStateCookie("state-token", "https://evil.example/path", { secret, secure: true });
+  const legal = {
+    version: "2026-07-25",
+    termsDigest: "terms",
+    privacyDigest: "privacy",
+    ageConfirmed: true,
+    acceptedAt: "2026-07-25T12:00:00.000Z",
+  };
+  const cookie = oauthStateCookie("state-token", "https://evil.example/path", {
+    secret,
+    secure: true,
+    purpose: "login",
+    legal,
+    now: () => new Date("2026-07-25T12:00:00.000Z"),
+  });
+  const payload = {
+    state: "state-token",
+    returnTo: "/?page=dashboard",
+    purpose: "login",
+    legal,
+    createdAt: "2026-07-25T12:00:00.000Z",
+  };
 
   assert.equal(
     cookie,
-    `bitcraft_discord_oauth_state=${encodeURIComponent(signedOAuthStateValue(JSON.stringify({ state: "state-token", returnTo: "/?page=dashboard" }), secret))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Secure`,
+    `bitcraft_discord_oauth_state=${encodeURIComponent(signedOAuthStateValue(JSON.stringify(payload), secret))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Secure`,
   );
   assert.deepEqual(
-    readOAuthStateCookie({ headers: { cookie } }, secret),
-    { state: "state-token", returnTo: "/?page=dashboard" },
+    readOAuthStateCookie({ headers: { cookie } }, secret, { now: () => new Date("2026-07-25T12:09:59.000Z") }),
+    payload,
   );
+  assert.equal(readOAuthStateCookie(
+    { headers: { cookie } },
+    secret,
+    { now: () => new Date("2026-07-25T12:10:01.000Z") },
+  ), null);
   assert.equal(readOAuthStateCookie({ headers: { cookie: "bitcraft_discord_oauth_state=invalid" } }, secret), null);
   assert.equal(readOAuthStateCookie({ headers: {} }, secret), null);
 });

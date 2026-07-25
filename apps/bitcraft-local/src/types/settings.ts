@@ -23,7 +23,19 @@ export type AppUser = {
   createdAt?: string;
   lastLoginAt?: string;
 };
-export type UserAuthState = { user: AppUser | null; discordLoginEnabled: boolean };
+export type UserLegalStatus = {
+  version: string;
+  termsDigest: string;
+  privacyDigest: string;
+  acceptedAt: string | null;
+  requiresAcceptance: boolean;
+};
+export type UserAuthState = {
+  user: AppUser | null;
+  csrfToken: string | null;
+  discordLoginEnabled: boolean;
+  legal: UserLegalStatus;
+};
 export type MarketDealWatchSettings = {
   maxWatchesPerUser: number;
   thresholdPercent: number;
