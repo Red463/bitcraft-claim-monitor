@@ -50,6 +50,10 @@ test("Linked Accounts ignores stale fallback roster responses", () => {
   assert.match(panel, /if\s*\(requestGeneration\s*!==\s*fallbackMembersRequest\.current\)\s*return/);
 });
 
+test("Linked Accounts tab loading owns the current roster source", () => {
+  assert.match(panel, /tab-load:\$\{tab\}:\$\{botSection\}:\$\{analyticsDays\}:\$\{securityEventSearch\}:\$\{securityEventPage\}:\$\{securityEventPageSize\}:\$\{settings\.claimId\}:\$\{members\.length\}/);
+});
+
 test("Linked Accounts keeps roster failures local without hiding later admin request errors", () => {
   assert.match(panel, /class\s+FallbackMemberLoadError\s+extends\s+Error/);
   assert.match(panel, /if\s*\(error\s+instanceof\s+FallbackMemberLoadError\)\s*return/);

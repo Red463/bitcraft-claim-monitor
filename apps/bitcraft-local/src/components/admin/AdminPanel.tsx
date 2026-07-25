@@ -522,7 +522,7 @@ export function AdminPanel({
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
       if (tab === "backups") await refreshBackups();
-    }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}`);
+    }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}:${settings.claimId}:${members.length}`);
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize, settings.claimId, members.length]);
   const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
   React.useEffect(() => {
