@@ -18,7 +18,7 @@ import type { LoadState } from "../../types/app";
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
-export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }) {
+export function PriceFinder({ monitoredRegionId, onDiscordLogin }: { monitoredRegionId: string; onDiscordLogin: (returnTo?: string) => void }) {
   const defaultRegion = monitoredRegionId || "19";
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
@@ -124,7 +124,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
@@ -136,7 +136,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
         }),
       });
       if (response.status === 401) {
-        window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
+        onDiscordLogin(`${window.location.pathname}${window.location.search}`);
         return;
       }
       if (!response.ok) {
@@ -197,7 +197,6 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
   const selectedWatch = selectedItem && activeRegion
     ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && toNumber(watch.itemType) === toNumber(selectedItem.itemType))
     : null;
-  const signInHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const maxWatches = toNumber(dealSettings.maxWatchesPerUser) || 10;
   return (
     <section className="price-finder">
@@ -246,7 +245,7 @@ export function PriceFinder({ monitoredRegionId }: { monitoredRegionId: string }
               </div>
               <div className="deal-watch-action">
                 {!authState.user ? (
-                  <a className="toolbar-button" href={signInHref}><Bell size={15} /> Sign in to watch</a>
+                  <button className="toolbar-button" onClick={() => onDiscordLogin()}><Bell size={15} /> Sign in to watch</button>
                 ) : selectedWatch ? (
                   <button className="toolbar-button" type="button" disabled><CheckCircle2 size={15} /> Watching deals</button>
                 ) : (

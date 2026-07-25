@@ -15,6 +15,8 @@ MIGRATION_KEEP="${MIGRATION_KEEP:-3}"
 MANUAL_KEEP="${MANUAL_KEEP:-3}"
 LEGACY_KEEP="${LEGACY_KEEP:-3}"
 DATABASE="$DATA_DIR/bitcraft-local.sqlite"
+BACKUP_ENCRYPTION_KEY_FILE="${BACKUP_ENCRYPTION_KEY_FILE:-/etc/bitcraft-claim-monitor/backup-encryption.key}"
+BACKUP_CRYPTO_HELPER="${BACKUP_CRYPTO_HELPER:-/usr/local/lib/bitcraft-claim-monitor/backup-crypto.mjs}"
 
 MODE=""
 REVISION=""
@@ -22,6 +24,9 @@ worker_was_active=0
 collector_was_active=0
 timer_was_active=0
 services_recorded=0
+plaintext_partial=""
+encrypted_partial=""
+validation_partial=""
 
 usage() {
   cat <<USAGE
@@ -124,6 +129,9 @@ restore_services() {
 restore_on_exit() {
   local status=$?
   trap - EXIT INT TERM
+  [[ -z "$plaintext_partial" ]] || rm -f -- "$plaintext_partial"
+  [[ -z "$encrypted_partial" ]] || rm -f -- "$encrypted_partial"
+  [[ -z "$validation_partial" ]] || rm -f -- "$validation_partial"
   if ! restore_services && [[ "$status" -eq 0 ]]; then
     status=1
   fi
@@ -156,16 +164,40 @@ run_backup_with_heartbeat() {
   return "$backup_status"
 }
 
-validate_and_publish() {
+validate_and_encrypt() {
   local partial="$1"
-  local final="$2"
+  local encrypted="$2"
+  local validation="$3"
+  local final="$4"
   local check_result
   check_result="$(sudo -u "$RUN_USER" sqlite3 "$partial" "PRAGMA quick_check;")"
   if [[ "$check_result" != "ok" ]]; then
     printf "Backup validation failed: %s\n" "$check_result" >&2
     return 1
   fi
-  mv -- "$partial" "$final"
+  node "$BACKUP_CRYPTO_HELPER" encrypt "$partial" "$encrypted" "$BACKUP_ENCRYPTION_KEY_FILE"
+  node "$BACKUP_CRYPTO_HELPER" decrypt "$encrypted" "$validation" "$BACKUP_ENCRYPTION_KEY_FILE"
+  check_result="$(sqlite3 "$validation" "PRAGMA quick_check;")"
+  if [[ "$check_result" != "ok" ]]; then
+    printf "Encrypted backup validation failed: %s\n" "$check_result" >&2
+    return 1
+  fi
+  mv -- "$encrypted" "$final"
+}
+
+validate_encryption_key() {
+  [[ -f "$BACKUP_ENCRYPTION_KEY_FILE" && ! -L "$BACKUP_ENCRYPTION_KEY_FILE" ]] || {
+    printf "Backup encryption key must be a regular non-symlink file.\n" >&2
+    return 1
+  }
+  [[ "$(stat -c %a -- "$BACKUP_ENCRYPTION_KEY_FILE")" == "600" ]] || {
+    printf "Backup encryption key must have mode 600.\n" >&2
+    return 1
+  }
+  [[ -f "$BACKUP_CRYPTO_HELPER" && ! -L "$BACKUP_CRYPTO_HELPER" ]] || {
+    printf "Backup encryption helper is unavailable.\n" >&2
+    return 1
+  }
 }
 
 collect_class_files() {
@@ -175,9 +207,9 @@ collect_class_files() {
   shopt -s nullglob
   case "$class" in
     legacy) matches=("$BACKUP_DIR"/bitcraft-local-predeploy-????????????-????????-??????.sqlite) ;;
-    daily) matches=("$BACKUP_DIR"/bitcraft-local-daily-????????-??????.sqlite) ;;
-    migration) matches=("$BACKUP_DIR"/bitcraft-local-migration-????????????-????????-??????.sqlite) ;;
-    manual) matches=("$BACKUP_DIR"/bitcraft-local-manual-????????????-????????-??????.sqlite) ;;
+    daily) matches=("$BACKUP_DIR"/bitcraft-local-daily-????????-??????.sqlite.enc) ;;
+    migration) matches=("$BACKUP_DIR"/bitcraft-local-migration-????????????-????????-??????.sqlite.enc) ;;
+    manual) matches=("$BACKUP_DIR"/bitcraft-local-manual-????????????-????????-??????.sqlite.enc) ;;
     *) return 2 ;;
   esac
   shopt -u nullglob
@@ -188,13 +220,14 @@ collect_class_files() {
     name="${path##*/}"
     case "$class" in
       legacy) [[ "$name" =~ ^bitcraft-local-predeploy-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
-      daily) [[ "$name" =~ ^bitcraft-local-daily-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
-      migration) [[ "$name" =~ ^bitcraft-local-migration-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
-      manual) [[ "$name" =~ ^bitcraft-local-manual-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite$ ]] || continue ;;
+      daily) [[ "$name" =~ ^bitcraft-local-daily-[0-9]{8}-[0-9]{6}\.sqlite\.enc$ ]] || continue ;;
+      migration) [[ "$name" =~ ^bitcraft-local-migration-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite\.enc$ ]] || continue ;;
+      manual) [[ "$name" =~ ^bitcraft-local-manual-[0-9a-f]{12}-[0-9]{8}-[0-9]{6}\.sqlite\.enc$ ]] || continue ;;
     esac
     modified="$(stat -c %Y -- "$path")" || continue
     (( modified <= cleanup_started )) || continue
-    timestamp="${name%.sqlite}"
+    timestamp="${name%.sqlite.enc}"
+    timestamp="${timestamp%.sqlite}"
     timestamp="${timestamp: -15}"
     printf "%s\t%s\n" "$timestamp" "$path"
   done | sort -t $'\t' -k1,1r | cut -f2-
@@ -314,22 +347,30 @@ acquire_deploy_lock() {
 
 create_backup() {
   [[ -f "$DATABASE" ]] || { printf "Database not found: %s\n" "$DATABASE" >&2; return 1; }
+  validate_encryption_key
   install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
 
-  local timestamp suffix partial final
+  local timestamp suffix final
   timestamp="$(date +%Y%m%d-%H%M%S)"
   if [[ "$MODE" == "daily" ]]; then
     suffix="daily-$timestamp"
   else
     suffix="$MODE-${REVISION:0:12}-$timestamp"
   fi
-  partial="$BACKUP_DIR/bitcraft-local-${suffix}.sqlite.partial"
-  final="${partial%.partial}"
+  plaintext_partial="$BACKUP_DIR/bitcraft-local-${suffix}.sqlite.partial"
+  encrypted_partial="$BACKUP_DIR/bitcraft-local-${suffix}.sqlite.enc.partial"
+  validation_partial="$BACKUP_DIR/bitcraft-local-${suffix}.validation.sqlite.partial"
+  final="$BACKUP_DIR/bitcraft-local-${suffix}.sqlite.enc"
 
   record_and_pause_services
   printf "Creating %s database backup: %s\n" "$MODE" "$final"
-  run_backup_with_heartbeat "$partial"
-  validate_and_publish "$partial" "$final"
+  run_backup_with_heartbeat "$plaintext_partial"
+  chmod 0600 "$plaintext_partial"
+  validate_and_encrypt "$plaintext_partial" "$encrypted_partial" "$validation_partial" "$final"
+  rm -f -- "$plaintext_partial" "$validation_partial"
+  plaintext_partial=""
+  encrypted_partial=""
+  validation_partial=""
   restore_services
   prune_completed_classes
   printf "Database backup complete: %s\n" "$final"

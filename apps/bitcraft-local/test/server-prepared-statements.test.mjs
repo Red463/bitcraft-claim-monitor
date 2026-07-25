@@ -51,6 +51,10 @@ test("createPreparedStatements prepares critical server statement keys", () => {
     "pruneDiscordCraftPlanReportOccurrences",
     "setDiscordYouTubeChannelDiscordChannel",
     "insertUserSession",
+    "currentUserLegalAcceptance",
+    "insertUserLegalAcceptance",
+    "updateUserSessionReauthenticatedAt",
+    "deleteExpiredUserSessions",
     "upsertDiscordCraftWatch",
     "dueDiscordTempBans",
   ]) {

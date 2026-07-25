@@ -64,6 +64,7 @@ export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/user-accounts") return "accounts.manage";
   if (pathname === "/api/local/admin/user-accounts/approval") return "accounts.manage";
   if (pathname === "/api/local/admin/user-accounts/character") return "accounts.manage";
+  if (pathname === "/api/local/admin/user-accounts/privacy") return "accounts.manage";
   if (pathname === "/api/local/admin/audit") return "audit.view";
   if (pathname === "/api/local/admin/analytics") return method === "DELETE" ? "analytics.manage" : "analytics.view";
   if (pathname === "/api/local/admin/visitor-security") return "analytics.view";

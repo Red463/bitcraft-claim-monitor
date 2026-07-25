@@ -89,6 +89,41 @@
 .settings-dialog .toggle-row.is-disabled-by-admin { opacity: .72; }
 .settings-dialog .toggle-row.is-disabled-by-admin input[type="checkbox"] { cursor: not-allowed; }
 .settings-dialog .toggle-row span small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.privacy-data-section { gap: 13px !important; }
+.privacy-legal-summary { border: 1px solid rgba(108,123,145,.28); border-radius: 8px; background: rgba(5,9,14,.54); padding: 10px 12px; display: grid; gap: 3px; }
+.privacy-legal-summary strong { color: var(--text); font-size: 13px; }
+.privacy-legal-summary span, .privacy-empty { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.privacy-legal-summary a { color: var(--active-color); }
+.privacy-action-list { display: grid; gap: 7px; }
+.privacy-action-row { border: 1px solid rgba(108,123,145,.25); border-radius: 8px; background: linear-gradient(180deg, rgba(10,15,23,.9), rgba(6,10,16,.94)); padding: 10px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.privacy-action-row > svg { color: var(--muted); }
+.privacy-action-row > div { display: grid; gap: 3px; min-width: 0; }
+.privacy-action-row strong { color: var(--text); font-size: 13px; }
+.privacy-action-row span { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.privacy-browser-reset { margin-top: 2px; }
+.privacy-confirm-panel { border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--danger) 8%, var(--panel-2)); padding: 11px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.privacy-confirm-panel > svg { color: var(--danger); }
+.privacy-confirm-panel > div { display: grid; gap: 4px; }
+.privacy-confirm-panel > div:last-child { grid-template-columns: repeat(2, auto); }
+.privacy-confirm-panel strong { color: var(--text); font-size: 13px; }
+.privacy-confirm-panel span { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.privacy-status { margin: 0; border: 1px solid color-mix(in srgb, var(--good) 38%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--good) 8%, transparent); color: var(--good); padding: 8px 10px; font-size: 12px; }
+.privacy-account-delete { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); }
+.account-deletion-overlay { z-index: calc(var(--z-cookie) + 1); }
+.account-deletion-dialog { width: min(650px, calc(100vw - 28px)); max-height: calc(100vh - 32px); overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto; }
+.account-deletion-body { min-height: 0; overflow: auto; display: grid; gap: 11px; padding-right: 4px; }
+.account-deletion-body > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.account-deletion-body a { color: var(--active-color); }
+.account-deletion-reauth { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 11px; display: grid; gap: 7px; }
+.account-deletion-reauth strong { color: var(--text); }
+.account-deletion-reauth span { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.account-deletion-reauth button { justify-self: start; }
+.account-deletion-confirm { max-width: 300px; }
+.account-deletion-confirm input { text-transform: none; letter-spacing: .08em; font-weight: 800; }
+.account-deletion-complete { display: grid; place-items: center; gap: 10px; text-align: center; padding: 20px 10px; }
+.account-deletion-complete > svg { color: var(--good); }
+.account-deletion-complete p { max-width: 500px; margin: 0; color: var(--muted); line-height: 1.5; }
+.account-deletion-complete code { color: var(--text); user-select: all; }
 
 @media (max-width: 860px) {
   .settings-shell,
@@ -98,4 +133,6 @@
   .theme-editor-layout { grid-template-columns: 1fr; }
   .theme-preview-card { grid-template-columns: 1fr; }
   .theme-preview-card aside { min-height: auto; }
+  .privacy-action-row, .privacy-confirm-panel { grid-template-columns: 22px minmax(0, 1fr); }
+  .privacy-action-row > button, .privacy-confirm-panel > div:last-child { grid-column: 2; justify-self: start; }
 }

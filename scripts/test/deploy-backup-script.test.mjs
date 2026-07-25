@@ -14,7 +14,12 @@ test("backup command has fixed production defaults and a dedicated lock", () => 
 test("backup command validates a partial copy before publishing it", () => {
   assert.match(script, /bitcraft-local-.*\.partial/);
   assert.match(script, /PRAGMA quick_check/);
-  assert.match(script, /mv -- "\$partial" "\$final"/);
+  assert.match(script, /BACKUP_ENCRYPTION_KEY_FILE/);
+  assert.match(script, /backup-crypto\.mjs/);
+  assert.match(script, /encrypt "\$partial" "\$encrypted"/);
+  assert.match(script, /decrypt "\$encrypted" "\$validation"/);
+  assert.match(script, /mv -- "\$encrypted" "\$final"/);
+  assert.match(script, /\.sqlite\.enc/);
   assert.match(script, /HEARTBEAT_SECONDS="\$\{HEARTBEAT_SECONDS:-30\}"/);
   assert.match(script, /Backup still running: elapsed=/);
 });
@@ -44,7 +49,7 @@ test("backup command exposes guarded legacy cleanup modes", () => {
 });
 
 test("retention sorts revision-bearing backup names by their timestamp suffix", () => {
-  assert.match(script, /timestamp="\$\{name%\.sqlite\}"/);
+  assert.match(script, /timestamp="\$\{name%\.sqlite\.enc\}"/);
   assert.match(script, /timestamp="\$\{timestamp: -15\}"/);
   assert.match(script, /printf "%s\\t%s\\n" "\$timestamp" "\$path"/);
 });

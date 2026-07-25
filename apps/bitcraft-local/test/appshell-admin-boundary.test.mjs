@@ -45,6 +45,20 @@ test("AdminPanel keeps sensitive admin controls explicit", () => {
   assert.match(analytics, /No administrator actions have been recorded yet/);
   assert.match(data, /No database backups have been created yet/);
 });
+test("Linked Accounts uses typed in-app confirmation for administrator-assisted privacy deletion", () => {
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const access = readFileSync(new URL("../src/components/admin/AdminAccessSection.tsx", import.meta.url), "utf8");
+  const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
+
+  assert.match(adminPanel, /\/admin\/user-accounts\/privacy/);
+  assert.match(adminPanel, /allowedDiscordIds\.filter\(\(discordId\) => discordId !== account\.discordId\)/);
+  assert.match(access, /privacyDeletionConfirmation !== "DELETE"/);
+  assert.match(access, /separate administrator identity/);
+  assert.match(access, /Discord server membership/);
+  assert.match(access, /<Dialog[\s\S]*className="admin-modal account-privacy-deletion-dialog"[\s\S]*backdropClassName="admin-modal-backdrop"/);
+  assert.doesNotMatch(access, /window\.confirm/);
+  assert.match(adminCss, /\.account-privacy-deletion-dialog\s*\{[^}]*max-height:\s*calc\(100vh - 36px\)/);
+});
 test("Admin diagnostics and collector settings stay bounded", () => {
   const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
 

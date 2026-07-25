@@ -2110,6 +2110,33 @@ export function AdminPanel({
             });
             setLinkedAccounts(result.accounts ?? []);
           }, member ? "Character assigned and approved." : "Character unassigned.", `account-character:${account.id}`)}
+          onAccountPrivacyDeletion={async (account) => {
+            let deleted = false;
+            await run(async () => {
+              const result = await api("/admin/user-accounts/privacy", {
+                method: "DELETE",
+                body: JSON.stringify({ userId: account.id, confirmation: "DELETE" }),
+              });
+              setLinkedAccounts((current) => current.filter((entry) => entry.id !== account.id));
+              setAccessControlState((current) => {
+                if (!current) return current;
+                const rules = Object.fromEntries(Object.entries(current.config.rules).map(([targetId, rule]) => [
+                  targetId,
+                  { ...rule, allowedDiscordIds: rule.allowedDiscordIds.filter((discordId) => discordId !== account.discordId) },
+                ]));
+                return {
+                  config: normalizeAccessControlConfig({ rules }),
+                  accounts: current.accounts.filter((entry) => entry.id !== account.id),
+                };
+              });
+              setMessageKind(result.notification?.ok ? "success" : "info");
+              setMessage(result.notification?.ok
+                ? "Account data removed and the user was notified by Discord DM."
+                : "Account data removed. The Discord DM could not be delivered.");
+              deleted = true;
+            }, undefined, `account-privacy-delete:${account.id}`);
+            return deleted;
+          }}
         />
       ) : null}
 

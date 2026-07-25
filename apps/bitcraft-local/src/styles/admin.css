@@ -931,6 +931,12 @@
 .popup-type-badge.success { color: #a9f7c9; border-color: rgba(99,235,165,.32); background: rgba(99,235,165,.08); }
 .admin-modal-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 4); display: grid; place-items: center; overflow: auto; padding: 18px; background: rgba(2,4,8,.68); backdrop-filter: blur(3px); overscroll-behavior: contain; }
 .admin-modal { width: min(760px, calc(100vw - 28px)); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid rgba(108,123,145,.34); border-radius: 9px; background: linear-gradient(180deg, rgba(14,19,27,.98), rgba(6,9,14,.99)); box-shadow: 0 28px 80px rgba(0,0,0,.55); padding: 16px; display: grid; gap: 14px; }
+.account-privacy-deletion-dialog { width: min(640px, calc(100vw - 28px)); max-height: calc(100vh - 36px); }
+.account-privacy-deletion-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.account-privacy-deletion-dialog > header > div { display: flex; align-items: center; gap: 10px; color: var(--danger); }
+.account-privacy-deletion-dialog h2, .account-privacy-deletion-dialog p { margin: 0; }
+.account-privacy-deletion-dialog header p { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.account-privacy-deletion-copy { display: grid; gap: 10px; color: var(--muted); line-height: 1.5; }
 .popup-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .popup-editor-grid .popup-message-field { grid-column: 1 / -1; }
 .popup-editor-grid textarea { min-height: 108px; resize: vertical; }

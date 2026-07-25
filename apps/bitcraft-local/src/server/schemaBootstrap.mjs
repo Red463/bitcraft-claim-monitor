@@ -141,15 +141,31 @@ export const schemaBootstrapSql = `
     character_status TEXT NOT NULL DEFAULT 'unlinked',
     settings_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    last_login_at TEXT
+    last_login_at TEXT,
+    inactivity_warning_sent_at TEXT
   );
   CREATE TABLE IF NOT EXISTS user_sessions (
     token_hash TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    reauthenticated_at TEXT,
     FOREIGN KEY (user_id) REFERENCES user_accounts(id)
   );
+  CREATE TABLE IF NOT EXISTS user_legal_acceptances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    legal_version TEXT NOT NULL,
+    terms_digest TEXT NOT NULL,
+    privacy_digest TEXT NOT NULL,
+    age_confirmed INTEGER NOT NULL CHECK (age_confirmed IN (0, 1)),
+    accepted_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('oauth', 'existing-session')),
+    FOREIGN KEY (user_id) REFERENCES user_accounts(id) ON DELETE CASCADE,
+    UNIQUE (user_id, legal_version, terms_digest, privacy_digest)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_legal_acceptances_user_time
+    ON user_legal_acceptances (user_id, accepted_at DESC);
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

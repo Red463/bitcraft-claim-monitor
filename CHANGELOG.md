@@ -9,6 +9,29 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.45.0-beta.1] - 2026-07-25
+
+### Added
+
+- Added comprehensive versioned Terms of Service and Privacy Policy with explicit 18+ acceptance before Discord sign-in and re-acceptance after policy changes.
+- Added a Privacy & Data area for exporting account data, unlinking characters, clearing saved data, withdrawing analytics consent, and deleting an account.
+- Added administrator-assisted account deletion with typed confirmation, protected audit receipts, and best-effort Discord notification.
+- Added signed deletion recovery records, encrypted authenticated backups, restore replay safeguards, and automatic inactive-account retention.
+
+### Changed
+
+- Administrator character assignment now requires a successful user notification before the assignment is committed.
+- Account deletion now removes specific-user access entries while preserving separate administrator identities and Discord server membership.
+
+### Security
+
+- Added recent Discord reauthentication for self-service account deletion and transactional protection against stale access-control saves restoring deleted identifiers.
+- Added production key requirements and recovery checks for privacy-deletion records and encrypted database backups.
+
+### Operator action required
+
+- Provision the documented privacy-ledger and backup-encryption key files, test encrypted restore and deletion-ledger replay, and complete the legal/release-readiness checks before deploying this release.
+
 ## [0.44.0-beta.1] - 2026-07-25
 
 ### Added

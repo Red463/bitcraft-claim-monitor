@@ -1,9 +1,10 @@
 import React from "react";
-import { Ban, CheckCircle2, Clock, MessageCircle, RefreshCw, UserPlus, Users } from "lucide-react";
+import { Ban, CheckCircle2, Clock, MessageCircle, RefreshCw, Trash2, UserPlus, Users } from "lucide-react";
 import type { AnyRecord } from "../../main-app-data";
 import type { AppUser } from "../../types/settings";
 import { dateLabel, formatNumber } from "../../utils/format";
 import { memberDisplayName, memberTrackingId } from "../../utils/memberTracking";
+import { Dialog } from "../main/Dialog";
 
 type NewAdminUser = { discordId: string; displayName: string; role: string };
 
@@ -29,6 +30,7 @@ type AdminAccessSectionProps = {
   onRefreshLinkedAccounts: () => void;
   onAccountApproval: (account: AppUser, status: "approved" | "pending" | "rejected") => void;
   onCharacterAssignment: (account: AppUser, member: AnyRecord | null) => void;
+  onAccountPrivacyDeletion: (account: AppUser) => Promise<boolean>;
 };
 
 export function AdminAccessSection({
@@ -45,8 +47,11 @@ export function AdminAccessSection({
   onRefreshLinkedAccounts,
   onAccountApproval,
   onCharacterAssignment,
+  onAccountPrivacyDeletion,
 }: AdminAccessSectionProps) {
   const [characterAssignments, setCharacterAssignments] = React.useState<Record<number, string>>({});
+  const [privacyDeletionTarget, setPrivacyDeletionTarget] = React.useState<AppUser | null>(null);
+  const [privacyDeletionConfirmation, setPrivacyDeletionConfirmation] = React.useState("");
   const approvedCharacterOwners = new Map(
     data.linkedAccounts
       .filter((account) => account.characterStatus === "approved" && account.characterPlayerId)
@@ -75,6 +80,7 @@ export function AdminAccessSection({
       ) : null}
 
       {tab === "accounts" ? (
+        <>
         <section className="form-card linked-accounts-card">
           <div className="split-header">
             <h3><MessageCircle size={17} /> Discord Linked Accounts</h3>
@@ -157,12 +163,90 @@ export function AdminAccessSection({
                         {status[0].toUpperCase() + status.slice(1)}
                       </button>
                     ))}
+                    <button
+                      className="toolbar-button danger"
+                      disabled={pending(`account-privacy-delete:${account.id}`)}
+                      title="Permanently remove this user's app account and associated app data."
+                      onClick={() => {
+                        setPrivacyDeletionConfirmation("");
+                        setPrivacyDeletionTarget(account);
+                      }}
+                    >
+                      <Trash2 size={14} /> Delete account data
+                    </button>
                   </div>
                 </div>
               );
             }) : <p className="legend">No Discord users have signed in yet.</p>}
           </div>
         </section>
+        <Dialog
+          open={privacyDeletionTarget != null}
+          title="Delete linked account data"
+          description="Permanently delete this user's app account and associated app data."
+          closeOnBackdrop={!privacyDeletionTarget || !pending(`account-privacy-delete:${privacyDeletionTarget.id}`)}
+          onClose={() => {
+            if (privacyDeletionTarget && pending(`account-privacy-delete:${privacyDeletionTarget.id}`)) return;
+            setPrivacyDeletionTarget(null);
+            setPrivacyDeletionConfirmation("");
+          }}
+          className="admin-modal account-privacy-deletion-dialog"
+          backdropClassName="admin-modal-backdrop"
+        >
+          <header>
+            <div>
+              <Trash2 size={20} />
+              <div>
+                <h2>Delete linked account data</h2>
+                <p>{privacyDeletionTarget?.globalName || privacyDeletionTarget?.username || "Discord user"}</p>
+              </div>
+            </div>
+          </header>
+          <div className="account-privacy-deletion-copy">
+            <p>This permanently removes the ordinary user app account, its character link, saved settings, sessions, market watches, and associated app data.</p>
+            <p>The user's Discord server membership and any separate administrator identity are not changed. Affected-user identifiers in required moderation and administrator audit records are retained only in de-identified or pseudonymised form.</p>
+            <p>The app will try to notify the user by Discord DM after deletion. Deletion still completes if that DM cannot be delivered.</p>
+            <label className="field">
+              <span>Type DELETE to confirm</span>
+              <input
+                value={privacyDeletionConfirmation}
+                autoComplete="off"
+                onChange={(event) => setPrivacyDeletionConfirmation(event.target.value)}
+                placeholder="DELETE"
+              />
+            </label>
+          </div>
+          <div className="modal-actions">
+            <button
+              className="toolbar-button"
+              disabled={Boolean(privacyDeletionTarget && pending(`account-privacy-delete:${privacyDeletionTarget.id}`))}
+              onClick={() => {
+                setPrivacyDeletionTarget(null);
+                setPrivacyDeletionConfirmation("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="toolbar-button danger"
+              disabled={
+                privacyDeletionConfirmation !== "DELETE"
+                || Boolean(privacyDeletionTarget && pending(`account-privacy-delete:${privacyDeletionTarget.id}`))
+              }
+              onClick={async () => {
+                if (!privacyDeletionTarget || privacyDeletionConfirmation !== "DELETE") return;
+                const target = privacyDeletionTarget;
+                const deleted = await onAccountPrivacyDeletion(target);
+                if (!deleted) return;
+                setPrivacyDeletionTarget(null);
+                setPrivacyDeletionConfirmation("");
+              }}
+            >
+              <Trash2 size={14} /> Permanently delete
+            </button>
+          </div>
+        </Dialog>
+        </>
       ) : null}
     </>
   );
