@@ -8,7 +8,7 @@ import {
 } from "../src/legal/legalPolicy.mjs";
 import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
 
-test("default policy identifies the individual operator without inventing a company", () => {
+test("default policy identifies the operator without awkward company-status disclaimers", () => {
   const policy = legalPolicyForEnvironment({});
 
   assert.equal(policy.version, LEGAL_VERSION);
@@ -17,8 +17,9 @@ test("default policy identifies the individual operator without inventing a comp
   assert.equal(policy.operator.projectName, "Timbersteel Claim Monitor");
   assert.equal(policy.operator.privacyEmail, "privacy@timbersteeltrade.com");
   assert.equal(policy.operator.minimumAge, 18);
-  assert.match(policy.operator.status, /individual developer and operator/i);
-  assert.match(policy.operator.status, /not a company or separate legal entity/i);
+  assert.equal(policy.operator.status, "Timbersteel Claim Monitor is operated by Thomas Bush.");
+  const publishedCopy = JSON.stringify([policy.operator, policy.terms.sections, policy.privacy.sections]);
+  assert.doesNotMatch(publishedCopy, /not a company|separate legal entity|no separate company/i);
   assert.equal("postalAddress" in policy.operator, false);
 });
 

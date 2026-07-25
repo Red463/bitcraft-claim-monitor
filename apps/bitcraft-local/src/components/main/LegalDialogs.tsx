@@ -77,32 +77,32 @@ function LegalSections({ sections }: { sections: typeof DEFAULT_LEGAL_POLICY.ter
 
 function LegalMeta() {
   return (
-    <aside className="legal-meta" aria-label="Legal document details">
+    <div className="legal-meta" aria-label="Legal document details">
       <strong>{DEFAULT_LEGAL_POLICY.operator.projectName}</strong>
       <span>Version {DEFAULT_LEGAL_POLICY.version} · Effective {DEFAULT_LEGAL_POLICY.effectiveDate}</span>
-      <span>{DEFAULT_LEGAL_POLICY.operator.status}</span>
       <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>
-    </aside>
+    </div>
   );
 }
 
 function LegalNavigation({ sections }: { sections: typeof DEFAULT_LEGAL_POLICY.terms.sections }) {
   return (
     <nav className="legal-section-nav" aria-label="Document sections">
+      <strong>On this page</strong>
       {sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}
     </nav>
   );
 }
 
 export function TermsContent({ compact = false }: { compact?: boolean }) {
-  return (
+  const content = (
     <>
-      <LegalMeta />
-      {!compact ? <LegalNavigation sections={DEFAULT_LEGAL_POLICY.terms.sections} /> : null}
+      {compact ? <LegalMeta /> : null}
       <LegalSections sections={DEFAULT_LEGAL_POLICY.terms.sections} />
-      <p className="help-intro">{DEFAULT_LEGAL_POLICY.notice}</p>
+      <p className="legal-notice">{DEFAULT_LEGAL_POLICY.notice}</p>
     </>
   );
+  return compact ? content : <div className="legal-document-content">{content}</div>;
 }
 
 function RetentionTable() {
@@ -137,39 +137,53 @@ function ProviderList() {
 }
 
 export function PrivacyContent({ compact = false }: { compact?: boolean }) {
-  return (
+  const content = (
     <>
-      <LegalMeta />
-      {!compact ? <LegalNavigation sections={DEFAULT_LEGAL_POLICY.privacy.sections} /> : null}
+      {compact ? <LegalMeta /> : null}
       <LegalSections sections={DEFAULT_LEGAL_POLICY.privacy.sections} />
       <RetentionTable />
       <ProviderList />
-      <p className="help-intro">{DEFAULT_LEGAL_POLICY.notice}</p>
+      <p className="legal-notice">{DEFAULT_LEGAL_POLICY.notice}</p>
     </>
   );
+  return compact ? content : <div className="legal-document-content">{content}</div>;
 }
 
 export function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
   const isTerms = type === "terms";
+  const title = isTerms ? DEFAULT_LEGAL_POLICY.terms.title : DEFAULT_LEGAL_POLICY.privacy.title;
+  const description = isTerms
+    ? "Rules for using Timbersteel Claim Monitor, its Discord features, and connected community tools."
+    : "How Timbersteel Claim Monitor collects, uses, protects, retains, and removes personal data.";
+  const sections = isTerms ? DEFAULT_LEGAL_POLICY.terms.sections : DEFAULT_LEGAL_POLICY.privacy.sections;
   return (
     <main className="legal-page">
-      <section className="legal-document">
-        <header>
-          <div>
-            {isTerms ? <FileText size={22} /> : <Shield size={22} />}
-            <h1>{isTerms ? DEFAULT_LEGAL_POLICY.terms.title : DEFAULT_LEGAL_POLICY.privacy.title}</h1>
+      <article className="legal-document">
+        <header className="legal-document-header">
+          <div className="legal-document-heading">
+            <span className="legal-document-eyebrow">Legal</span>
+            <div className="legal-document-title">
+              {isTerms ? <FileText size={24} /> : <Shield size={24} />}
+              <h1>{title}</h1>
+            </div>
+            <p>{description}</p>
+            <div className="legal-document-meta">
+              <span>Version {DEFAULT_LEGAL_POLICY.version}</span>
+              <span>Effective {DEFAULT_LEGAL_POLICY.effectiveDate}</span>
+            </div>
           </div>
           <a className="toolbar-button" href="/"><ExternalLink size={14} /> Open app</a>
         </header>
-        <p className="help-intro">Application version {APP_VERSION}</p>
-        {isTerms ? <TermsContent /> : <PrivacyContent />}
+        <div className="legal-document-layout">
+          <LegalNavigation sections={sections} />
+          {isTerms ? <TermsContent /> : <PrivacyContent />}
+        </div>
         <footer>
-          <span>{DEFAULT_LEGAL_POLICY.operator.status}</span>
-          <span>Legal version {DEFAULT_LEGAL_POLICY.version}, effective {DEFAULT_LEGAL_POLICY.effectiveDate}. Contact <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>.</span>
+          <span>Questions or privacy requests: <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>.</span>
           <span>Data provided by the <a href="https://bitjita.com/docs/api">BitJita API</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
-          <span>{isTerms ? <a href="/privacy">Read the Privacy Policy</a> : <a href="/terms">Read the Terms of Service</a>}.</span>
+          <span>Application version {APP_VERSION} · {isTerms ? <a href="/privacy">Read the Privacy Policy</a> : <a href="/terms">Read the Terms of Service</a>}</span>
         </footer>
-      </section>
+      </article>
     </main>
   );
 }

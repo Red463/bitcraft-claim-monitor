@@ -85,7 +85,6 @@ export function LegalAcceptanceDialog({
       </header>
 
       <div className="legal-acceptance-body">
-        <p>{policy.operator.status}</p>
         <p>
           {isExistingSession
             ? "The Terms or Privacy Policy have changed. You must accept the current version before using signed-in features."

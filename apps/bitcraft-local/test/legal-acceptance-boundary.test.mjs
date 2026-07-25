@@ -46,3 +46,22 @@ test("acceptance is a fixed viewport dialog with bounded internal scrolling", ()
   assert.match(css, /\.legal-acceptance-dialog\s*\{[^}]*max-height:\s*calc\(100vh/s);
   assert.match(css, /\.legal-acceptance-body\s*\{[^}]*overflow-y:\s*auto;/s);
 });
+
+test("acceptance keeps operator identity on the full policies instead of the popup", () => {
+  const dialog = readFileSync(acceptanceUrl, "utf8");
+
+  assert.doesNotMatch(dialog, /<p>\{policy\.operator\.status\}<\/p>/);
+  assert.match(dialog, /Read the complete <a href="\/terms"/);
+  assert.match(dialog, /<a href="\/privacy"/);
+});
+
+test("dedicated legal routes use a responsive document layout without sidebar inheritance", () => {
+  assert.match(legalDialogs, /className="legal-document-header"/);
+  assert.match(legalDialogs, /className="legal-document-layout"/);
+  assert.match(legalDialogs, /className="legal-document-content"/);
+  assert.doesNotMatch(legalDialogs, /<aside className="legal-meta"/);
+  assert.match(css, /\.legal-document-layout\s*\{[^}]*grid-template-columns:/s);
+  assert.match(css, /\.legal-section-nav\s*\{[^}]*position:\s*sticky;/s);
+  assert.match(css, /\.legal-document-content \.terms-section\s*\{[^}]*border-top:/s);
+  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.legal-document-layout\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+});
