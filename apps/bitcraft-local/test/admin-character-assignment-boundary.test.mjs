@@ -44,6 +44,12 @@ test("Linked Accounts makes roster loading, empty, and failure states actionable
   assert.match(access, /disabled=\{membersLoading \|\| !data\.members\.length \|\| pending\(`account-character:\$\{account\.id\}`\)\}/);
 });
 
+test("Linked Accounts displays the loader failure message without a duplicated prefix", () => {
+  assert.match(panel, /setMembersError\(detail\)/);
+  assert.doesNotMatch(panel, /setMembersError\(`Unable to load settlement characters\. \$\{detail\}`\)/);
+  assert.match(access, /\{membersError\} Refresh and retry\./);
+});
+
 test("Linked Accounts ignores stale fallback roster responses", () => {
   assert.match(panel, /const\s+fallbackMembersRequest\s*=\s*React\.useRef\(0\)/);
   assert.match(panel, /const\s+requestGeneration\s*=\s*\+\+fallbackMembersRequest\.current/);

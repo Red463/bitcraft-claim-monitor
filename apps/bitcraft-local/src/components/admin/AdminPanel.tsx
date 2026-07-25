@@ -186,7 +186,15 @@ const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   },
 ];
 
-const ADMIN_TABS = ADMIN_TAB_GROUPS.flatMap((group) => group.tabs);
+const BOT_CONSOLE_TAB_GROUPS: AdminTabGroup[] = [
+  {
+    label: "Bot Console",
+    tabs: [
+      { key: "discord", label: "Discord Bot Control", description: "Manage bot setup, notifications, roles, tools, and diagnostics" },
+      { key: "accounts", label: "Linked Accounts", description: "Approve Discord-linked BitCraft characters" },
+    ],
+  },
+];
 
 /**
  * Admin console for installation-wide settings and diagnostics.
@@ -397,7 +405,7 @@ export function AdminPanel({
       if (requestGeneration !== fallbackMembersRequest.current) return;
       setFallbackMembers([]);
       const detail = error instanceof Error ? error.message : String(error);
-      setMembersError(`Unable to load settlement characters. ${detail}`);
+      setMembersError(detail);
       throw new FallbackMemberLoadError(detail);
     } finally {
       if (requestGeneration === fallbackMembersRequest.current) setMembersLoading(false);
@@ -796,9 +804,9 @@ export function AdminPanel({
   }
 
   const canViewServerHealth = Boolean(auth?.user?.permissions?.includes("*"));
-  const visibleTabGroups = React.useMemo(() => ADMIN_TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => item.key !== "server-health" || canViewServerHealth) })).filter((group) => group.tabs.length), [canViewServerHealth]);
-  const tabs = React.useMemo<AdminTabMeta[]>(() => botOnly ? [] : visibleTabGroups.flatMap((group) => group.tabs), [botOnly, visibleTabGroups]);
-  const activeTabMeta = ADMIN_TABS.find((item) => item.key === tab);
+  const visibleTabGroups = React.useMemo(() => (botOnly ? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS).map((group) => ({ ...group, tabs: group.tabs.filter((item) => item.key !== "server-health" || canViewServerHealth) })).filter((group) => group.tabs.length), [botOnly, canViewServerHealth]);
+  const tabs = React.useMemo<AdminTabMeta[]>(() => visibleTabGroups.flatMap((group) => group.tabs), [visibleTabGroups]);
+  const activeTabMeta = tabs.find((item) => item.key === tab);
   const activeTabGroup = activeTabMeta ? visibleTabGroups.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
   const extractedTabOwnsMessage = tab === "analytics" || tab === "empire-membership" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
   const tabLoadPending = [...pendingActions].some((key) => key.startsWith(`tab-load:${tab}:`));
@@ -806,11 +814,7 @@ export function AdminPanel({
   const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
   const loginRows: AnyRecord[] = Array.isArray(auditData.logins) ? auditData.logins : [];
   React.useEffect(() => {
-    if (botOnly) {
-      if (tab !== "discord") setTab("discord");
-      return;
-    }
-    if (!tabs.some((item) => item.key === tab)) setTab("status");
+    if (!tabs.some((item) => item.key === tab)) setTab(botOnly ? "discord" : "status");
   }, [botOnly, setTab, tab, tabs]);
   const discordTestButtons = [
     ["basic", "Basic"],

@@ -79,6 +79,14 @@ test("dedicated bot route has a route title and level-one panel heading", () => 
   assert.match(adminPanel, /const Heading = headingLevel === 1 \? "h1" : "h2"/);
 });
 
+test("bot console exposes Linked Accounts through the shared admin tab navigation", () => {
+  assert.match(adminPanel, /const BOT_CONSOLE_TAB_GROUPS: AdminTabGroup\[\] = \[/);
+  assert.match(adminPanel, /key: "discord", label: "Discord Bot Control"/);
+  assert.match(adminPanel, /key: "accounts", label: "Linked Accounts"/);
+  assert.match(adminPanel, /botOnly \? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS/);
+  assert.match(adminPanel, /if \(!tabs\.some\(\(item\) => item\.key === tab\)\) setTab\(botOnly \? "discord" : "status"\)/);
+});
+
 test("dedicated legal routes set their titles from an effect", () => {
   assert.match(appShell, /function DedicatedLegalApp\([\s\S]*?React\.useEffect\(\(\) => \{[\s\S]*?document\.title/);
   assert.match(appShell, /return <DedicatedLegalPage type=\{type\} \/>/);
