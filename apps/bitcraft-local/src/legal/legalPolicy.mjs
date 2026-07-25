@@ -8,7 +8,7 @@ export const defaultLegalOperator = Object.freeze({
   controllerCountry: "United Kingdom",
   governingLaw: "England and Wales",
   minimumAge: 18,
-  status: "Thomas Bush is the individual developer and operator of Timbersteel Claim Monitor, a free, unofficial community project. Timbersteel Claim Monitor is not a company or separate legal entity.",
+  status: "Timbersteel Claim Monitor is operated by Thomas Bush.",
 });
 
 const providerDefinitions = Object.freeze([
@@ -108,7 +108,7 @@ function validatedOperator(env) {
   if (!Number.isInteger(operator.minimumAge) || operator.minimumAge < 18 || operator.minimumAge > 120) {
     throw new Error("Legal minimum age must be an integer of at least 18");
   }
-  const status = `${operator.controllerName} is the individual developer and operator of ${operator.projectName}, a free, unofficial community project. ${operator.projectName} is not a company or separate legal entity.`;
+  const status = `${operator.projectName} is operated by ${operator.controllerName}.`;
   return Object.freeze({ ...operator, status });
 }
 
@@ -249,8 +249,7 @@ function privacySections(operator) {
       id: "controller",
       title: "Controller",
       paragraphs: [
-        operator.status,
-        `${operator.controllerName}, based in ${operator.controllerCountry}, is the controller for the personal data described here. Contact: ${operator.privacyEmail}. No separate company controls this project.`,
+        `${operator.controllerName}, based in ${operator.controllerCountry}, is the controller for the personal data described here. Contact: ${operator.privacyEmail}.`,
       ],
     },
     {

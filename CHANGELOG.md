@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.45.0-beta.2] - 2026-07-25
+
+### Changed
+
+- Redesigned the Terms of Service and Privacy Policy as readable responsive documents with a compact section index.
+- Simplified operator and controller wording, and kept personal identity details out of the legal-acceptance popup.
+
+### Fixed
+
+- Fixed legal-page metadata inheriting the full-height application sidebar layout.
+
 ## [0.45.0-beta.1] - 2026-07-25
 
 ### Added
