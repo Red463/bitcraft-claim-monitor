@@ -131,7 +131,7 @@
 .dashboard-chart svg { width: 100%; height: 230px; overflow: visible; }
 .dashboard-chart-grid { stroke: rgba(154,168,190,.12); stroke-width: 1; }
 .dashboard-chart-y-axis { fill: #8f9aaa; font-size: 11px; }
-.dashboard-chart-y-title { position: absolute; top: 2px; left: 62px; color: #8f9aaa; font-size: 11px; line-height: 1; pointer-events: none; }
+.dashboard-chart-y-title { fill: #8f9aaa; font-size: 11px; pointer-events: none; }
 .dashboard-chart-area { fill: url(#dashboardAreaGold); }
 .dashboard-chart-line { fill: none; stroke: var(--active-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 8px color-mix(in srgb, var(--active-color) 28%, transparent)); }
 .dashboard-chart-dot { fill: var(--active-color); stroke: var(--card-top); stroke-width: 3; }

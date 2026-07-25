@@ -144,6 +144,7 @@ export function DashboardTrend({
             <stop offset="100%" stopColor="rgba(247, 200, 54, 0)" />
           </linearGradient>
         </defs>
+        <text x={plotLeft} y="14" className="dashboard-chart-y-title">{yAxisLabel}</text>
         <g role="group" aria-label={yAxisLabel}>
           {yTicks.map((tick) => {
             const y = yForValue(tick);
@@ -160,7 +161,6 @@ export function DashboardTrend({
         {chartPoints.map((point) => <circle key={point.ms} cx={xForTime(point.ms)} cy={yForValue(point.value)} r="12" className="dashboard-chart-hit" aria-hidden="true" />)}
       </svg>
       {activePoint ? <div className="dashboard-chart-tooltip" style={{ left: `${Math.max(12, Math.min(88, (activeX / width) * 100))}%` }} role="status"><span>{shortDateLabel(activePoint.at)}</span><strong>{formatNumber(activePoint.value)}{suffix}</strong></div> : null}
-      <span className="dashboard-chart-y-title">{yAxisLabel}</span>
       <div className="dashboard-chart-axis" style={{ gridTemplateColumns: `repeat(${axisPoints.length}, minmax(0, 1fr))` }}>{axisPoints.map((point) => <span key={point.ms}>{shortDateLabel(point.at)}</span>)}</div>
     </div>
   );
