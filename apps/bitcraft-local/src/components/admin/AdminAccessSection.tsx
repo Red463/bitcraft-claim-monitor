@@ -3,6 +3,7 @@ import { Ban, CheckCircle2, Clock, MessageCircle, RefreshCw, UserPlus, Users } f
 import type { AnyRecord } from "../../main-app-data";
 import type { AppUser } from "../../types/settings";
 import { dateLabel, formatNumber } from "../../utils/format";
+import { memberDisplayName, memberTrackingId } from "../../utils/memberTracking";
 
 type NewAdminUser = { discordId: string; displayName: string; role: string };
 
@@ -11,6 +12,7 @@ type AdminAccessSectionProps = {
   data: {
     users: AnyRecord[];
     linkedAccounts: AppUser[];
+    members: AnyRecord[];
     newUser: NewAdminUser;
     adminRoles: Record<string, string>;
     canManageAdmins: boolean;
@@ -26,6 +28,7 @@ type AdminAccessSectionProps = {
   onToggleStatus: (user: AnyRecord) => void;
   onRefreshLinkedAccounts: () => void;
   onAccountApproval: (account: AppUser, status: "approved" | "pending" | "rejected") => void;
+  onCharacterAssignment: (account: AppUser, member: AnyRecord | null) => void;
 };
 
 export function AdminAccessSection({
@@ -41,7 +44,14 @@ export function AdminAccessSection({
   onToggleStatus,
   onRefreshLinkedAccounts,
   onAccountApproval,
+  onCharacterAssignment,
 }: AdminAccessSectionProps) {
+  const [characterAssignments, setCharacterAssignments] = React.useState<Record<number, string>>({});
+  const approvedCharacterOwners = new Map(
+    data.linkedAccounts
+      .filter((account) => account.characterStatus === "approved" && account.characterPlayerId)
+      .map((account) => [String(account.characterPlayerId), account.id]),
+  );
   return (
     <>
       {error ? <div className="admin-message error" role="alert" aria-live="assertive">{error}</div> : null}
@@ -72,36 +82,85 @@ export function AdminAccessSection({
           </div>
           <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
           <div className="linked-account-list">
-            {data.linkedAccounts.length ? data.linkedAccounts.map((account) => (
-              <div className="linked-account-row" key={account.id}>
-                <div className="linked-account-user">
-                  {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : <span>{(account.globalName || account.username || "?").slice(0, 1).toUpperCase()}</span>}
-                  <div>
-                    <strong>{account.globalName || account.username || "Discord user"}</strong>
-                    <small>{account.username ? `@${account.username}` : account.discordId} | Last login {dateLabel(account.lastLoginAt)}</small>
+            {data.linkedAccounts.length ? data.linkedAccounts.map((account) => {
+              const selectedCharacterId = characterAssignments[account.id] ?? account.characterPlayerId ?? "";
+              const selectedMember = data.members.find((member) => memberTrackingId(member) === selectedCharacterId) ?? null;
+              const selectedOwnerId = approvedCharacterOwners.get(selectedCharacterId);
+              const selectedCharacterUnavailable = selectedOwnerId != null && selectedOwnerId !== account.id;
+              return (
+                <div className="linked-account-row" key={account.id}>
+                  <div className="linked-account-user">
+                    {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : <span>{(account.globalName || account.username || "?").slice(0, 1).toUpperCase()}</span>}
+                    <div>
+                      <strong>{account.globalName || account.username || "Discord user"}</strong>
+                      <small>{account.username ? `@${account.username}` : account.discordId} | Last login {dateLabel(account.lastLoginAt)}</small>
+                    </div>
+                  </div>
+                  <div className="linked-account-character">
+                    <div>
+                      <strong>{account.characterName || "No character selected"}</strong>
+                      <small>{account.characterPlayerId || "No BitCraft player ID"}</small>
+                    </div>
+                    {account.characterStatus === "approved" ? (
+                      <button
+                        className="toolbar-button"
+                        disabled={pending(`account-character:${account.id}`)}
+                        onClick={() => {
+                          setCharacterAssignments((current) => ({ ...current, [account.id]: "" }));
+                          onCharacterAssignment(account, null);
+                        }}
+                      >
+                        <RefreshCw size={14} /> Unassign character
+                      </button>
+                    ) : (
+                      <div className="linked-account-character-actions">
+                        <label className="field compact-field">
+                          <span>Assign character</span>
+                          <select
+                            value={selectedCharacterId}
+                            disabled={pending(`account-character:${account.id}`)}
+                            onChange={(event) => setCharacterAssignments((current) => ({ ...current, [account.id]: event.target.value }))}
+                          >
+                            <option value="">Select a settlement character</option>
+                            {data.members.map((member) => {
+                              const playerId = memberTrackingId(member);
+                              const ownerId = approvedCharacterOwners.get(playerId);
+                              return (
+                                <option key={playerId || memberDisplayName(member)} value={playerId} disabled={ownerId != null && ownerId !== account.id}>
+                                  {memberDisplayName(member)}{ownerId != null && ownerId !== account.id ? " (already assigned)" : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </label>
+                        <button
+                          className="toolbar-button primary"
+                          disabled={!selectedMember || selectedCharacterUnavailable || pending(`account-character:${account.id}`)}
+                          onClick={() => onCharacterAssignment(account, selectedMember)}
+                        >
+                          <UserPlus size={14} /> Assign & approve
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <em className={`link-status ${account.characterStatus}`}>{account.characterStatus || "unlinked"}</em>
+                  <div className="toolbar">
+                    {(["approved", "pending", "rejected"] as const).map((status) => (
+                      <button
+                        className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
+                        disabled={!account.characterPlayerId || pending(`account-approval:${account.id}`)}
+                        title={`Mark this character link as ${status}.`}
+                        key={status}
+                        onClick={() => onAccountApproval(account, status)}
+                      >
+                        {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
+                        {status[0].toUpperCase() + status.slice(1)}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div>
-                  <strong>{account.characterName || "No character selected"}</strong>
-                  <small>{account.characterPlayerId || "No BitCraft player ID"}</small>
-                </div>
-                <em className={`link-status ${account.characterStatus}`}>{account.characterStatus || "unlinked"}</em>
-                <div className="toolbar">
-                  {(["approved", "pending", "rejected"] as const).map((status) => (
-                    <button
-                      className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
-                      disabled={!account.characterPlayerId || pending(`account-approval:${account.id}`)}
-                      title={`Mark this character link as ${status}.`}
-                      key={status}
-                      onClick={() => onAccountApproval(account, status)}
-                    >
-                      {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
-                      {status[0].toUpperCase() + status.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )) : <p className="legend">No Discord users have signed in yet.</p>}
+              );
+            }) : <p className="legend">No Discord users have signed in yet.</p>}
           </div>
         </section>
       ) : null}

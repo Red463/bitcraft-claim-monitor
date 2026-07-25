@@ -1190,6 +1190,94 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
   assert.equal(linkedAccounts.accounts.some((account) => account.discordId === "deal-discord-user"), true);
+  const characterAssignmentDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  characterAssignmentDb.prepare(`
+    INSERT INTO user_accounts (
+      discord_id, discord_username, discord_global_name, discord_avatar,
+      character_player_id, character_name, character_status, settings_json,
+      created_at, last_login_at
+    ) VALUES (?, ?, ?, NULL, NULL, NULL, 'unlinked', '{}', ?, ?)
+  `).run("second-discord-user", "SecondUser", "Second User", new Date().toISOString(), new Date().toISOString());
+  const secondUserId = Number(characterAssignmentDb.prepare("SELECT id FROM user_accounts WHERE discord_id = ?").get("second-discord-user").id);
+  characterAssignmentDb.close();
+
+  const assignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: dealUserId, characterPlayerId: "87654321", characterName: "Assigned Character" }),
+  });
+  assert.equal(assignCharacter.status, 200);
+  const assignedAccounts = (await assignCharacter.json()).accounts;
+  assert.deepEqual(
+    assignedAccounts.find((account) => account.id === dealUserId),
+    {
+      ...assignedAccounts.find((account) => account.id === dealUserId),
+      characterPlayerId: "87654321",
+      characterName: "Assigned Character",
+      characterStatus: "approved",
+    },
+  );
+
+  const duplicateAssignment = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, characterPlayerId: "87654321", characterName: "Assigned Character" }),
+  });
+  assert.equal(duplicateAssignment.status, 409);
+  assert.match((await duplicateAssignment.json()).error, /unassign/i);
+
+  const pendingDuplicateDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  pendingDuplicateDb.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = 'pending' WHERE id = ?")
+    .run("87654321", "Assigned Character", secondUserId);
+  pendingDuplicateDb.close();
+  const duplicateApproval = await fetch(`${origin}/api/local/admin/user-accounts/approval`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, status: "approved" }),
+  });
+  assert.equal(duplicateApproval.status, 409);
+
+  const unassignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: dealUserId, characterPlayerId: "", characterName: "" }),
+  });
+  assert.equal(unassignCharacter.status, 200);
+  const unassignedAccount = (await unassignCharacter.json()).accounts.find((account) => account.id === dealUserId);
+  assert.equal(unassignedAccount.characterPlayerId, "");
+  assert.equal(unassignedAccount.characterName, "");
+  assert.equal(unassignedAccount.characterStatus, "unlinked");
+
+  const reassignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, characterPlayerId: "87654321", characterName: "Assigned Character" }),
+  });
+  assert.equal(reassignCharacter.status, 200);
+  assert.equal((await reassignCharacter.json()).accounts.find((account) => account.id === secondUserId).characterStatus, "approved");
+
+  const assignmentEvidenceDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const assignmentAuditActions = assignmentEvidenceDb.prepare(`
+    SELECT action FROM admin_audit_log
+    WHERE action IN ('linked_account.character_assigned', 'linked_account.character_unassigned')
+    ORDER BY id
+  `).all().map((row) => row.action);
+  const assignmentDeliveryEvents = assignmentEvidenceDb.prepare(`
+    SELECT event_type FROM discord_delivery_log
+    WHERE event_type IN ('character_link_assigned', 'character_link_unassigned')
+    ORDER BY id
+  `).all().map((row) => row.event_type);
+  assignmentEvidenceDb.close();
+  assert.deepEqual(assignmentAuditActions.slice(-3), [
+    "linked_account.character_assigned",
+    "linked_account.character_unassigned",
+    "linked_account.character_assigned",
+  ]);
+  assert.deepEqual(assignmentDeliveryEvents.slice(-3), [
+    "character_link_assigned",
+    "character_link_unassigned",
+    "character_link_assigned",
+  ]);
   const saveAccessControl = await fetch(`${origin}/api/local/admin/access-control`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
