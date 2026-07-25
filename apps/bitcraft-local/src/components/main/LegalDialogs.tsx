@@ -2,12 +2,14 @@ import React from "react";
 import { CheckCircle2, CircleHelp, ExternalLink, FileText, MessageCircle, Settings, Shield, X } from "lucide-react";
 
 import packageJson from "../../../package.json";
+import { legalPolicyForEnvironment } from "../../legal/legalPolicy.mjs";
 import { Dialog } from "./Dialog";
 import type { ActivePanel } from "../../types/app";
 import { routeHelpFor } from "../../navigation/routeHelp";
 
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const APP_VERSION = packageJson.version;
+const DEFAULT_LEGAL_POLICY = legalPolicyForEnvironment({});
 type AnalyticsConsent = "accepted" | "declined" | null;
 export function HelpCenter({ activePage, version, onClose, onPrivacy, onTerms, onStartTour }: { activePage: ActivePanel; version: string; onClose: () => void; onPrivacy: () => void; onTerms: () => void; onStartTour: () => void }) {
   const routeHelp = routeHelpFor(activePage);
@@ -59,32 +61,90 @@ export function HelpCenter({ activePage, version, onClose, onPrivacy, onTerms, o
   );
 }
 
-export function TermsContent({ compact = false }: { compact?: boolean }) {
+function LegalSections({ sections }: { sections: typeof DEFAULT_LEGAL_POLICY.terms.sections }) {
   return (
     <>
-      <section className="terms-section">
-        <h3>Application Terms</h3>
-        <p>This is an unofficial fan-made settlement tool for BitCraft players. It is provided as-is for community use, testing and development. Data may be delayed, incomplete, unavailable or inaccurate, so do not rely on it as the only source for important settlement decisions.</p>
-        <p>The app is not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc. Data is provided by the BitJita API.</p>
-      </section>
-      <section className="terms-section">
-        <h3>Discord Bot Terms</h3>
-        <p>The optional Timbersteel Trade Discord bot posts settlement notifications and responds to slash commands using the same public BitJita data and locally stored app data used by this dashboard.</p>
-        <p>Using the bot in Discord means command names, command options, Discord user/server/channel identifiers, response status, and notification delivery diagnostics may be processed by this app and Discord to provide the requested bot features.</p>
-        <p>Bot responses are informational only. Server administrators can disable notifications, remove the bot, rotate its token, or delete local diagnostic/history data from the app administration tools.</p>
-      </section>
-      {!compact ? <p className="help-intro">Questions, bug reports and feature requests can be raised through the GitHub Issues link in this app.</p> : null}
+      {sections.map((section) => (
+        <section className="terms-section" id={section.id} key={section.id}>
+          <h3>{section.title}</h3>
+          {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+          {section.bullets?.length ? <ul>{section.bullets.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+        </section>
+      ))}
     </>
   );
 }
 
-export function PrivacyContent() {
+function LegalMeta() {
+  return (
+    <aside className="legal-meta" aria-label="Legal document details">
+      <strong>{DEFAULT_LEGAL_POLICY.operator.projectName}</strong>
+      <span>Version {DEFAULT_LEGAL_POLICY.version} · Effective {DEFAULT_LEGAL_POLICY.effectiveDate}</span>
+      <span>{DEFAULT_LEGAL_POLICY.operator.status}</span>
+      <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>
+    </aside>
+  );
+}
+
+function LegalNavigation({ sections }: { sections: typeof DEFAULT_LEGAL_POLICY.terms.sections }) {
+  return (
+    <nav className="legal-section-nav" aria-label="Document sections">
+      {sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}
+    </nav>
+  );
+}
+
+export function TermsContent({ compact = false }: { compact?: boolean }) {
   return (
     <>
-      <p className="help-intro">With your permission, this site uses first-party analytics cookies to understand which pages and tools are valuable and how long sections are used. This information is genuinely helpful while the app is being developed.</p>
-      <p className="help-intro">Analytics record a random browser identifier, visits to app sections and high-level feature actions. They do not record BitCraft usernames, selected member identities, typed search text, admin credentials or database contents.</p>
-      <p className="help-intro">The optional Discord bot does not use analytics cookies. When enabled, Discord slash commands and notifications may process Discord server, channel and user identifiers, command options, public BitJita data, and notification delivery diagnostics so the bot can respond and administrators can diagnose delivery issues.</p>
-      <p className="help-intro">Consent and analytics cookies last for up to 180 days. Raw usage events are retained for up to 90 days. You can change your preference in the app at any time; declining removes the analytics identifier from this browser.</p>
+      <LegalMeta />
+      {!compact ? <LegalNavigation sections={DEFAULT_LEGAL_POLICY.terms.sections} /> : null}
+      <LegalSections sections={DEFAULT_LEGAL_POLICY.terms.sections} />
+      <p className="help-intro">{DEFAULT_LEGAL_POLICY.notice}</p>
+    </>
+  );
+}
+
+function RetentionTable() {
+  return (
+    <div className="legal-table-scroll" tabIndex={0} aria-label="Personal data retention table">
+      <table className="legal-retention-table">
+        <thead><tr><th scope="col">Data</th><th scope="col">Retention</th></tr></thead>
+        <tbody>
+          {DEFAULT_LEGAL_POLICY.retention.map((rule) => <tr key={rule.key}><th scope="row">{rule.label}</th><td>{rule.rule}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProviderList() {
+  return (
+    <section className="terms-section" id="providers">
+      <h3>Named providers</h3>
+      <div className="legal-provider-list">
+        {DEFAULT_LEGAL_POLICY.providers.map((provider) => (
+          <article key={provider.key}>
+            <strong>{provider.name}</strong>
+            <span>{provider.role}</span>
+            <p>{provider.data}</p>
+            <small>{provider.location}</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function PrivacyContent({ compact = false }: { compact?: boolean }) {
+  return (
+    <>
+      <LegalMeta />
+      {!compact ? <LegalNavigation sections={DEFAULT_LEGAL_POLICY.privacy.sections} /> : null}
+      <LegalSections sections={DEFAULT_LEGAL_POLICY.privacy.sections} />
+      <RetentionTable />
+      <ProviderList />
+      <p className="help-intro">{DEFAULT_LEGAL_POLICY.notice}</p>
     </>
   );
 }
@@ -97,15 +157,17 @@ export function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
         <header>
           <div>
             {isTerms ? <FileText size={22} /> : <Shield size={22} />}
-            <h1>{isTerms ? "Terms & Discord Bot Use" : "Privacy Policy"}</h1>
+            <h1>{isTerms ? DEFAULT_LEGAL_POLICY.terms.title : DEFAULT_LEGAL_POLICY.privacy.title}</h1>
           </div>
           <a className="toolbar-button" href="/"><ExternalLink size={14} /> Open app</a>
         </header>
-        <p className="help-intro">Timbersteel Claim Monitor - version {APP_VERSION}</p>
+        <p className="help-intro">Application version {APP_VERSION}</p>
         {isTerms ? <TermsContent /> : <PrivacyContent />}
         <footer>
-          <span>Unofficial fan-made tool. Not affiliated with Clockwork Labs. BitCraft&trade; is a trademark of Clockwork Labs, Inc.</span>
+          <span>{DEFAULT_LEGAL_POLICY.operator.status}</span>
+          <span>Legal version {DEFAULT_LEGAL_POLICY.version}, effective {DEFAULT_LEGAL_POLICY.effectiveDate}. Contact <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>.</span>
           <span>Data provided by the <a href="https://bitjita.com/docs/api">BitJita API</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
+          <span>{isTerms ? <a href="/privacy">Read the Privacy Policy</a> : <a href="/terms">Read the Terms of Service</a>}.</span>
         </footer>
       </section>
     </main>
@@ -118,11 +180,11 @@ export function TermsDialog({ onClose, onPrivacy }: { onClose: () => void; onPri
         <header>
           <div>
             <FileText size={19} />
-            <h2 id="terms-title">Legal & Bot Terms</h2>
+            <h2 id="terms-title">Terms of Service</h2>
           </div>
           <button onClick={onClose} aria-label="Close legal and bot terms"><X size={16} /></button>
         </header>
-        <TermsContent compact />
+        <div className="legal-dialog-scroll"><TermsContent compact /></div>
         <div className="toolbar">
           <a className="toolbar-button primary" href="/terms" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open dedicated page</a>
           <button className="toolbar-button" onClick={() => { onClose(); onPrivacy(); }}><Shield size={14} /> Privacy details</button>
@@ -145,7 +207,7 @@ export function PrivacyDialog({ consent, onConsent, onClose }: { consent: Analyt
           <strong>Usage analytics {consent === "accepted" ? "accepted" : consent === "declined" ? "declined" : "not selected"}</strong>
           <span>{consent === "accepted" ? "This browser is helping development by sharing anonymous feature usage." : "This browser is not currently contributing usage analytics."}</span>
         </div>
-        <PrivacyContent />
+        <div className="legal-dialog-scroll"><PrivacyContent compact /></div>
         <div className="privacy-actions">
           <button className="toolbar-button primary" onClick={() => onConsent("accepted")}>Accept Analytics</button>
           <button className="toolbar-button" onClick={() => onConsent("declined")}>Decline</button>

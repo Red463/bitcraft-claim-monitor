@@ -1,0 +1,378 @@
+export const LEGAL_VERSION = "2026-07-25";
+export const LEGAL_EFFECTIVE_DATE = "2026-07-25";
+
+export const defaultLegalOperator = Object.freeze({
+  controllerName: "Thomas Bush",
+  projectName: "Timbersteel Claim Monitor",
+  privacyEmail: "privacy@timbersteeltrade.com",
+  controllerCountry: "United Kingdom",
+  governingLaw: "England and Wales",
+  minimumAge: 18,
+  status: "Thomas Bush is the individual developer and operator of Timbersteel Claim Monitor, a free, unofficial community project. Timbersteel Claim Monitor is not a company or separate legal entity.",
+});
+
+const providerDefinitions = Object.freeze([
+  {
+    key: "hostworld",
+    name: "HostWorld",
+    role: "UK virtual private server and database hosting provider",
+    data: "Application database, server logs, encrypted backups where configured, and operational files.",
+    location: "United Kingdom",
+  },
+  {
+    key: "namecheap",
+    name: "Namecheap",
+    role: "Domain registrar and DNS provider",
+    data: "Domain and DNS configuration; it is not described as the application database host.",
+    location: "Provider locations described in Namecheap's privacy information.",
+  },
+  {
+    key: "discord",
+    name: "Discord",
+    role: "OAuth identity, bot, direct-message, guild, and community platform",
+    data: "Discord identity, guild interactions, bot commands, notifications, and moderation data.",
+    location: "International processing under Discord's terms and privacy policy.",
+  },
+  {
+    key: "bitjita",
+    name: "BitJita",
+    role: "Public BitCraft game-data API",
+    data: "Public game, character, settlement, inventory, market, and activity information.",
+    location: "As described by BitJita.",
+  },
+  {
+    key: "proton",
+    name: "Proton",
+    role: "Email service for privacy and support correspondence",
+    data: "Email addresses, message content, attachments, and correspondence records.",
+    location: "Switzerland and other locations described by Proton.",
+  },
+  {
+    key: "buy-me-a-coffee",
+    name: "Buy Me a Coffee / Publisherr Inc.",
+    role: "Optional external contribution service",
+    data: "Donation and supporter information made available through that service; the app does not collect card details.",
+    location: "International processing under Buy Me a Coffee's terms and privacy policy.",
+  },
+  {
+    key: "github",
+    name: "GitHub",
+    role: "Source-code, issue, release, and deployment-workflow provider",
+    data: "Repository activity and technical deployment metadata, not ordinary app account content by design.",
+    location: "International processing under GitHub's privacy statement.",
+  },
+]);
+
+const retentionRules = Object.freeze([
+  { key: "account-data", label: "Discord account, preferences, character link, and acceptance", rule: "While active; delete after 24 months without login", months: 24 },
+  { key: "user-sessions", label: "User sessions", rule: "30 days", days: 30 },
+  { key: "admin-sessions", label: "Administrator sessions", rule: "7 days", days: 7 },
+  { key: "market-watches", label: "Market watches", rule: "Until the user removes them or deletes the account" },
+  { key: "market-alerts", label: "Market alert history", rule: "180 days", days: 180 },
+  { key: "assignment-audit", label: "Character-assignment and administrator audit", rule: "12 months; identifiers are scrubbed sooner on account deletion", months: 12 },
+  { key: "moderation", label: "Moderation records", rule: "While active and normally 12 months after closure, then delete or anonymise", months: 12 },
+  { key: "discord-delivery", label: "Discord delivery diagnostics", rule: "90 days or the latest 250 entries, whichever is sooner", days: 90, maximumRows: 250 },
+  { key: "discord-interactions", label: "Poll, RSVP, vote, and temporary interaction records", rule: "90 days after the event or interaction", days: 90 },
+  { key: "analytics-events", label: "Optional analytics events", rule: "90 days", days: 90 },
+  { key: "analytics-identifiers", label: "Analytics consent and browser identifiers", rule: "180 days unless withdrawn sooner", days: 180 },
+  { key: "full-ip", label: "Full IP address in security logs", rule: "7 days", days: 7 },
+  { key: "security-anonymised", label: "Hashed or anonymised security records", rule: "180 days", days: 180 },
+  { key: "craft-audit", label: "Craft Planner audit history", rule: "14 days", days: 14 },
+  { key: "empire-membership", label: "Empire membership history", rule: "365 days", days: 365 },
+  { key: "server-health", label: "Server-health diagnostics", rule: "7 days", days: 7 },
+  { key: "privacy-correspondence", label: "Privacy correspondence", rule: "24 months, unless a dispute or legal obligation requires longer", months: 24 },
+  { key: "daily-backups", label: "Daily encrypted backups", rule: "7 recovery points, normally about 7 days", days: 7, maximumRows: 7 },
+  { key: "migration-backups", label: "Migration and manual encrypted backups", rule: "3 of each class and no more than 90 days", days: 90, maximumRows: 3 },
+  { key: "deletion-ledger", label: "HMAC deletion-restoration ledger", rule: "90 days", days: 90 },
+  { key: "inactive-accounts", label: "Inactive accounts", rule: "Delete after 24 months without login, with a warning about 30 days before", months: 24 },
+]);
+
+function configuredValue(env, key, fallback) {
+  return env?.[key] === undefined ? fallback : String(env[key]).trim();
+}
+
+function validatedOperator(env) {
+  const operator = {
+    controllerName: configuredValue(env, "LEGAL_CONTROLLER_NAME", defaultLegalOperator.controllerName),
+    projectName: configuredValue(env, "LEGAL_PROJECT_NAME", defaultLegalOperator.projectName),
+    privacyEmail: configuredValue(env, "LEGAL_PRIVACY_EMAIL", defaultLegalOperator.privacyEmail),
+    controllerCountry: configuredValue(env, "LEGAL_CONTROLLER_COUNTRY", defaultLegalOperator.controllerCountry),
+    governingLaw: configuredValue(env, "LEGAL_GOVERNING_LAW", defaultLegalOperator.governingLaw),
+    minimumAge: Number(configuredValue(env, "LEGAL_MINIMUM_AGE", defaultLegalOperator.minimumAge)),
+  };
+  if (!operator.controllerName) throw new Error("Legal controller name is required");
+  if (!operator.projectName) throw new Error("Legal project name is required");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(operator.privacyEmail)) throw new Error("A valid legal privacy email is required");
+  if (!operator.controllerCountry) throw new Error("Legal controller country is required");
+  if (!operator.governingLaw) throw new Error("Legal governing law is required");
+  if (!Number.isInteger(operator.minimumAge) || operator.minimumAge < 18 || operator.minimumAge > 120) {
+    throw new Error("Legal minimum age must be an integer of at least 18");
+  }
+  const status = `${operator.controllerName} is the individual developer and operator of ${operator.projectName}, a free, unofficial community project. ${operator.projectName} is not a company or separate legal entity.`;
+  return Object.freeze({ ...operator, status });
+}
+
+function termsSections(operator) {
+  const project = operator.projectName;
+  return [
+    {
+      id: "operator",
+      title: "Operator and status",
+      paragraphs: [
+        operator.status,
+        `${project} is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitJita, Discord, HostWorld, Namecheap, Proton, GitHub, or Buy Me a Coffee.`,
+      ],
+    },
+    {
+      id: "eligibility",
+      title: "Eligibility",
+      paragraphs: [
+        `You must be at least ${operator.minimumAge} years old to use ${project}. The service is made available worldwide, but you are responsible for complying with laws and platform rules that apply to you.`,
+      ],
+    },
+    {
+      id: "accounts-and-sessions",
+      title: "Anonymous use, Discord accounts, and sessions",
+      paragraphs: [
+        "Some public pages work without an account. Signed-in features use Discord OAuth and may store your Discord ID, profile details, sessions, preferences, and acceptance record.",
+        "You must protect access to your Discord account, provide accurate information, and tell the operator promptly if you believe your app access is being misused.",
+      ],
+    },
+    {
+      id: "character-linking",
+      title: "Character linking",
+      paragraphs: [
+        "You may request a BitCraft character link. An authorised administrator may also assign and immediately approve a character for your Discord login when reasonably needed to operate the community service.",
+        "An administrator assignment is blocked unless the app can first send your Discord account a direct notice. You can unlink the character or delete your app account from Privacy & Data. A character already approved for one Discord account cannot be assigned to another until it is unassigned.",
+      ],
+    },
+    {
+      id: "discord-and-app-features",
+      title: "Discord, game-data, and app features",
+      paragraphs: [
+        `${project} may provide Discord bot commands, notifications, guild tools, role management, moderation, polls, events, diagnostics, market watches, alerts, production tools, history, analytics, backups, and administration.`,
+        "BitJita and BitCraft information may be public, delayed, partial, unavailable, or inaccurate. Calculations and estimates are operational aids, not guaranteed facts.",
+      ],
+    },
+    {
+      id: "acceptable-use",
+      title: "Acceptable use",
+      paragraphs: ["You must use the service lawfully and in a way that does not harm other people, the service, Discord, BitCraft, or connected providers."],
+      bullets: [
+        "Do not impersonate another person or submit a knowingly false character link.",
+        "Do not bypass access controls or attack, overload, probe, scrape, or disrupt the service.",
+        "Do not misuse Discord, BitCraft, or another person's identifiers or personal information.",
+        "Do not abuse bot, moderation, notification, administrator, poll, or event functions.",
+        "Do not submit unlawful, infringing, deceptive, malicious, or harmful content.",
+      ],
+    },
+    {
+      id: "suspension-and-termination",
+      title: "Suspension and termination",
+      paragraphs: [
+        "Access may be restricted for security, abuse prevention, Discord or community moderation, operational, or legal reasons. Where appropriate, you will receive a reason and may request review.",
+        "You may stop using the service, unlink your character, or delete your ordinary app account using the available self-service controls.",
+      ],
+    },
+    {
+      id: "intellectual-property",
+      title: "Intellectual property and trademarks",
+      paragraphs: [
+        `The ${project} code and original presentation remain subject to their applicable ownership and licence terms. BitCraft, Discord, BitJita, provider names, game assets, and third-party content belong to their respective owners.`,
+      ],
+    },
+    {
+      id: "third-party-services",
+      title: "Third-party services",
+      paragraphs: [
+        "Discord, BitJita, hosting, domain, email, source-code, and donation services operate under their own terms and privacy policies. The operator does not control their independent availability or processing.",
+      ],
+    },
+    {
+      id: "donations",
+      title: "Free service and optional donations",
+      paragraphs: [
+        `${project} is free. The optional Buy Me a Coffee link is a voluntary contribution and creates no subscription, paid entitlement, service level, ownership interest, priority support, or right to influence the project. Payment details are handled by Buy Me a Coffee and its payment providers.`,
+      ],
+    },
+    {
+      id: "availability",
+      title: "Changes and availability",
+      paragraphs: [
+        "The service may change, pause, or end and is not guaranteed to be uninterrupted. Reasonable care is taken, but third-party data and derived estimates may be incomplete, delayed, unavailable, or wrong. Do not rely on the app as the sole source for important settlement or financial decisions.",
+      ],
+    },
+    {
+      id: "liability",
+      title: "Fair liability terms",
+      paragraphs: [
+        "To the extent permitted by law, the operator is not responsible for losses caused solely by your misuse, unauthorised third-party conduct, or matters genuinely outside reasonable control.",
+        "Nothing in these Terms excludes or limits liability for death or personal injury caused by negligence, fraud, deliberate wrongdoing, data-protection duties, mandatory consumer rights, or any liability that cannot lawfully be excluded or limited.",
+      ],
+    },
+    {
+      id: "complaints",
+      title: "Questions, complaints, and review",
+      paragraphs: [
+        `Contact ${operator.privacyEmail} for legal/privacy questions or to request review of an access decision. Privacy complaints may also be made to the UK Information Commissioner's Office.`,
+      ],
+    },
+    {
+      id: "changes",
+      title: "Changes to these Terms",
+      paragraphs: [
+        "Material changes receive a new legal version. Signed-in users will be asked to accept the current version before continuing to account features.",
+      ],
+    },
+    {
+      id: "general-terms",
+      title: "General terms",
+      paragraphs: [
+        "If one term is unenforceable, the remaining terms continue. A delay in enforcing a term is not a waiver. You may not transfer your rights under these Terms without consent; the operator may transfer operation only with appropriate notice and protection. These Terms and the Privacy Policy record the agreement about the service, subject to rights that law does not allow either party to exclude.",
+      ],
+    },
+    {
+      id: "governing-law",
+      title: "Governing law",
+      paragraphs: [
+        `These Terms are governed by the law of ${operator.governingLaw}. Mandatory rights and any court rights you have where you live are not removed.`,
+      ],
+    },
+  ];
+}
+
+function privacySections(operator) {
+  const project = operator.projectName;
+  return [
+    {
+      id: "controller",
+      title: "Controller",
+      paragraphs: [
+        operator.status,
+        `${operator.controllerName}, based in ${operator.controllerCountry}, is the controller for the personal data described here. Contact: ${operator.privacyEmail}. No separate company controls this project.`,
+      ],
+    },
+    {
+      id: "data-we-process",
+      title: "Personal data we process",
+      paragraphs: [
+        "Depending on the features you use, this includes Discord ID and profile data, sessions, settings, legal acceptance, character links, market watches and alerts, bot/guild interactions, role and moderation records, votes and RSVPs, delivery diagnostics, security logs, optional analytics, and privacy correspondence.",
+        "Public BitJita game and settlement data may become personal data in context when it is linked to a Discord account or community activity. Special-category data is not intentionally requested.",
+      ],
+    },
+    {
+      id: "lawful-bases",
+      title: "Purposes and lawful bases",
+      paragraphs: [
+        "Contract is used to provide requested accounts, settings, exports, watches, alerts, and other signed-in features. Consent is used for optional analytics and can be withdrawn.",
+        "Legitimate interests support secure operation, abuse prevention, proportionate community administration, necessary character linking, diagnostics, and moderation, after balancing those purposes against user rights. Legal obligation is used where records must be handled to meet law, rights requests, or disputes.",
+      ],
+    },
+    {
+      id: "character-linking",
+      title: "Character linking and administrator assignment",
+      paragraphs: [
+        "Character ID, name, status, Discord account, assignment administrator, and audit/delivery results are processed to associate community access with the correct public game identity.",
+        "An administrator assignment requires a current acceptance and a successful direct notice before the link is committed. Duplicate approved links are blocked. You may unlink or delete the account yourself, and failed removal notifications do not undo removal.",
+      ],
+    },
+    {
+      id: "discord-administration",
+      title: "Discord administration and moderation",
+      paragraphs: [
+        "Guild IDs, Discord IDs, commands, roles, warnings, notes, cases, bans, polls, events, and delivery results may be processed to operate requested tools, maintain community safety, investigate abuse, and document proportionate moderation.",
+      ],
+    },
+    {
+      id: "analytics",
+      title: "Optional analytics and cookies",
+      paragraphs: [
+        "Optional analytics use consent and are kept separate from Terms acceptance. Rejecting or withdrawing analytics does not block the service. Necessary session, security, consent-choice, and preference storage may still be used to provide and protect requested functions.",
+      ],
+    },
+    {
+      id: "sharing",
+      title: "Service providers and disclosures",
+      paragraphs: [
+        "Data is shared only as needed with the providers listed below, where you direct a Discord/BitJita action, to protect people or the service, to comply with law, or with your permission. Discord API data is not sold or shared with donation or advertising services.",
+      ],
+    },
+    {
+      id: "international-transfers",
+      title: "International processing",
+      paragraphs: [
+        "The primary VPS/database arrangement is described as UK-hosted. Discord, GitHub, Buy Me a Coffee, Proton, Namecheap, BitJita, and their providers may process data internationally under their own safeguards and applicable transfer mechanisms.",
+      ],
+    },
+    {
+      id: "retention",
+      title: "Retention",
+      paragraphs: [
+        "Data is kept only for the periods or criteria in the retention table below. Shorter deletion applies when you use self-service controls, except where a limited record must be anonymised or retained for security, legal, or dispute reasons.",
+      ],
+    },
+    {
+      id: "rights",
+      title: "Your rights",
+      paragraphs: [
+        `Depending on applicable law, you may request access, correction, deletion, restriction, portability, or object to processing, and you may withdraw consent. Use Privacy & Data or email ${operator.privacyEmail}. Identity checks use only what is reasonably necessary. Requests are normally answered within one month.`,
+        "There is no solely automated decision-making that produces legal or similarly significant effects.",
+      ],
+    },
+    {
+      id: "deletion-and-backups",
+      title: "Deletion, backups, and inactive accounts",
+      paragraphs: [
+        "Self-service tools can export data, unlink a character, clear preferences, remove market data, withdraw analytics consent, and delete an ordinary app account after recent Discord reauthentication.",
+        "Live data is removed immediately. Restricted encrypted backups expire within their stated windows. A separate HMAC deletion-restoration ledger, containing no plaintext identity, is replayed before a restored database goes public so an older backup does not restore a deleted account.",
+        "Accounts inactive for 24 months are deleted after a warning attempt about 30 days beforehand. Delivery failure does not extend retention.",
+      ],
+    },
+    {
+      id: "security",
+      title: "Security",
+      paragraphs: [
+        "Controls include restricted sessions and administrator routes, same-origin and CSRF checks, rate limits, access logging, data minimisation, encrypted application backups, restricted keys, HMAC deletion records, and tested restore procedures. No internet service can promise absolute security.",
+      ],
+    },
+    {
+      id: "complaints",
+      title: "Complaints",
+      paragraphs: [
+        `Contact ${operator.privacyEmail} first if you can. You may also complain to the UK Information Commissioner's Office or the data-protection authority available to you.`,
+      ],
+    },
+    {
+      id: "contact",
+      title: "Contact and policy changes",
+      paragraphs: [
+        `Email ${operator.privacyEmail}. Material policy changes receive a new version/effective date and signed-in users are prompted on their next visit.`,
+      ],
+    },
+  ];
+}
+
+export function legalPolicyForEnvironment(env = {}) {
+  if (String(env?.NODE_ENV ?? "").toLowerCase() === "production" && String(env?.LEGAL_CONFIGURATION_CONFIRMED ?? "").toLowerCase() !== "true") {
+    throw new Error("Production requires LEGAL_CONFIGURATION_CONFIRMED=true after reviewing the published legal identity");
+  }
+  const operator = validatedOperator(env);
+  return Object.freeze({
+    version: LEGAL_VERSION,
+    effectiveDate: LEGAL_EFFECTIVE_DATE,
+    operator,
+    supportUrl: "https://buymeacoffee.com/tom.bush",
+    providers: providerDefinitions.map((provider) => ({ ...provider })),
+    retention: retentionRules.map((rule) => ({ ...rule })),
+    terms: {
+      title: "Terms of Service",
+      sections: termsSections(operator),
+    },
+    privacy: {
+      title: "Privacy Policy",
+      sections: privacySections(operator),
+    },
+    notice: "These documents describe this service and are not legal advice to users or other operators.",
+  });
+}
+
