@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
+import { BEST_SELLER_SORTS, MARKET_INCOME_RANGES, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
 
 test("buildMarketTopItems aggregates sales by item and sorts by units then value", () => {
   const topItems = buildMarketTopItems([
@@ -48,6 +48,44 @@ test("buildMarketIncomeSummary totals confirmed daily market sales and plots cum
     { at: "2026-06-30", value: 54 },
   ]);
 });
+
+test("market income ranges expose stable dashboard choices", () => {
+  assert.deepEqual(MARKET_INCOME_RANGES, [
+    { id: "7", label: "7D", days: 7 },
+    { id: "30", label: "30D", days: 30 },
+    { id: "365", label: "1Y", days: 365 },
+  ]);
+});
+
+test("buildMarketIncomeSummary anchors a seven-day range to lifetime income", () => {
+  const summary = buildMarketIncomeSummary([
+    { day: "2026-06-01", salesCount: 1, unitsSold: 1, totalValue: 100 },
+    { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
+    { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
+  ], "2026-06-25", 7, 130);
+
+  assert.equal(summary.partialRange, false);
+  assert.equal(summary.requestedStartDay, "2026-06-19");
+  assert.equal(summary.availableStartDay, "2026-06-01");
+  assert.deepEqual(summary.trend[0], { at: "2026-06-19", value: 100 });
+  assert.deepEqual(summary.trend.at(-1), { at: "2026-06-25", value: 130 });
+});
+
+test("buildMarketIncomeSummary does not invent observations before stored history", () => {
+  const summary = buildMarketIncomeSummary([
+    { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
+    { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
+  ], "2026-06-25", 30, 30);
+
+  assert.equal(summary.partialRange, true);
+  assert.equal(summary.requestedStartDay, "2026-05-27");
+  assert.equal(summary.availableStartDay, "2026-06-24");
+  assert.deepEqual(summary.trend, [
+    { at: "2026-06-24", value: 10 },
+    { at: "2026-06-25", value: 30 },
+  ]);
+});
+
 test("formatMarketDay formats ISO days and preserves unknown labels", () => {
   assert.match(formatMarketDay("2026-06-28"), /28|Jun/);
   assert.equal(formatMarketDay("Unknown"), "Unknown");

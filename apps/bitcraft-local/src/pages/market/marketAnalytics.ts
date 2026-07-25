@@ -2,6 +2,7 @@ import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data.ts
 import { timestampMs } from "../../utils/format.ts";
 
 export type BestSellerSortKey = "units" | "revenue" | "sales" | "average" | "recent";
+export type MarketIncomeRangeDays = 7 | 30 | 365;
 
 export const BEST_SELLER_SORTS: Array<{ key: BestSellerSortKey; label: string }> = [
   { key: "units", label: "Units sold" },
@@ -10,6 +11,12 @@ export const BEST_SELLER_SORTS: Array<{ key: BestSellerSortKey; label: string }>
   { key: "average", label: "Avg price" },
   { key: "recent", label: "Recent" },
 ];
+
+export const MARKET_INCOME_RANGES = [
+  { id: "7", label: "7D", days: 7 },
+  { id: "30", label: "30D", days: 30 },
+  { id: "365", label: "1Y", days: 365 },
+] as const;
 
 export function bestSellerSortValue(row: AnyRecord, sort: BestSellerSortKey): number {
   switch (sort) {
@@ -59,7 +66,12 @@ export function buildMarketDaily(events: AnyRecord[]) {
   return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
 }
 
-export function buildMarketIncomeSummary(dailyRows: AnyRecord[], endAt?: string | Date | null) {
+export function buildMarketIncomeSummary(
+  dailyRows: AnyRecord[],
+  endAt?: string | Date | null,
+  rangeDays: MarketIncomeRangeDays = 7,
+  lifetimeTotal?: number,
+) {
   const rows = [...dailyRows]
     .map((row) => ({
       day: String(row.day ?? ""),
@@ -74,11 +86,21 @@ export function buildMarketIncomeSummary(dailyRows: AnyRecord[], endAt?: string 
   const lastSaleDay = rows[rows.length - 1]?.day;
   const requestedEndDay = parseDateValue(endAt)?.toISOString().slice(0, 10);
   const lastDay = requestedEndDay && lastSaleDay && requestedEndDay > lastSaleDay ? requestedEndDay : lastSaleDay;
+  const selectedRangeDays = MARKET_INCOME_RANGES.some((range) => range.days === rangeDays) ? rangeDays : 7;
+  const requestedStart = lastDay ? new Date(`${lastDay}T00:00:00.000Z`) : null;
+  requestedStart?.setUTCDate(requestedStart.getUTCDate() - (selectedRangeDays - 1));
+  const requestedStartDay = requestedStart?.toISOString().slice(0, 10) ?? null;
+  const plottedStartDay = firstDay && requestedStartDay && firstDay > requestedStartDay ? firstDay : requestedStartDay;
   const cumulativeTrend: Array<{ at: string; value: number }> = [];
-  let runningTotal = 0;
+  const totalValue = rows.reduce((total, row) => total + row.totalValue, 0);
+  const resolvedLifetimeTotal = typeof lifetimeTotal === "number" && Number.isFinite(lifetimeTotal) ? lifetimeTotal : totalValue;
+  const plottedIncome = plottedStartDay
+    ? rows.filter((row) => row.day >= plottedStartDay && (!lastDay || row.day <= lastDay)).reduce((total, row) => total + row.totalValue, 0)
+    : 0;
+  let runningTotal = Math.max(0, resolvedLifetimeTotal - plottedIncome);
 
-  if (firstDay && lastDay) {
-    const cursor = new Date(`${firstDay}T00:00:00.000Z`);
+  if (plottedStartDay && lastDay) {
+    const cursor = new Date(`${plottedStartDay}T00:00:00.000Z`);
     const end = new Date(`${lastDay}T00:00:00.000Z`);
     while (cursor <= end) {
       const day = cursor.toISOString().slice(0, 10);
@@ -89,10 +111,13 @@ export function buildMarketIncomeSummary(dailyRows: AnyRecord[], endAt?: string 
   }
 
   return {
-    totalValue: rows.reduce((total, row) => total + row.totalValue, 0),
+    totalValue,
     salesCount: rows.reduce((total, row) => total + row.salesCount, 0),
     unitsSold: rows.reduce((total, row) => total + row.unitsSold, 0),
     trend: cumulativeTrend,
+    requestedStartDay,
+    availableStartDay: firstDay ?? null,
+    partialRange: Boolean(firstDay && requestedStartDay && firstDay > requestedStartDay),
   };
 }
 
