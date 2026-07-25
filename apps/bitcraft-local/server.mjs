@@ -3393,7 +3393,7 @@ function createAppUserSession(userId) {
     maxAgeSeconds: APP_USER_SESSION_MAX_AGE_SECONDS,
     secure: isProduction,
   });
-  statements.insertUserSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt);
+  statements.insertUserSession.run(session.tokenHash, userId, session.expiresAt, session.createdAt, session.createdAt);
   return {
     token: session.token,
     cookie: session.cookie,

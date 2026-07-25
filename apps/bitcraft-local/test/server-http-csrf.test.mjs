@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { csrfToken, csrfTokenFromSession, validCsrfHeader } from "../src/server/httpCsrf.mjs";
+import {
+  appUserCsrfToken,
+  csrfToken,
+  csrfTokenForCookie,
+  csrfTokenFromSession,
+  validCsrfHeader,
+} from "../src/server/httpCsrf.mjs";
 
 const session = "session-token";
 const expected = createHash("sha256").update(`csrf:${session}`).digest("base64url");
@@ -24,4 +30,16 @@ test("validCsrfHeader accepts only exact same-length token matches", () => {
   assert.equal(validCsrfHeader(expected, expected.slice(1)), false);
   assert.equal(validCsrfHeader(expected, ""), false);
   assert.equal(validCsrfHeader(null, expected), false);
+});
+
+test("user CSRF tokens derive only from the app-user session cookie", () => {
+  const request = {
+    headers: {
+      cookie: `bitcraft_admin_session=admin-token; bitcraft_user_session=${encodeURIComponent(session)}`,
+    },
+  };
+  assert.equal(appUserCsrfToken(request), expected);
+  assert.equal(csrfTokenForCookie(request, "bitcraft_user_session"), expected);
+  assert.notEqual(csrfToken(request), expected);
+  assert.equal(appUserCsrfToken({ headers: { cookie: "bitcraft_admin_session=admin-token" } }), null);
 });

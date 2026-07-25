@@ -351,9 +351,28 @@ export function createPreparedStatements(db) {
       last_login_at = excluded.last_login_at
   `),
   updateUserLastLogin: db.prepare("UPDATE user_accounts SET last_login_at = ? WHERE id = ?"),
-  insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"),
+  insertUserSession: db.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at, reauthenticated_at) VALUES (?, ?, ?, ?, ?)"),
   deleteAppUserSession: db.prepare("DELETE FROM user_sessions WHERE token_hash = ?"),
   deleteExpiredUserSessions: db.prepare("DELETE FROM user_sessions WHERE expires_at <= ?"),
+  updateUserSessionReauthenticatedAt: db.prepare("UPDATE user_sessions SET reauthenticated_at = ? WHERE token_hash = ? AND user_id = ?"),
+  currentUserLegalAcceptance: db.prepare(`
+    SELECT *
+    FROM user_legal_acceptances
+    WHERE user_id = ?
+    ORDER BY accepted_at DESC, id DESC
+    LIMIT 1
+  `),
+  insertUserLegalAcceptance: db.prepare(`
+    INSERT INTO user_legal_acceptances (
+      user_id, legal_version, terms_digest, privacy_digest,
+      age_confirmed, accepted_at, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, legal_version, terms_digest, privacy_digest)
+    DO UPDATE SET
+      age_confirmed = excluded.age_confirmed,
+      accepted_at = excluded.accepted_at,
+      source = excluded.source
+  `),
   updateUserCharacter: db.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = ? WHERE id = ?"),
   approvedUserAccountByCharacterId: db.prepare(`
     SELECT *

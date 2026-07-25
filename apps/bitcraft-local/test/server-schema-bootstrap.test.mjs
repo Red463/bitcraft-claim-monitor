@@ -10,6 +10,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS app_settings",
     "CREATE TABLE IF NOT EXISTS admin_users",
     "CREATE TABLE IF NOT EXISTS user_accounts",
+    "CREATE TABLE IF NOT EXISTS user_legal_acceptances",
     "CREATE TABLE IF NOT EXISTS market_deal_alerts",
     "CREATE TABLE IF NOT EXISTS craft_plan_settings",
     "CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_snapshots",
@@ -30,6 +31,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS empire_membership_tracking",
     "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
+    "CREATE INDEX IF NOT EXISTS idx_user_legal_acceptances_user_time",
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status",
     "CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time",
@@ -69,5 +71,28 @@ test("membership history schema is additive and preserves existing data", () => 
   assert.equal(db.prepare("SELECT value FROM app_settings WHERE key = 'claim_id'").get().value, "123");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_tracking").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_periods").get().count, 0);
+  db.close();
+});
+
+test("legal acceptance schema enforces one exact document snapshot per user", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  const userId = Number(db.prepare(`
+    INSERT INTO user_accounts (discord_id, character_status, settings_json, created_at)
+    VALUES ('legal-user', 'unlinked', '{}', '2026-07-25T00:00:00.000Z')
+    RETURNING id
+  `).get().id);
+  const insert = db.prepare(`
+    INSERT INTO user_legal_acceptances (
+      user_id, legal_version, terms_digest, privacy_digest,
+      age_confirmed, accepted_at, source
+    ) VALUES (?, ?, ?, ?, 1, ?, 'oauth')
+  `);
+  insert.run(userId, "2026-07-25", "terms", "privacy", "2026-07-25T00:00:00.000Z");
+  assert.throws(
+    () => insert.run(userId, "2026-07-25", "terms", "privacy", "2026-07-25T00:00:01.000Z"),
+    /UNIQUE constraint failed/,
+  );
   db.close();
 });

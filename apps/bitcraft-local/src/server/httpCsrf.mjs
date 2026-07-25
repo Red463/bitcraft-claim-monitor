@@ -6,7 +6,15 @@ export function csrfTokenFromSession(token) {
 }
 
 export function csrfToken(req) {
-  return csrfTokenFromSession(parseCookies(req).bitcraft_admin_session);
+  return csrfTokenForCookie(req, "bitcraft_admin_session");
+}
+
+export function csrfTokenForCookie(req, cookieName) {
+  return csrfTokenFromSession(parseCookies(req)[cookieName]);
+}
+
+export function appUserCsrfToken(req) {
+  return csrfTokenForCookie(req, "bitcraft_user_session");
 }
 
 export function validCsrfHeader(expected, actual) {

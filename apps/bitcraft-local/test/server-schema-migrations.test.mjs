@@ -33,6 +33,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "admin_users", column: "discord_username", definition: "TEXT" },
     { table: "admin_users", column: "discord_global_name", definition: "TEXT" },
     { table: "admin_users", column: "discord_avatar", definition: "TEXT" },
+    { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
     { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
     { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
     { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
@@ -47,6 +48,33 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "game_catalog_recipe_outputs", column: "guaranteed_quantity", definition: "REAL" },
     { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
+});
+
+test("reauthentication timestamp migrates existing user sessions without losing them", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE user_sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO user_sessions VALUES (
+      'session-hash', 7, '2026-08-24T00:00:00.000Z', '2026-07-25T00:00:00.000Z'
+    );
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "user_sessions",
+    column: "reauthenticated_at",
+    definition: "TEXT",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT token_hash, user_id, reauthenticated_at FROM user_sessions").get() },
+    { token_hash: "session-hash", user_id: 7, reauthenticated_at: null },
+  );
+  db.close();
 });
 
 test("guaranteed item-list quantity migrates an existing catalog additively", () => {
