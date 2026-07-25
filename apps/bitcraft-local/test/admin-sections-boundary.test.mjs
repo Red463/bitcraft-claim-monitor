@@ -7,6 +7,7 @@ const sectionUrls = {
   access: new URL("../src/components/admin/AdminAccessSection.tsx", import.meta.url),
   analytics: new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url),
   data: new URL("../src/components/admin/AdminDataSection.tsx", import.meta.url),
+  empireMembership: new URL("../src/components/admin/AdminEmpireMembershipSection.tsx", import.meta.url),
 };
 
 const sourceIfPresent = (url) => existsSync(url) ? readFileSync(url, "utf8") : "";
@@ -20,9 +21,11 @@ test("AdminPanel composes focused admin feature sections", () => {
   assert.match(adminPanel, /import \{ AdminAccessSection \} from "\.\/AdminAccessSection";/);
   assert.match(adminPanel, /import \{ AdminAnalyticsSection \} from "\.\/AdminAnalyticsSection";/);
   assert.match(adminPanel, /import \{ AdminDataSection \} from "\.\/AdminDataSection";/);
+  assert.match(adminPanel, /import \{ AdminEmpireMembershipSection \} from "\.\/AdminEmpireMembershipSection";/);
   assert.match(adminPanel, /<AdminAccessSection\b/);
   assert.match(adminPanel, /<AdminAnalyticsSection\b/);
   assert.match(adminPanel, /<AdminDataSection\b/);
+  assert.match(adminPanel, /<AdminEmpireMembershipSection\b/);
 });
 
 test("AdminPanel no longer owns extracted presentation blocks", () => {

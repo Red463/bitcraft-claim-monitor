@@ -36,6 +36,7 @@ test("admin permission helpers keep owner wildcard and scoped roles", () => {
 
 test("adminPermissionFor maps admin routes to the existing least-privilege permissions", () => {
   assert.equal(adminPermissionFor("GET", "/api/local/admin/me"), "status.view");
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/empire-membership"), "status.view");
   assert.equal(adminPermissionFor("POST", "/api/local/admin/settings"), "settings.manage");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/settings"), "settings.view");
   assert.equal(adminPermissionFor("GET", "/api/local/admin/craft-plan/catalog-refresh"), "settings.view");

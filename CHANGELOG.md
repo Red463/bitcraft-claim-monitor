@@ -9,7 +9,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.43.0-beta.1] - 2026-07-25
+## [0.44.0-beta.1] - 2026-07-25
 
 ### Added
 
@@ -18,6 +18,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Changed
 
 - Prevented a character from being approved for more than one Discord account until its existing assignment is removed.
+
+## [0.43.0-beta.1] - 2026-07-24
+
+### Added
+
+- Added an administrator Empire Membership page showing current members, observed joins, confirmed departures, and rejoins.
+- Added compact local membership-period tracking with a 365-day retention window and independent background collection.
+- Added search and 30-day or all-retained filters for current and departed empire members.
+
+### Changed
+
+- Initial roster members are labelled as present when tracking began instead of being assigned an invented historical join date.
+- Departures now require two consecutive successful roster omissions, reducing false departures from incomplete upstream responses.
 
 ## [0.42.1-beta.1] - 2026-07-24
 
