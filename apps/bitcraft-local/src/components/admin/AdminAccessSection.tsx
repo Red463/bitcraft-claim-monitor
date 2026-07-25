@@ -21,6 +21,8 @@ type AdminAccessSectionProps = {
   };
   pending: (key: string) => boolean;
   error?: string | null;
+  membersLoading: boolean;
+  membersError?: string | null;
   result?: { message: string; kind: "success" | "info" } | null;
   onNewUserChange: (user: NewAdminUser) => void;
   onAddUser: () => void;
@@ -38,6 +40,8 @@ export function AdminAccessSection({
   data,
   pending,
   error,
+  membersLoading,
+  membersError,
   result,
   onNewUserChange,
   onAddUser,
@@ -87,6 +91,7 @@ export function AdminAccessSection({
             <button className={`toolbar-button${pending("linked-accounts-refresh") ? " is-loading" : ""}`} disabled={pending("linked-accounts-refresh")} onClick={onRefreshLinkedAccounts}><RefreshCw size={14} /> {pending("linked-accounts-refresh") ? "Refreshing..." : "Refresh"}</button>
           </div>
           <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
+          {membersError ? <div className="admin-message error" role="alert" aria-live="assertive">{membersError} Refresh and retry.</div> : null}
           <div className="linked-account-list">
             {data.linkedAccounts.length ? data.linkedAccounts.map((account) => {
               const selectedCharacterId = characterAssignments[account.id] ?? account.characterPlayerId ?? "";
@@ -124,10 +129,10 @@ export function AdminAccessSection({
                           <span>Assign character</span>
                           <select
                             value={selectedCharacterId}
-                            disabled={pending(`account-character:${account.id}`)}
+                            disabled={membersLoading || !data.members.length || pending(`account-character:${account.id}`)}
                             onChange={(event) => setCharacterAssignments((current) => ({ ...current, [account.id]: event.target.value }))}
                           >
-                            <option value="">Select a settlement character</option>
+                            <option value="">{membersLoading ? "Loading settlement characters..." : data.members.length ? "Select a settlement character" : "No settlement characters available"}</option>
                             {data.members.map((member) => {
                               const playerId = memberTrackingId(member);
                               const ownerId = approvedCharacterOwners.get(playerId);
@@ -141,7 +146,7 @@ export function AdminAccessSection({
                         </label>
                         <button
                           className="toolbar-button primary"
-                          disabled={!selectedMember || selectedCharacterUnavailable || pending(`account-character:${account.id}`)}
+                          disabled={membersLoading || !selectedMember || selectedCharacterUnavailable || pending(`account-character:${account.id}`)}
                           onClick={() => onCharacterAssignment(account, selectedMember)}
                         >
                           <UserPlus size={14} /> Assign & approve
