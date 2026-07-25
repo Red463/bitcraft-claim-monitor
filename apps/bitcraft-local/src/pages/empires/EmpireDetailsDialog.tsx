@@ -4,7 +4,7 @@ import { AppSkeleton } from "../../components/main/AppChrome";
 import { AsyncState } from "../../components/main/AsyncState";
 import { Dialog } from "../../components/main/Dialog";
 import type { AnyRecord } from "../../main-app-data";
-import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../../utils/format";
+import { dateLabel, formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import { presentHexiteReserveMetric } from "./hexitePresentation";
 import { coordinateText } from "./watchtowerPresentation";
 import { useManualRefresh } from "../../refresh/ManualRefreshContext";
@@ -204,7 +204,7 @@ export function EmpireDetailsDialog({
                           <strong>{claim.name ?? "Unknown claim"}</strong>
                           <small>{claim.ownerName ?? "Unknown owner"} · {coordinateText(claim)}</small>
                         </div>
-                        <span>T{claim.tier ?? "?"} · {formatNumber(claim.supplies)} supplies · {formatCompactNumber(claim.treasury)}g</span>
+                        <span>T{claim.tier ?? "?"} · {formatNumber(claim.supplies)} supplies · {formatGoldAmount(claim.treasury)}</span>
                       </article>
                     ))}
                   </div>

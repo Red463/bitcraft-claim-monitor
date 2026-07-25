@@ -24,6 +24,11 @@ export function formatCompactNumber(value: unknown): string {
   return formatNumber(num);
 }
 
+export function formatGoldAmount(value: unknown): string {
+  const formatted = formatCompactNumber(value);
+  return /[KMB]$/.test(formatted) ? formatted : `${formatted}g`;
+}
+
 export function timestampMs(value: unknown): number {
   const date = parseDateValue(value);
   return date ? date.getTime() : 0;

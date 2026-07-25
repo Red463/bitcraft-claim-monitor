@@ -8,7 +8,7 @@ import { Dialog } from "../components/main/Dialog";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
-import { dateLabel, formatCompactNumber, formatNumber, timeAgo } from "../utils/format";
+import { dateLabel, formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
@@ -236,7 +236,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
                         {claim.tier ? <span className="status-pill good">T{claim.tier}</span> : <span className="status-pill muted">No tier</span>}
                         <span>{formatNumber(claim.numTiles)} tiles</span>
                         <span>{formatNumber(claim.supplies)} supplies</span>
-                        <span>{formatCompactNumber(claim.treasury)}g</span>
+                        <span>{formatGoldAmount(claim.treasury)}</span>
                         <span className="status-pill muted">{distanceLabel(claim.distanceTiles)}</span>
                       </div>
                     </button>
