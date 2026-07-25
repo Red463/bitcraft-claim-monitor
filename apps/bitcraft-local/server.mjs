@@ -122,6 +122,11 @@ import {
   isCurrentOAuthLegalAcceptance,
   publicLegalStatus,
 } from "./src/server/legalAcceptance.mjs";
+import {
+  characterLinkAssignedDm,
+  characterLinkAssignmentCorrectiveDm,
+  characterLinkUnassignedDm,
+} from "./src/server/characterLinkNotifications.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -228,6 +233,9 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(root, "dist");
 const isProduction = process.env.NODE_ENV === "production";
 const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_ENV === "test";
+const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
+  ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
+  : "https://discord.com/api/v10";
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
@@ -4058,6 +4066,65 @@ async function sendDiscordCharacterLinkAdminAction(userRow, action, administrato
   }
 }
 
+async function sendDiscordCharacterLinkUserNotice(userRow, action, administrator, settings = getDiscordSettingsRaw()) {
+  const assigned = action === "assigned";
+  const corrective = action === "corrective";
+  const eventType = assigned
+    ? "character_link_assignment_notice"
+    : corrective
+      ? "character_link_assignment_corrective"
+      : "character_link_unassignment_notice";
+  const characterName = String(userRow.character_name || "Unknown character");
+  const characterPlayerId = String(userRow.character_player_id || "");
+  const metadata = {
+    eventType,
+    accountId: userRow.id,
+    discordId: String(userRow.discord_id ?? ""),
+    discordUsername: String(userRow.discord_username ?? ""),
+    administrator: String(administrator || "Administrator"),
+    characterName,
+    characterPlayerId,
+  };
+  const details = {
+    projectName: legalPolicy.operator.projectName,
+    administrator: metadata.administrator,
+    characterName,
+    characterPlayerId,
+  };
+  const payload = assigned
+    ? characterLinkAssignedDm(details)
+    : corrective
+      ? characterLinkAssignmentCorrectiveDm(details)
+      : characterLinkUnassignedDm(details);
+  const summary = corrective
+    ? `Character assignment corrective notice: ${characterName}`
+    : `Character link ${assigned ? "assignment" : "removal"} notice: ${characterName}`;
+  try {
+    const response = await sendDiscordDirectMessage(userRow.discord_id, payload, settings);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType,
+      channelId: response?.channel_id,
+      channelKey: "dm",
+      summary,
+      metadata,
+      response: { id: response?.id, channel_id: response?.channel_id },
+    });
+    return { ok: true, skipped: false, response: { id: response?.id, channelId: response?.channel_id } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType,
+      channelKey: "dm",
+      summary,
+      error: message,
+      metadata,
+    });
+    return { ok: false, skipped: false, error: message };
+  }
+}
+
 function recordDiscordDelivery(status) {
   const occurredAt = new Date().toISOString();
   const record = { ...status, at: occurredAt };
@@ -4267,7 +4334,7 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
-  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
+  const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: {
       authorization: `Bot ${settings.botToken}`,
@@ -4370,7 +4437,7 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
 
 async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
-  const response = await fetch(`https://discord.com/api/v10${pathname}`, {
+  const response = await fetch(`${discordApiOrigin}${pathname}`, {
     ...options,
     headers: {
       authorization: `Bot ${settings.botToken}`,
@@ -9774,8 +9841,26 @@ const server = createServer(async (req, res) => {
       const characterPlayerId = String(body.characterPlayerId ?? "").trim();
       const characterName = String(body.characterName ?? "").trim();
       if (!characterPlayerId && !characterName) {
-        statements.updateUserCharacter.run("", "", "unlinked", user.id);
-        return send(res, 200, { user: publicAppUser(getAppUser(req)) });
+        try {
+          db.exec("BEGIN IMMEDIATE");
+          statements.updateUserCharacter.run("", "", "unlinked", user.id);
+          audit({ id: user.id, username: user.discord_username }, "linked_account.character_self_unassigned", {
+            userId: user.id,
+            discordId: user.discord_id,
+            characterPlayerId: user.character_player_id,
+            characterName: user.character_name,
+          });
+          db.exec("COMMIT");
+        } catch (error) {
+          try { db.exec("ROLLBACK"); } catch {}
+          throw error;
+        }
+        const userNotification = await sendDiscordCharacterLinkUserNotice(user, "unassigned", "You");
+        const adminNotification = await sendDiscordCharacterLinkAdminAction(user, "unassigned", user.discord_username);
+        return send(res, 200, {
+          user: publicAppUser(getAppUser(req)),
+          notification: { user: userNotification, admin: adminNotification },
+        });
       }
       if (String(user.character_status ?? "") === "approved" && String(user.character_player_id ?? "") && String(user.character_player_id) !== characterPlayerId) {
         return send(res, 409, { error: "Unlink your approved character before linking a different one" });
@@ -10387,19 +10472,39 @@ const server = createServer(async (req, res) => {
         if (!target) return send(res, 404, { error: "Linked account not found" });
 
         if (!characterPlayerId && !characterName) {
-          statements.updateUserCharacter.run("", "", "unlinked", userId);
-          audit(user, "linked_account.character_unassigned", {
-            userId,
-            discordId: target.discord_id,
-            characterPlayerId: target.character_player_id,
-            characterName: target.character_name,
+          let removedTarget;
+          try {
+            db.exec("BEGIN IMMEDIATE");
+            removedTarget = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+            if (!removedTarget) {
+              db.exec("ROLLBACK");
+              return send(res, 404, { error: "Linked account not found" });
+            }
+            statements.updateUserCharacter.run("", "", "unlinked", userId);
+            audit(user, "linked_account.character_unassigned", {
+              userId,
+              discordId: removedTarget.discord_id,
+              characterPlayerId: removedTarget.character_player_id,
+              characterName: removedTarget.character_name,
+            });
+            db.exec("COMMIT");
+          } catch (error) {
+            try { db.exec("ROLLBACK"); } catch {}
+            throw error;
+          }
+          const userNotification = await sendDiscordCharacterLinkUserNotice(removedTarget, "unassigned", user.username);
+          const adminNotification = await sendDiscordCharacterLinkAdminAction(removedTarget, "unassigned", user.username);
+          return send(res, 200, {
+            accounts: statements.listUserAccounts.all().map(publicAppUser),
+            notification: { user: userNotification, admin: adminNotification },
           });
-          void sendDiscordCharacterLinkAdminAction(target, "unassigned", user.username);
-          return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
         }
 
         if (!/^\d{8,}$/.test(characterPlayerId)) return send(res, 400, { error: "Choose a valid BitCraft character" });
         if (!characterName || characterName.length > 80) return send(res, 400, { error: "Character name is required" });
+        if (!isCurrentLegalAcceptance(statements.currentUserLegalAcceptance.get(userId), legalSnapshot)) {
+          return send(res, 409, { error: "This account must accept the current Terms and Privacy Policy before an administrator can assign a character" });
+        }
         if (
           String(target.character_status ?? "") === "approved"
           && String(target.character_player_id ?? "")
@@ -10410,16 +10515,70 @@ const server = createServer(async (req, res) => {
         const existing = statements.approvedUserAccountByCharacterId.get(characterPlayerId, userId);
         if (existing) return send(res, 409, { error: "This character is already approved for another Discord account. Unassign it there first." });
 
-        statements.updateUserCharacter.run(characterPlayerId, characterName, "approved", userId);
-        const assigned = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
-        audit(user, "linked_account.character_assigned", {
-          userId,
-          discordId: target.discord_id,
-          characterPlayerId,
-          characterName,
+        const proposedAssignment = {
+          ...target,
+          character_player_id: characterPlayerId,
+          character_name: characterName,
+          character_status: "approved",
+        };
+        const userNotification = await sendDiscordCharacterLinkUserNotice(proposedAssignment, "assigned", user.username);
+        if (!userNotification.ok) {
+          return send(res, 502, {
+            error: "The character was not assigned because the affected user could not be notified by Discord DM",
+            notification: { user: userNotification },
+          });
+        }
+
+        let assigned = null;
+        let recheckError = "";
+        let transactionError = null;
+        try {
+          db.exec("BEGIN IMMEDIATE");
+          const freshTarget = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+          if (!freshTarget) {
+            recheckError = "Linked account no longer exists";
+          } else if (!isCurrentLegalAcceptance(statements.currentUserLegalAcceptance.get(userId), legalSnapshot)) {
+            recheckError = "The account's legal acceptance changed before assignment completed";
+          } else if (
+            String(freshTarget.character_status ?? "") === "approved"
+            && String(freshTarget.character_player_id ?? "")
+            && String(freshTarget.character_player_id) !== characterPlayerId
+          ) {
+            recheckError = "The account was assigned a different approved character before this assignment completed";
+          } else if (statements.approvedUserAccountByCharacterId.get(characterPlayerId, userId)) {
+            recheckError = "This character was approved for another Discord account before this assignment completed";
+          }
+          if (recheckError) {
+            db.exec("ROLLBACK");
+          } else {
+            statements.updateUserCharacter.run(characterPlayerId, characterName, "approved", userId);
+            assigned = db.prepare("SELECT * FROM user_accounts WHERE id = ?").get(userId);
+            audit(user, "linked_account.character_assigned", {
+              userId,
+              discordId: freshTarget.discord_id,
+              characterPlayerId,
+              characterName,
+            });
+            db.exec("COMMIT");
+          }
+        } catch (error) {
+          try { db.exec("ROLLBACK"); } catch {}
+          transactionError = error;
+        }
+        if (recheckError || transactionError) {
+          const correctiveNotification = await sendDiscordCharacterLinkUserNotice(proposedAssignment, "corrective", user.username);
+          if (transactionError) throw transactionError;
+          return send(res, 409, {
+            error: recheckError,
+            notification: { user: userNotification, corrective: correctiveNotification },
+          });
+        }
+
+        const adminNotification = await sendDiscordCharacterLinkAdminAction(assigned, "assigned", user.username);
+        return send(res, 200, {
+          accounts: statements.listUserAccounts.all().map(publicAppUser),
+          notification: { user: userNotification, admin: adminNotification },
         });
-        void sendDiscordCharacterLinkAdminAction(assigned, "assigned", user.username);
-        return send(res, 200, { accounts: statements.listUserAccounts.all().map(publicAppUser) });
       }
       if (req.method === "PUT" && url.pathname === "/api/local/admin/user-accounts/approval") {
         const body = await readJson(req);

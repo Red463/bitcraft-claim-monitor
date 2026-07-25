@@ -20,6 +20,13 @@ function json(res, body, status = 200) {
   res.end(JSON.stringify(body));
 }
 
+async function requestJson(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = Buffer.concat(chunks).toString("utf8");
+  return body ? JSON.parse(body) : {};
+}
+
 function gameDataProbabilityFixture(url, res) {
   if (url.pathname === "/game-data/item-lists") {
     json(res, [{ id: 55, possibilities: [
@@ -194,8 +201,37 @@ test("server collection paginates listings and protects production mutations", a
   let failResearchRefresh = false;
   let failEmpireList = false;
   let failEmpireTowers = false;
-  const upstream = createServer((req, res) => {
+  const discordDirectMessages = [];
+  const discordChannelMessages = [];
+  const failedDiscordRecipients = new Set();
+  let discordAssignmentRace = null;
+  const upstream = createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/discord/api/v10/users/@me/channels" && req.method === "POST") {
+      const body = await requestJson(req);
+      const recipientId = String(body.recipient_id ?? "");
+      if (failedDiscordRecipients.has(recipientId)) return json(res, { error: "simulated DM failure" }, 500);
+      return json(res, { id: `dm-${recipientId}` });
+    }
+    if (url.pathname.startsWith("/discord/api/v10/channels/") && url.pathname.endsWith("/messages") && req.method === "POST") {
+      const channelId = decodeURIComponent(url.pathname.split("/")[5] ?? "");
+      const payload = await requestJson(req);
+      const recipientId = channelId.startsWith("dm-") ? channelId.slice(3) : "";
+      if (recipientId) {
+        discordDirectMessages.push({ recipientId, payload });
+        if (discordAssignmentRace?.recipientId === recipientId) {
+          const race = discordAssignmentRace;
+          discordAssignmentRace = null;
+          await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (raceDb) => {
+            raceDb.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = 'approved' WHERE id = ?")
+              .run(race.characterPlayerId, race.characterName, race.competingUserId);
+          });
+        }
+      } else {
+        discordChannelMessages.push({ channelId, payload });
+      }
+      return json(res, { id: `message-${discordDirectMessages.length + discordChannelMessages.length}`, channel_id: channelId });
+    }
     if (url.pathname === "/api/cache-test") {
       proxyCacheRequests += 1;
       if (failCacheTest) return json(res, { error: "upstream unavailable" }, 500);
@@ -458,6 +494,7 @@ test("server collection paginates listings and protects production mutations", a
       BITJITA_PROXY_STALE_IF_ERROR_MS: "5000",
       EMPIRE_SCOUT_CACHE_TTL_MS: "100",
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
+      DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
     },
@@ -914,9 +951,9 @@ test("server collection paginates listings and protects production mutations", a
   const dealDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   dealDb.prepare(`
     INSERT INTO user_accounts (discord_id, discord_username, discord_global_name, discord_avatar, character_player_id, character_name, character_status, settings_json, created_at, last_login_at)
-    VALUES ('deal-discord-user', 'DealUser', 'Deal User', NULL, NULL, NULL, 'unlinked', '{}', ?, ?)
+    VALUES ('222222222222222222', 'DealUser', 'Deal User', NULL, NULL, NULL, 'unlinked', '{}', ?, ?)
   `).run(new Date().toISOString(), new Date().toISOString());
-  const dealUserId = dealDb.prepare("SELECT id FROM user_accounts WHERE discord_id = 'deal-discord-user'").get().id;
+  const dealUserId = dealDb.prepare("SELECT id FROM user_accounts WHERE discord_id = '222222222222222222'").get().id;
   dealDb.prepare("INSERT INTO user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .run(createHash("sha256").update(dealSessionToken).digest("hex"), dealUserId, new Date(Date.now() + 86400000).toISOString(), new Date().toISOString());
   dealDb.prepare(`
@@ -1122,7 +1159,12 @@ test("server collection paginates listings and protects production mutations", a
       ...updatedConfig,
       discord: {
         ...updatedConfig.discord,
+        enabled: true,
+        applicationId: "1511277824525471826",
+        publicKey: "a".repeat(64),
+        channelId: "555555555555555555",
         botToken: "test-discord-bot-token",
+        channels: { ...updatedConfig.discord.channels, modLog: "mod-log" },
       },
     }),
   });
@@ -1225,12 +1267,12 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(savedAccountSettings.status, 200);
   assert.equal((await savedAccountSettings.json()).user.settings.density, "compact");
   const reloadedAccountSettings = await fetch(`${origin}/api/local/auth/me`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
-  assert.equal(reloadedAccountSettings.user.discordId, "deal-discord-user");
+  assert.equal(reloadedAccountSettings.user.discordId, "222222222222222222");
   assert.equal(reloadedAccountSettings.user.settings.selectedMemberId, "player-42");
   assert.equal(reloadedAccountSettings.user.settings.toastSettings.marketListings, false);
   const approvedLinkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   approvedLinkDb.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = 'approved' WHERE discord_id = ?")
-    .run("12345678", "Approved Character", "deal-discord-user");
+    .run("12345678", "Approved Character", "222222222222222222");
   approvedLinkDb.close();
   const blockedRelink = await fetch(`${origin}/api/local/auth/character`, {
     method: "PUT",
@@ -1255,7 +1297,7 @@ test("server collection paginates listings and protects production mutations", a
   const linkedAccounts = await fetch(`${origin}/api/local/admin/user-accounts`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
-  assert.equal(linkedAccounts.accounts.some((account) => account.discordId === "deal-discord-user"), true);
+  assert.equal(linkedAccounts.accounts.some((account) => account.discordId === "222222222222222222"), true);
   const characterAssignmentDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   characterAssignmentDb.prepare(`
     INSERT INTO user_accounts (
@@ -1263,16 +1305,55 @@ test("server collection paginates listings and protects production mutations", a
       character_player_id, character_name, character_status, settings_json,
       created_at, last_login_at
     ) VALUES (?, ?, ?, NULL, NULL, NULL, 'unlinked', '{}', ?, ?)
-  `).run("second-discord-user", "SecondUser", "Second User", new Date().toISOString(), new Date().toISOString());
-  const secondUserId = Number(characterAssignmentDb.prepare("SELECT id FROM user_accounts WHERE discord_id = ?").get("second-discord-user").id);
+  `).run("333333333333333333", "SecondUser", "Second User", new Date().toISOString(), new Date().toISOString());
+  const secondUserId = Number(characterAssignmentDb.prepare("SELECT id FROM user_accounts WHERE discord_id = ?").get("333333333333333333").id);
   characterAssignmentDb.close();
 
+  const directMessagesBeforeStaleTarget = discordDirectMessages.length;
+  const staleTargetAssignment = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, characterPlayerId: "55555555", characterName: "No Consent Character" }),
+  });
+  assert.equal(staleTargetAssignment.status, 409);
+  assert.match((await staleTargetAssignment.json()).error, /terms|privacy|accept/i);
+  assert.equal(discordDirectMessages.length, directMessagesBeforeStaleTarget);
+
+  const secondAcceptanceDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  secondAcceptanceDb.prepare(`
+    INSERT INTO user_legal_acceptances (
+      user_id, legal_version, terms_digest, privacy_digest, age_confirmed, accepted_at, source
+    ) VALUES (?, ?, ?, ?, 1, ?, 'existing-session')
+  `).run(secondUserId, legalPolicy.version, legalDigests.termsDigest, legalDigests.privacyDigest, new Date().toISOString());
+  const auditCountBeforeFailedDm = Number(secondAcceptanceDb.prepare("SELECT COUNT(*) AS count FROM admin_audit_log WHERE action = 'linked_account.character_assigned'").get().count);
+  secondAcceptanceDb.close();
+  failedDiscordRecipients.add("333333333333333333");
+  const failedDmAssignment = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, characterPlayerId: "55555555", characterName: "DM Failure Character" }),
+  });
+  assert.equal(failedDmAssignment.status, 502);
+  failedDiscordRecipients.delete("333333333333333333");
+  const failedAssignmentDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const unchangedAfterFailedDm = failedAssignmentDb.prepare("SELECT character_player_id, character_status FROM user_accounts WHERE id = ?").get(secondUserId);
+  const auditCountAfterFailedDm = Number(failedAssignmentDb.prepare("SELECT COUNT(*) AS count FROM admin_audit_log WHERE action = 'linked_account.character_assigned'").get().count);
+  failedAssignmentDb.close();
+  assert.equal(String(unchangedAfterFailedDm.character_player_id ?? ""), "");
+  assert.equal(unchangedAfterFailedDm.character_status, "unlinked");
+  assert.equal(auditCountAfterFailedDm, auditCountBeforeFailedDm);
+
+  const directMessagesBeforeAssignment = discordDirectMessages.length;
+  const channelMessagesBeforeAssignment = discordChannelMessages.length;
   const assignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ userId: dealUserId, characterPlayerId: "87654321", characterName: "Assigned Character" }),
   });
   assert.equal(assignCharacter.status, 200);
+  assert.equal(discordDirectMessages.length, directMessagesBeforeAssignment + 1);
+  assert.equal(discordDirectMessages.at(-1)?.recipientId, "222222222222222222");
+  assert.equal(discordChannelMessages.length, channelMessagesBeforeAssignment + 1);
   const assignedAccounts = (await assignCharacter.json()).accounts;
   assert.deepEqual(
     assignedAccounts.find((account) => account.id === dealUserId),
@@ -1284,6 +1365,7 @@ test("server collection paginates listings and protects production mutations", a
     },
   );
 
+  const directMessagesBeforeDuplicate = discordDirectMessages.length;
   const duplicateAssignment = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -1291,6 +1373,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(duplicateAssignment.status, 409);
   assert.match((await duplicateAssignment.json()).error, /unassign/i);
+  assert.equal(discordDirectMessages.length, directMessagesBeforeDuplicate);
 
   const pendingDuplicateDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   pendingDuplicateDb.prepare("UPDATE user_accounts SET character_player_id = ?, character_name = ?, character_status = 'pending' WHERE id = ?")
@@ -1303,16 +1386,51 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(duplicateApproval.status, 409);
 
+  failedDiscordRecipients.add("222222222222222222");
   const unassignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ userId: dealUserId, characterPlayerId: "", characterName: "" }),
   });
   assert.equal(unassignCharacter.status, 200);
-  const unassignedAccount = (await unassignCharacter.json()).accounts.find((account) => account.id === dealUserId);
+  const unassignBody = await unassignCharacter.json();
+  assert.equal(unassignBody.notification.user.ok, false);
+  failedDiscordRecipients.delete("222222222222222222");
+  const unassignedAccount = unassignBody.accounts.find((account) => account.id === dealUserId);
   assert.equal(unassignedAccount.characterPlayerId, "");
   assert.equal(unassignedAccount.characterName, "");
   assert.equal(unassignedAccount.characterStatus, "unlinked");
+
+  const raceDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  raceDb.prepare(`
+    INSERT INTO user_accounts (
+      discord_id, discord_username, discord_global_name, discord_avatar,
+      character_player_id, character_name, character_status, settings_json,
+      created_at, last_login_at
+    ) VALUES (?, ?, ?, NULL, NULL, NULL, 'unlinked', '{}', ?, ?)
+  `).run("444444444444444444", "RaceUser", "Race User", new Date().toISOString(), new Date().toISOString());
+  const raceUserId = Number(raceDb.prepare("SELECT id FROM user_accounts WHERE discord_id = ?").get("444444444444444444").id);
+  raceDb.close();
+  const directMessagesBeforeRace = discordDirectMessages.length;
+  discordAssignmentRace = {
+    recipientId: "333333333333333333",
+    characterPlayerId: "99999999",
+    characterName: "Raced Character",
+    competingUserId: raceUserId,
+  };
+  const racedAssignment = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
+    method: "PUT",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ userId: secondUserId, characterPlayerId: "99999999", characterName: "Raced Character" }),
+  });
+  assert.equal(racedAssignment.status, 409);
+  assert.equal(discordDirectMessages.length, directMessagesBeforeRace + 2);
+  assert.match(JSON.stringify(discordDirectMessages.at(-1)?.payload), /did not complete/i);
+  const racedAssignmentDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const raceTarget = racedAssignmentDb.prepare("SELECT character_player_id, character_status FROM user_accounts WHERE id = ?").get(secondUserId);
+  racedAssignmentDb.close();
+  assert.notEqual(String(raceTarget.character_player_id ?? ""), "99999999");
+  assert.notEqual(raceTarget.character_status, "approved");
 
   const reassignCharacter = await fetch(`${origin}/api/local/admin/user-accounts/character`, {
     method: "PUT",
@@ -1333,6 +1451,13 @@ test("server collection paginates listings and protects production mutations", a
     WHERE event_type IN ('character_link_assigned', 'character_link_unassigned')
     ORDER BY id
   `).all().map((row) => row.event_type);
+  const failedUnassignmentNotice = assignmentEvidenceDb.prepare(`
+    SELECT status FROM discord_delivery_log
+    WHERE event_type = 'character_link_unassignment_notice'
+      AND json_extract(metadata_json, '$.discordId') = '222222222222222222'
+    ORDER BY id DESC
+    LIMIT 1
+  `).get();
   assignmentEvidenceDb.close();
   assert.deepEqual(assignmentAuditActions.slice(-3), [
     "linked_account.character_assigned",
@@ -1344,6 +1469,7 @@ test("server collection paginates listings and protects production mutations", a
     "character_link_unassigned",
     "character_link_assigned",
   ]);
+  assert.equal(failedUnassignmentNotice.status, "failed");
   const saveAccessControl = await fetch(`${origin}/api/local/admin/access-control`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },

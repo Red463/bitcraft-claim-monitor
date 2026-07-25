@@ -39,7 +39,7 @@ test("Market page exposes a dedicated deal watchlist tool tab", () => {
   assert.match(marketPage, /"dealWatchlist"/);
   assert.match(marketPage, /deal-watchlist/);
   assert.match(marketPage, /Deal Watchlist/);
-  assert.match(marketPage, /<DealWatchlist monitoredRegionId=\{String\(data\.claim\?\.regionId \?\? "19"\)\} \/>/);
+  assert.match(marketPage, /<DealWatchlist monitoredRegionId=\{String\(data\.claim\?\.regionId \?\? "19"\)\} onDiscordLogin=\{onDiscordLogin\} \/>/);
   assert.match(commandPalette, /deal-watchlist/);
   assert.match(commandPalette, /Deal Watchlist/);
 });
