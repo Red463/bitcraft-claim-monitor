@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const script = new URL("../../deploy/backup-bitcraft-monitor", import.meta.url);
+const cryptoHelper = new URL("../../deploy/backup-crypto.mjs", import.meta.url);
 const hasBash = process.platform !== "win32" && spawnSync("bash", ["--version"]).status === 0;
 
 function writeExecutable(path, contents) {
@@ -18,12 +19,14 @@ function runBackupFixture({ activeUnits = [], quickCheck = "ok", backupDelaySeco
   const bin = join(root, "bin");
   const data = join(root, "data");
   const backups = join(root, "backups");
+  const encryptionKey = join(root, "backup-encryption.key");
   const actionsPath = join(root, "actions.log");
   const activePath = join(root, "active.txt");
   mkdirSync(bin);
   mkdirSync(data);
   mkdirSync(backups);
   writeFileSync(join(data, "bitcraft-local.sqlite"), "database", "utf8");
+  writeFileSync(encryptionKey, Buffer.alloc(32, 7).toString("base64url"), { mode: 0o600 });
   writeFileSync(activePath, activeUnits.join("\n"), "utf8");
 
   writeExecutable(join(bin, "systemctl"), `#!/usr/bin/env bash
@@ -69,6 +72,8 @@ fi
       PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       DATA_DIR: data,
       BACKUP_DIR: backups,
+      BACKUP_ENCRYPTION_KEY_FILE: encryptionKey,
+      BACKUP_CRYPTO_HELPER: cryptoHelper.pathname,
       BACKUP_LOCK_FILE: join(root, "backup.lock"),
       RUN_USER: process.env.USER ?? process.env.LOGNAME ?? "root",
       ALLOW_NON_ROOT_FOR_TESTS: "1",
@@ -105,11 +110,13 @@ function runCleanupFixture({
   const bin = join(root, "bin");
   const data = join(root, "data");
   const backups = join(root, "backups");
+  const encryptionKey = join(root, "backup-encryption.key");
   const openPath = join(root, "open.txt");
   mkdirSync(bin);
   mkdirSync(data);
   mkdirSync(backups);
   writeFileSync(join(data, "bitcraft-local.sqlite"), "database", "utf8");
+  writeFileSync(encryptionKey, Buffer.alloc(32, 7).toString("base64url"), { mode: 0o600 });
   writeFileSync(openPath, openNames.join("\n"), "utf8");
 
   const names = [];
@@ -117,13 +124,13 @@ function runCleanupFixture({
     names.push(`bitcraft-local-predeploy-${String(index).padStart(12, "0")}-20260701-${String(index).padStart(6, "0")}.sqlite`);
   }
   for (let index = 1; index <= dailyCount; index += 1) {
-    names.push(`bitcraft-local-daily-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+    names.push(`bitcraft-local-daily-202607${String(index).padStart(2, "0")}-000000.sqlite.enc`);
   }
   for (let index = 1; index <= migrationCount; index += 1) {
-    names.push(`bitcraft-local-migration-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+    names.push(`bitcraft-local-migration-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite.enc`);
   }
   for (let index = 1; index <= manualCount; index += 1) {
-    names.push(`bitcraft-local-manual-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite`);
+    names.push(`bitcraft-local-manual-${String(index).padStart(12, "0")}-202607${String(index).padStart(2, "0")}-000000.sqlite.enc`);
   }
   for (const name of [...names, ...extraNames]) {
     const path = join(backups, name);
@@ -165,6 +172,8 @@ grep -Fxq "$(basename "$path")" "$FIXTURE_OPEN"
       PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       DATA_DIR: data,
       BACKUP_DIR: backups,
+      BACKUP_ENCRYPTION_KEY_FILE: encryptionKey,
+      BACKUP_CRYPTO_HELPER: cryptoHelper.pathname,
       BACKUP_LOCK_FILE: join(root, "backup.lock"),
       DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
       RUN_USER: process.env.USER ?? process.env.LOGNAME ?? "root",
@@ -191,19 +200,19 @@ test("backup pauses active writers, validates, publishes, and restores them", { 
     activeUnits: ["bitcraft-claim-monitor-worker.service", "bitcraft-monitor-collector.timer"],
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.actions, ["stop:timer", "stop:worker", "backup", "quick_check", "start:worker", "start:timer"]);
-  assert.equal(result.backupFiles.filter((path) => path.endsWith(".sqlite")).length, 1);
+  assert.deepEqual(result.actions, ["stop:timer", "stop:worker", "backup", "quick_check", "quick_check", "start:worker", "start:timer"]);
+  assert.equal(result.backupFiles.filter((path) => path.endsWith(".sqlite.enc")).length, 1);
   assert.equal(result.backupFiles.some((path) => path.endsWith(".partial")), false);
 });
 
-test("failed validation keeps the partial file and restores prior states", { skip: !hasBash }, () => {
+test("failed validation removes plaintext partials and restores prior states", { skip: !hasBash }, () => {
   const result = runBackupFixture({
     activeUnits: ["bitcraft-claim-monitor-worker.service", "bitcraft-monitor-collector.timer"],
     quickCheck: "corrupt",
   });
   assert.notEqual(result.status, 0);
-  assert.equal(result.backupFiles.some((path) => path.endsWith(".sqlite")), false);
-  assert.equal(result.backupFiles.some((path) => path.endsWith(".partial")), true);
+  assert.equal(result.backupFiles.some((path) => path.endsWith(".sqlite.enc")), false);
+  assert.equal(result.backupFiles.some((path) => path.endsWith(".partial")), false);
   assert.deepEqual(result.actions.slice(-2), ["start:worker", "start:timer"]);
 });
 
@@ -254,16 +263,16 @@ test("retention uses timestamps rather than revision text", { skip: !hasBash }, 
   const result = runCleanupFixture({
     mode: "retention",
     extraNames: [
-      "bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite",
-      "bitcraft-local-migration-eeeeeeeeeeee-20260702-000000.sqlite",
-      "bitcraft-local-migration-dddddddddddd-20260703-000000.sqlite",
-      "bitcraft-local-migration-000000000001-20260704-000000.sqlite",
-      "bitcraft-local-migration-000000000002-20260705-000000.sqlite",
+      "bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite.enc",
+      "bitcraft-local-migration-eeeeeeeeeeee-20260702-000000.sqlite.enc",
+      "bitcraft-local-migration-dddddddddddd-20260703-000000.sqlite.enc",
+      "bitcraft-local-migration-000000000001-20260704-000000.sqlite.enc",
+      "bitcraft-local-migration-000000000002-20260705-000000.sqlite.enc",
     ],
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.remainingNames.includes("bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite"), false);
-  assert.equal(result.remainingNames.includes("bitcraft-local-migration-000000000002-20260705-000000.sqlite"), true);
+  assert.equal(result.remainingNames.includes("bitcraft-local-migration-ffffffffffff-20260701-000000.sqlite.enc"), false);
+  assert.equal(result.remainingNames.includes("bitcraft-local-migration-000000000002-20260705-000000.sqlite.enc"), true);
   assert.equal(result.remainingNames.filter((name) => name.includes("-migration-")).length, 3);
 });
 
