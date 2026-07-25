@@ -20,10 +20,14 @@ This is an operational checklist, not legal advice. Preserve the minimum evidenc
 
 - The current ledger is `/var/backups/bitcraft-claim-monitor/privacy-deletion-ledger.jsonl`.
 - Its HMAC key is `/etc/bitcraft-claim-monitor/privacy-ledger.key`, owned by root with group `bitcraft`, mode `0640`.
-- The ledger must have an independently preserved current recovery copy and must never be rolled back with a selected database snapshot.
+- Temporary exception accepted by the owner on 2026-07-25: regular full-VPS backups are the current ledger recovery copy. They protect database-only recovery but are not independent of the VPS or HostWorld failure domain.
+- Never roll the live ledger back merely because an older application database snapshot is selected.
 - Verify every ledger signature before starting the service. A verification failure is a production blocker.
 - After restoring SQLite, run the replay helper with explicit database, ledger, and key paths before service start. Startup also replays as a safety net.
 - Retain current and previous ledger verification keys during rotation until every record under the old key ID has expired (90 days). Never rewrite signed historical records.
+- For database-only recovery, preserve the live ledger, restore SQLite, verify the ledger, and replay committed deletions before starting either service.
+- For full-VPS recovery, restore the newest available full-VPS backup, identify and verify the newest ledger captured by it, and replay it before service start. Record that deletions after the backup timestamp may need reconstruction from protected privacy correspondence or non-sensitive audit receipts.
+- Off-VPS hardening is deferred to uniquely named snapshots under `Proton Drive/My files/Timbersteel Claim Monitor/Privacy Recovery/Deletion Ledger/`. Keep the signing key separate. Remove this exception only after upload and restore verification pass.
 
 ## Encrypted backups and restore
 

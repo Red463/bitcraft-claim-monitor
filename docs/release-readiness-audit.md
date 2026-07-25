@@ -1,21 +1,23 @@
 # Release Readiness Audit
 
-Status date: 2026-06-29
+Status date: 2026-07-25
 
 ## Privacy release gates (2026-07-25)
 
-These owner actions remain mandatory before deploying the legal/privacy feature:
+The legal/privacy production gates were closed on 2026-07-25 with the temporary recovery exception recorded below:
 
-- [ ] Complete the ICO data-protection fee self-assessment.
-- [ ] Obtain solicitor review of the Terms, Privacy Policy, both legitimate-interest assessments, England/Wales wording, international transfers, 18+ approach, and the absence of a published postal address.
-- [ ] Confirm and document HostWorld volume and provider-snapshot encryption at rest. If this cannot be confirmed, production is blocked until equivalent host/filesystem or application-layer database encryption is deployed.
-- [ ] Provision `/etc/bitcraft-claim-monitor/backup-encryption.key` as root-owned mode `0600`.
-- [ ] Provision `/etc/bitcraft-claim-monitor/privacy-ledger.key` as root-owned, group `bitcraft`, mode `0640`.
-- [ ] Provision an independently preserved current deletion ledger that cannot roll back with the database volume/provider snapshot.
-- [ ] Run and record an encrypted-backup restore plus deletion-ledger replay on Linux.
-- [ ] Update the Discord Developer Portal Terms and Privacy URLs.
-- [ ] Verify Namecheap, Proton, GitHub, Buy Me a Coffee, Discord, BitJita, and HostWorld disclosures against the live arrangement.
-- [ ] Inventory legacy plaintext backups; after encrypted restore verification, either re-encrypt required recovery points or remove them through the guarded cleanup flow.
+- [x] Owner confirmed completion of the ICO data-protection fee self-assessment.
+- [x] Owner confirmed solicitor review of the Terms, Privacy Policy, both legitimate-interest assessments, England/Wales wording, international transfers, 18+ approach, and the absence of a published postal address.
+- [x] Owner confirmed HostWorld volume and provider-snapshot encryption at rest.
+- [x] Provisioned `/etc/bitcraft-claim-monitor/backup-encryption.key` as a validated 32-byte base64url value, root-owned mode `0600`.
+- [x] Provisioned `/etc/bitcraft-claim-monitor/privacy-ledger.key` as a separate validated 32-byte base64url value, root-owned, group `bitcraft`, mode `0640`.
+- [x] Recorded the owner's temporary acceptance of regular full-VPS backups as the deletion-ledger recovery copy. This is not independent of the VPS or HostWorld failure domain; the approved limitation and Proton Drive follow-up are in `docs/superpowers/specs/2026-07-25-temporary-vps-ledger-recovery-design.md`.
+- [x] Ran a protected Linux SQLite backup, AES-256-GCM encrypt/decrypt round trip, two `PRAGMA quick_check` validations, signed-ledger replay, and plaintext temporary-file cleanup.
+- [x] Owner confirmed the Discord Developer Portal Terms and Privacy URLs are updated.
+- [x] Owner confirmed Namecheap, Proton, GitHub, Buy Me a Coffee, Discord, BitJita, and HostWorld disclosures against the live arrangement.
+- [x] Inventoried legacy plaintext backups; converted the six retained recovery points to validated `.sqlite.enc` files, guarded-pruned 22 older predeploy copies, and removed the checksum-validated obsolete plaintext database/environment bundle.
+
+Off-VPS hardening remains scheduled: copy uniquely named signed-ledger snapshots to `Proton Drive/My files/Timbersteel Claim Monitor/Privacy Recovery/Deletion Ledger/`, verify a restore, and then remove the temporary same-VPS exception.
 
 This audit tracks public-release readiness for the maintained app at `apps/bitcraft-local`. It records evidence from the current codebase and the remaining work that must be verified before the release-readiness goal can be marked complete.
 
