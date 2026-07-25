@@ -2,7 +2,7 @@ import React from "react";
 import { TrendingUp } from "lucide-react";
 
 import { LiveValue } from "./Stats";
-import { formatCompactNumber, formatNumber, shortDateLabel, timestampMs } from "../../utils/format";
+import { formatCompactNumber, formatGoldAmount, formatNumber, shortDateLabel, timestampMs } from "../../utils/format";
 
 export function DashboardMetric({
   icon,
@@ -150,7 +150,7 @@ export function DashboardTrend({
             const y = yForValue(tick);
             return <g key={tick}>
               <line x1={plotLeft} x2={width - plotRight} y1={y} y2={y} className="dashboard-chart-grid" />
-              <text x={plotLeft - 9} y={y + 4} textAnchor="end" className="dashboard-chart-y-axis">{formatCompactNumber(tick)}{suffix}</text>
+              <text x={plotLeft - 9} y={y + 4} textAnchor="end" className="dashboard-chart-y-axis">{suffix === "g" ? formatGoldAmount(tick) : `${formatCompactNumber(tick)}${suffix}`}</text>
             </g>;
           })}
         </g>

@@ -18,6 +18,8 @@ test("dashboard market income labels partial coverage and the Y axis", () => {
   assert.match(dashboardPage, /Stored sales begin/);
   assert.match(dashboardPage, /yAxisLabel="Cumulative gold"/);
   assert.match(widgets, /dashboard-chart-y-axis/);
+  assert.match(widgets, /formatGoldAmount\(tick\)/);
+  assert.doesNotMatch(widgets, /formatCompactNumber\(tick\)\}\{suffix\}/);
   assert.match(widgets, /aria-label=\{yAxisLabel\}/);
   assert.match(styles, /\.dashboard-chart-controls/);
   assert.match(styles, /\.dashboard-chart-y-axis/);
@@ -27,4 +29,10 @@ test("dashboard market income labels partial coverage and the Y axis", () => {
 test("dashboard chart keeps the Y-axis title inside the plot instead of overlapping summary copy", () => {
   assert.match(widgets, /<text x=\{plotLeft\} y="14" className="dashboard-chart-y-title">\{yAxisLabel\}<\/text>/);
   assert.doesNotMatch(styles, /\.dashboard-chart-y-title\s*\{[^}]*position:\s*absolute/s);
+});
+
+test("dashboard chart hides its long accessible summary from the visible card layout", () => {
+  assert.match(widgets, /className="dashboard-chart-summary"/);
+  assert.match(widgets, /aria-describedby=\{summaryId\}/);
+  assert.match(styles, /\.dashboard-chart-summary\s*\{[^}]*position:\s*absolute[^}]*clip-path:\s*inset\(50%\)/s);
 });
