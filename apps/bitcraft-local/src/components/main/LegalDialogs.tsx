@@ -234,7 +234,7 @@ export function CookieBanner({ onConsent, onPrivacy }: { onConsent: (choice: Exc
   );
 }
 
-export function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSettings }: { authHref: string; onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
+export function DiscordSignInPrompt({ onDiscordLogin, onClose, onSettings }: { onDiscordLogin: () => void; onClose: () => void; onSettings: () => void }) {
   return (
     <Dialog open title="Sign in with Discord" onClose={onClose} className="help-dialog discord-signin-dialog" backdropClassName="help-overlay discord-signin-overlay">
         <header>
@@ -254,7 +254,7 @@ export function DiscordSignInPrompt({ authHref, onDiscordLogin, onClose, onSetti
           </ul>
         </div>
         <div className="help-actions">
-          <a className="toolbar-button primary" href={authHref} onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</a>
+          <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={14} /> Sign in with Discord</button>
           <button className="toolbar-button" onClick={onSettings}><Settings size={14} /> Open settings</button>
           <button className="toolbar-button" onClick={onClose}>Maybe later</button>
         </div>

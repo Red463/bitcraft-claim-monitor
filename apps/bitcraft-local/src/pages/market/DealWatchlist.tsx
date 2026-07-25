@@ -14,7 +14,7 @@ import type { LoadState } from "../../types/app";
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
-export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string }) {
+export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitoredRegionId: string; onDiscordLogin: (returnTo?: string) => void }) {
   const defaultRegion = monitoredRegionId || "19";
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
@@ -111,7 +111,7 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
         }),
       });
       if (response.status === 401) {
-        window.location.href = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
+        onDiscordLogin(`${window.location.pathname}${window.location.search}`);
         return;
       }
       if (!response.ok) {
@@ -174,7 +174,6 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
   const dealWatches: AnyRecord[] = Array.isArray(watchState.data?.watches) ? watchState.data.watches : [];
   const dealSettings = watchState.data?.settings ?? {};
   const maxWatches = toNumber(dealSettings.maxWatchesPerUser) || 10;
-  const signInHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const regionIds = unique([
     defaultRegion,
     regionChoice !== "All" ? regionChoice : "",
@@ -223,7 +222,7 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
           </label>
         </div>
         {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><a className="toolbar-button" href={signInHref}>Sign in with Discord</a></div>
+          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : (
           <div className="toolbar-row">
             <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
@@ -238,7 +237,7 @@ export function DealWatchlist({ monitoredRegionId }: { monitoredRegionId: string
         <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
         {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><a className="toolbar-button" href={signInHref}>Sign in with Discord</a></div>
+          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : dealWatches.length ? (
           <div className="deal-watch-list">
             {dealWatches.map((watch) => (

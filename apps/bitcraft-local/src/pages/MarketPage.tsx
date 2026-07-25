@@ -164,7 +164,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
     </div>
   );
 }
-export function Market({ data, history, claimId, access, locationSearch, onQueryStateChange }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; onQueryStateChange: () => void }) {
+export function Market({ data, history, claimId, access, locationSearch, onQueryStateChange, onDiscordLogin }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; onQueryStateChange: () => void; onDiscordLogin: (returnTo?: string) => void }) {
   const { request, trackPromise } = useManualRefresh();
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<MarketViewId>("market.view", "live");
@@ -343,9 +343,9 @@ export function Market({ data, history, claimId, access, locationSearch, onQuery
         </div>
       </section>
       {currentView === "pricing" ? (
-        <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
+        <PriceFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} onDiscordLogin={onDiscordLogin} />
       ) : currentView === "dealWatchlist" ? (
-        <DealWatchlist monitoredRegionId={String(data.claim?.regionId ?? "19")} />
+        <DealWatchlist monitoredRegionId={String(data.claim?.regionId ?? "19")} onDiscordLogin={onDiscordLogin} />
       ) : currentView === "buyOrders" ? (
         <BuyOrderFinder monitoredRegionId={String(data.claim?.regionId ?? "19")} />
       ) : currentView === "analytics" ? (

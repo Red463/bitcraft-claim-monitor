@@ -33,6 +33,7 @@ import { AppPopupManager } from "./components/main/AppPopupManager";
 import { UserSettingsDialog } from "./components/main/UserSettingsDialog";
 import { BuyMeCoffeeButton, DiscordIcon } from "./components/main/SupportLinks";
 import { CookieBanner, DedicatedLegalPage, DiscordSignInPrompt, HelpCenter, PrivacyDialog, TermsDialog } from "./components/main/LegalDialogs";
+import { LegalAcceptanceDialog, type PublicLegalPolicy } from "./components/main/LegalAcceptanceDialog";
 import { FirstRunTourManager } from "./components/main/FirstRunTourManager";
 import { useBrowserNotificationSmoke } from "./notifications/useBrowserNotificationSmoke";
 import { useBrowserNotificationSources } from "./notifications/useBrowserNotificationSources";
@@ -202,6 +203,9 @@ function DashboardApp() {
     discordLoginEnabled: false,
     legal: { version: "", termsDigest: "", privacyDigest: "", acceptedAt: null, requiresAcceptance: false },
   });
+  const [publicLegalPolicy, setPublicLegalPolicy] = React.useState<PublicLegalPolicy | null>(null);
+  const [legalAcceptanceOpen, setLegalAcceptanceOpen] = React.useState(false);
+  const [legalLoginReturnTo, setLegalLoginReturnTo] = React.useState("");
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
@@ -311,13 +315,22 @@ function DashboardApp() {
     () => ({ ...dealAlerts, userKey: userAuth.user?.discordId ?? "" }),
     [dealAlerts, userAuth.user?.discordId],
   );
-  const discordAuthHref = `${LOCAL_API}/auth/discord/start?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
   const refreshUserAuth = React.useCallback(async () => {
     const response = await fetch(`${LOCAL_API}/auth/me`);
     if (!response.ok) return;
     setUserAuth(await response.json());
+  }, []);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${LOCAL_API}/legal`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`legal policy HTTP ${response.status}`)))
+      .then((policy) => setPublicLegalPolicy(policy))
+      .catch(() => {
+        if (!controller.signal.aborted) setPublicLegalPolicy(null);
+      });
+    return () => controller.abort();
   }, []);
   const refreshEffectiveAccess = React.useCallback(async () => {
     try {
@@ -342,10 +355,44 @@ function DashboardApp() {
   React.useEffect(() => {
     refreshEffectiveAccess().catch(() => undefined);
   }, [refreshEffectiveAccess, userAuth.user?.discordId, userAuth.user?.characterStatus]);
-  const discordLogin = React.useCallback(() => {
+  const discordLogin = React.useCallback((returnTo = `${window.location.pathname}${window.location.search}`) => {
     setDiscordPromptDismissed(true);
-    window.location.href = discordAuthHref;
-  }, [discordAuthHref, setDiscordPromptDismissed]);
+    setLegalLoginReturnTo(returnTo);
+    setLegalAcceptanceOpen(true);
+  }, [setDiscordPromptDismissed]);
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("legal") !== "required") return;
+    discordLogin(params.get("returnTo") || "/?page=dashboard");
+    params.delete("legal");
+    params.delete("returnTo");
+    const query = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }, [discordLogin]);
+  const startDiscordLogin = React.useCallback(async ({ acceptedTerms, ageConfirmed }: { acceptedTerms: true; ageConfirmed: true }) => {
+    const response = await fetch(`${LOCAL_API}/auth/discord/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ returnTo: legalLoginReturnTo, acceptedTerms, ageConfirmed }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to prepare Discord sign-in");
+    if (typeof body.authorizeUrl !== "string" || !body.authorizeUrl.startsWith("https://discord.com/")) {
+      throw new Error("The server returned an invalid Discord sign-in address");
+    }
+    window.location.assign(body.authorizeUrl);
+  }, [legalLoginReturnTo]);
+  const acceptCurrentLegalPolicy = React.useCallback(async ({ acceptedTerms, ageConfirmed }: { acceptedTerms: true; ageConfirmed: true }) => {
+    const response = await fetch(`${LOCAL_API}/auth/legal/accept`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-csrf-token": String(userAuth.csrfToken ?? "") },
+      body: JSON.stringify({ acceptedTerms, ageConfirmed }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Unable to record legal acceptance");
+    setUserAuth(body);
+    setLegalAcceptanceOpen(false);
+  }, [userAuth.csrfToken]);
   const discordLogout = React.useCallback(async () => {
     const response = await fetch(`${LOCAL_API}/auth/logout`, { method: "POST" });
     const body = await response.json();
@@ -672,7 +719,7 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} />,
+    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} onDiscordLogin={discordLogin} />,
     empire: <Region data={data} />,
     empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
@@ -797,7 +844,7 @@ function DashboardApp() {
                   <span className="sidebar-account-avatar"><MessageCircle size={16} /></span>
                   <span className="sidebar-account-copy"><strong>Not signed in</strong><small>Sign in to save settings and verify your character.</small></span>
                 </div>
-                {userAuth.discordLoginEnabled ? <a className="sidebar-account-action" href={discordAuthHref} onClick={() => setDiscordPromptDismissed(true)}><MessageCircle size={14} /> Sign in with Discord</a> : <span className="sidebar-account-disabled">Discord login unavailable</span>}
+                {userAuth.discordLoginEnabled ? <button className="sidebar-account-action" onClick={() => discordLogin()}><MessageCircle size={14} /> Sign in with Discord</button> : <span className="sidebar-account-disabled">Discord login unavailable</span>}
               </>
             )}
           </section>
@@ -964,12 +1011,21 @@ function DashboardApp() {
       {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
-      {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt authHref={discordAuthHref} onDiscordLogin={discordLogin} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
+      {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={() => discordLogin()} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter activePage={active} version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}
       {consent == null && !privacyOpen ? <CookieBanner onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); }} onPrivacy={() => setPrivacyOpen(true)} /> : null}
       {privacyOpen ? <PrivacyDialog consent={consent} onConsent={(choice) => { setAnalyticsPreference(choice); setConsent(choice); setPrivacyOpen(false); }} onClose={() => setPrivacyOpen(false)} /> : null}
       {termsOpen ? <TermsDialog onClose={() => setTermsOpen(false)} onPrivacy={() => setPrivacyOpen(true)} /> : null}
+      {publicLegalPolicy && (legalAcceptanceOpen || Boolean(userAuth.user && userAuth.legal.requiresAcceptance)) ? (
+        <LegalAcceptanceDialog
+          mode={userAuth.user && userAuth.legal.requiresAcceptance ? "existing-session" : "login"}
+          policy={publicLegalPolicy}
+          onContinue={userAuth.user && userAuth.legal.requiresAcceptance ? acceptCurrentLegalPolicy : startDiscordLogin}
+          onClose={() => setLegalAcceptanceOpen(false)}
+          onLogout={userAuth.user && userAuth.legal.requiresAcceptance ? discordLogout : undefined}
+        />
+      ) : null}
       <FirstRunTourManager activePage={active} enabled={active !== "admin" && consent != null && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen && !(!discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user)} showAccountStep={userAuth.discordLoginEnabled} replayToken={tourReplayToken} onNavigate={(panel) => navigate(panel)} onVisibilityChange={setTourVisible} />
       <AppPopupManager activePage={active} enabled={active !== "admin" && !tourVisible && !userSettingsOpen && !helpOpen && !privacyOpen && !termsOpen && !commandOpen && !noticeOpen} />
     </div>
