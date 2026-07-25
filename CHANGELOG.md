@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.43.0-beta.1] - 2026-07-25
+
+### Added
+
+- Added direct admin assignment and approval of settlement characters for existing Discord logins, with explicit unassignment controls and Discord admin notifications.
+
+### Changed
+
+- Prevented a character from being approved for more than one Discord account until its existing assignment is removed.
+
 ## [0.42.1-beta.1] - 2026-07-24
 
 ### Fixed
