@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "../src/pages/market/listingUtils.ts";
+import {
+  displayItemName,
+  listingDate,
+  listingTrackingKey,
+  liveDaysSince,
+  safeDisplayJson,
+  settlementListingState,
+} from "../src/pages/market/listingUtils.ts";
 
 test("displayItemName hides empty and placeholder item labels", () => {
   assert.equal(displayItemName(" Iron Sword "), "Iron Sword");
@@ -42,4 +49,25 @@ test("liveDaysSince formats listing age from the current time", () => {
   } finally {
     Date.now = originalNow;
   }
+});
+
+test("settlementListingState distinguishes loading, failure, empty settlement, and filtered results", () => {
+  assert.deepEqual(settlementListingState({ loading: true, error: null, totalListings: 0, visibleListings: 0 }), {
+    kind: "loading",
+    title: "Loading live listings…",
+  });
+  assert.deepEqual(settlementListingState({ loading: false, error: "BitJita timed out", totalListings: 0, visibleListings: 0 }), {
+    kind: "error",
+    title: "Unable to load live listings",
+    detail: "BitJita timed out",
+  });
+  assert.deepEqual(settlementListingState({ loading: false, error: null, totalListings: 0, visibleListings: 0 }), {
+    kind: "empty",
+    title: "This settlement has no live listings.",
+  });
+  assert.deepEqual(settlementListingState({ loading: false, error: null, totalListings: 29, visibleListings: 0 }), {
+    kind: "no-match",
+    title: "No listings match the current filters.",
+  });
+  assert.equal(settlementListingState({ loading: false, error: null, totalListings: 29, visibleListings: 12 }), null);
 });

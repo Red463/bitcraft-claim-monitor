@@ -4,7 +4,7 @@ import { MapPin, Route, TrendingUp } from "lucide-react";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
-import { formatCompactNumber, formatNumber } from "../../utils/format";
+import { formatCompactNumber, formatGoldAmount, formatNumber } from "../../utils/format";
 import type { ActiveRegion } from "../../hooks/useActiveRegions";
 import type { MapFocus } from "../map/mapUtils";
 import { filterMarketDeals, type MarketRefreshProps } from "./globalMarket";
@@ -69,7 +69,7 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
         {activeRegions.map((region) => <button key={region.regionId} className={regions.includes(region.regionId) ? "active" : ""} onClick={() => toggleRegion(region.regionId)}>R{region.regionId} {region.regionName ?? ""}</button>)}
       </div>
       {state.error ? <div className="error">Deals unavailable: {state.error}</div> : null}
-      <div className="metric-grid market-deal-summary"><MiniStat icon={<TrendingUp />} label="Matching Deals" value={formatNumber(rows.length)} /><MiniStat icon={<TrendingUp />} label="Best Unit Profit" value={`${formatNumber(topProfit)}g`} /><MiniStat icon={<TrendingUp />} label="Visible Potential" value={`${formatCompactNumber(totalPotential)}g`} /></div>
+      <div className="metric-grid market-deal-summary"><MiniStat icon={<TrendingUp />} label="Matching Deals" value={formatNumber(rows.length)} /><MiniStat icon={<TrendingUp />} label="Best Unit Profit" value={formatGoldAmount(topProfit)} /><MiniStat icon={<TrendingUp />} label="Visible Potential" value={formatGoldAmount(totalPotential)} /></div>
       <div className="table-wrap" tabIndex={0} aria-label="Global market deals table">
         <table><thead><tr><th>Item</th><th>Buy at</th><th>Sell at</th><th>Available</th><th>Wanted</th><th>Max trade</th><th>Unit profit</th><th>Gain</th><th>Distance</th><th>Map</th></tr></thead>
           <tbody>{rows.slice(0, 250).map((deal) => {
@@ -78,10 +78,10 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
             const maxTrade = toNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity ?? Math.min(toNumber(deal.buyQuantity), toNumber(deal.sellQuantity)));
             return <tr key={String(deal.id ?? `${deal.itemType}:${deal.itemId}:${deal.buyLocationId}:${deal.sellLocationId}`)}>
               <td><ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} /></td>
-              <td><strong>{formatNumber(deal.buyPrice)}g</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></td>
-              <td><strong>{formatNumber(deal.sellPrice)}g</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></td>
+              <td><span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span></td>
+              <td><span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span></td>
               <td>{formatNumber(deal.buyQuantity)}</td><td>{formatNumber(deal.sellQuantity)}</td>
-              <td>{formatNumber(maxTrade)}</td><td className="positive">{formatNumber(profit)}g</td><td className="positive">{formatNumber(percent)}%</td><td>{formatCompactNumber(deal.distance)}</td>
+              <td>{formatNumber(maxTrade)}</td><td className="positive">{formatGoldAmount(profit)}</td><td className="positive">{formatNumber(percent)}%</td><td>{formatCompactNumber(deal.distance)}</td>
               <td><div className="market-map-actions">{toNumber(deal.buyLocationX) || toNumber(deal.buyLocationZ) ? <button className="icon-button" title="Show buy location" onClick={() => onShowMap({ name: String(deal.buyLocation ?? "Buy market"), locationX: toNumber(deal.buyLocationX), locationZ: toNumber(deal.buyLocationZ) }, String(deal.buyRegionId ?? ""))}><MapPin size={14} /></button> : null}{toNumber(deal.sellLocationX) || toNumber(deal.sellLocationZ) ? <button className="icon-button" title="Show sell location" onClick={() => onShowMap({ name: String(deal.sellLocation ?? "Sell market"), locationX: toNumber(deal.sellLocationX), locationZ: toNumber(deal.sellLocationZ) }, String(deal.sellRegionId ?? ""))}><Route size={14} /></button> : null}</div></td>
             </tr>;
           })}</tbody>

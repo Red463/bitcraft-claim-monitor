@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../components/main/Badges";
 import { DataTable } from "../components/main/DataTable";
+import { AsyncState } from "../components/main/AsyncState";
 import { ItemIcon, ItemLabel, TierMaterialIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { Segmented } from "../components/main/Segmented";
@@ -78,7 +79,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
 import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
-import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson } from "./market/listingUtils";
+import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson, settlementListingState } from "./market/listingUtils";
 
 /*
  * Main application pages that still share a large amount of display logic.
@@ -161,7 +162,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
     </div>
   );
 }
-export function SettlementMarket({ data, history, claimId, access, locationSearch, onQueryStateChange }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; onQueryStateChange: () => void }) {
+export function SettlementMarket({ data, history, claimId, access, locationSearch, listingsLoading = false, listingError = null, onQueryStateChange }: { data: ReturnType<typeof normalizeData>; history: AnyRecord | null; claimId: string; access?: EffectiveAccess | null; locationSearch: string; listingsLoading?: boolean; listingError?: string | null; onQueryStateChange: () => void }) {
   const { request, trackPromise } = useManualRefresh();
   const [q, setQ] = React.useState("");
   const [view, setView] = usePersistedState<SettlementMarketViewId>("settlementMarket.view", "live");
@@ -261,6 +262,12 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
     return true;
   });
   const renderedRows = rows.slice(0, 500);
+  const emptyListingState = settlementListingState({
+    loading: listingsLoading,
+    error: listingError,
+    totalListings: data.market.length,
+    visibleListings: rows.length,
+  });
   const highest = [...all].sort((a, b) => toNumber(b.price) * toNumber(b.quantity || 1) - toNumber(a.price) * toNumber(a.quantity || 1)).slice(0, 3);
   const saleEvents = apiTrades.map((trade: AnyRecord) => ({
     itemName: trade.itemName,
@@ -413,7 +420,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
         </div>
       </section>
       {rows.length > renderedRows.length ? <p className="legend market-legend">Showing the first {formatNumber(renderedRows.length)} of {formatNumber(rows.length)} matching listings. Narrow the filters to inspect more specific results.</p> : null}
-      <DataTable rows={renderedRows} scrollLabel="Market listings table" emptyState="No market listings match the current filters." columns={[
+      <DataTable rows={renderedRows} scrollLabel="Market listings table" emptyState={emptyListingState ? <AsyncState {...emptyListingState} compact /> : null} columns={[
         ["Item", r => <ItemLabel item={{ ...r, name: r.itemName }} name={r.itemName ?? "Unknown"} />],
         ["Side", r => <span className={`pill ${String(r.side ?? r.orderType).includes("buy") ? "buy" : "sell"}`}>{r.side ?? r.orderType ?? "sell"}</span>],
         ["Qty", r => formatNumber(r.quantity)],

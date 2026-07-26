@@ -409,7 +409,7 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
 test("Craft Planning serves a compact live board and lazy item drilldowns", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const bitjita = readFileSync(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
+  const bitjitaEndpoints = readFileSync(new URL("../src/api/bitjitaEndpoints.ts", import.meta.url), "utf8");
 
   assert.match(server, /computedCompactCraftPlanResponse/);
   assert.match(server, /createCraftPlanResponseWorkspace/);
@@ -427,7 +427,7 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);
-  assert.match(bitjita, /activePanel === "planning"/);
+  assert.match(bitjitaEndpoints, /activePanel === "planning"/);
 });
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {

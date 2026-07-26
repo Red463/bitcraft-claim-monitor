@@ -52,6 +52,18 @@ test("Market mini-stat values leave room for descenders", () => {
   assert.match(valueRule, /padding-bottom:\s*1px\b/);
 });
 
+test("global Market uses balanced desktop density with controlled responsive collapse", () => {
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.global-market-page \.mini-stat\s*\{[^}]*min-height:\s*84px/s);
+  assert.match(css, /\.market-order-summary\s*\{[^}]*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.market-price-location\s*\{[^}]*display:\s*grid/s);
+  assert.match(css, /\.market-toggle-group\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.market-overview-section > \.empty-state\.compact\s*\{[^}]*min-height:\s*0/s);
+  assert.match(css, /\.market-stall-summary\s*\{[^}]*max-width:\s*720px/s);
+  assert.match(css, /@media \(max-width:\s*1280px\)[\s\S]*\.market-order-summary\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+});
+
 test("Market tool tabs accept app access-control decisions", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
 
