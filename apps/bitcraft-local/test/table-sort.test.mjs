@@ -44,3 +44,17 @@ test("sortIndexedRows uses raw values instead of formatted time labels", () => {
   assert.deepEqual(ascending.map(({ row }) => row.name), ["Two hours", "Ten hours", "One day"]);
   assert.deepEqual(descending.map(({ row }) => row.name), ["One day", "Ten hours", "Two hours"]);
 });
+
+test("windowIndexedRows selects the requested page after rows are sorted", () => {
+  const rows = [40, 10, 30, 20].map((price, index) => ({ row: { price }, index }));
+  const sorted = tableSort.sortIndexedRows(rows, (row) => row.price, "asc");
+
+  assert.deepEqual(
+    tableSort.windowIndexedRows(sorted, 1, 2).map(({ row }) => row.price),
+    [20, 30],
+  );
+  assert.deepEqual(
+    tableSort.windowIndexedRows(sorted).map(({ row }) => row.price),
+    [10, 20, 30, 40],
+  );
+});

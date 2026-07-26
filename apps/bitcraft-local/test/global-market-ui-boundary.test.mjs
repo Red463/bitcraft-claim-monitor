@@ -16,7 +16,10 @@ test("global market map handoffs write the canonical region and coordinate param
 
 test("Deals shows available, wanted, and maximum tradable quantities", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
-  assert.match(deals, /<th>Available<\/th><th>Wanted<\/th><th>Max trade<\/th>/);
+
+  assert.match(deals, /\["Available"/);
+  assert.match(deals, /\["Wanted"/);
+  assert.match(deals, /\["Max trade"/);
   assert.match(deals, /formatNumber\(deal\.buyQuantity\)/);
   assert.match(deals, /formatNumber\(deal\.sellQuantity\)/);
 });
@@ -42,6 +45,40 @@ test("global market money and locations use the shared legible presentation", ()
   assert.match(browse, /formatGoldAmount\(order\.unitPrice \* order\.quantity\)/);
   assert.doesNotMatch(overview, /formatCompactNumber\(row\.totalValue\)\}g/);
   assert.doesNotMatch(deals, /formatCompactNumber\(totalPotential\)\}g/);
+});
+
+test("Overview top deals uses explicit sortable values and a static Map column", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+
+  assert.match(overview, /<DataTable[\s\S]*scrollLabel="Top global market deals"/);
+  assert.match(overview, /\["Item",[\s\S]*deal\.itemName/);
+  assert.match(overview, /\["Buy at",[\s\S]*toNumber\(deal\.buyPrice\)/);
+  assert.match(overview, /\["Profit",[\s\S]*toNumber\(deal\.profit \?\? deal\.profitPerUnit\)/);
+  assert.match(overview, /\["Map",[\s\S]*undefined,\s*false\]/);
+});
+
+test("Deals sorts every data column from raw values and keeps Map static", () => {
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+
+  assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
+  assert.match(deals, /\["Available",[\s\S]*toNumber\(deal\.buyQuantity\)/);
+  assert.match(deals, /\["Wanted",[\s\S]*toNumber\(deal\.sellQuantity\)/);
+  assert.match(deals, /\["Gain",[\s\S]*percent/);
+  assert.match(deals, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.doesNotMatch(deals, /<span>Sort<\/span>/);
+});
+
+test("Browse sorts the complete filtered order book before pagination", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const orderWorkspace = browse.slice(browse.indexOf('detailTab === "orders"'), browse.indexOf("pagination-row"));
+
+  assert.match(orderWorkspace, /<DataTable/);
+  assert.match(orderWorkspace, /rows=\{filteredOrders\}/);
+  assert.match(orderWorkspace, /rowOffset=\{\(Math\.min\(page,\s*pageCount\) - 1\) \* pageSize\}/);
+  assert.match(orderWorkspace, /rowLimit=\{pageSize\}/);
+  assert.match(orderWorkspace, /\["Total",[\s\S]*order\.unitPrice \* order\.quantity/);
+  assert.match(orderWorkspace, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
 });
 
 test("Browse groups availability controls and separates item identity metadata", () => {

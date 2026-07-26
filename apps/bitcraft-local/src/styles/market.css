@@ -788,7 +788,7 @@
 }
 
 .market-specialized-filters {
-  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
 }
 
 .market-stall-search {
@@ -901,7 +901,7 @@
 }
 
 .market-order-filters {
-  grid-template-columns: auto repeat(5, minmax(130px, 1fr));
+  grid-template-columns: auto repeat(4, minmax(130px, 1fr));
 }
 
 .market-region-summaries {

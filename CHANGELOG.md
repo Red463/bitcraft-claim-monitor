@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.47.1-beta.2] - 2026-07-26
+
+### Changed
+
+- Added sortable table headers to Global Market overview deals, arbitrage results, and item order books.
+- Improved market table sorting so complete filtered results are ordered before display limits and pagination are applied.
+
 ## [0.47.1-beta.1] - 2026-07-26
 
 ### Changed

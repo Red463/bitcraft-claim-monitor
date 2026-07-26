@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity, ArrowRight, Clock3, MapPin, Star, Store, TrendingUp } from "lucide-react";
 
+import { DataTable } from "../../components/main/DataTable";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
@@ -97,7 +98,20 @@ export function MarketOverview({ regionId, favorites, onOpenItem, onShowMap, ref
       <div className="market-overview-grid">
         <section className="market-overview-section market-overview-wide">
           <h3><TrendingUp size={16} /> Top deals right now <small>{regionId ? `R${regionId}` : "Global routes"}</small></h3>
-          {deals.length ? <div className="table-wrap" tabIndex={0} aria-label="Top global market deals"><table><thead><tr><th>Item</th><th>Buy at</th><th>Sell at</th><th>Profit</th><th>Qty</th><th>Distance</th><th>Map</th></tr></thead><tbody>{deals.slice(0, 8).map((deal) => <tr key={String(deal.id ?? `${deal.itemType}:${deal.itemId}:${deal.buyLocationId}`)}><td><button className="market-item-link" onClick={() => onOpenItem(itemShape(deal))}><ItemLabel item={itemShape({ ...deal, iconAssetName: deal.itemIconAssetName })} /></button></td><td><span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"}</small></span></td><td><span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"}</small></span></td><td className="positive">{formatGoldAmount(deal.profit ?? deal.profitPerUnit)}</td><td>{formatNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity)}</td><td>{formatCompactNumber(deal.distance)}</td><td><div className="market-map-actions"><button className="icon-button" title="Show buy location" onClick={() => onShowMap({ name: String(deal.buyLocation), locationX: toNumber(deal.buyLocationX), locationZ: toNumber(deal.buyLocationZ) }, String(deal.buyRegionId ?? ""))}><MapPin size={13} /></button><button className="icon-button" title="Show sell location" onClick={() => onShowMap({ name: String(deal.sellLocation), locationX: toNumber(deal.sellLocationX), locationZ: toNumber(deal.sellLocationZ) }, String(deal.sellRegionId ?? ""))}><MapPin size={13} /></button></div></td></tr>)}</tbody></table></div> : <div className="empty-state compact">{state.loading ? "Loading deals…" : "No qualifying deals."}</div>}
+          <DataTable
+            rows={deals.slice(0, 8)}
+            columns={[
+              ["Item", (deal) => <button className="market-item-link" onClick={() => onOpenItem(itemShape(deal))}><ItemLabel item={itemShape({ ...deal, iconAssetName: deal.itemIconAssetName })} /></button>, (deal) => String(deal.itemName ?? deal.name ?? "")],
+              ["Buy at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"}</small></span>, (deal) => toNumber(deal.buyPrice)],
+              ["Sell at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"}</small></span>, (deal) => toNumber(deal.sellPrice)],
+              ["Profit", (deal) => <span className="positive">{formatGoldAmount(deal.profit ?? deal.profitPerUnit)}</span>, (deal) => toNumber(deal.profit ?? deal.profitPerUnit)],
+              ["Qty", (deal) => formatNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity), (deal) => toNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity)],
+              ["Distance", (deal) => formatCompactNumber(deal.distance), (deal) => toNumber(deal.distance)],
+              ["Map", (deal) => <div className="market-map-actions"><button className="icon-button" title="Show buy location" onClick={() => onShowMap({ name: String(deal.buyLocation), locationX: toNumber(deal.buyLocationX), locationZ: toNumber(deal.buyLocationZ) }, String(deal.buyRegionId ?? ""))}><MapPin size={13} /></button><button className="icon-button" title="Show sell location" onClick={() => onShowMap({ name: String(deal.sellLocation), locationX: toNumber(deal.sellLocationX), locationZ: toNumber(deal.sellLocationZ) }, String(deal.sellRegionId ?? ""))}><MapPin size={13} /></button></div>, undefined, false],
+            ]}
+            emptyState={state.loading ? "Loading deals…" : "No qualifying deals."}
+            scrollLabel="Top global market deals"
+          />
         </section>
         <section className="market-overview-section">
           <h3><TrendingUp size={16} /> Biggest movers <small>Global · {data.moverBaseline === "prior-24h" ? "24h vs prior 24h" : "24h vs 7d warm-up"}</small></h3>
