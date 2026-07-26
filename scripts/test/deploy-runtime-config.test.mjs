@@ -33,7 +33,7 @@ test("Caddy returns explicit browser and API maintenance responses", () => {
 });
 
 test("database backup schedule is persistent and runs daily in London time", () => {
-  assert.equal(schemaVersion.trim(), "1");
+  assert.equal(schemaVersion.trim(), "2");
   assert.match(backupService, /backup-bitcraft-monitor daily/);
   assert.match(backupTimer, /OnCalendar=\*-\*-\* 03:30:00 Europe\/London/);
   assert.match(backupTimer, /RandomizedDelaySec=15m/);
