@@ -50,14 +50,14 @@ test("access control evaluates discord, verified, and specific user rules", () =
 test("access control tab fallback chooses the first allowed tab", () => {
   const config = normalizeAccessControlConfig({
     rules: {
-      "tab:market:live": { mode: "verified" },
-      "tab:market:analytics": { mode: "discord" },
+      "tab:market:overview": { mode: "verified" },
+      "tab:market:browse": { mode: "discord" },
     },
   });
 
-  assert.equal(firstAllowedTab(config, "market", anonymous), "pricing");
-  assert.equal(firstAllowedTab(config, "market", signedIn), "analytics");
-  assert.equal(firstAllowedTab(config, "market", verified), "live");
+  assert.equal(firstAllowedTab(config, "market", anonymous), "deals");
+  assert.equal(firstAllowedTab(config, "market", signedIn), "browse");
+  assert.equal(firstAllowedTab(config, "market", verified), "overview");
 });
 
 test("allowed-view resolution returns a fallback or null when every view is restricted", () => {

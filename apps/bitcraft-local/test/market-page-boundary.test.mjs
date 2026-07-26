@@ -5,18 +5,17 @@ import { test } from "node:test";
 const marketPageSource = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
 
 test("Market renders a restricted state when every tool view is denied", () => {
-  assert.match(marketPageSource, /resolveAllowedView\(view, marketViews\.map\(\(entry\) => entry\.id\)\)/);
-  assert.match(marketPageSource, /No market views are available for your account\./);
+  assert.match(marketPageSource, /resolveAllowedView\([\s\S]*?views\.map\(\(entry\) => entry\.id\)\)/);
+  assert.match(marketPageSource, /No global market workspaces are available for your account\./);
   assert.match(marketPageSource, /updateQueryState\(\{ page: "market", tab:[^}]+\}, "push"\)/);
 });
 
 test("Market synchronizes URL subviews without turning normalization into navigation", () => {
   assert.match(marketPageSource, /locationSearch: string/);
   assert.match(marketPageSource, /marketViewLocation\(new URLSearchParams\(locationSearch\)\.get\("tab"\)\)/);
-  assert.match(marketPageSource, /React\.useEffect\(\(\) => \{[\s\S]*?setView\(locationView\.view\)[\s\S]*?locationSearch/);
-  assert.match(marketPageSource, /if \(locationView\.shouldReplace\)[\s\S]*?updateQueryState\(\{ page: "market", tab: locationView\.canonicalTab \}\);[\s\S]*?onQueryStateChange\(\)/);
+  assert.match(marketPageSource, /if \(location\.page === "settlement-market"\)[\s\S]*?onNavigate\("settlement-market", location\.canonicalTab\)/);
+  assert.match(marketPageSource, /if \(location\.shouldReplace \|\| currentView !== location\.view\)[\s\S]*?updateQueryState\(\{ page: "market", tab: currentView \}\)/);
   assert.match(marketPageSource, /updateQueryState\(\{ page: "market", tab: next[^}]+\}, "push"\);[\s\S]*?onQueryStateChange\(\)/);
-  assert.match(marketPageSource, /if \(!resolvedView \|\| resolvedView === view\) return;[\s\S]*?updateQueryState\(\{ page: "market", tab: resolvedView[^}]+\}\);/);
 });
 
 test("Market page replaces the legacy MainPages bundle", () => {
@@ -26,22 +25,24 @@ test("Market page replaces the legacy MainPages bundle", () => {
 
   assert.equal(existsSync(mainPagesUrl), false);
   assert.match(marketPage, /export function Market\b/);
-  assert.match(marketPage, /from "\.\/market\/PriceFinder"/);
-  assert.match(marketPage, /from "\.\/market\/BuyOrderFinder"/);
+  assert.match(marketPage, /from "\.\/market\/MarketBrowse"/);
+  assert.match(marketPage, /from "\.\/market\/MarketOverview"/);
+  assert.match(marketPage, /from "\.\/market\/MarketDeals"/);
+  assert.match(marketPage, /from "\.\/market\/MarketStalls"/);
   assert.match(marketPage, /from "\.\/market\/DealWatchlist"/);
   assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MarketPage"\)/);
+  assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/SettlementMarketPage"\)/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
 });
 test("Market page exposes a dedicated deal watchlist tool tab", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 
-  assert.match(marketPage, /"dealWatchlist"/);
-  assert.match(marketPage, /deal-watchlist/);
-  assert.match(marketPage, /Deal Watchlist/);
-  assert.match(marketPage, /<DealWatchlist monitoredRegionId=\{String\(data\.claim\?\.regionId \?\? "19"\)\} onDiscordLogin=\{onDiscordLogin\} \/>/);
-  assert.match(commandPalette, /deal-watchlist/);
-  assert.match(commandPalette, /Deal Watchlist/);
+  assert.match(marketPage, /id: "deal-watch"/);
+  assert.match(marketPage, /label: "Deal Watch"/);
+  assert.match(marketPage, /<DealWatchlist[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
+  assert.match(commandPalette, /deal-watch/);
+  assert.match(commandPalette, /Deal Watch/);
 });
 test("Market mini-stat values leave room for descenders", () => {
   const marketCss = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
@@ -56,7 +57,7 @@ test("Market tool tabs accept app access-control decisions", () => {
 
   assert.match(marketPage, /type EffectiveAccess/);
   assert.match(marketPage, /targetIdForTab\("market"/);
-  assert.match(marketPage, /marketViews/);
+  assert.match(marketPage, /MARKET_VIEWS/);
   assert.match(marketPage, /effectiveTargetAllowed/);
 });
 

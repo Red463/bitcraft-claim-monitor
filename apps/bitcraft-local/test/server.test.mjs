@@ -865,17 +865,21 @@ test("server collection paginates listings and protects production mutations", a
     ownerMembershipBody.currentMembers.every((member) => member.membershipStatus === "initial"),
     true,
   );
-  await waitForCondition("regional buy-order cache", () => {
-    const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-    const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count;
-    checkDb.close();
-    return count === 3;
-  });
   const appDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
-  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ? AND region_id = '19' AND active = 1").get(claimId).count, 3);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_buy_orders_current'").get().count, 1);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ?").get(claimId).count, 0);
   appDb.close();
   const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  const legacyBuyOrderNow = new Date().toISOString();
+  staleRegionalDb.prepare(`
+    INSERT OR REPLACE INTO market_buy_orders_current (
+      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
+      buyer_entity_id, buyer_name, item_id, item_type, item_name, quantity, unit_price,
+      total_value, stored_coins, first_seen, last_seen, active, raw_json, updated_at
+    )
+    VALUES (?, 'legacy-leather-order', '19', 'Test Region', 'market-19', 'Test Market', 'buyer-19', 'Buyer', '30', '0', 'Leather', 10, 12, 120, 120, ?, ?, 1, '{}', ?)
+  `).run(claimId, legacyBuyOrderNow, legacyBuyOrderNow, legacyBuyOrderNow);
   staleRegionalDb.prepare(`
     INSERT OR REPLACE INTO market_buy_orders_current (
       claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
@@ -911,37 +915,20 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ key: "regional_buy_order_sale_baselines_refresh" }),
   });
-  assert.equal(baselineJob.status, 202);
-  await waitForCondition("incremental regional buy-order sale baseline write", () => {
-    const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-    const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '30'").get(claimId).count;
-    checkDb.close();
-    return count > 0;
-  });
+  assert.equal(baselineJob.status, 404);
   const runningBaselineJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
   const runningBaselineJob = runningBaselineJobs.jobs.find((job) => job.key === "regional_buy_order_sale_baselines_refresh");
-  assert.equal(runningBaselineJob.metadata.total ?? runningBaselineJob.metadata.uniqueItemCount, 3);
-  assert.ok(runningBaselineJob.metadata.averageCount >= 1);
-  assert.equal(slowPriceHistoryResponded, false);
-  await waitForCondition("regional buy-order sale baseline refresh", () => {
-    const checkDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-    const count = checkDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ?").get(claimId).count;
-    checkDb.close();
-    return count === 3;
-  });
+  assert.equal(runningBaselineJob, undefined);
   const scopedBaselineDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-  assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '9'").get(claimId).count, 0);
-  assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '19' AND item_id = '998'").get(claimId).count, 0);
-  assert.equal(scopedBaselineDb.prepare("SELECT active FROM market_buy_orders_current WHERE claim_id = ? AND order_key = 'stale-r9-order'").get(claimId).active, 0);
-  assert.equal(scopedBaselineDb.prepare("SELECT average_unit_price FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '32' AND item_type = '1'").get(claimId).average_unit_price, 40);
-  assert.equal(scopedBaselineDb.prepare("SELECT raw_json FROM market_regional_sale_averages_current WHERE claim_id = ? AND item_id = '32' AND item_type = '1'").get(claimId).raw_json.includes('"buckets"'), false);
+  assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '9'").get(claimId).count, 1);
+  assert.equal(scopedBaselineDb.prepare("SELECT active FROM market_buy_orders_current WHERE claim_id = ? AND order_key = 'stale-r9-order'").get(claimId).active, 1);
   scopedBaselineDb.close();
-  assert.equal(priceHistoryRequests, 3);
+  assert.equal(priceHistoryRequests, 0);
   const buyOrdersAfterBaselineJob = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
-  assert.equal(buyOrdersAfterBaselineJob.opportunities.length, 1);
-  assert.equal(Math.round(buyOrdersAfterBaselineJob.opportunities[0].premiumPercent), 20);  const anonymousDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
+  assert.equal(buyOrdersAfterBaselineJob.opportunities.length, 0);
+  const anonymousDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({ regionId: "19", itemId: 30, itemType: 0, itemName: "Leather" }),
@@ -1026,7 +1013,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
-  assert.equal(initialConfig.collectorSettings.buyOrders.intervalSeconds, 1800);
+  assert.equal(initialConfig.collectorSettings.buyOrders, undefined);
   const initialPublicPopups = await fetch(`${origin}/api/local/popups`).then((response) => response.json());
   assert.deepEqual(initialPublicPopups, { popups: [] });
   const anonymousAdminPopups = await fetch(`${origin}/api/local/admin/popups`);

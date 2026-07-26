@@ -100,6 +100,7 @@ const Inventory = React.lazy(() => import("./pages/InventoryPage").then(({ Inven
 const Construction = React.lazy(() => import("./pages/ConstructionPage").then(({ Construction }) => ({ default: Construction })));
 const Research = React.lazy(() => import("./pages/ResearchPage").then(({ Research }) => ({ default: Research })));
 const Market = React.lazy(() => import("./pages/MarketPage").then(({ Market }) => ({ default: Market })));
+const SettlementMarket = React.lazy(() => import("./pages/SettlementMarketPage").then(({ SettlementMarket }) => ({ default: SettlementMarket })));
 const Region = React.lazy(() => import("./pages/RegionPage").then(({ Region }) => ({ default: Region })));
 const Empires = React.lazy(() => import("./pages/EmpiresPage").then(({ Empires }) => ({ default: Empires })));
 const ActivityPanel = React.lazy(() => import("./pages/ActivityPage").then(({ ActivityPanel }) => ({ default: ActivityPanel })));
@@ -506,7 +507,7 @@ function DashboardApp() {
     const activeMapFocus = panel === "map" ? nextMapFocus ?? mapFocus : null;
     updateQueryState({
       page: panel,
-      tab: panel === "market" ? marketTab ?? null : null,
+      tab: panel === "market" || panel === "settlement-market" ? marketTab ?? null : null,
       item: panel === "market" ? new URLSearchParams(window.location.search).get("item") : null,
       itemName: panel === "market" ? new URLSearchParams(window.location.search).get("itemName") : null,
       itemType: panel === "market" ? new URLSearchParams(window.location.search).get("itemType") : null,
@@ -515,9 +516,13 @@ function DashboardApp() {
       buyItemName: panel === "market" ? new URLSearchParams(window.location.search).get("buyItemName") : null,
       buyItemType: panel === "market" ? new URLSearchParams(window.location.search).get("buyItemType") : null,
       buyRegion: panel === "market" ? new URLSearchParams(window.location.search).get("buyRegion") : null,
-      mapName: activeMapFocus?.name ?? null,
-      mapX: activeMapFocus ? String(activeMapFocus.locationX) : null,
-      mapZ: activeMapFocus ? String(activeMapFocus.locationZ) : null,
+      label: activeMapFocus?.name ?? null,
+      x: activeMapFocus ? String(activeMapFocus.locationX) : null,
+      z: activeMapFocus ? String(activeMapFocus.locationZ) : null,
+      mapName: null,
+      mapX: null,
+      mapZ: null,
+      regionId: panel === "map" ? activeMapFocus?.regionId ?? null : null,
     }, "push");
     setRouteSearch(window.location.search);
     const label = NAV.find(([id]) => id === panel)?.[1] ?? "Dashboard";
@@ -767,10 +772,11 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} onDiscordLogin={discordLogin} />,
+    market: <Market access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
+    "settlement-market": <SettlementMarket data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} onQueryStateChange={syncRouteSearch} />,
     empire: <Region data={data} />,
     empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
-    map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ mapName: null, mapX: null, mapZ: null }); }} />,
+    map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} access={effectiveAccess} />,
     admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,

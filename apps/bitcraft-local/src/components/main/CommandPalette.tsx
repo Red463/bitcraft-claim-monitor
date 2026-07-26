@@ -30,7 +30,7 @@ export function CommandPalette({
   const searchRef = React.useRef<HTMLInputElement | null>(null);
   const q = query.toLowerCase().trim();
   const allowedPages = new Set(navItems.map(([id]) => id));
-  const marketViewAllowed = (tab: "pricing" | "dealWatchlist" | "buyOrders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
+  const marketViewAllowed = (tab: "browse" | "deal-watch" | "buy-orders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
   const commands = [
     ...buildPagePaletteCommands(NAV, allowedPages).map((command) => {
       const Icon = command.icon;
@@ -41,9 +41,9 @@ export function CommandPalette({
         run: () => activatePagePaletteCommand(command, onNavigate),
       };
     }),
-    { key: "price-finder", label: "Price Finder", description: "Find a listing price", icon: <CircleDollarSign size={15} />, allowed: marketViewAllowed("pricing"), locked: false, run: () => onNavigate("market", "pricing") },
-    { key: "deal-watchlist", label: "Deal Watchlist", description: "Manage watched market deals", icon: <Bell size={15} />, allowed: marketViewAllowed("dealWatchlist"), locked: false, run: () => onNavigate("market", "deal-watchlist") },
-    { key: "buy-order-finder", label: "Buy Order Finder", description: "Find active buy orders", icon: <ShoppingBag size={15} />, allowed: marketViewAllowed("buyOrders"), locked: false, run: () => onNavigate("market", "buy-orders") },
+    { key: "price-finder", label: "Market Browse", description: "Find global listings and price history", icon: <CircleDollarSign size={15} />, allowed: marketViewAllowed("browse"), locked: false, run: () => onNavigate("market", "browse") },
+    { key: "deal-watchlist", label: "Deal Watch", description: "Manage watched market deals", icon: <Bell size={15} />, allowed: marketViewAllowed("deal-watch"), locked: false, run: () => onNavigate("market", "deal-watch") },
+    { key: "buy-order-finder", label: "Buy Orders", description: "Find active global buy orders", icon: <ShoppingBag size={15} />, allowed: marketViewAllowed("buy-orders"), locked: false, run: () => onNavigate("market", "buy-orders") },
     { key: "craft-calculator", label: "Craft Calculator", description: "Calculate recipe chains", icon: <Calculator size={15} />, allowed: allowedPages.has("craftcalc"), locked: false, run: () => onNavigate("craftcalc") },
     ...(allowedPages.has("members") ? members : []).map((member) => ({
       key: `member-${member.playerEntityId}`,

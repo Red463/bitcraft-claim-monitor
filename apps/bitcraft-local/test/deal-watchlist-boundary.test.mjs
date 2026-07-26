@@ -7,7 +7,8 @@ test("DealWatchlist owns standalone watch management and direct creation", () =>
 
   assert.match(dealWatchlist, /export function DealWatchlist\b/);
   assert.match(dealWatchlist, /fetch\(`\$\{LOCAL_API\}\/market\/deal-watches`/);
-  assert.match(dealWatchlist, /fetch\(`\$\{API\}\/market\?q=/);
+  assert.match(dealWatchlist, /fetch\(`\$\{API\}\/market\?hasOrders=true`/);
+  assert.match(dealWatchlist, /includes\(queryToken\)/);
   assert.match(dealWatchlist, /method: "POST"/);
   assert.match(dealWatchlist, /thresholdPercent/);
   assert.match(dealWatchlist, /Watch item/);

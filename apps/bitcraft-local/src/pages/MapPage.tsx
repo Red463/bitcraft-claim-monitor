@@ -238,7 +238,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   }, [currentFrameUrl, mapSignature, rosterSource, roster.length, selectedIds, currentPlayerIdsKey]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
-    if (focus) updateQueryState({ mapName: focus.name, mapX: String(focus.locationX), mapZ: String(focus.locationZ) });
+    if (focus) updateQueryState({ label: focus.name, x: String(focus.locationX), z: String(focus.locationZ), regionId: focus.regionId ?? null, mapName: null, mapX: null, mapZ: null });
   }, [focusKey]);
   const visibleResources = React.useMemo(() => {
     const query = resourceSearch.trim().toLowerCase();

@@ -46,6 +46,7 @@ export const NAV_GROUPS = [
     ["inventory", "Inventory", Package],
     ["construction", "Construction", Hammer],
     ["research", "Research", FlaskConical],
+    ["settlement-market", "Settlement Market", CircleDollarSign],
   ] },
   { id: "economy", label: "Economy & Region", items: [
     ["market", "Market", CircleDollarSign],
@@ -83,5 +84,6 @@ export function updateQueryState(values: Record<string, string | null>, mode: Na
 }
 
 export function panelHref(panel: ActivePanel): string {
-  return `/?page=${encodeURIComponent(panel)}`;
+  const defaultTab = panel === "market" ? "&tab=overview" : panel === "settlement-market" ? "&tab=live" : "";
+  return `/?page=${encodeURIComponent(panel)}${defaultTab}`;
 }

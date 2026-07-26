@@ -34,13 +34,13 @@ export const SUPPORTED_BROWSER_NOTIFICATION_TYPES: readonly BrowserNotificationT
     id: "market-listing",
     label: "Market listing toast",
     source: "/api/local/notification-activity event_type=market_new_listing",
-    expectedDestination: "market",
+    expectedDestination: "settlement-market",
   },
   {
     id: "market-sale",
     label: "Market sale toast",
     source: "/api/local/notification-activity event_type=market_sale or market_sale_confirmed",
-    expectedDestination: "market",
+    expectedDestination: "settlement-market",
   },
   {
     id: "market-deal-alert",
@@ -142,6 +142,7 @@ export const NOTIFICATION_MATRIX_PAGES: readonly NotificationMatrixPage[] = [
   { panel: "construction", label: "Construction", path: "/?page=construction" },
   { panel: "research", label: "Research", path: "/?page=research" },
   { panel: "market", label: "Market", path: "/?page=market" },
+  { panel: "settlement-market", label: "Settlement Market", path: "/?page=settlement-market" },
   { panel: "empire", label: "Region", path: "/?page=empire" },
   { panel: "empires", label: "Empires", path: "/?page=empires" },
   { panel: "map", label: "Map", path: "/?page=map" },

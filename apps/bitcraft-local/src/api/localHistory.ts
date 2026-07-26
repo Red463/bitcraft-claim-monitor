@@ -42,7 +42,7 @@ export function useLocalHistory(
         const history = await response.json();
         const activity = history.activity ?? {};
         setState((prev) => ({
-          market: history.market ?? (activePanel === "market" || activePanel === "dashboard" ? null : prev.market),
+          market: history.market ?? (activePanel === "settlement-market" || activePanel === "dashboard" ? null : prev.market),
           activity: activity.events ?? [],
           activityTotal: toNumber(activity.total ?? activity.events?.length),
           dashboard: history.dashboard ?? (activePanel === "dashboard" ? null : prev.dashboard),

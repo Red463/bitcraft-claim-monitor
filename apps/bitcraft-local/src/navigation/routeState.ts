@@ -2,11 +2,13 @@ import type { ActivePanel } from "../types/app";
 
 export type PageId = ActivePanel;
 export type NavigationMode = "push" | "replace";
-export type MarketViewId = "live" | "analytics" | "pricing" | "buyOrders" | "dealWatchlist";
+export type GlobalMarketViewId = "overview" | "browse" | "deals" | "buy-orders" | "deal-watch" | "stalls";
+export type SettlementMarketViewId = "live" | "analytics";
 
 export type MarketViewLocation = {
-  view: MarketViewId | null;
-  canonicalTab: string | null;
+  page: "market" | "settlement-market";
+  view: GlobalMarketViewId | SettlementMarketViewId;
+  canonicalTab: string;
   shouldReplace: boolean;
 };
 
@@ -36,14 +38,27 @@ export function resolveAllowedView<T extends string>(requested: T, allowed: read
 }
 
 export function marketViewLocation(tab: string | null): MarketViewLocation {
-  if (tab === "live" || tab === "analytics" || tab === "pricing") {
-    return { view: tab, canonicalTab: tab, shouldReplace: false };
+  if (tab === "live" || tab === "analytics") {
+    return { page: "settlement-market", view: tab, canonicalTab: tab, shouldReplace: true };
   }
-  if (tab === "buy-orders" || tab === "buyOrders") {
-    return { view: "buyOrders", canonicalTab: "buy-orders", shouldReplace: tab !== "buy-orders" };
+  if (tab === "pricing") {
+    return { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true };
   }
   if (tab === "deal-watchlist" || tab === "dealWatchlist") {
-    return { view: "dealWatchlist", canonicalTab: "deal-watchlist", shouldReplace: tab !== "deal-watchlist" };
+    return { page: "market", view: "deal-watch", canonicalTab: "deal-watch", shouldReplace: true };
   }
-  return { view: null, canonicalTab: null, shouldReplace: tab !== null };
+  if (tab === "buyOrders") {
+    return { page: "market", view: "buy-orders", canonicalTab: "buy-orders", shouldReplace: true };
+  }
+  if (tab === "overview" || tab === "browse" || tab === "deals" || tab === "buy-orders" || tab === "deal-watch" || tab === "stalls") {
+    return { page: "market", view: tab, canonicalTab: tab, shouldReplace: false };
+  }
+  return { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true };
+}
+
+export function settlementMarketViewLocation(tab: string | null): MarketViewLocation {
+  if (tab === "live" || tab === "analytics") {
+    return { page: "settlement-market", view: tab, canonicalTab: tab, shouldReplace: false };
+  }
+  return { page: "settlement-market", view: "live", canonicalTab: "live", shouldReplace: true };
 }

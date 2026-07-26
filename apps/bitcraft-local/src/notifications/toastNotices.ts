@@ -30,6 +30,7 @@ export type CreateToastNoticeInput = {
   sourceKey?: string;
   metaLabel?: string;
   soundType?: NotificationSoundType;
+  destination?: ActivePanel;
 };
 
 
@@ -103,7 +104,7 @@ export function createToastNotice(input: CreateToastNoticeInput): ToastNotice {
     kind: input.kind,
     occurredAt: input.occurredAt,
     read: false,
-    destination: destinationForToastKind(input.kind),
+    destination: input.destination ?? destinationForToastKind(input.kind),
     item: input.item ?? null,
     sourceKey: input.sourceKey,
     ...(input.metaLabel ? { metaLabel: input.metaLabel } : {}),

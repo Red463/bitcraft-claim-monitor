@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.47.0-beta.1] - 2026-07-26
+
+### Added
+
+- Added a global Market hub for browsing listings, buy orders, deals, Deal Watch rules, favorites, and barter stalls across every active BitJita region.
+- Added global market overview insights for arbitrage opportunities, price movers, trading activity, and market hubs.
+- Added a dedicated Settlement Market page for monitored-claim listings and confirmed-sales analytics.
+
+### Changed
+
+- Moved settlement-specific market tools under the Settlement navigation group and kept global discovery under Economy & Region.
+- Replaced the cached regional buy-order view with live item-first global order-book lookup while preserving existing cached data for rollback.
+
 ## [0.46.0-beta.1] - 2026-07-25
 
 ### Added

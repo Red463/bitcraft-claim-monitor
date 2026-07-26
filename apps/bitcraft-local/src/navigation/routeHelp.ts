@@ -16,6 +16,7 @@ export const ROUTE_HELP = {
   construction: { purpose: "Track active construction projects and missing supplies.", nextAction: "Open a project to review its remaining requirements." },
   research: { purpose: "Review research progress and outstanding contribution needs.", nextAction: "Select a research task to inspect its remaining materials." },
   market: { purpose: "Compare listings, pricing history, and watched market opportunities.", nextAction: "Choose a market tool, then search for an item or order." },
+  "settlement-market": { purpose: "Track listings and confirmed sales for the configured settlement.", nextAction: "Review live listings or open settlement sales analytics." },
   empire: { purpose: "Inspect the selected region and its settlement context.", nextAction: "Review the regional summary, then open a related settlement or map location." },
   empires: { purpose: "Compare empire-wide settlement and regional activity.", nextAction: "Select an empire or region to inspect its current details." },
   map: { purpose: "Locate settlements, players, resources, and tracked activity.", nextAction: "Choose a map layer or search target to focus the view." },
