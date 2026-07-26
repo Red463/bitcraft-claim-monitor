@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowDownUp, BarChart3, MapPin, Search, ShoppingBag, Star } from "lucide-react";
 
+import { DataTable } from "../../components/main/DataTable";
 import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { MiniStat } from "../../components/main/Stats";
@@ -58,7 +59,6 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
   const [minimumPrice, setMinimumPrice] = React.useState("0");
   const [locationFilter, setLocationFilter] = React.useState("");
   const [playerFilter, setPlayerFilter] = React.useState("");
-  const [sort, setSort] = React.useState<"price" | "quantity" | "location" | "player">("price");
   const [detailTab, setDetailTab] = React.useState<"orders" | "stats">("orders");
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
@@ -171,10 +171,13 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
     if (locationFilter && !`${order.claimName} ${order.regionName}`.toLowerCase().includes(locationFilter.toLowerCase())) return false;
     if (playerFilter && !order.ownerName.toLowerCase().includes(playerFilter.toLowerCase())) return false;
     return true;
-  }).sort((a, b) => sort === "quantity" ? b.quantity - a.quantity : sort === "location" ? a.claimName.localeCompare(b.claimName) : sort === "player" ? a.ownerName.localeCompare(b.ownerName) : orderTab === "buy" ? b.unitPrice - a.unitPrice : a.unitPrice - b.unitPrice), [locationFilter, minimumPrice, minimumQuantity, orderTab, orders, playerFilter, sort]);
+  }).sort(
+    (a, b) => orderTab === "buy"
+      ? b.unitPrice - a.unitPrice
+      : a.unitPrice - b.unitPrice,
+  ), [locationFilter, minimumPrice, minimumQuantity, orderTab, orders, playerFilter]);
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
-  const visibleOrders = filteredOrders.slice((Math.min(page, pageCount) - 1) * pageSize, Math.min(page, pageCount) * pageSize);
   const sells = orders.filter((order) => order.side === "sell");
   const buys = orders.filter((order) => order.side === "buy");
   const regionSummaries = React.useMemo(() => {
@@ -262,14 +265,23 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
               {orderTab === "buy" ? <label className="field"><span>Minimum price</span><input type="number" min="0" value={minimumPrice} onChange={(event) => setMinimumPrice(event.target.value)} /></label> : null}
               <label className="field"><span>Settlement or region</span><input value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} /></label>
               <label className="field"><span>{orderTab === "buy" ? "Buyer" : "Seller"}</span><input value={playerFilter} onChange={(event) => setPlayerFilter(event.target.value)} /></label>
-              <label className="field"><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="price">Price</option><option value="quantity">Quantity</option><option value="location">Location</option><option value="player">{orderTab === "buy" ? "Buyer" : "Seller"}</option></select></label>
             </div>
-            <div className="table-wrap" tabIndex={0} aria-label={`${orderTab} market orders table`}>
-              <table><thead><tr><th>Price</th><th>Quantity</th><th>Total</th><th>Region</th><th>Settlement</th><th>{orderTab === "buy" ? "Buyer" : "Seller"}</th><th>Map</th></tr></thead>
-                <tbody>{visibleOrders.map((order) => <tr key={order.orderKey}><td>{formatGoldAmount(order.unitPrice)}</td><td>{formatNumber(order.quantity)}</td><td>{formatGoldAmount(order.unitPrice * order.quantity)}</td><td>{order.regionName || (order.regionId ? `R${order.regionId}` : "—")}</td><td>{order.claimName || "Unknown settlement"}</td><td>{order.ownerName || "—"}</td><td>{order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX!, locationZ: order.locationZ! }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—"}</td></tr>)}</tbody>
-              </table>
-              {!visibleOrders.length ? <div className="empty-state">No {orderTab} orders match these filters.</div> : null}
-            </div>
+            <DataTable
+              rows={filteredOrders}
+              rowOffset={(Math.min(page, pageCount) - 1) * pageSize}
+              rowLimit={pageSize}
+              scrollLabel={`${orderTab} market orders table`}
+              emptyState={`No ${orderTab} orders match these filters.`}
+              columns={[
+                ["Price", (order) => formatGoldAmount(order.unitPrice), (order) => order.unitPrice],
+                ["Quantity", (order) => formatNumber(order.quantity), (order) => order.quantity],
+                ["Total", (order) => formatGoldAmount(order.unitPrice * order.quantity), (order) => order.unitPrice * order.quantity],
+                ["Region", (order) => order.regionName || (order.regionId ? `R${order.regionId}` : "—"), (order) => order.regionName || String(order.regionId ?? "")],
+                ["Settlement", (order) => order.claimName || "Unknown settlement", (order) => order.claimName],
+                [orderTab === "buy" ? "Buyer" : "Seller", (order) => order.ownerName || "—", (order) => order.ownerName],
+                ["Map", (order) => order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX, locationZ: order.locationZ }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—", undefined, false],
+              ]}
+            />
             <div className="pagination-row"><span>Page {Math.min(page, pageCount)} of {pageCount} · {formatNumber(filteredOrders.length)} orders</span><div><button className="toolbar-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button className="toolbar-button" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button></div></div>
           </> : (
             <div className="market-stats-workspace">

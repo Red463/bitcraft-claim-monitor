@@ -68,6 +68,19 @@ test("Deals sorts every data column from raw values and keeps Map static", () =>
   assert.doesNotMatch(deals, /<span>Sort<\/span>/);
 });
 
+test("Browse sorts the complete filtered order book before pagination", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const orderWorkspace = browse.slice(browse.indexOf('detailTab === "orders"'), browse.indexOf("pagination-row"));
+
+  assert.match(orderWorkspace, /<DataTable/);
+  assert.match(orderWorkspace, /rows=\{filteredOrders\}/);
+  assert.match(orderWorkspace, /rowOffset=\{\(Math\.min\(page,\s*pageCount\) - 1\) \* pageSize\}/);
+  assert.match(orderWorkspace, /rowLimit=\{pageSize\}/);
+  assert.match(orderWorkspace, /\["Total",[\s\S]*order\.unitPrice \* order\.quantity/);
+  assert.match(orderWorkspace, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
+});
+
 test("Browse groups availability controls and separates item identity metadata", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
 
