@@ -51,3 +51,12 @@ test("Browse groups availability controls and separates item identity metadata",
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
 });
+
+test("Deal Watch renders operational facts as labelled units", () => {
+  const watch = source("../src/pages/market/DealWatchlist.tsx");
+
+  assert.match(watch, /className="deal-watch-fact"/);
+  assert.match(watch, />Region<\/span><strong>R\{watch\.regionId\}<\/strong>/);
+  assert.match(watch, />Last checked<\/span><strong>/);
+  assert.match(watch, />Last alert<\/span><strong>/);
+});
