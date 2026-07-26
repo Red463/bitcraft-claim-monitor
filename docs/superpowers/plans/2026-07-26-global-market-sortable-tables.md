@@ -97,7 +97,7 @@ Extend the existing `DataTable owns sort state on headers and accepts caller emp
 assert.match(source, /sortable\?: boolean/);
 assert.match(source, /rowOffset\?: number/);
 assert.match(source, /rowLimit\?: number/);
-assert.match(source, /sortable === false/);
+assert.match(source, /sortable = true/);
 assert.match(source, /windowIndexedRows\(sortedRows,\s*rowOffset,\s*rowLimit\)/);
 ```
 
@@ -320,7 +320,7 @@ git commit -m "feat: sort global market overview deals"
 **Interfaces:**
 
 - Consumes: shared `DataTable`.
-- Produces: a sortable table over the first 250 filtered deal rows.
+- Produces: a sortable table over all filtered deal rows with a 250-row post-sort display window.
 - Preserves: default highest-unit-profit ordering and every existing route filter.
 
 - [ ] **Step 1: Write the failing Deals boundary assertions**
@@ -331,7 +331,7 @@ Add:
 test("Deals sorts every data column from raw values and keeps Map static", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
 
-  assert.match(deals, /<DataTable[\s\S]*rows=\{rows\.slice\(0,\s*250\)\}/);
+  assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
   assert.match(deals, /\["Available",[\s\S]*toNumber\(deal\.buyQuantity\)/);
   assert.match(deals, /\["Wanted",[\s\S]*toNumber\(deal\.sellQuantity\)/);
   assert.match(deals, /\["Gain",[\s\S]*percent/);
@@ -376,7 +376,7 @@ Change:
 
 - [ ] **Step 4: Convert the result table**
 
-Import `DataTable` and provide columns for Item, Buy at, Sell at, Available, Wanted, Max trade, Unit profit, Gain, Distance, and Map.
+Import `DataTable`, pass `rows={rows}` and `rowLimit={250}`, and provide columns for Item, Buy at, Sell at, Available, Wanted, Max trade, Unit profit, Gain, Distance, and Map.
 
 Every data column must provide a raw accessor. Derive display-only values inside renderers exactly as the current rows do:
 

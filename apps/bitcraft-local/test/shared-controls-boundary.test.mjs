@@ -38,6 +38,11 @@ test("DataTable owns sort state on headers and accepts caller empty content", ()
   assert.match(source, /\{emptyState\}/);
   assert.doesNotMatch(source, /No data returned\./);
   assert.doesNotMatch(source, /<button[^>]*aria-sort=/s);
+  assert.match(source, /sortable\?: boolean/);
+  assert.match(source, /rowOffset\?: number/);
+  assert.match(source, /rowLimit\?: number/);
+  assert.match(source, /sortable = true/);
+  assert.match(source, /windowIndexedRows\(sortedRows,\s*rowOffset,\s*rowLimit\)/);
 });
 
 test("every data table and custom horizontal table scroller has a durable keyboard label", () => {

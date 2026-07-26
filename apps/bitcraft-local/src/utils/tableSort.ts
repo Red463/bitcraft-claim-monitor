@@ -63,3 +63,13 @@ export function sortIndexedRows<Row>(
     return result || left.index - right.index;
   });
 }
+
+export function windowIndexedRows<Row>(
+  rows: ReadonlyArray<IndexedRow<Row>>,
+  offset = 0,
+  limit?: number,
+): Array<IndexedRow<Row>> {
+  const start = Math.max(0, Math.trunc(offset));
+  if (limit == null) return rows.slice(start);
+  return rows.slice(start, start + Math.max(0, Math.trunc(limit)));
+}
