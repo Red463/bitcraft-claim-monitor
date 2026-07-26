@@ -13,6 +13,7 @@ import {
   ExternalLink,
   FileText,
   KeyRound,
+  LockKeyhole,
   MessageCircle,
   Menu,
   PanelLeftClose,
@@ -60,7 +61,8 @@ import type { ActivePanel } from "./types/app";
 import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./types/settings";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
-import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
+import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
+import { restrictedAccessGuidance } from "./access/restrictedAccess";
 import { ManualRefreshProvider, type ManualRefreshRequest } from "./refresh/ManualRefreshContext";
 import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTaskCoordinator, manualRefreshApplies } from "./refresh/manualRefresh.mjs";
 
@@ -137,17 +139,31 @@ function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
 }
 
-function RestrictedAccessState({ title, decision, discordLoginEnabled, onDiscordLogin }: { title: string; decision: { mode?: string; reason?: string } | undefined; discordLoginEnabled: boolean; onDiscordLogin: () => void }) {
-  const modeInfo = ACCESS_RULE_MODES.find((entry) => entry.mode === decision?.mode);
-  const needsDiscord = decision?.mode === "discord" || decision?.mode === "verified" || decision?.mode === "specificUsers";
+function RestrictedAccessState({
+  title,
+  decision,
+  user,
+  discordLoginEnabled,
+  onDiscordLogin,
+  onOpenUserSettings,
+}: {
+  title: string;
+  decision: { mode?: string; reason?: string } | undefined;
+  user: AppUser | null;
+  discordLoginEnabled: boolean;
+  onDiscordLogin: () => void;
+  onOpenUserSettings: () => void;
+}) {
+  const guidance = restrictedAccessGuidance(decision, user, discordLoginEnabled);
   return (
     <div className="panel restricted-access-panel">
       <section className="empty-state restricted-access-state">
         <Shield size={34} />
         <strong>{title} is restricted</strong>
-        <span>{decision?.reason || modeInfo?.label || "You do not have access to this area."}</span>
-        {decision?.mode === "verified" ? <small>Link your BitCraft character in User Settings, then wait for an admin to approve it.</small> : null}
-        {needsDiscord && discordLoginEnabled ? <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={15} /> Sign in with Discord</button> : null}
+        <span>{decision?.reason || "You do not have access to this area."}</span>
+        <small>{guidance.message}</small>
+        {guidance.action === "discord-login" ? <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={15} /> Sign in with Discord</button> : null}
+        {guidance.action === "user-settings" ? <button className="toolbar-button primary" onClick={onOpenUserSettings}><Settings size={15} /> Open User Settings</button> : null}
       </section>
     </div>
   );
@@ -500,7 +516,6 @@ function DashboardApp() {
   const accessTargetMeta = React.useMemo(() => new Map(ACCESS_CONTROL_TARGETS.map((target) => [target.id, target])), []);
   const accessDecisionFor = React.useCallback((targetId: string) => effectiveAccess?.targets?.[targetId], [effectiveAccess]);
   const isPageAllowed = React.useCallback((panel: ActivePanel | string) => panel === "admin" || effectiveTargetAllowed(effectiveAccess, targetIdForPage(panel)), [effectiveAccess]);
-  const visibleNavigationItems = React.useMemo(() => NAV.filter(([id]) => isPageAllowed(id)), [isPageAllowed]);
   const syncRouteSearch = React.useCallback(() => setRouteSearch(window.location.search), []);
   const navigate = React.useCallback((panel: ActivePanel, marketTab?: string, nextMapFocus?: MapFocus) => {
     setActive(panel);
@@ -786,7 +801,7 @@ function DashboardApp() {
   const activePageLabel = accessTargetMeta.get(activePageTargetId)?.label ?? NAV.find(([id]) => id === active)?.[1] ?? "This page";
   const activePanel = isPageAllowed(active)
     ? panels[active] ?? panels.dashboard
-    : <RestrictedAccessState title={activePageLabel} decision={activePageDecision} discordLoginEnabled={userAuth.discordLoginEnabled} onDiscordLogin={discordLogin} />;
+    : <RestrictedAccessState title={activePageLabel} decision={activePageDecision} user={userAuth.user} discordLoginEnabled={userAuth.discordLoginEnabled} onDiscordLogin={discordLogin} onOpenUserSettings={() => setUserSettingsOpen(true)} />;
   const manualRefreshIsRefreshing = manualRefreshState.status === "refreshing";
   const manualRefreshCooldownMs = cooldownRemainingMs(manualRefreshRequest?.requestedAt, manualRefreshClock);
   const manualRefreshCooldownSeconds = Math.ceil(manualRefreshCooldownMs / 1000);
@@ -906,9 +921,7 @@ function DashboardApp() {
         </div>
         <nav ref={navigationRef} aria-label="Main navigation" data-tour="sidebar-navigation">
           {NAV_GROUPS.map((group) => {
-            const visibleItems = group.items.filter(([id]) => isPageAllowed(id));
-            if (!visibleItems.length) return null;
-            const hasActivePage = visibleItems.some(([id]) => active === id);
+            const hasActivePage = group.items.some(([id]) => active === id);
             const isOpen = sidebarGroups[group.id] ?? true;
             const showItems = isOpen || hasActivePage;
             return (
@@ -923,28 +936,35 @@ function DashboardApp() {
                   <ArrowDown size={12} aria-hidden="true" />
                 </button>
                 <div className="sidebar-section-items">
-                  {visibleItems.map(([id, label, Icon]) => (
-                    <a
-                      key={id}
-                      className={active === id ? "active" : ""}
-                      href={panelHref(id)}
-                      aria-current={active === id ? "page" : undefined}
-                      title={label}
-                      onMouseEnter={(event) => showCollapsedNavTooltip(event.currentTarget, label)}
-                      onMouseLeave={() => setCollapsedNavTooltip(null)}
-                      onFocus={(event) => showCollapsedNavTooltip(event.currentTarget, label)}
-                      onBlur={() => setCollapsedNavTooltip(null)}
-                      onClick={(event) => {
-                        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                        event.preventDefault();
-                        navigate(id);
-                        setMobileNavigationOpen(false);
-                      }}
-                    >
-                      <Icon size={16} /><span className="nav-label">{label}</span>
-                      <span className="collapsed-nav-label" aria-hidden="true">{label}</span>
-                    </a>
-                  ))}
+                  {group.items.map(([id, label, Icon]) => {
+                    const restricted = !isPageAllowed(id);
+                    const accessibleLabel = restricted ? `${label} — restricted` : label;
+                    return (
+                      <a
+                        key={id}
+                        className={[`nav-destination`, active === id ? "active" : "", restricted ? "is-restricted" : ""].filter(Boolean).join(" ")}
+                        href={panelHref(id)}
+                        aria-current={active === id ? "page" : undefined}
+                        aria-label={restricted ? `${label} — restricted` : label}
+                        data-restricted={restricted || undefined}
+                        title={accessibleLabel}
+                        onMouseEnter={(event) => showCollapsedNavTooltip(event.currentTarget, accessibleLabel)}
+                        onMouseLeave={() => setCollapsedNavTooltip(null)}
+                        onFocus={(event) => showCollapsedNavTooltip(event.currentTarget, accessibleLabel)}
+                        onBlur={() => setCollapsedNavTooltip(null)}
+                        onClick={(event) => {
+                          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                          event.preventDefault();
+                          navigate(id);
+                          setMobileNavigationOpen(false);
+                        }}
+                      >
+                        <Icon size={16} /><span className="nav-label">{label}</span>
+                        <span className="collapsed-nav-label" aria-hidden="true">{label}</span>
+                        {restricted ? <LockKeyhole className="nav-access-lock" size={13} aria-hidden="true" /> : null}
+                      </a>
+                    );
+                  })}
                 </div>
               </section>
             );
@@ -1064,7 +1084,7 @@ function DashboardApp() {
       </div>
       {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
-      {commandOpen ? <CommandPalette navItems={visibleNavigationItems} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
+      {commandOpen ? <CommandPalette adminAuthenticated={Boolean(adminAuth.authenticated)} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
       {consent != null && !discordPromptDismissed && userAuth.discordLoginEnabled && !userAuth.user ? <DiscordSignInPrompt onDiscordLogin={() => discordLogin()} onClose={() => setDiscordPromptDismissed(true)} onSettings={() => { setDiscordPromptDismissed(true); setUserSettingsOpen(true); }} /> : null}
       {userSettingsOpen ? <UserSettingsDialog density={density} onDensityChange={setDensity} toastSettings={normalizedUserToastSettings} appToastSettings={appSettings.toastSettings} onToastSettingsChange={(settings) => setUserToastSettings(normalizeUserToastSettings(settings))} theme={{ ...DEFAULT_THEME, ...browserTheme }} onThemeChange={setBrowserTheme} auth={userAuth} members={data.members} onDiscordLogin={discordLogin} onDiscordLogout={discordLogout} onLinkCharacter={linkDiscordCharacter} onDiscordMarketSaleDmChange={setDiscordMarketSaleDm} showAdminTools={Boolean(adminAuth.authenticated)} onOpenAdmin={() => { setUserSettingsOpen(false); navigate("admin"); }} onPrivacyUserChanged={handlePrivacyUserChanged} onAnalyticsCleared={handleAnalyticsCleared} onDeleteAccount={() => setAccountDeletionOpen(true)} onResetSettings={() => { clearBrowserLocalSettings(); window.location.reload(); }} modal onClose={() => setUserSettingsOpen(false)} /> : null}
       {helpOpen ? <HelpCenter activePage={active} version={APP_VERSION} onClose={() => setHelpOpen(false)} onPrivacy={() => setPrivacyOpen(true)} onTerms={() => setTermsOpen(true)} onStartTour={() => { setHelpOpen(false); setTourReplayToken((current) => current + 1); }} /> : null}

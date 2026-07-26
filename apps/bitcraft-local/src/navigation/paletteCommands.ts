@@ -11,6 +11,10 @@ export type PagePaletteCommand<Icon = unknown> = {
   icon: Icon;
 };
 
+export function visiblePagePaletteItems<Icon>(navItems: readonly PaletteNavItem<Icon>[], adminAuthenticated: boolean): PaletteNavItem<Icon>[] {
+  return navItems.filter(([panel]) => panel !== "admin" || adminAuthenticated);
+}
+
 export function buildPagePaletteCommands<Icon>(navItems: readonly PaletteNavItem<Icon>[], allowedPages: ReadonlySet<ActivePanel>): PagePaletteCommand<Icon>[] {
   return navItems.map(([panel, label, icon]) => {
     const help = routeHelpFor(panel);
@@ -22,14 +26,14 @@ export function buildPagePaletteCommands<Icon>(navItems: readonly PaletteNavItem
       locked,
       icon,
       description: locked
-        ? `${help?.purpose ?? "Administrator access is restricted."} Unavailable for your current access. Signing in or verifying your character does not guarantee access.`
+        ? `${help?.purpose ?? "Administrator access is restricted."} Restricted for your current access. Open to see access requirements.`
         : `${help?.purpose ?? "Open this page."} ${help?.nextAction ?? "Continue with an available action."}`,
     };
   });
 }
 
 export function activatePagePaletteCommand(command: PagePaletteCommand | undefined, onNavigate: (panel: ActivePanel) => void) {
-  if (!command || command.locked) return false;
+  if (!command) return false;
   onNavigate(command.panel);
   return true;
 }

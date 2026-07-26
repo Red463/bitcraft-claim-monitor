@@ -67,8 +67,9 @@ test("route shell restores history and announces explicit route changes", () => 
 });
 
 test("sidebar and command palette consume the same effective page access", () => {
-  assert.match(appShell, /const visibleNavigationItems = React\.useMemo\(\(\) => NAV\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);
-  assert.match(appShell, /<CommandPalette navItems=\{visibleNavigationItems\} access=\{effectiveAccess\}/);
+  assert.match(appShell, /<CommandPalette adminAuthenticated=\{Boolean\(adminAuth\.authenticated\)\} access=\{effectiveAccess\}/);
+  assert.match(commandPalette, /visiblePagePaletteItems\(NAV, adminAuthenticated\)/);
+  assert.match(commandPalette, /effectiveTargetAllowed\(access, targetIdForPage\(id\)\)/);
   assert.match(commandPalette, /effectiveTargetAllowed\(access, targetIdForTab\("market", tab\)\)/);
   assert.match(commandPalette, /allowedPages\.has\("members"\)/);
 });
@@ -93,8 +94,12 @@ test("dedicated legal routes set their titles from an effect", () => {
   assert.match(appShell, /return <DedicatedLegalPage type=\{type\} \/>/);
 });
 
-test("sidebar destinations preserve routing, access filtering, and active-route semantics", () => {
-  assert.match(appShell, /group\.items\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);
+test("sidebar destinations keep restricted public pages discoverable and preserve active-route semantics", () => {
+  assert.doesNotMatch(appShell, /group\.items\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);
+  assert.match(appShell, /const restricted = !isPageAllowed\(id\)/);
+  assert.match(appShell, /className=\{\[`nav-destination`/);
+  assert.match(appShell, /aria-label=\{restricted \? `\$\{label\} — restricted` : label\}/);
+  assert.match(appShell, /<LockKeyhole className="nav-access-lock"/);
   assert.match(appShell, /href=\{panelHref\(id\)\}/);
   assert.match(appShell, /aria-current=\{active === id \? "page" : undefined\}/);
 });
@@ -124,7 +129,7 @@ test("narrow navigation exposes an accessible grouped drawer", () => {
   assert.equal(openClass, "mobile-open");
   assert.match(shellCss, new RegExp(`\\.app-sidebar\\.${openClass}\\s*\\{[^}]*transform:\\s*translateX\\(0\\)`, "s"));
   assert.match(appShell, /NAV_GROUPS\.map\(\(group\) =>/);
-  assert.match(appShell, /group\.items\.filter\(\(\[id\]\) => isPageAllowed\(id\)\)/);
+  assert.match(appShell, /group\.items\.map\(\(\[id, label, Icon\]\) =>/);
 });
 
 test("closed narrow drawer is hidden from accessibility and keyboard navigation without disabling desktop sidebar", () => {
@@ -145,6 +150,13 @@ test("ordinary route activation navigates before closing the mobile drawer", () 
   assert.match(appShell, /if \(event\.button !== 0 \|\| event\.metaKey \|\| event\.ctrlKey \|\| event\.shiftKey \|\| event\.altKey\) return;/);
 });
 
+test("restricted navigation has distinct expanded, collapsed, and mobile styling without relying on colour alone", () => {
+  assert.match(shellCss, /\.nav-destination\.is-restricted/);
+  assert.match(shellCss, /\.nav-access-lock/);
+  assert.match(shellCss, /\.sidebar-collapsed nav a \.nav-access-lock/);
+  assert.match(shellCss, /@media \(max-width: 920px\)[\s\S]*?\.nav-access-lock/);
+});
+
 test("route links expose collapsed labels while route changes retain scroll orientation", () => {
   assert.match(appShell, /<span className="nav-label">\{label\}<\/span>\s*<span className="collapsed-nav-label" aria-hidden="true">\{label\}<\/span>/);
   assert.match(appShell, /if \(mainRef\.current\) mainRef\.current\.scrollTop = 0;/);
@@ -153,8 +165,8 @@ test("route links expose collapsed labels while route changes retain scroll orie
 
 test("collapsed route tooltip is rendered outside the scrolling sidebar", () => {
   assert.match(appShell, /const \[collapsedNavTooltip, setCollapsedNavTooltip\] = React\.useState/);
-  assert.match(appShell, /onMouseEnter=\{\(event\) => showCollapsedNavTooltip\(event\.currentTarget, label\)\}/);
-  assert.match(appShell, /onFocus=\{\(event\) => showCollapsedNavTooltip\(event\.currentTarget, label\)\}/);
+  assert.match(appShell, /onMouseEnter=\{\(event\) => showCollapsedNavTooltip\(event\.currentTarget, accessibleLabel\)\}/);
+  assert.match(appShell, /onFocus=\{\(event\) => showCollapsedNavTooltip\(event\.currentTarget, accessibleLabel\)\}/);
   assert.match(appShell, /<\/aside>\s*\{collapsedNavTooltip \? <span className="collapsed-nav-tooltip"/);
   assert.match(appShell, /aria-hidden="true"/);
 });

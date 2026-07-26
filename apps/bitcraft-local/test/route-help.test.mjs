@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activatePagePaletteCommand, buildPagePaletteCommands } from "../src/navigation/paletteCommands.ts";
+import * as paletteCommands from "../src/navigation/paletteCommands.ts";
 import { ROUTE_HELP, routeHelpFor } from "../src/navigation/routeHelp.ts";
 
+const { activatePagePaletteCommand, buildPagePaletteCommands } = paletteCommands;
+const visiblePagePaletteItems = paletteCommands.visiblePagePaletteItems ?? (() => []);
 const routeIds = Object.keys(ROUTE_HELP);
 const navItems = routeIds.map((id) => [id, id, null]);
 
@@ -21,15 +23,25 @@ test("active route selects its own contextual help", () => {
   });
 });
 
-test("palette page commands are contextual and locked commands cannot activate", () => {
+test("palette page commands are contextual and restricted commands open their access explanation", () => {
   const commands = buildPagePaletteCommands(navItems, new Set(["dashboard"]));
   const dashboard = commands.find((command) => command.panel === "dashboard");
   const planning = commands.find((command) => command.panel === "planning");
   const activated = [];
   assert.match(dashboard.description, /Scan current settlement attention signals/);
-  assert.equal(activatePagePaletteCommand(planning, (panel) => activated.push(panel)), false);
-  assert.deepEqual(activated, []);
-  assert.match(planning.description, /does not guarantee access/);
+  assert.equal(activatePagePaletteCommand(planning, (panel) => activated.push(panel)), true);
+  assert.deepEqual(activated, ["planning"]);
+  assert.match(planning.description, /Open to see access requirements/);
   assert.equal(activatePagePaletteCommand(dashboard, (panel) => activated.push(panel)), true);
-  assert.deepEqual(activated, ["dashboard"]);
+  assert.deepEqual(activated, ["planning", "dashboard"]);
+});
+
+test("page palette candidates hide Admin unless the administrator session is authenticated", () => {
+  const candidates = [
+    ["admin", "Admin", null],
+    ["dashboard", "Dashboard", null],
+  ];
+
+  assert.deepEqual(visiblePagePaletteItems(candidates, false).map(([id]) => id), ["dashboard"]);
+  assert.deepEqual(visiblePagePaletteItems(candidates, true).map(([id]) => id), ["admin", "dashboard"]);
 });

@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.48.0-beta.1] - 2026-07-27
+
+### Added
+
+- Added lock indicators and tailored access guidance for navigation destinations that require sign-in, character verification, administrator approval, or allow-list access.
+
+### Changed
+
+- Restricted non-admin pages now remain discoverable in desktop, collapsed, mobile, and Quick Navigation menus while continuing to open the protected access explanation instead of page content.
+- Quick Navigation now shows the Admin destination only to authenticated administrators.
+
 ## [0.47.1-beta.2] - 2026-07-26
 
 ### Changed
