@@ -34,6 +34,8 @@ Extend `DataTableColumn` with an optional fourth tuple member, `sortable`, which
 
 Each converted market table supplies an explicit raw `sortValue` for every sortable column. This avoids relying on rendered text from badges, icons, nested labels, compact currency strings, or location sublabels.
 
+Add optional `rowOffset` and `rowLimit` inputs to `DataTable`. Sorting always runs across the complete supplied row set before this display window is applied. Browse supplies its full filtered order book plus the current pagination window, so a header sort affects every matching order rather than only the current 25 rows.
+
 The existing Deals and Browse sort dropdowns become redundant once all columns are directly sortable and will be removed. Their current initial behavior remains:
 
 - Deals initially orders by highest unit profit.
@@ -111,7 +113,7 @@ The same table definition handles sell and buy modes while updating the player h
 
 No API or database changes are required.
 
-`DataTable` retains its local active column and direction. The rows supplied by each market component retain their existing initial order so clearing a header sort restores the current default.
+`DataTable` retains its local active column and direction. The rows supplied by each market component retain their existing initial order so clearing a header sort restores the current default. When a display window is configured, it is applied after sorting.
 
 Explicit sort values preserve item/cargo identity by using the normalized display name only for ordering; row keys, item actions, and map actions continue using their existing typed records.
 
@@ -131,6 +133,7 @@ Add focused tests that fail before implementation and cover:
 - Map columns are declared non-sortable.
 - Deals and Browse no longer render redundant sort dropdowns.
 - `DataTable` renders non-sortable columns without a sort button or `aria-sort`.
+- Browse sorting is applied before the current 25-row pagination window.
 - Existing table-sort utility tests continue to cover numeric, text, and date ordering.
 
 Run:
