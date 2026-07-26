@@ -6,7 +6,7 @@ import { manualRefreshApplies, manualRefreshHeaders } from "../refresh/manualRef
 import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
-import { marketEndpointMap } from "./bitjitaEndpoints.mjs";
+import { marketEndpointMap } from "./bitjitaEndpoints.ts";
 
 /*
  * BitJita data loader for the public app pages.

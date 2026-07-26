@@ -1,4 +1,6 @@
-export function marketEndpointMap(claimId, activePanel) {
+import type { ActivePanel } from "../types/app.ts";
+
+export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
   const endpoints = {
     claim: `/claims/${claimId}`,
     members: `/claims/${claimId}/members`,
@@ -12,12 +14,12 @@ export function marketEndpointMap(claimId, activePanel) {
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
     layout: `/claims/${claimId}/layout`,
     skills: "/skills",
-  };
+  } as const;
   if (!activePanel) return endpoints;
   if (activePanel === "activity" || activePanel === "admin" || activePanel === "planning") return {};
 
-  const keys = new Set(["claim", "members"]);
-  const add = (...nextKeys) => nextKeys.forEach((key) => keys.add(key));
+  const keys = new Set<keyof typeof endpoints>(["claim", "members"]);
+  const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
 
   switch (activePanel) {
     case "dashboard":

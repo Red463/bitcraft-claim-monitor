@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { marketEndpointMap } from "../src/api/bitjitaEndpoints.mjs";
+import { marketEndpointMap } from "../src/api/bitjitaEndpoints.ts";
 
 test("Settlement Market requests the monitored claim listing feed", () => {
   const endpoints = marketEndpointMap("claim-42", "settlement-market");
