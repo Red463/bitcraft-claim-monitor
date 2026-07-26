@@ -1,10 +1,10 @@
 import React from "react";
-import { Bell, Calculator, CircleDollarSign, Search, ShoppingBag, User } from "lucide-react";
+import { Bell, Calculator, CircleDollarSign, LockKeyhole, Search, ShoppingBag, User } from "lucide-react";
 import type { AnyRecord } from "../../main-app-data";
-import { NAV, type NavItem } from "../../navigation";
-import { activatePagePaletteCommand, buildPagePaletteCommands } from "../../navigation/paletteCommands";
+import { NAV } from "../../navigation";
+import { activatePagePaletteCommand, buildPagePaletteCommands, visiblePagePaletteItems } from "../../navigation/paletteCommands";
 import type { ActivePanel } from "../../types/app";
-import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../../access/accessControl.mjs";
+import { effectiveTargetAllowed, targetIdForPage, targetIdForTab, type EffectiveAccess } from "../../access/accessControl.mjs";
 import { Dialog } from "./Dialog";
 
 function memberName(member: AnyRecord): string {
@@ -12,14 +12,14 @@ function memberName(member: AnyRecord): string {
 }
 
 export function CommandPalette({
-  navItems,
+  adminAuthenticated,
   access,
   members,
   onClose,
   onNavigate,
   onSelectMember,
 }: {
-  navItems: readonly NavItem[];
+  adminAuthenticated: boolean;
   access?: EffectiveAccess | null;
   members: AnyRecord[];
   onClose: () => void;
@@ -29,14 +29,17 @@ export function CommandPalette({
   const [query, setQuery] = React.useState("");
   const searchRef = React.useRef<HTMLInputElement | null>(null);
   const q = query.toLowerCase().trim();
-  const allowedPages = new Set(navItems.map(([id]) => id));
+  const pageItems = visiblePagePaletteItems(NAV, adminAuthenticated);
+  const allowedPages = new Set<ActivePanel>(pageItems
+    .filter(([id]) => id === "admin" || effectiveTargetAllowed(access, targetIdForPage(id)))
+    .map(([id]) => id));
   const marketViewAllowed = (tab: "browse" | "deal-watch" | "buy-orders") => allowedPages.has("market") && effectiveTargetAllowed(access, targetIdForTab("market", tab));
   const commands = [
-    ...buildPagePaletteCommands(NAV, allowedPages).map((command) => {
+    ...buildPagePaletteCommands(pageItems, allowedPages).map((command) => {
       const Icon = command.icon;
       return {
         ...command,
-        icon: <Icon size={15} />,
+        icon: command.locked ? <LockKeyhole size={15} /> : <Icon size={15} />,
         allowed: true,
         run: () => activatePagePaletteCommand(command, onNavigate),
       };
@@ -67,7 +70,7 @@ export function CommandPalette({
         </label>
         <div>
           {commands.map((command) => (
-            <button key={command.key} aria-disabled={command.locked} onClick={() => { if (command.locked) return; command.run(); onClose(); }}>
+            <button key={command.key} data-restricted={command.locked || undefined} onClick={() => { if (command.run() !== false) onClose(); }}>
               {command.icon}
               <strong>{command.label}</strong>
               <span>{command.description}</span>

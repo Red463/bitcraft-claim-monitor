@@ -367,6 +367,11 @@ body:has(.admin-loading-panel) .floating-actions {
 .command-palette button:hover { background: var(--gold-dim); color: var(--gold); }
 .command-palette strong { color: var(--text); font-weight: 500; }
 .command-palette span { font-size: 12px; }
+.command-palette button[data-restricted="true"] { color: #9da6b3; background: rgba(255,255,255,.025); }
+.command-palette button[data-restricted="true"] svg { color: #c3ae6d; }
+.command-palette button[data-restricted="true"] strong { color: #cbd2dc; }
+.command-palette button[data-restricted="true"]:hover { color: #d8dee7; background: rgba(154,168,190,.1); }
+.command-palette button[data-restricted="true"]:hover svg { color: #e2ca80; }
 
 @media (max-width: 900px) {
   .cookie-banner, .cookie-actions { display: grid; }

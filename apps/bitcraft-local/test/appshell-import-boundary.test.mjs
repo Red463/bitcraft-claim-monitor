@@ -19,5 +19,6 @@ test("AppShell wires public access-control decisions into navigation and blocked
   assert.match(appShell, /effectiveTargetAllowed/);
   assert.match(appShell, /targetIdForPage/);
   assert.match(appShell, /RestrictedAccessState/);
-  assert.match(appShell, /visibleItems = group\.items\.filter/);
+  assert.doesNotMatch(appShell, /visibleItems = group\.items\.filter/);
+  assert.match(appShell, /const restricted = !isPageAllowed\(id\)/);
 });

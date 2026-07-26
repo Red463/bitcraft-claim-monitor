@@ -10,7 +10,7 @@ test("AppShell wires first-run tour manager and suppresses app popups while tour
   assert.match(appShell, /<FirstRunTourManager/);
   assert.match(appShell, /onNavigate=\{\(panel\) => navigate\(panel\)\}/);
   assert.match(appShell, /onVisibilityChange=\{setTourVisible\}/);
-  assert.doesNotMatch(appShell, /onOpenUserSettings=/);
+  assert.doesNotMatch(appShell, /<FirstRunTourManager[\s\S]*onOpenUserSettings=/);
   assert.doesNotMatch(appShell, /onCloseUserSettings=/);
   assert.match(appShell, /<FirstRunTourManager[\s\S]*enabled=\{[\s\S]*consent != null[\s\S]*replayToken=/);
   assert.match(appShell, /\{!tourVisible \? <ToastStack/);
@@ -51,12 +51,14 @@ test("tour replay waits for the shared modal coordinator to clear", () => {
   assert.doesNotMatch(manager, /if \(!enabled && !running\) return null;/);
 });
 
-test("command palette keeps locked public routes discoverable without promising access", () => {
+test("command palette keeps restricted public routes actionable while hiding unauthenticated Admin", () => {
   const palette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 
-  assert.match(palette, /buildPagePaletteCommands\(NAV, allowedPages\)/);
+  assert.match(palette, /visiblePagePaletteItems\(NAV, adminAuthenticated\)/);
+  assert.match(palette, /buildPagePaletteCommands\(pageItems, allowedPages\)/);
   assert.match(palette, /activatePagePaletteCommand\(command, onNavigate\)/);
-  assert.match(palette, /aria-disabled=\{command\.locked\}/);
+  assert.match(palette, /data-restricted=\{command\.locked \|\| undefined\}/);
+  assert.doesNotMatch(palette, /aria-disabled=\{command\.locked\}/);
 });
 
 test("tour card stacks above the spotlight dim layer", () => {
