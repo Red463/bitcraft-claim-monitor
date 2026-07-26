@@ -6,7 +6,7 @@ import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
-import { formatCompactNumber, formatNumber, timeAgo } from "../../utils/format";
+import { formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import { isMarketableItem } from "../../utils/items";
 import type { MapFocus } from "../map/mapUtils";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
@@ -214,17 +214,30 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
           <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option></select></label>
-          <label className="toggle-line"><input type="checkbox" checked={availableOnly} onChange={(event) => setAvailableOnly(event.target.checked)} /><span>Available only</span></label>
-          <label className="toggle-line"><input type="checkbox" checked={hasSell} onChange={(event) => setHasSell(event.target.checked)} /><span>Has sell</span></label>
-          <label className="toggle-line"><input type="checkbox" checked={hasBuy} onChange={(event) => setHasBuy(event.target.checked)} /><span>Has buy</span></label>
+          <div className="market-toggle-group">
+            <label className="toggle-line"><input type="checkbox" checked={availableOnly} onChange={(event) => setAvailableOnly(event.target.checked)} /><span>Available only</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={hasSell} onChange={(event) => setHasSell(event.target.checked)} /><span>Has sell</span></label>
+            <label className="toggle-line"><input type="checkbox" checked={hasBuy} onChange={(event) => setHasBuy(event.target.checked)} /><span>Has buy</span></label>
+          </div>
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
       {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>{mode === "buy" ? "Choose an item to inspect live demand" : "Search the global market catalog"}</strong><span>{mode === "buy" ? "Buy orders are loaded live after item selection; no monitored-settlement cache is used." : "Use the filters above, then select an item for live orders and completed-trade statistics."}</span></div> : (
         <div className="market-item-detail">
           <header>
-            <ItemIcon item={itemMetadata} />
-            <div><h3>{itemMetadata.name}</h3><span>{selectedKey?.itemType === "cargo" ? "Cargo" : "Item"} · {regionId ? `Region ${regionId}` : "All active regions"}</span><small>{toNumber(itemMetadata.tier) > 0 ? `Tier ${itemMetadata.tier} · ` : ""}{itemMetadata.rarityStr ?? itemMetadata.rarity ?? "Rarity unavailable"} · {itemMetadata.category ?? itemMetadata.tag ?? "Category unavailable"}</small></div>
+            <div className="market-item-identity">
+              <ItemIcon item={itemMetadata} />
+              <div>
+                <h2>{itemMetadata.name}</h2>
+                <div className="market-item-meta">
+                  <span>{selectedKey?.itemType === "cargo" ? "Cargo" : "Item"}</span>
+                  <span>{regionId ? `Region ${regionId}` : "All active regions"}</span>
+                  {toNumber(itemMetadata.tier) > 0 ? <span>Tier {itemMetadata.tier}</span> : null}
+                  <span>{itemMetadata.rarityStr ?? itemMetadata.rarity ?? "Rarity unavailable"}</span>
+                  <span>{itemMetadata.category ?? itemMetadata.tag ?? "Category unavailable"}</span>
+                </div>
+              </div>
+            </div>
             <button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Favorited" : "Favorite"}</button>
           </header>
           {detailState.error ? <div className="error">Unable to load this market: {detailState.error}</div> : null}
@@ -253,7 +266,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
             </div>
             <div className="table-wrap" tabIndex={0} aria-label={`${orderTab} market orders table`}>
               <table><thead><tr><th>Price</th><th>Quantity</th><th>Total</th><th>Region</th><th>Settlement</th><th>{orderTab === "buy" ? "Buyer" : "Seller"}</th><th>Map</th></tr></thead>
-                <tbody>{visibleOrders.map((order) => <tr key={order.orderKey}><td>{formatNumber(order.unitPrice)}g</td><td>{formatNumber(order.quantity)}</td><td>{formatCompactNumber(order.unitPrice * order.quantity)}g</td><td>{order.regionName || (order.regionId ? `R${order.regionId}` : "—")}</td><td>{order.claimName || "Unknown settlement"}</td><td>{order.ownerName || "—"}</td><td>{order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX!, locationZ: order.locationZ! }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—"}</td></tr>)}</tbody>
+                <tbody>{visibleOrders.map((order) => <tr key={order.orderKey}><td>{formatGoldAmount(order.unitPrice)}</td><td>{formatNumber(order.quantity)}</td><td>{formatGoldAmount(order.unitPrice * order.quantity)}</td><td>{order.regionName || (order.regionId ? `R${order.regionId}` : "—")}</td><td>{order.claimName || "Unknown settlement"}</td><td>{order.ownerName || "—"}</td><td>{order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX!, locationZ: order.locationZ! }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—"}</td></tr>)}</tbody>
               </table>
               {!visibleOrders.length ? <div className="empty-state">No {orderTab} orders match these filters.</div> : null}
             </div>

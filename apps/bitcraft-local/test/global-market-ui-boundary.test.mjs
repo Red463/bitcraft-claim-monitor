@@ -29,3 +29,25 @@ test("stall cards show coordinates and item detail shows metadata plus order cou
   assert.match(browse, /label="Sell Orders" value=\{formatNumber\(sells\.length\)\}/);
   assert.match(browse, /label="Buy Orders" value=\{formatNumber\(buys\.length\)\}/);
 });
+
+test("global market money and locations use the shared legible presentation", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+
+  assert.match(overview, /formatGoldAmount\(deal\.buyPrice\)/);
+  assert.match(overview, /className="market-price-location"/);
+  assert.match(deals, /formatGoldAmount\(totalPotential\)/);
+  assert.match(deals, /className="market-price-location"/);
+  assert.match(browse, /formatGoldAmount\(order\.unitPrice \* order\.quantity\)/);
+  assert.doesNotMatch(overview, /formatCompactNumber\(row\.totalValue\)\}g/);
+  assert.doesNotMatch(deals, /formatCompactNumber\(totalPotential\)\}g/);
+});
+
+test("Browse groups availability controls and separates item identity metadata", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+
+  assert.match(browse, /className="market-toggle-group"/);
+  assert.match(browse, /className="market-item-identity"/);
+  assert.match(browse, /className="market-item-meta"/);
+});
