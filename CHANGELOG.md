@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.47.1-beta.1] - 2026-07-26
+
+### Changed
+
+- Improved the Global Market layout for faster scanning across desktop, tablet, and mobile screens.
+- Clarified item metadata, deal locations, Deal Watch details, and market loading and empty states.
+
+### Fixed
+
+- Fixed Settlement Market showing no live listings after the global and settlement market split.
+- Fixed abbreviated global market values displaying a misleading `Kg` suffix.
+
 ## [0.47.0-beta.1] - 2026-07-26
 
 ### Added
