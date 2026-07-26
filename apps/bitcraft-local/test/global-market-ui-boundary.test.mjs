@@ -16,7 +16,10 @@ test("global market map handoffs write the canonical region and coordinate param
 
 test("Deals shows available, wanted, and maximum tradable quantities", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
-  assert.match(deals, /<th>Available<\/th><th>Wanted<\/th><th>Max trade<\/th>/);
+
+  assert.match(deals, /\["Available"/);
+  assert.match(deals, /\["Wanted"/);
+  assert.match(deals, /\["Max trade"/);
   assert.match(deals, /formatNumber\(deal\.buyQuantity\)/);
   assert.match(deals, /formatNumber\(deal\.sellQuantity\)/);
 });
@@ -52,6 +55,17 @@ test("Overview top deals uses explicit sortable values and a static Map column",
   assert.match(overview, /\["Buy at",[\s\S]*toNumber\(deal\.buyPrice\)/);
   assert.match(overview, /\["Profit",[\s\S]*toNumber\(deal\.profit \?\? deal\.profitPerUnit\)/);
   assert.match(overview, /\["Map",[\s\S]*undefined,\s*false\]/);
+});
+
+test("Deals sorts every data column from raw values and keeps Map static", () => {
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+
+  assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
+  assert.match(deals, /\["Available",[\s\S]*toNumber\(deal\.buyQuantity\)/);
+  assert.match(deals, /\["Wanted",[\s\S]*toNumber\(deal\.sellQuantity\)/);
+  assert.match(deals, /\["Gain",[\s\S]*percent/);
+  assert.match(deals, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.doesNotMatch(deals, /<span>Sort<\/span>/);
 });
 
 test("Browse groups availability controls and separates item identity metadata", () => {

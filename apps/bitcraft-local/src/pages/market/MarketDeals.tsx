@@ -1,6 +1,7 @@
 import React from "react";
 import { MapPin, Route, TrendingUp } from "lucide-react";
 
+import { DataTable } from "../../components/main/DataTable";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
@@ -18,7 +19,6 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
   const [minimumProfit, setMinimumProfit] = React.useState("0");
   const [maximumProfit, setMaximumProfit] = React.useState("");
   const [maximumDistance, setMaximumDistance] = React.useState("");
-  const [sort, setSort] = React.useState<"profit" | "percent" | "distance" | "quantity">("profit");
 
   React.useEffect(() => setRegions(sharedRegionId ? [sharedRegionId] : []), [sharedRegionId]);
   React.useEffect(() => {
@@ -46,12 +46,9 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
     if (maximumProfit && percent > toNumber(maximumProfit)) return false;
     if (maximumDistance && distance > toNumber(maximumDistance)) return false;
     return true;
-  }).sort((a, b) => {
-    if (sort === "percent") return toNumber(b.profitPercent ?? b.gainPercent) - toNumber(a.profitPercent ?? a.gainPercent);
-    if (sort === "distance") return toNumber(a.distance) - toNumber(b.distance);
-    if (sort === "quantity") return toNumber(b.maxQuantity ?? b.maxTrade ?? b.tradeQuantity) - toNumber(a.maxQuantity ?? a.maxTrade ?? a.tradeQuantity);
-    return toNumber(b.profit ?? b.profitPerUnit) - toNumber(a.profit ?? a.profitPerUnit);
-  }), [maximumDistance, maximumProfit, minimumProfit, minimumQuantity, regions, sort, state.rows]);
+  }).sort(
+    (a, b) => toNumber(b.profit ?? b.profitPerUnit) - toNumber(a.profit ?? a.profitPerUnit),
+  ), [maximumDistance, maximumProfit, minimumProfit, minimumQuantity, regions, state.rows]);
   const topProfit = rows.reduce((best, row) => Math.max(best, toNumber(row.profit ?? row.profitPerUnit)), 0);
   const totalPotential = rows.reduce((total, row) => total + toNumber(row.profit ?? row.profitPerUnit) * toNumber(row.maxQuantity ?? row.maxTrade ?? row.tradeQuantity), 0);
 
@@ -62,7 +59,6 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
         <label className="field"><span>Minimum profit %</span><input type="number" value={minimumProfit} onChange={(event) => setMinimumProfit(event.target.value)} /></label>
         <label className="field"><span>Maximum profit %</span><input type="number" placeholder="No maximum" value={maximumProfit} onChange={(event) => setMaximumProfit(event.target.value)} /></label>
         <label className="field"><span>Maximum distance</span><input type="number" placeholder="Any distance" value={maximumDistance} onChange={(event) => setMaximumDistance(event.target.value)} /></label>
-        <label className="field"><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="profit">Unit profit</option><option value="percent">Profit %</option><option value="quantity">Trade quantity</option><option value="distance">Distance</option></select></label>
       </div>
       <div className="market-region-pills" aria-label="Deal regions">
         <button className={!regions.length ? "active" : ""} onClick={() => setRegions([])}>All active regions</button>
@@ -70,24 +66,36 @@ export function MarketDeals({ sharedRegionId, activeRegions, onShowMap, refreshS
       </div>
       {state.error ? <div className="error">Deals unavailable: {state.error}</div> : null}
       <div className="metric-grid market-deal-summary"><MiniStat icon={<TrendingUp />} label="Matching Deals" value={formatNumber(rows.length)} /><MiniStat icon={<TrendingUp />} label="Best Unit Profit" value={formatGoldAmount(topProfit)} /><MiniStat icon={<TrendingUp />} label="Visible Potential" value={formatGoldAmount(totalPotential)} /></div>
-      <div className="table-wrap" tabIndex={0} aria-label="Global market deals table">
-        <table><thead><tr><th>Item</th><th>Buy at</th><th>Sell at</th><th>Available</th><th>Wanted</th><th>Max trade</th><th>Unit profit</th><th>Gain</th><th>Distance</th><th>Map</th></tr></thead>
-          <tbody>{rows.slice(0, 250).map((deal) => {
+      <DataTable
+        rows={rows}
+        rowLimit={250}
+        columns={[
+          ["Item", (deal) => <ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} />, (deal) => String(deal.itemName ?? "")],
+          ["Buy at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => toNumber(deal.buyPrice)],
+          ["Sell at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => toNumber(deal.sellPrice)],
+          ["Available", (deal) => formatNumber(deal.buyQuantity), (deal) => toNumber(deal.buyQuantity)],
+          ["Wanted", (deal) => formatNumber(deal.sellQuantity), (deal) => toNumber(deal.sellQuantity)],
+          ["Max trade", (deal) => formatNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity ?? Math.min(toNumber(deal.buyQuantity), toNumber(deal.sellQuantity))), (deal) => toNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity ?? Math.min(toNumber(deal.buyQuantity), toNumber(deal.sellQuantity)))],
+          ["Unit profit", (deal) => {
+            const profit = toNumber(deal.profit ?? deal.profitPerUnit ?? toNumber(deal.sellPrice) - toNumber(deal.buyPrice));
+            return <span className="positive">{formatGoldAmount(profit)}</span>;
+          }, (deal) => toNumber(deal.profit ?? deal.profitPerUnit ?? toNumber(deal.sellPrice) - toNumber(deal.buyPrice))],
+          ["Gain", (deal) => {
             const profit = toNumber(deal.profit ?? deal.profitPerUnit ?? toNumber(deal.sellPrice) - toNumber(deal.buyPrice));
             const percent = toNumber(deal.profitPercent ?? deal.gainPercent ?? (toNumber(deal.buyPrice) ? (profit / toNumber(deal.buyPrice)) * 100 : 0));
-            const maxTrade = toNumber(deal.maxQuantity ?? deal.maxTrade ?? deal.tradeQuantity ?? Math.min(toNumber(deal.buyQuantity), toNumber(deal.sellQuantity)));
-            return <tr key={String(deal.id ?? `${deal.itemType}:${deal.itemId}:${deal.buyLocationId}:${deal.sellLocationId}`)}>
-              <td><ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} /></td>
-              <td><span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span></td>
-              <td><span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span></td>
-              <td>{formatNumber(deal.buyQuantity)}</td><td>{formatNumber(deal.sellQuantity)}</td>
-              <td>{formatNumber(maxTrade)}</td><td className="positive">{formatGoldAmount(profit)}</td><td className="positive">{formatNumber(percent)}%</td><td>{formatCompactNumber(deal.distance)}</td>
-              <td><div className="market-map-actions">{toNumber(deal.buyLocationX) || toNumber(deal.buyLocationZ) ? <button className="icon-button" title="Show buy location" onClick={() => onShowMap({ name: String(deal.buyLocation ?? "Buy market"), locationX: toNumber(deal.buyLocationX), locationZ: toNumber(deal.buyLocationZ) }, String(deal.buyRegionId ?? ""))}><MapPin size={14} /></button> : null}{toNumber(deal.sellLocationX) || toNumber(deal.sellLocationZ) ? <button className="icon-button" title="Show sell location" onClick={() => onShowMap({ name: String(deal.sellLocation ?? "Sell market"), locationX: toNumber(deal.sellLocationX), locationZ: toNumber(deal.sellLocationZ) }, String(deal.sellRegionId ?? ""))}><Route size={14} /></button> : null}</div></td>
-            </tr>;
-          })}</tbody>
-        </table>
-        {!rows.length ? <div className="empty-state">{state.loading ? "Loading current arbitrage routes…" : "No deals match these route filters."}</div> : null}
-      </div>
+            return <span className="positive">{formatNumber(percent)}%</span>;
+          }, (deal) => {
+            const profit = toNumber(deal.profit ?? deal.profitPerUnit ?? toNumber(deal.sellPrice) - toNumber(deal.buyPrice));
+            const percent = toNumber(deal.profitPercent ?? deal.gainPercent ?? (toNumber(deal.buyPrice) ? (profit / toNumber(deal.buyPrice)) * 100 : 0));
+            return percent;
+          }],
+          ["Distance", (deal) => formatCompactNumber(deal.distance), (deal) => toNumber(deal.distance)],
+          ["Map", (deal) => <div className="market-map-actions">{toNumber(deal.buyLocationX) || toNumber(deal.buyLocationZ) ? <button className="icon-button" title="Show buy location" onClick={() => onShowMap({ name: String(deal.buyLocation ?? "Buy market"), locationX: toNumber(deal.buyLocationX), locationZ: toNumber(deal.buyLocationZ) }, String(deal.buyRegionId ?? ""))}><MapPin size={14} /></button> : null}{toNumber(deal.sellLocationX) || toNumber(deal.sellLocationZ) ? <button className="icon-button" title="Show sell location" onClick={() => onShowMap({ name: String(deal.sellLocation ?? "Sell market"), locationX: toNumber(deal.sellLocationX), locationZ: toNumber(deal.sellLocationZ) }, String(deal.sellRegionId ?? ""))}><Route size={14} /></button> : null}</div>, undefined, false],
+        ]}
+        emptyState={state.loading ? "Loading current arbitrage routes…" : "No deals match these route filters."}
+        emptyKind="no-match"
+        scrollLabel="Global market deals table"
+      />
       {state.updatedAt ? <p className="legend">Deal data loaded {new Date(state.updatedAt).toLocaleTimeString()}.</p> : null}
     </section>
   );
