@@ -6,6 +6,7 @@ import { manualRefreshApplies, manualRefreshHeaders } from "../refresh/manualRef
 import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
+import { marketEndpointMap } from "./bitjitaEndpoints.mjs";
 
 /*
  * BitJita data loader for the public app pages.
@@ -60,67 +61,6 @@ function fallbackPlayerFromMember(member: AnyRecord, error: string): AnyRecord {
     detailAvailable: false,
     detailError: error,
   });
-}
-
-function endpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
-  // These are the core BitJita endpoints the app understands. Each page below
-  // opts into only the domains it needs so switching tabs does not fan out every
-  // possible claim request.
-  const endpoints = {
-    claim: `/claims/${claimId}`,
-    members: `/claims/${claimId}/members`,
-    citizens: `/claims/${claimId}/citizens`,
-    buildings: `/claims/${claimId}/buildings`,
-    inventories: `/claims/${claimId}/inventories`,
-    construction: `/claims/${claimId}/construction`,
-    research: `/claims/${claimId}/research`,
-    recruitment: `/claims/${claimId}/recruitment`,
-    market: `/claims/${claimId}/market/listings?limit=200`,
-    crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
-    layout: `/claims/${claimId}/layout`,
-    skills: `/skills`,
-  } as const;
-  if (!activePanel) return endpoints;
-  if (activePanel === "activity" || activePanel === "admin" || activePanel === "planning") return {};
-
-  const keys = new Set<keyof typeof endpoints>(["claim", "members"]);
-  const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
-
-  switch (activePanel) {
-    case "dashboard":
-      add("citizens", "buildings", "construction", "research", "market");
-      break;
-    case "members":
-      add("citizens");
-      break;
-    case "skills":
-      add("citizens", "skills");
-      break;
-    case "production":
-      add("citizens", "crafts");
-      break;
-    case "leaderboard":
-      add("citizens", "skills");
-      break;
-    case "inventory":
-      add("inventories");
-      break;
-    case "construction":
-      add("construction", "inventories");
-      break;
-    case "research":
-      add("research");
-      break;
-    case "market":
-      add("market");
-      break;
-    case "empires":
-      break;
-    default:
-      break;
-  }
-
-  return Object.fromEntries([...keys].map((key) => [key, endpoints[key]]));
 }
 
 const PAGE_NAVIGATION_CACHE_TTL_MS = 20_000;
@@ -182,7 +122,7 @@ export function useBitjitaData(
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
-        const requestedEndpoints = endpointMap(claimId, activePanel);
+        const requestedEndpoints = marketEndpointMap(claimId, activePanel);
         if (Object.keys(requestedEndpoints).length === 0) {
           if (!cancelled) React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
           return;

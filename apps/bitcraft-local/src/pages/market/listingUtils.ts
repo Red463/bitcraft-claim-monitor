@@ -34,3 +34,30 @@ export function liveDaysSince(value: unknown): string {
   const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
   return days === 0 ? "<1 day" : `${days} day${days === 1 ? "" : "s"}`;
 }
+
+type SettlementListingState = {
+  kind: "loading" | "empty" | "no-match" | "error";
+  title: string;
+  detail?: string;
+};
+
+export function settlementListingState({
+  loading,
+  error,
+  totalListings,
+  visibleListings,
+}: {
+  loading: boolean;
+  error: unknown;
+  totalListings: number;
+  visibleListings: number;
+}): SettlementListingState | null {
+  const errorMessage = String(error ?? "").trim();
+  if (errorMessage && totalListings === 0) {
+    return { kind: "error", title: "Unable to load live listings", detail: errorMessage };
+  }
+  if (loading && totalListings === 0) return { kind: "loading", title: "Loading live listings…" };
+  if (totalListings === 0) return { kind: "empty", title: "This settlement has no live listings." };
+  if (visibleListings === 0) return { kind: "no-match", title: "No listings match the current filters." };
+  return null;
+}
