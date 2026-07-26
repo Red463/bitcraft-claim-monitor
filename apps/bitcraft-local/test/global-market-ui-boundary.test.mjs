@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+function source(path) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
+test("global market map handoffs write the canonical region and coordinate parameters", () => {
+  const appShell = source("../src/AppShell.tsx");
+  assert.match(appShell, /label: activeMapFocus\?\.name/);
+  assert.match(appShell, /x: activeMapFocus \? String\(activeMapFocus\.locationX\)/);
+  assert.match(appShell, /z: activeMapFocus \? String\(activeMapFocus\.locationZ\)/);
+  assert.match(appShell, /regionId: panel === "map" \? activeMapFocus\?\.regionId/);
+});
+
+test("Deals shows available, wanted, and maximum tradable quantities", () => {
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+  assert.match(deals, /<th>Available<\/th><th>Wanted<\/th><th>Max trade<\/th>/);
+  assert.match(deals, /formatNumber\(deal\.buyQuantity\)/);
+  assert.match(deals, /formatNumber\(deal\.sellQuantity\)/);
+});
+
+test("stall cards show coordinates and item detail shows metadata plus order counts", () => {
+  const stalls = source("../src/pages/market/MarketStalls.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  assert.match(stalls, /X \$\{formatNumber\(stall\.locationX\)\}, Z \$\{formatNumber\(stall\.locationZ\)\}/);
+  assert.match(browse, /itemMetadata\.category \?\? itemMetadata\.tag/);
+  assert.match(browse, /label="Sell Orders" value=\{formatNumber\(sells\.length\)\}/);
+  assert.match(browse, /label="Buy Orders" value=\{formatNumber\(buys\.length\)\}/);
+});

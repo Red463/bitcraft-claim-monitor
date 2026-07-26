@@ -45,11 +45,12 @@ test("route-state helpers distinguish explicit navigation from normalization", (
 
 test("Market tab locations canonicalize aliases and clean invalid values", () => {
   assert.equal(typeof routeStateModule.marketViewLocation, "function");
-  assert.deepEqual(routeStateModule.marketViewLocation("pricing"), { view: "pricing", canonicalTab: "pricing", shouldReplace: false });
-  assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { view: "buyOrders", canonicalTab: "buy-orders", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { view: "dealWatchlist", canonicalTab: "deal-watchlist", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { view: null, canonicalTab: null, shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation(null), { view: null, canonicalTab: null, shouldReplace: false });
+  assert.deepEqual(routeStateModule.marketViewLocation("pricing"), { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { page: "market", view: "buy-orders", canonicalTab: "buy-orders", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { page: "market", view: "deal-watch", canonicalTab: "deal-watch", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("live"), { page: "settlement-market", view: "live", canonicalTab: "live", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation(null), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
 });
 
 test("route shell restores history and announces explicit route changes", () => {

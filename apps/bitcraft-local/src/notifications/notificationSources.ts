@@ -35,6 +35,7 @@ export function marketActivityToastDraft(
     title: isListing ? "New market listing" : "Market sale",
     body: helpers.summary(event),
     kind: "market",
+    destination: "settlement-market",
     occurredAt: event.occurred_at ?? event.occurredAt,
     item,
     sourceKey: helpers.key(event),
@@ -243,6 +244,7 @@ export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
     title: "Market deal found",
     body: `${itemName}: ${price} at ${alert.marketClaimName ?? "a regional market"} (${discount}% below ${baseline})`,
     kind: "market",
+    destination: "market",
     item: {
       name: itemName,
       itemName,

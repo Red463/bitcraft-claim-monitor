@@ -13,6 +13,7 @@ export type ActivePanel =
   | "construction"
   | "research"
   | "market"
+  | "settlement-market"
   | "empire"
   | "empires"
   | "map"

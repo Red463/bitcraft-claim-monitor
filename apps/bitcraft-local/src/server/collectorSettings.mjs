@@ -13,7 +13,6 @@ export const domainCollectorDefaults = {
   construction: { label: "Construction", intervalSeconds: 60 },
   research: { label: "Research", intervalSeconds: 600 },
   market: { label: "Market", intervalSeconds: 60 },
-  buyOrders: { label: "Regional buy orders", intervalSeconds: 1800 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
   marketListings: { label: "Market listing sync", intervalSeconds: 60 },
@@ -34,7 +33,6 @@ export const collectorPrimaryPayloadDomain = {
   construction: "construction",
   research: "research",
   market: "market",
-  buyOrders: "regionalBuyOrders",
   region: "region",
   mapCatalog: "skills",
 };
@@ -56,7 +54,6 @@ export const payloadDomainCollector = {
   research: "research",
   market: "market",
   tradeVolume: "market",
-  regionalBuyOrders: "buyOrders",
   region: "region",
   regionStatus: "region",
 };
@@ -69,7 +66,6 @@ export function payloadDomainsForCollectors(collectorKeys = []) {
 export const collectorCurrentTables = {
   production: ["production_contributions"],
   market: ["market_listings", "market_trades"],
-  buyOrders: ["market_buy_orders_current", "market_regional_sale_averages_current"],
   mapCatalog: ["domain_payload_current"],
   marketListings: ["market_listings", "market_events", "market_trades"],
   productionContributions: ["production_jobs", "production_contributions"],

@@ -10,46 +10,59 @@ import { usePersistedState } from "../../hooks/usePersistedState";
 import { isMarketableItem } from "../../utils/items";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
+import type { MarketRefreshProps } from "./globalMarket";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
-export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitoredRegionId: string; onDiscordLogin: (returnTo?: string) => void }) {
-  const defaultRegion = monitoredRegionId || "19";
+export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+  monitoredRegionId: string;
+  onDiscordLogin: (returnTo?: string) => void;
+}) {
+  const defaultRegion = monitoredRegionId;
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
-  const activeRegions = useActiveRegions(defaultRegion);
+  const activeRegions = useActiveRegions();
   const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
-  const activeRegion = regionChoice === "All" ? defaultRegion : regionChoice;
+  const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => String(region.regionId))), [activeRegions]);
+  const activeRegion = activeRegionIds.has(regionChoice)
+    ? regionChoice
+    : activeRegionIds.has(defaultRegion)
+      ? defaultRegion
+      : String(activeRegions[0]?.regionId ?? "");
+
+  React.useEffect(() => {
+    if (activeRegion && regionChoice !== activeRegion) setRegionChoice(activeRegion);
+  }, [activeRegion, regionChoice, setRegionChoice]);
 
   const refreshDealWatches = React.useCallback(() => {
     const controller = new AbortController();
     setWatchState((current) => ({ ...current, error: null, loading: true }));
-    fetch(`${LOCAL_API}/market/deal-watches`, { signal: controller.signal })
+    trackRefresh("global-market-deal-watches", fetch(`${LOCAL_API}/market/deal-watches`, { headers: refreshHeaders, signal: controller.signal }))
       .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
       .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
       .catch((error) => {
         if (!controller.signal.aborted) setWatchState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
       });
     return () => controller.abort();
-  }, []);
+  }, [refreshSequence]);
 
   React.useEffect(() => {
     const controller = new AbortController();
-    fetch(`${LOCAL_API}/auth/me`, { signal: controller.signal })
+    trackRefresh("global-market-auth", fetch(`${LOCAL_API}/auth/me`, { headers: refreshHeaders, signal: controller.signal }))
       .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
       .then((payload) => setAuthState(payload ?? { user: null, discordLoginEnabled: false }))
       .catch(() => {
         if (!controller.signal.aborted) setAuthState({ user: null, discordLoginEnabled: false });
       });
     return () => controller.abort();
-  }, []);
+  }, [refreshSequence]);
 
   React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
 
@@ -67,10 +80,11 @@ export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitored
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchState("loading");
-      fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
+      trackRefresh("global-market-watch-search", fetch(`${API}/market?hasOrders=true`, { headers: refreshHeaders, signal: controller.signal }))
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
         .then((payload) => {
-          setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).slice(0, 8));
+          const queryToken = query.trim().toLowerCase();
+          setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).filter((item: AnyRecord) => String(item.name ?? item.itemName ?? "").toLowerCase().includes(queryToken)).slice(0, 8));
           setSearchState("idle");
         })
         .catch(() => {
@@ -84,7 +98,7 @@ export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitored
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query, selectedItem?.name]);
+  }, [query, refreshSequence, selectedItem?.name]);
 
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
@@ -222,7 +236,7 @@ export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitored
           </label>
         </div>
         {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
+          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : (
           <div className="toolbar-row">
             <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
@@ -237,7 +251,7 @@ export function DealWatchlist({ monitoredRegionId, onDiscordLogin }: { monitored
         <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
         {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
+          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : dealWatches.length ? (
           <div className="deal-watch-list">
             {dealWatches.map((watch) => (

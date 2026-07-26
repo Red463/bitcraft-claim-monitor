@@ -11,7 +11,6 @@ export const COLLECTOR_PURPOSES: Record<string, string> = {
   construction: "Records construction project and material-change history.",
   research: "Keeps research progress snapshots available for diagnostics and history.",
   market: "Tracks settlement market listings and market notification inputs.",
-  buyOrders: "Updates the cached regional buy-order finder data.",
   region: "Refreshes regional settlement comparison data and region status diagnostics.",
   mapCatalog: "Updates map resource/catalog metadata used by map tools.",
   empireMembership: "Records compact observed empire joins, confirmed departures, and rejoins without storing roster snapshots.",

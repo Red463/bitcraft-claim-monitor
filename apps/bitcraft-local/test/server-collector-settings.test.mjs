@@ -39,11 +39,12 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(collectorPrimaryPayloadDomain.production, "crafts");
   assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
   assert.equal(payloadDomainCollector.tradeVolume, "market");
-  assert.equal(payloadDomainCollector.regionalBuyOrders, "buyOrders");
+  assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
-  assert.deepEqual(collectorCurrentTables.buyOrders, ["market_buy_orders_current", "market_regional_sale_averages_current"]);
+  assert.equal(collectorCurrentTables.buyOrders, undefined);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "buyOrders"), false);
   assert.equal(Object.hasOwn(collectorCurrentTables, "snapshotHistory"), false);
 });
 

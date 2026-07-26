@@ -3,7 +3,7 @@ import type { ActivePanel } from "../types/app";
 export function localHistoryIncludeForPanel(activePanel: ActivePanel): string {
   return [
     "activity",
-    activePanel === "market" || activePanel === "dashboard" ? "market" : "",
+    activePanel === "settlement-market" || activePanel === "dashboard" ? "market" : "",
     activePanel === "dashboard" ? "dashboard" : "",
   ]
     .filter(Boolean)

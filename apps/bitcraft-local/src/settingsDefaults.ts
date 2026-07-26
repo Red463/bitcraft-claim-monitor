@@ -149,7 +149,6 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   construction: { label: "Construction", enabled: true, intervalSeconds: 60 },
   research: { label: "Research", enabled: true, intervalSeconds: 600 },
   market: { label: "Market", enabled: true, intervalSeconds: 60 },
-  buyOrders: { label: "Regional buy orders", enabled: true, intervalSeconds: 300 },
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
   marketListings: { label: "Market listing sync", enabled: true, intervalSeconds: 60 },

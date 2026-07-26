@@ -16,6 +16,7 @@ const PAGE_TARGETS = [
   ["construction", "Construction"],
   ["research", "Research"],
   ["market", "Market"],
+  ["settlement-market", "Settlement Market"],
   ["empire", "Region"],
   ["empires", "Empires"],
   ["map", "Map"],
@@ -27,11 +28,16 @@ const PAGE_TARGETS = [
 
 export const ACCESS_TAB_GROUPS = {
   market: [
+    { id: "overview", label: "Overview" },
+    { id: "browse", label: "Browse" },
+    { id: "deals", label: "Deals" },
+    { id: "buy-orders", label: "Buy Orders" },
+    { id: "deal-watch", label: "Deal Watch" },
+    { id: "stalls", label: "Stalls" },
+  ],
+  "settlement-market": [
     { id: "live", label: "Live Listings" },
     { id: "analytics", label: "Analytics" },
-    { id: "pricing", label: "Price Finder" },
-    { id: "buyOrders", label: "Buy Order Finder" },
-    { id: "dealWatchlist", label: "Deal Watchlist" },
   ],
   leaderboard: [
     { id: "contribution", label: "Contribution" },
@@ -96,6 +102,14 @@ export function normalizeAccessControlConfig(value) {
     if (mode !== "public" || allowedDiscordIds.length) rules[targetId] = { mode, allowedDiscordIds };
   }
   return { rules };
+}
+
+export function resetLegacyMarketAccessRules(value) {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawRules = raw.rules && typeof raw.rules === "object" && !Array.isArray(raw.rules) ? raw.rules : {};
+  return {
+    rules: Object.fromEntries(Object.entries(rawRules).filter(([targetId]) => targetId !== "page:market" && !targetId.startsWith("tab:market:"))),
+  };
 }
 
 export function accessRuleFor(config, targetId) {

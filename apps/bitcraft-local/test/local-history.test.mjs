@@ -7,6 +7,7 @@ test("dashboard local history includes market data for the income chart", () => 
   assert.equal(localHistoryIncludeForPanel("dashboard"), "activity,market,dashboard");
 });
 
-test("market local history keeps requesting the market history slice", () => {
-  assert.equal(localHistoryIncludeForPanel("market"), "activity,market");
+test("only Settlement Market requests the claim-scoped market history slice", () => {
+  assert.equal(localHistoryIncludeForPanel("market"), "activity");
+  assert.equal(localHistoryIncludeForPanel("settlement-market"), "activity,market");
 });
