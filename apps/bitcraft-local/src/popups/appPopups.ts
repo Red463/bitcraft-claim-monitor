@@ -8,13 +8,13 @@ export const POPUP_PAGE_OPTIONS = [
   ["leaderboard", "Leaderboard"],
   ["members", "Members"],
   ["skills", "Professions"],
-  ["production", "Production"],
+  ["craft-monitor", "Craft Monitor"],
   ["planning", "Craft Planning"],
   ["inventory", "Inventory"],
   ["construction", "Construction"],
   ["research", "Research"],
   ["market", "Market"],
-  ["empire", "Region"],
+  ["region", "Region"],
   ["empires", "Empires"],
   ["map", "Map"],
   ["activity", "Activity"],
@@ -26,6 +26,11 @@ export const POPUP_PAGE_OPTIONS = [
 export type PopupType = typeof POPUP_TYPES[number];
 export type PopupMode = typeof POPUP_MODES[number];
 export type PopupPage = typeof POPUP_PAGE_OPTIONS[number][0];
+
+const LEGACY_POPUP_PAGE_ALIASES: Readonly<Record<string, PopupPage>> = {
+  production: "craft-monitor",
+  empire: "region",
+};
 
 export type AppPopup = {
   id: string;
@@ -66,6 +71,10 @@ function isPopupMode(value: unknown): value is PopupMode {
 
 function isPopupPage(value: unknown): value is PopupPage {
   return POPUP_PAGE_OPTIONS.some(([page]) => page === value);
+}
+
+function canonicalPopupPage(value: unknown): unknown {
+  return LEGACY_POPUP_PAGE_ALIASES[String(value ?? "")] ?? value;
 }
 
 function popupText(value: unknown, maxLength: number) {
@@ -117,6 +126,7 @@ export function normalizePopupConfig(value: unknown, options: PopupNormalizeOpti
       const title = popupText(candidate.title, 120);
       const message = popupText(candidate.message, 2000);
       const expiresAt = popupDate(candidate.expiresAt);
+      const page = canonicalPopupPage(candidate.page);
       if (!id || !title || !message) return [];
       return [{
         id,
@@ -124,7 +134,7 @@ export function normalizePopupConfig(value: unknown, options: PopupNormalizeOpti
         message,
         type: isPopupType(candidate.type) ? candidate.type : "info",
         mode: isPopupMode(candidate.mode) ? candidate.mode : "oneTime",
-        page: isPopupPage(candidate.page) ? candidate.page : "any",
+        page: isPopupPage(page) ? page : "any",
         expiresAt,
         enabled: candidate.enabled === true && !popupExpired(expiresAt, options),
         updatedAt: popupText(candidate.updatedAt, 80),

@@ -93,7 +93,7 @@ export function claimNotificationSourceKey(sourceKey: string | undefined, option
   }
 }
 export function destinationForToastKind(kind: ToastKind): ActivePanel {
-  return kind === "market" ? "market" : "production";
+  return kind === "market" ? "market" : "craft-monitor";
 }
 
 export function createToastNotice(input: CreateToastNoticeInput): ToastNotice {

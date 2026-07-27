@@ -5,6 +5,7 @@ import {
   dismissalStateAfterAction,
   normalizePopupConfig,
   popupDismissalKey,
+  popupPageLabel,
   selectNextPopup,
 } from "../src/popups/appPopups.ts";
 
@@ -108,17 +109,21 @@ test("normalizePopupConfig defaults popup targeting and preserves valid expiry d
     popups: [
       { id: "old", title: "Old", message: "Any page", enabled: true, updatedAt: "v1" },
       { id: "prod", title: "Production", message: "Production only", enabled: true, page: "production", expiresAt: "2026-07-15", updatedAt: "v1" },
+      { id: "regional", title: "Region", message: "Region only", enabled: true, page: "empire", expiresAt: "2026-07-15", updatedAt: "v1" },
       { id: "bad", title: "Bad page", message: "Defaults", enabled: true, page: "unknown", expiresAt: "15/07/2026", updatedAt: "v1" },
     ],
   }, { today: "2026-07-14" });
 
   assert.equal(config.popups[0].page, "any");
   assert.equal(config.popups[0].expiresAt, "");
-  assert.equal(config.popups[1].page, "production");
+  assert.equal(config.popups[1].page, "craft-monitor");
   assert.equal(config.popups[1].expiresAt, "2026-07-15");
   assert.equal(config.popups[1].enabled, true);
-  assert.equal(config.popups[2].page, "any");
-  assert.equal(config.popups[2].expiresAt, "");
+  assert.equal(config.popups[2].page, "region");
+  assert.equal(config.popups[3].page, "any");
+  assert.equal(config.popups[3].expiresAt, "");
+  assert.equal(popupPageLabel("craft-monitor"), "Craft Monitor");
+  assert.equal(popupPageLabel("region"), "Region");
 });
 
 test("normalizePopupConfig disables expired popups without deleting them", () => {
@@ -142,6 +147,6 @@ test("selectNextPopup filters popups by active page", () => {
     ],
   });
 
-  assert.equal(selectNextPopup(config.popups, {}, { page: "production" })?.id, "production");
+  assert.equal(selectNextPopup(config.popups, {}, { page: "craft-monitor" })?.id, "production");
   assert.equal(selectNextPopup(config.popups, {}, { page: "inventory" })?.id, "any");
 });

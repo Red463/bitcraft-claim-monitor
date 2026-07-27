@@ -25,6 +25,24 @@ test("notification verification matrix covers every routed main app panel", () =
   assert.deepEqual(matrixPanels, navPanels);
 });
 
+test("notification verification uses canonical renamed page destinations", () => {
+  assert.ok(NOTIFICATION_MATRIX_PAGES.some((page) =>
+    page.panel === "craft-monitor" && page.label === "Craft Monitor" && page.path === "/?page=craft-monitor"
+  ));
+  assert.ok(NOTIFICATION_MATRIX_PAGES.some((page) =>
+    page.panel === "region" && page.label === "Region" && page.path === "/?page=region"
+  ));
+  assert.ok(NOTIFICATION_MATRIX_PAGES.some((page) =>
+    page.panel === "settlement-market" && page.label === "Local Market"
+  ));
+  assert.equal(
+    SUPPORTED_BROWSER_NOTIFICATION_TYPES
+      .filter((type) => type.id.startsWith("production-"))
+      .every((type) => type.expectedDestination === "craft-monitor"),
+    true,
+  );
+});
+
 test("notification verification matrix names every supported browser notification type", () => {
   assert.deepEqual(SUPPORTED_BROWSER_NOTIFICATION_TYPES.map((type) => type.id), [
     "market-listing",
@@ -200,7 +218,7 @@ test("notification smoke bridge installs only on loopback and pushes valid sampl
 
   assert.equal(pushed.length, 1);
   assert.equal(pushed[0].title, "Craft completed");
-  assert.equal(pushed[0].destination, "production");
+  assert.equal(pushed[0].destination, "craft-monitor");
   assert.equal(pushed[0].sourceKey.includes("smoke:production-completed:production-page"), true);
 
   cleanup();
