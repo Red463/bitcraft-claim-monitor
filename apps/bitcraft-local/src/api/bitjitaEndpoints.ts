@@ -31,7 +31,7 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
     case "skills":
       add("citizens", "skills");
       break;
-    case "production":
+    case "craft-monitor":
       add("citizens", "crafts");
       break;
     case "leaderboard":

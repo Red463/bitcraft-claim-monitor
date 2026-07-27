@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ActivePanel } from "./types/app";
-import { writeQueryLocation, type NavigationMode } from "./navigation/routeState.ts";
+import { canonicalPageId, writeQueryLocation, type NavigationMode } from "./navigation/routeState.ts";
 
 /*
  * Main app navigation model.
@@ -41,7 +41,7 @@ export const NAV_GROUPS = [
   { id: "settlement", label: "Settlement", items: [
     ["members", "Members", Users],
     ["skills", "Professions", GraduationCap],
-    ["production", "Production", Factory],
+    ["craft-monitor", "Production", Factory],
     ["planning", "Craft Planning", ClipboardList],
     ["inventory", "Inventory", Package],
     ["construction", "Construction", Hammer],
@@ -50,7 +50,7 @@ export const NAV_GROUPS = [
   ] },
   { id: "economy", label: "Economy & Region", items: [
     ["market", "Market", CircleDollarSign],
-    ["empire", "Region", Globe2],
+    ["region", "Region", Globe2],
     ["empires", "Empires", Landmark],
     ["map", "Map", MapIcon],
     ["activity", "Activity", Activity],
@@ -71,12 +71,13 @@ export const NAV: readonly NavItem[] = NAV_GROUPS.reduce<NavItem[]>((items, grou
 
 export const DEFAULT_SIDEBAR_GROUPS = Object.fromEntries(NAV_GROUPS.map((group) => [group.id, true])) as Record<string, boolean>;
 
+export function canonicalPanel(panel: string | null): ActivePanel | null {
+  const candidate = canonicalPageId(panel);
+  return NAV.some(([id]) => id === candidate) ? candidate as ActivePanel : null;
+}
+
 export function urlPanel(): ActivePanel | null {
-  const panel = new URLSearchParams(window.location.search).get("page");
-  // Legacy routes from earlier releases should land on the replacement dashboard
-  // instead of leaving users on a removed page.
-  if (panel === "buildings" || panel === "overview") return "dashboard";
-  return NAV.some(([id]) => id === panel) ? panel as ActivePanel : null;
+  return canonicalPanel(new URLSearchParams(window.location.search).get("page"));
 }
 
 export function updateQueryState(values: Record<string, string | null>, mode: NavigationMode = "replace") {

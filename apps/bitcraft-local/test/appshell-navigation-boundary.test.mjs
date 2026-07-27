@@ -32,15 +32,24 @@ test("route-state helpers distinguish explicit navigation from normalization", (
   };
   try {
     routeStateModule.writePageLocation("market", "push");
-    routeStateModule.writePageLocation("production", "replace");
+    routeStateModule.writePageLocation("craft-monitor", "replace");
   } finally {
     globalThis.window = originalWindow;
   }
 
   assert.deepEqual(calls, [
     ["push", "/?page=market&tab=live#status"],
-    ["replace", "/?page=production&tab=live#status"],
+    ["replace", "/?page=craft-monitor&tab=live#status"],
   ]);
+});
+
+test("legacy page IDs resolve to canonical page IDs", () => {
+  assert.equal(typeof routeStateModule.canonicalPageId, "function");
+  assert.equal(routeStateModule.canonicalPageId("production"), "craft-monitor");
+  assert.equal(routeStateModule.canonicalPageId("empire"), "region");
+  assert.equal(routeStateModule.canonicalPageId("craft-monitor"), "craft-monitor");
+  assert.equal(routeStateModule.canonicalPageId("region"), "region");
+  assert.equal(routeStateModule.canonicalPageId(null), null);
 });
 
 test("Market tab locations canonicalize aliases and clean invalid values", () => {
@@ -110,8 +119,8 @@ test("navigation retains existing groups and non-admin route IDs", () => {
   }
 
   for (const routeId of [
-    "dashboard", "leaderboard", "members", "skills", "production", "planning",
-    "inventory", "construction", "research", "market", "empire", "empires",
+    "dashboard", "leaderboard", "members", "skills", "craft-monitor", "planning",
+    "inventory", "construction", "research", "market", "region", "empires",
     "map", "activity", "publiccrafts", "craftcalc", "sync",
   ]) {
     assert.match(navigation, new RegExp(`\\["${routeId}",`));

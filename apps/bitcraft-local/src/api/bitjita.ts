@@ -148,7 +148,7 @@ export function useBitjitaData(
         const raw = Object.fromEntries(entries) as AnyRecord;
         const claim = raw.claim?.claim ?? raw.claim;
         const members = unwrap<AnyRecord[]>(raw.members, "members", []);
-        if (activePanel === "production") {
+        if (activePanel === "craft-monitor") {
           try {
             // Production cards need contribution and station details that are
             // expensive to request one-by-one from the browser. The local helper
@@ -176,8 +176,8 @@ export function useBitjitaData(
         }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel === "members" || activePanel === "map" || activePanel === "leaderboard";
-        const readsProductionDetail = activePanel === "production";
-        const readsRegionDetail = activePanel === "empire";
+        const readsProductionDetail = activePanel === "craft-monitor";
+        const readsRegionDetail = activePanel === "region";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
           readsPlayerDetail ? fetch(`${LOCAL_API}/player-details`, {
             // Player detail requests are batched server-side because each member
