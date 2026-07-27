@@ -147,7 +147,7 @@ test("PageHeader is shared by exactly the first seven canonical routes", () => {
     ["DashboardPage.tsx", "Dashboard"],
     ["MembersPage.tsx", "Members"],
     ["SkillsPage.tsx", "Professions"],
-    ["ProductionPage.tsx", "Production"],
+    ["ProductionPage.tsx", "Craft Monitor"],
     ["InventoryPage.tsx", "Inventory"],
     ["ResearchPage.tsx", "Research"],
     ["ConstructionPage.tsx", "Construction"],

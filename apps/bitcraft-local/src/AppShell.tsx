@@ -44,7 +44,8 @@ import { normalizeUserToastSettings } from "./notifications/userToastSettings";
 import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from "./hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
-import { DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
+import { canonicalPanel, DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
+import { settlementNavigationLabel } from "./navigation/navigationLabels";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
 import {
   normalizeReleaseBuildId,
@@ -553,15 +554,16 @@ function DashboardApp() {
 
 
   React.useEffect(() => {
-    if (String(active) === "buildings" || String(active) === "overview") {
-      setActive("dashboard");
-      updateQueryState({ page: "dashboard" });
+    const canonicalActive = canonicalPanel(String(active));
+    if (canonicalActive && canonicalActive !== active) {
+      setActive(canonicalActive);
+      updateQueryState({ page: canonicalActive });
     }
   }, [active, setActive]);
   React.useEffect(() => {
     const rawPanel = new URLSearchParams(window.location.search).get("page");
-    if (rawPanel === "buildings" || rawPanel === "overview") updateQueryState({ page: "dashboard" });
     const requested = urlPanel();
+    if (requested && rawPanel !== requested) updateQueryState({ page: requested });
     const requestedMapFocus = urlMapFocus();
     if (requestedMapFocus) setMapFocus(requestedMapFocus);
     if (requested) setActive(requested);
@@ -572,7 +574,9 @@ function DashboardApp() {
     function restoreFromHistory() {
       setRouteStatus("");
       setRouteSearch(window.location.search);
+      const rawHistoryPanel = new URLSearchParams(window.location.search).get("page");
       const panel = urlPanel();
+      if (panel && rawHistoryPanel !== panel) updateQueryState({ page: panel });
       const historyMapFocus = urlMapFocus();
       if (historyMapFocus) setMapFocus(historyMapFocus);
       if (panel) setActive(panel);
@@ -780,7 +784,7 @@ function DashboardApp() {
     leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} data={data} access={effectiveAccess} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
-    production: <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
+    "craft-monitor": <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
     planning: <CraftPlanningPage claimId={claimId} refreshToken={refreshToken} />,
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder refreshToken={refreshToken} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     craftcalc: <CraftCalculatorPage />,
@@ -789,7 +793,7 @@ function DashboardApp() {
     research: <Research data={data} />,
     market: <Market access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
     "settlement-market": <SettlementMarket data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} listingsLoading={state.loading} listingError={state.error} onQueryStateChange={syncRouteSearch} />,
-    empire: <Region data={data} />,
+    region: <Region data={data} />,
     empires: <Empires monitoredRegionId={String(data.claim.regionId ?? "")} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
@@ -932,7 +936,7 @@ function DashboardApp() {
                   aria-expanded={showItems}
                   onClick={() => setSidebarGroups((current) => ({ ...current, [group.id]: !(current[group.id] ?? true) }))}
                 >
-                  <span>{group.label}</span>
+                  <span>{group.id === "settlement" ? settlementNavigationLabel(data.claim.name) : group.label}</span>
                   <ArrowDown size={12} aria-hidden="true" />
                 </button>
                 <div className="sidebar-section-items">

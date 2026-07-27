@@ -10,14 +10,14 @@ const PAGE_TARGETS = [
   ["leaderboard", "Leaderboard"],
   ["members", "Members"],
   ["skills", "Professions"],
-  ["production", "Production"],
+  ["craft-monitor", "Craft Monitor"],
   ["planning", "Craft Planning"],
   ["inventory", "Inventory"],
   ["construction", "Construction"],
   ["research", "Research"],
   ["market", "Market"],
-  ["settlement-market", "Settlement Market"],
-  ["empire", "Region"],
+  ["settlement-market", "Local Market"],
+  ["region", "Region"],
   ["empires", "Empires"],
   ["map", "Map"],
   ["activity", "Activity"],
@@ -72,6 +72,11 @@ const TAB_TARGETS = Object.entries(ACCESS_TAB_GROUPS).flatMap(([page, tabs]) => 
 
 export const ACCESS_CONTROL_TARGETS = [...PAGE_TARGETS, ...TAB_TARGETS];
 
+const LEGACY_ACCESS_TARGET_ALIASES = {
+  "page:production": "page:craft-monitor",
+  "page:empire": "page:region",
+};
+
 export function pageAccessTargets() {
   return PAGE_TARGETS;
 }
@@ -94,7 +99,9 @@ export function normalizeAccessControlConfig(value) {
   const rawRules = raw.rules && typeof raw.rules === "object" && !Array.isArray(raw.rules) ? raw.rules : {};
   const rules = {};
   const validTargets = new Set(ACCESS_CONTROL_TARGETS.map((target) => target.id));
-  for (const [targetId, ruleValue] of Object.entries(rawRules)) {
+  for (const [rawTargetId, ruleValue] of Object.entries(rawRules)) {
+    const targetId = LEGACY_ACCESS_TARGET_ALIASES[rawTargetId] ?? rawTargetId;
+    if (targetId !== rawTargetId && Object.hasOwn(rawRules, targetId)) continue;
     if (!validTargets.has(targetId)) continue;
     const rule = ruleValue && typeof ruleValue === "object" && !Array.isArray(ruleValue) ? ruleValue : {};
     const mode = normalizeMode(rule.mode);

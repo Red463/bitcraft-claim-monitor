@@ -222,7 +222,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   return (
     <div className="panel production-page">
       <PageHeader
-        title="Production"
+        title="Craft Monitor"
         description={visibleCrafts.length === 0 ? "No active crafting jobs" : `${activeJobs} active now - ${visibleCrafts.length} jobs across ${Object.keys(visibleCrafterCounts).length} crafters`}
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">

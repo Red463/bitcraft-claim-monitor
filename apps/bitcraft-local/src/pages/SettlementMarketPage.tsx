@@ -64,6 +64,7 @@ import {
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
+import { settlementMarketTitle } from "../navigation/navigationLabels";
 import { getTrackedOwnerName } from "../utils/ownership";
 import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
@@ -303,7 +304,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
     <div className="panel market-page">
       <header className="members-topbar market-topbar">
         <div>
-          <h2>Settlement Market</h2>
+          <h2>{settlementMarketTitle(data.claim?.name)}</h2>
           <p>{`${formatNumber(all.length)} monitored listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>
         <div className="dashboard-top-meta">

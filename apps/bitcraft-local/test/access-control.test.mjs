@@ -47,6 +47,32 @@ test("access control evaluates discord, verified, and specific user rules", () =
   assert.equal(publicAccessDecision(config, "tab:leaderboard:market", verified).allowed, true);
 });
 
+test("access control migrates legacy page targets and prefers canonical rules", () => {
+  const config = normalizeAccessControlConfig({
+    rules: {
+      "page:production": { mode: "discord" },
+      "page:empire": { mode: "verified" },
+      "page:craft-monitor": { mode: "specificUsers", allowedDiscordIds: ["222222"] },
+    },
+  });
+
+  assert.deepEqual(config.rules["page:craft-monitor"], {
+    mode: "specificUsers",
+    allowedDiscordIds: ["222222"],
+  });
+  assert.deepEqual(config.rules["page:region"], {
+    mode: "verified",
+    allowedDiscordIds: [],
+  });
+  assert.equal("page:production" in config.rules, false);
+  assert.equal("page:empire" in config.rules, false);
+
+  const labels = new Map(pageAccessTargets().map((target) => [target.page, target.label]));
+  assert.equal(labels.get("craft-monitor"), "Craft Monitor");
+  assert.equal(labels.get("settlement-market"), "Local Market");
+  assert.equal(labels.get("region"), "Region");
+});
+
 test("access control tab fallback chooses the first allowed tab", () => {
   const config = normalizeAccessControlConfig({
     rules: {

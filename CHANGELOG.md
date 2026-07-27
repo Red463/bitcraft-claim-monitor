@@ -9,6 +9,15 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.48.0-beta.2] - 2026-07-27
+
+### Changed
+
+- Navigation now labels the settlement section with the configured claim name and updates automatically when the monitored settlement changes.
+- Renamed Settlement Market to Local Market, with the page heading showing the configured claim name.
+- Renamed Production to Craft Monitor and moved it to the `craft-monitor` URL.
+- Moved the Region page from the `empire` URL to `region`; existing Production and Region links continue to redirect to their new addresses.
+
 ## [0.48.0-beta.1] - 2026-07-27
 
 ### Added

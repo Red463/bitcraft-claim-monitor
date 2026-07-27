@@ -5,6 +5,18 @@ export type NavigationMode = "push" | "replace";
 export type GlobalMarketViewId = "overview" | "browse" | "deals" | "buy-orders" | "deal-watch" | "stalls";
 export type SettlementMarketViewId = "live" | "analytics";
 
+const LEGACY_PAGE_ALIASES: Readonly<Record<string, PageId>> = {
+  buildings: "dashboard",
+  overview: "dashboard",
+  production: "craft-monitor",
+  empire: "region",
+};
+
+export function canonicalPageId(page: string | null): string | null {
+  if (!page) return null;
+  return LEGACY_PAGE_ALIASES[page] ?? page;
+}
+
 export type MarketViewLocation = {
   page: "market" | "settlement-market";
   view: GlobalMarketViewId | SettlementMarketViewId;
