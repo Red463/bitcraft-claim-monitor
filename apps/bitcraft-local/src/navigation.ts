@@ -41,12 +41,12 @@ export const NAV_GROUPS = [
   { id: "settlement", label: "Settlement", items: [
     ["members", "Members", Users],
     ["skills", "Professions", GraduationCap],
-    ["craft-monitor", "Production", Factory],
+    ["craft-monitor", "Craft Monitor", Factory],
     ["planning", "Craft Planning", ClipboardList],
     ["inventory", "Inventory", Package],
     ["construction", "Construction", Hammer],
     ["research", "Research", FlaskConical],
-    ["settlement-market", "Settlement Market", CircleDollarSign],
+    ["settlement-market", "Local Market", CircleDollarSign],
   ] },
   { id: "economy", label: "Economy & Region", items: [
     ["market", "Market", CircleDollarSign],

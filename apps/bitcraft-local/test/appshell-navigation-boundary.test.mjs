@@ -6,6 +6,8 @@ const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "
 const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
 const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../src/navigation.ts", import.meta.url), "utf8");
+const productionPage = readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8");
+const settlementMarketPage = readFileSync(new URL("../src/pages/SettlementMarketPage.tsx", import.meta.url), "utf8");
 const routeStateUrl = new URL("../src/navigation/routeState.ts", import.meta.url);
 const routeState = existsSync(routeStateUrl) ? readFileSync(routeStateUrl, "utf8") : "";
 const shellCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -15,6 +17,13 @@ try {
   routeStateModule = await import("../src/navigation/routeState.ts");
 } catch {
   // RED starts with the route-state module absent.
+}
+
+let navigationLabelsModule = {};
+try {
+  navigationLabelsModule = await import("../src/navigation/navigationLabels.ts");
+} catch {
+  // RED starts with the navigation-label helpers absent.
 }
 
 test("route-state helpers distinguish explicit navigation from normalization", () => {
@@ -125,6 +134,24 @@ test("navigation retains existing groups and non-admin route IDs", () => {
   ]) {
     assert.match(navigation, new RegExp(`\\["${routeId}",`));
   }
+});
+
+test("settlement navigation labels derive from the configured claim name", () => {
+  assert.equal(typeof navigationLabelsModule.settlementNavigationLabel, "function");
+  assert.equal(typeof navigationLabelsModule.settlementMarketTitle, "function");
+  assert.equal(navigationLabelsModule.settlementNavigationLabel(" Timbersteel Trade "), "Timbersteel Trade");
+  assert.equal(navigationLabelsModule.settlementNavigationLabel(""), "Settlement");
+  assert.equal(navigationLabelsModule.settlementMarketTitle(" Timbersteel Trade "), "Timbersteel Trade Market");
+  assert.equal(navigationLabelsModule.settlementMarketTitle(null), "Settlement Market");
+});
+
+test("navigation and page headings use the approved settlement naming", () => {
+  assert.match(navigation, /\["craft-monitor", "Craft Monitor", Factory\]/);
+  assert.match(navigation, /\["settlement-market", "Local Market", CircleDollarSign\]/);
+  assert.match(navigation, /\["region", "Region", Globe2\]/);
+  assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(data\.claim\.name\)\s*:\s*group\.label/);
+  assert.match(productionPage, /title="Craft Monitor"/);
+  assert.match(settlementMarketPage, /<h2>\{settlementMarketTitle\(data\.claim\?\.name\)\}<\/h2>/);
 });
 
 test("narrow navigation exposes an accessible grouped drawer", () => {

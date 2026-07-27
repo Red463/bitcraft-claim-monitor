@@ -45,6 +45,7 @@ import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from 
 import { toNumber, type AnyRecord } from "./main-app-data";
 import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { canonicalPanel, DEFAULT_SIDEBAR_GROUPS, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
+import { settlementNavigationLabel } from "./navigation/navigationLabels";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
 import {
   normalizeReleaseBuildId,
@@ -935,7 +936,7 @@ function DashboardApp() {
                   aria-expanded={showItems}
                   onClick={() => setSidebarGroups((current) => ({ ...current, [group.id]: !(current[group.id] ?? true) }))}
                 >
-                  <span>{group.label}</span>
+                  <span>{group.id === "settlement" ? settlementNavigationLabel(data.claim.name) : group.label}</span>
                   <ArrowDown size={12} aria-hidden="true" />
                 </button>
                 <div className="sidebar-section-items">
