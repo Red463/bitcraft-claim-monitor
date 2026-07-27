@@ -172,7 +172,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
         <DashboardMetric icon={<CircleDollarSign />} label="Treasury" value={`${formatNumber(treasury)}g`} detail={`${signedDelta(treasuryNetToday, 0, "g")} net today`} tone="gold" onClick={() => onNavigate("activity")} />
         <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatCompactNumber(marketListingValue)} total listing value`} tone="green" onClick={() => onNavigate("market")} />
-        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("empire")} />
+        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("region")} />
       </section>
 
       <section className="dashboard-main-grid">
@@ -249,10 +249,10 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
         </article>
 
         <article className="dashboard-card dashboard-card-production">
-          <DashboardCardHeader title="Current Crafts" icon={<Factory size={15} />} action="View production" onClick={() => onNavigate("production")} />
+          <DashboardCardHeader title="Current Crafts" icon={<Factory size={15} />} action="View production" onClick={() => onNavigate("craft-monitor")} />
           <div className="dashboard-production-list">
             {currentCraftsDisplay.length ? currentCraftsDisplay.map((job) => (
-              <button key={job.id} onClick={() => onNavigate("production")}>
+              <button key={job.id} onClick={() => onNavigate("craft-monitor")}>
                 <span className="dashboard-item-icon"><ItemIcon item={job.item} /></span>
                 <strong>{job.name}</strong>
                 <b>{job.pct}%</b>

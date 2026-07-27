@@ -5,6 +5,7 @@ import test from "node:test";
 const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
 const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
 const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
+const dashboardPage = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../src/navigation.ts", import.meta.url), "utf8");
 const productionPage = readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8");
 const settlementMarketPage = readFileSync(new URL("../src/pages/SettlementMarketPage.tsx", import.meta.url), "utf8");
@@ -152,6 +153,12 @@ test("navigation and page headings use the approved settlement naming", () => {
   assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(data\.claim\.name\)\s*:\s*group\.label/);
   assert.match(productionPage, /title="Craft Monitor"/);
   assert.match(settlementMarketPage, /<h2>\{settlementMarketTitle\(data\.claim\?\.name\)\}<\/h2>/);
+});
+
+test("dashboard shortcuts navigate to canonical Craft Monitor and Region routes", () => {
+  assert.match(dashboardPage, /onNavigate\("craft-monitor"\)/);
+  assert.match(dashboardPage, /onNavigate\("region"\)/);
+  assert.doesNotMatch(dashboardPage, /onNavigate\("(?:production|empire)"\)/);
 });
 
 test("narrow navigation exposes an accessible grouped drawer", () => {

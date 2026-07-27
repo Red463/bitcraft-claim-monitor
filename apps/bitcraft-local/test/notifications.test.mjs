@@ -108,7 +108,7 @@ test("createToastNotice assigns stable notification fields and destinations", ()
     metaLabel: "Mosswick",
     soundType: "dealAlerts",
   });
-  assert.equal(productionNotice.destination, "production");
+  assert.equal(productionNotice.destination, "craft-monitor");
   assert.equal(productionNotice.read, false);
   assert.equal(productionNotice.item, null);
 });
