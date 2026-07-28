@@ -98,7 +98,18 @@ import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentA
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { runSettlementStateTransaction, settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
-import { buildDiscordAuthorizeUrl, discordOAuthCallbackDecision, discordOAuthProfileAccount, discordOAuthProfileRequest, discordOAuthSuccessRedirect, discordOAuthTokenRequest } from "./src/server/discordOAuthFlow.mjs";
+import {
+  buildDiscordAuthorizeUrl,
+  DiscordOAuthRequestError,
+  discordOAuthCallbackDecision,
+  discordOAuthDiagnosticLine,
+  discordOAuthFailureRedirect,
+  discordOAuthJsonRequest,
+  discordOAuthProfileAccount,
+  discordOAuthProfileRequest,
+  discordOAuthSuccessRedirect,
+  discordOAuthTokenRequest,
+} from "./src/server/discordOAuthFlow.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -3698,53 +3709,99 @@ async function handleDiscordOAuthCallback(req, res, url) {
     res.end();
     return true;
   }
-  const tokenRequest = discordOAuthTokenRequest({ config, code: callbackDecision.code });
-  const tokenResponse = await fetch(tokenRequest.url, tokenRequest.init);
-  if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed: ${tokenResponse.status}`);
-  const tokenJson = await tokenResponse.json();
-  const profileRequest = discordOAuthProfileRequest(tokenJson.access_token);
-  const profileResponse = await fetch(profileRequest.url, profileRequest.init);
-  if (!profileResponse.ok) throw new Error(`Discord profile lookup failed: ${profileResponse.status}`);
-  const profile = await profileResponse.json();
-  const loginAt = new Date().toISOString();
-  if (privacyReauth) {
-    if (String(profile?.id ?? "") !== String(reauthUser.discord_id)) {
-      return send(res, 403, { error: "Reauthenticate with the Discord account currently signed in", code: "privacy_reauthentication_account_mismatch" }, {
-        "set-cookie": clearAuthStateCookie(),
-      });
-    }
-    const updated = statements.updateUserSessionReauthenticatedAt.run(loginAt, reauthSessionTokenHash, reauthUser.id);
-    if (Number(updated.changes) !== 1) {
-      return send(res, 403, { error: "The signed-in session is no longer available", code: "privacy_reauthentication_session_missing" }, {
-        "set-cookie": clearAuthStateCookie(),
-      });
-    }
-    res.writeHead(302, { location: "/?privacy=delete-ready", "set-cookie": clearAuthStateCookie() });
-    res.end();
-    return true;
+  logDiscordOAuthDiagnostic({ stage: "callback", event: "start" });
+  let tokenJson;
+  try {
+    tokenJson = await discordOAuthJsonRequest({
+      request: discordOAuthTokenRequest({ config, code: callbackDecision.code }),
+      stage: "token",
+      onDiagnostic: logDiscordOAuthDiagnostic,
+    });
+  } catch (error) {
+    const failure = error instanceof DiscordOAuthRequestError
+      ? error
+      : new DiscordOAuthRequestError("token", "network");
+    return finishDiscordOAuthFailure(res, returnTo, failure.stage, failure.reason);
   }
-  const account = discordOAuthProfileAccount(profile, loginAt);
-  statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
-  const user = statements.userByDiscordId.get(account.discordId);
-  statements.updateUserLastLogin.run(loginAt, user.id);
-  statements.insertUserLegalAcceptance.run(
-    user.id,
-    stateCookie.legal.version,
-    stateCookie.legal.termsDigest,
-    stateCookie.legal.privacyDigest,
-    1,
-    stateCookie.legal.acceptedAt,
-    "discord-oauth",
-  );
-  const session = createAppUserSession(user.id);
-  const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
-  const redirect = discordOAuthSuccessRedirect({
-    returnTo,
-    clearStateCookie: clearAuthStateCookie(),
-    userSessionCookie: session.cookie,
-    adminSessionCookie: adminSession?.cookie,
+
+  let profile;
+  try {
+    profile = await discordOAuthJsonRequest({
+      request: discordOAuthProfileRequest(tokenJson.access_token),
+      stage: "profile",
+      onDiagnostic: logDiscordOAuthDiagnostic,
+    });
+  } catch (error) {
+    const failure = error instanceof DiscordOAuthRequestError
+      ? error
+      : new DiscordOAuthRequestError("profile", "network");
+    return finishDiscordOAuthFailure(res, returnTo, failure.stage, failure.reason);
+  }
+
+  logDiscordOAuthDiagnostic({ stage: "session", event: "start" });
+  try {
+    const loginAt = new Date().toISOString();
+    if (privacyReauth) {
+      if (String(profile?.id ?? "") !== String(reauthUser.discord_id)) {
+        return send(res, 403, { error: "Reauthenticate with the Discord account currently signed in", code: "privacy_reauthentication_account_mismatch" }, {
+          "set-cookie": clearAuthStateCookie(),
+        });
+      }
+      const updated = statements.updateUserSessionReauthenticatedAt.run(loginAt, reauthSessionTokenHash, reauthUser.id);
+      if (Number(updated.changes) !== 1) {
+        return send(res, 403, { error: "The signed-in session is no longer available", code: "privacy_reauthentication_session_missing" }, {
+          "set-cookie": clearAuthStateCookie(),
+        });
+      }
+      res.writeHead(302, { location: "/?privacy=delete-ready", "set-cookie": clearAuthStateCookie() });
+      res.end();
+      logDiscordOAuthDiagnostic({ stage: "session", event: "success" });
+      return true;
+    }
+    const account = discordOAuthProfileAccount(profile, loginAt);
+    statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
+    const user = statements.userByDiscordId.get(account.discordId);
+    statements.updateUserLastLogin.run(loginAt, user.id);
+    statements.insertUserLegalAcceptance.run(
+      user.id,
+      stateCookie.legal.version,
+      stateCookie.legal.termsDigest,
+      stateCookie.legal.privacyDigest,
+      1,
+      stateCookie.legal.acceptedAt,
+      "discord-oauth",
+    );
+    const session = createAppUserSession(user.id);
+    const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
+    const redirect = discordOAuthSuccessRedirect({
+      returnTo,
+      clearStateCookie: clearAuthStateCookie(),
+      userSessionCookie: session.cookie,
+      adminSessionCookie: adminSession?.cookie,
+    });
+    res.writeHead(302, { location: redirect.location, "set-cookie": redirect.setCookie });
+    res.end();
+    logDiscordOAuthDiagnostic({ stage: "session", event: "success" });
+    return true;
+  } catch {
+    logDiscordOAuthDiagnostic({
+      stage: "session",
+      event: "failure",
+      reason: "local",
+    });
+    return finishDiscordOAuthFailure(res, returnTo, "session", "local");
+  }
+}
+
+function logDiscordOAuthDiagnostic(event) {
+  if (!isTestRuntime) console.info(discordOAuthDiagnosticLine(event));
+}
+
+function finishDiscordOAuthFailure(res, returnTo, stage, reason) {
+  res.writeHead(302, {
+    location: discordOAuthFailureRedirect({ returnTo, stage, reason }),
+    "set-cookie": clearAuthStateCookie(),
   });
-  res.writeHead(302, { location: redirect.location, "set-cookie": redirect.setCookie });
   res.end();
   return true;
 }
