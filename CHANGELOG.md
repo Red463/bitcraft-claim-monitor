@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.49.0-beta.2] - 2026-07-28
+
+### Fixed
+
+- Fixed Linked Accounts row actions stretching across the screen and removed unintended extra disclosure icons from account menus.
+
 ## [0.49.0-beta.1] - 2026-07-28
 
 ### Changed

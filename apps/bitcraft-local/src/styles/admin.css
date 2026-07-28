@@ -831,6 +831,10 @@
   gap: 8px;
   align-items: center;
 }
+.linked-account-contextual-actions > .toolbar-button {
+  width: fit-content;
+  justify-self: start;
+}
 .linked-account-primary-actions {
   display: flex;
   flex-wrap: wrap;
@@ -849,6 +853,11 @@
   list-style-position: inside;
 }
 .linked-account-assignment-disclosure > summary:hover { color: var(--gold); }
+.linked-account-assignment-disclosure > summary::after,
+.linked-account-more-actions > summary::after {
+  content: none;
+  display: none;
+}
 .linked-account-assignment-disclosure > summary:focus-visible,
 .linked-account-more-actions > summary:focus-visible {
   outline: 2px solid var(--focus-border);
