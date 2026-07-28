@@ -791,7 +791,7 @@
   background: rgba(255,255,255,.025);
   padding: 12px;
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(280px, 1.25fr) auto auto;
+  grid-template-columns: minmax(210px, 1.05fr) minmax(210px, .9fr) minmax(280px, 1.15fr) auto;
   gap: 12px;
   align-items: center;
 }
@@ -807,10 +807,102 @@
   place-items: center;
   font-weight: 800;
 }
-.linked-account-character { min-width: 0; display: grid; gap: 8px; }
+.linked-account-character { min-width: 0; }
+.linked-account-character-heading {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 9px;
+  align-items: center;
+}
+.linked-account-character-heading > small { grid-column: 1 / -1; }
+.linked-account-character-label {
+  display: block;
+  margin-bottom: 2px;
+  color: #8997aa;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.linked-account-contextual-actions {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+.linked-account-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .linked-account-character-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
 .linked-account-character-actions .field { flex: 1 1 210px; min-width: 0; }
 .linked-account-character-actions .toolbar-button { flex: 0 0 auto; }
+.linked-account-assignment-disclosure { min-width: 0; }
+.linked-account-assignment-disclosure > summary {
+  width: fit-content;
+  color: #aeb9c9;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  list-style-position: inside;
+}
+.linked-account-assignment-disclosure > summary:hover { color: var(--gold); }
+.linked-account-assignment-disclosure > summary:focus-visible,
+.linked-account-more-actions > summary:focus-visible {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.linked-account-assignment-disclosure[open] > summary { color: var(--gold); }
+.linked-account-assignment-disclosure .linked-account-character-actions {
+  margin-top: 8px;
+  border-left: 2px solid rgba(240,198,79,.22);
+  padding-left: 10px;
+}
+.linked-account-inline-warning {
+  margin: 0;
+  color: #ffc16f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.linked-account-more-actions {
+  position: relative;
+  justify-self: end;
+}
+.linked-account-more-actions > summary {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(108,123,145,.28);
+  border-radius: 7px;
+  color: #aeb9c9;
+  background: rgba(4,7,11,.5);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  list-style: none;
+}
+.linked-account-more-actions > summary::-webkit-details-marker { display: none; }
+.linked-account-more-actions > summary:hover,
+.linked-account-more-actions[open] > summary {
+  border-color: rgba(240,198,79,.38);
+  color: var(--gold);
+  background: rgba(240,198,79,.07);
+}
+.linked-account-more-menu {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: 190px;
+  border: 1px solid rgba(108,123,145,.32);
+  border-radius: 7px;
+  background: #090e15;
+  padding: 6px;
+}
+.linked-account-more-menu .toolbar-button { width: 100%; justify-content: flex-start; }
 .linked-account-row strong { color: #fff; display: block; }
 .linked-account-row small { color: #aab5c4; display: block; font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
 .admin-page .diagnostics .ok strong { color: #63eba5; }
@@ -900,8 +992,31 @@
   .analytics-admin .analytics-metrics,
   .admin-page .status-detail,
   .admin-page .diagnostics { grid-template-columns: 1fr; }
-  .linked-account-row { grid-template-columns: 1fr; align-items: stretch; }
-  .linked-account-row > .toolbar { justify-content: flex-start; }
+  .linked-account-row {
+    position: relative;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    padding-right: 56px;
+  }
+  .linked-account-contextual-actions { width: 100%; }
+  .linked-account-contextual-actions > .toolbar-button,
+  .linked-account-primary-actions,
+  .linked-account-primary-actions .toolbar-button,
+  .linked-account-character-actions,
+  .linked-account-character-actions .toolbar-button,
+  .linked-account-character-actions .field select {
+    width: 100%;
+  }
+  .linked-account-contextual-actions .toolbar-button,
+  .linked-account-character-actions .field select {
+    min-height: 44px;
+  }
+  .linked-account-more-actions {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+  }
+  .linked-account-more-actions > summary { width: 44px; height: 44px; }
   .scheduled-job-row { grid-template-columns: 1fr; }
   .scheduled-job-actions { justify-content: flex-start; }
   .floating-save { bottom: 12px; width: 100%; display: grid; grid-template-columns: 1fr 1fr; }

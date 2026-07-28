@@ -9,6 +9,14 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.49.0-beta.1] - 2026-07-28
+
+### Changed
+
+- Simplified Linked Accounts administration so each account shows only the actions relevant to its current linking state.
+- Prioritised pending character-link requests and moved account deletion into an accessible overflow menu.
+- Improved Linked Accounts controls for narrow screens and prevented invalid character overrides.
+
 ## [0.48.1-beta.5] - 2026-07-28
 
 ### Fixed

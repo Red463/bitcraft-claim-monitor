@@ -6,14 +6,40 @@ const access = readFileSync(new URL("../src/components/admin/AdminAccessSection.
 const panel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
 
-test("Linked Accounts exposes direct assignment and explicit unassignment", () => {
+test("Linked Accounts renders only the workflow relevant to each account state", () => {
   assert.match(access, /members:\s*AnyRecord\[\]/);
   assert.match(access, /onCharacterAssignment:\s*\(account:\s*AppUser,\s*member:\s*AnyRecord\s*\|\s*null\)\s*=>\s*void/);
+  assert.match(access, /account\.characterStatus === "approved"[\s\S]*Unassign/);
+  assert.match(access, /account\.characterStatus === "pending"[\s\S]*onAccountApproval\(account, "approved"\)[\s\S]*Approve request[\s\S]*onAccountApproval\(account, "rejected"\)[\s\S]*Reject/);
+  assert.match(access, /account\.characterStatus === "rejected"[\s\S]*onAccountApproval\(account, "pending"\)[\s\S]*Review again/);
   assert.match(access, /Assign & approve/);
-  assert.match(access, /Unassign character/);
+  assert.match(access, /Choose different character/);
+  assert.doesNotMatch(access, /\(\["approved", "pending", "rejected"\] as const\)\.map/);
   assert.match(access, /memberTrackingId\(member\)/);
-  assert.match(access, /account\.characterStatus === "approved"/);
-  assert.match(access, /disabled=\{membersLoading \|\| !selectedMember \|\| selectedCharacterUnavailable \|\| pending/);
+});
+
+test("Linked Accounts keeps administrator assignment explicit, blank, and guarded", () => {
+  assert.match(access, /characterAssignments\[account\.id\]\s*\?\?\s*""/);
+  assert.match(access, /selectedCharacterMatchesRequest/);
+  assert.match(access, /selectedCharacterUnavailable/);
+  assert.match(access, /disabled=\{membersLoading \|\| !selectedMember \|\| selectedCharacterUnavailable \|\| selectedCharacterMatchesRequest \|\| accountActionPending\}/);
+  assert.match(access, /accountActionPending = accountApprovalPending \|\| accountCharacterPending \|\| accountDeletionPending/);
+  assert.match(access, /This character is already approved for another Discord account\./);
+  assert.match(access, /pendingCharacterUnavailable[\s\S]*disabled=\{!account\.characterPlayerId \|\| pendingCharacterUnavailable \|\| accountActionPending\}/);
+});
+
+test("Linked Accounts sorts pending requests first without disturbing either group", () => {
+  assert.match(access, /const orderedLinkedAccounts = \[\.\.\.data\.linkedAccounts\]\.sort/);
+  assert.match(access, /Number\(right\.characterStatus === "pending"\) - Number\(left\.characterStatus === "pending"\)/);
+  assert.match(access, /orderedLinkedAccounts\.map\(\(account\) =>/);
+});
+
+test("Linked Accounts keeps destructive deletion under an accessible overflow menu", () => {
+  assert.match(access, /<details className="linked-account-more-actions">/);
+  assert.match(access, /aria-label=\{`More actions for \$\{accountDisplayName\}`\}/);
+  assert.match(access, /More actions/);
+  assert.match(access, /linked-account-more-menu[\s\S]*Delete account data/);
+  assert.match(access, /setPrivacyDeletionTarget\(account\)/);
 });
 
 test("AdminPanel sends the selected member to the secured character route", () => {
@@ -41,7 +67,7 @@ test("Linked Accounts makes roster loading, empty, and failure states actionable
   assert.match(access, /No settlement characters available/);
   assert.match(access, /membersError[^]*role="alert"/);
   assert.match(access, /Refresh and retry\./);
-  assert.match(access, /disabled=\{membersLoading \|\| !data\.members\.length \|\| pending\(`account-character:\$\{account\.id\}`\)\}/);
+  assert.match(access, /disabled=\{membersLoading \|\| !data\.members\.length \|\| accountActionPending\}/);
 });
 
 test("Linked Accounts displays the loader failure message without a duplicated prefix", () => {
@@ -67,7 +93,11 @@ test("Linked Accounts keeps roster failures local without hiding later admin req
   assert.match(panel, /error=\{messageKind === "error" \? message : null\}/);
 });
 
-test("Linked account assignment remains dense and becomes single-column on narrow screens", () => {
+test("Linked account assignment remains dense, layered, and touch-friendly on narrow screens", () => {
+  assert.match(css, /\.linked-account-row\s*\{[^}]*grid-template-columns:\s*minmax/);
   assert.match(css, /\.linked-account-character-actions/);
+  assert.match(css, /\.linked-account-more-menu\s*\{[^}]*z-index:\s*var\(--z-dropdown\)/);
+  assert.match(css, /\.linked-account-more-actions\s*>\s*summary:focus-visible/);
   assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-row\s*\{[^}]*grid-template-columns:\s*1fr/);
+  assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-contextual-actions[\s\S]*min-height:\s*44px/);
 });
