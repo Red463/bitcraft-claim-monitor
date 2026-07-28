@@ -1,5 +1,5 @@
 import React from "react";
-import { Ban, CheckCircle2, Clock, MessageCircle, RefreshCw, Trash2, UserPlus, Users } from "lucide-react";
+import { Ban, CheckCircle2, EllipsisVertical, MessageCircle, RefreshCw, Trash2, UserPlus, Users } from "lucide-react";
 import type { AnyRecord } from "../../main-app-data";
 import type { AppUser } from "../../types/settings";
 import { dateLabel, formatNumber } from "../../utils/format";
@@ -61,6 +61,9 @@ export function AdminAccessSection({
       .filter((account) => account.characterStatus === "approved" && account.characterPlayerId)
       .map((account) => [String(account.characterPlayerId), account.id]),
   );
+  const orderedLinkedAccounts = [...data.linkedAccounts].sort(
+    (left, right) => Number(right.characterStatus === "pending") - Number(left.characterStatus === "pending"),
+  );
   return (
     <>
       {error ? <div className="admin-message error" role="alert" aria-live="assertive">{error}</div> : null}
@@ -93,93 +96,159 @@ export function AdminAccessSection({
           <p className="legend">Users can sign in with Discord and request a BitCraft character link. Approval is manual because Discord identity does not prove character ownership by itself.</p>
           {membersError ? <div className="admin-message error" role="alert" aria-live="assertive">{membersError} Refresh and retry.</div> : null}
           <div className="linked-account-list">
-            {data.linkedAccounts.length ? data.linkedAccounts.map((account) => {
-              const selectedCharacterId = characterAssignments[account.id] ?? account.characterPlayerId ?? "";
-              const selectedMember = data.members.find((member) => memberTrackingId(member) === selectedCharacterId) ?? null;
+            {orderedLinkedAccounts.length ? orderedLinkedAccounts.map((account) => {
+              const accountDisplayName = account.globalName || account.username || "Discord user";
+              const accountState = account.characterStatus === "approved"
+                || account.characterStatus === "pending"
+                || account.characterStatus === "rejected"
+                ? account.characterStatus
+                : "unlinked";
+              const selectedCharacterId = characterAssignments[account.id] ?? "";
+              const selectedMember = selectedCharacterId
+                ? data.members.find((member) => memberTrackingId(member) === selectedCharacterId) ?? null
+                : null;
               const selectedOwnerId = approvedCharacterOwners.get(selectedCharacterId);
               const selectedCharacterUnavailable = selectedOwnerId != null && selectedOwnerId !== account.id;
+              const selectedCharacterMatchesRequest = (accountState === "pending" || accountState === "rejected")
+                && Boolean(account.characterPlayerId)
+                && selectedCharacterId === String(account.characterPlayerId);
+              const requestedOwnerId = account.characterPlayerId
+                ? approvedCharacterOwners.get(String(account.characterPlayerId))
+                : null;
+              const pendingCharacterUnavailable = account.characterStatus === "pending"
+                && requestedOwnerId != null
+                && requestedOwnerId !== account.id;
+              const accountApprovalPending = pending(`account-approval:${account.id}`);
+              const accountCharacterPending = pending(`account-character:${account.id}`);
+              const accountDeletionPending = pending(`account-privacy-delete:${account.id}`);
+              const accountActionPending = accountApprovalPending || accountCharacterPending || accountDeletionPending;
+              const assignmentControls = (
+                <div className="linked-account-character-actions">
+                  <label className="field compact-field">
+                    <span>Assign character</span>
+                    <select
+                      value={selectedCharacterId}
+                      disabled={membersLoading || !data.members.length || accountActionPending}
+                      onChange={(event) => setCharacterAssignments((current) => ({ ...current, [account.id]: event.target.value }))}
+                    >
+                      <option value="">{membersLoading ? "Loading settlement characters..." : data.members.length ? "Select a settlement character" : "No settlement characters available"}</option>
+                      {data.members.map((member) => {
+                        const playerId = memberTrackingId(member);
+                        const ownerId = approvedCharacterOwners.get(playerId);
+                        return (
+                          <option key={playerId || memberDisplayName(member)} value={playerId} disabled={ownerId != null && ownerId !== account.id}>
+                            {memberDisplayName(member)}{ownerId != null && ownerId !== account.id ? " (already assigned)" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <button
+                    className="toolbar-button primary"
+                    disabled={membersLoading || !selectedMember || selectedCharacterUnavailable || selectedCharacterMatchesRequest || accountActionPending}
+                    onClick={() => onCharacterAssignment(account, selectedMember)}
+                  >
+                    <UserPlus size={14} /> Assign & approve
+                  </button>
+                </div>
+              );
               return (
-                <div className="linked-account-row" key={account.id}>
+                <div className={`linked-account-row is-${accountState}`} key={account.id}>
                   <div className="linked-account-user">
                     {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : <span>{(account.globalName || account.username || "?").slice(0, 1).toUpperCase()}</span>}
                     <div>
-                      <strong>{account.globalName || account.username || "Discord user"}</strong>
+                      <strong>{accountDisplayName}</strong>
                       <small>{account.username ? `@${account.username}` : account.discordId} | Last login {dateLabel(account.lastLoginAt)}</small>
                     </div>
                   </div>
                   <div className="linked-account-character">
-                    <div>
-                      <strong>{account.characterName || "No character selected"}</strong>
+                    <div className="linked-account-character-heading">
+                      <div>
+                        <span className="linked-account-character-label">
+                          {accountState === "approved" ? "Linked character" : accountState === "pending" ? "Requested character" : accountState === "rejected" ? "Previous request" : "Character"}
+                        </span>
+                        <strong>{accountState === "unlinked" ? "No character linked" : account.characterName || "Unknown character"}</strong>
+                      </div>
+                      <em className={`link-status ${accountState}`}>{accountState}</em>
                       <small>{account.characterPlayerId || "No BitCraft player ID"}</small>
                     </div>
+                  </div>
+                  <div className="linked-account-contextual-actions">
                     {account.characterStatus === "approved" ? (
                       <button
                         className="toolbar-button"
-                        disabled={pending(`account-character:${account.id}`)}
+                        disabled={accountActionPending}
                         onClick={() => {
                           setCharacterAssignments((current) => ({ ...current, [account.id]: "" }));
                           onCharacterAssignment(account, null);
                         }}
                       >
-                        <RefreshCw size={14} /> Unassign character
+                        <RefreshCw size={14} /> Unassign
                       </button>
-                    ) : (
-                      <div className="linked-account-character-actions">
-                        <label className="field compact-field">
-                          <span>Assign character</span>
-                          <select
-                            value={selectedCharacterId}
-                            disabled={membersLoading || !data.members.length || pending(`account-character:${account.id}`)}
-                            onChange={(event) => setCharacterAssignments((current) => ({ ...current, [account.id]: event.target.value }))}
+                    ) : account.characterStatus === "pending" ? (
+                      <>
+                        <div className="linked-account-primary-actions">
+                          <button
+                            className="toolbar-button primary"
+                            disabled={!account.characterPlayerId || pendingCharacterUnavailable || accountActionPending}
+                            onClick={() => onAccountApproval(account, "approved")}
                           >
-                            <option value="">{membersLoading ? "Loading settlement characters..." : data.members.length ? "Select a settlement character" : "No settlement characters available"}</option>
-                            {data.members.map((member) => {
-                              const playerId = memberTrackingId(member);
-                              const ownerId = approvedCharacterOwners.get(playerId);
-                              return (
-                                <option key={playerId || memberDisplayName(member)} value={playerId} disabled={ownerId != null && ownerId !== account.id}>
-                                  {memberDisplayName(member)}{ownerId != null && ownerId !== account.id ? " (already assigned)" : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </label>
+                            <CheckCircle2 size={14} /> Approve request
+                          </button>
+                          <button
+                            className="toolbar-button"
+                            disabled={accountActionPending}
+                            onClick={() => onAccountApproval(account, "rejected")}
+                          >
+                            <Ban size={14} /> Reject
+                          </button>
+                        </div>
+                        {pendingCharacterUnavailable ? (
+                          <p className="linked-account-inline-warning" role="status">
+                            This character is already approved for another Discord account. Choose a different character or reject the request.
+                          </p>
+                        ) : null}
+                        <details className="linked-account-assignment-disclosure">
+                          <summary>Choose different character</summary>
+                          {assignmentControls}
+                        </details>
+                      </>
+                    ) : account.characterStatus === "rejected" ? (
+                      <>
                         <button
-                          className="toolbar-button primary"
-                          disabled={membersLoading || !selectedMember || selectedCharacterUnavailable || pending(`account-character:${account.id}`)}
-                          onClick={() => onCharacterAssignment(account, selectedMember)}
+                          className="toolbar-button"
+                          disabled={!account.characterPlayerId || accountActionPending}
+                          onClick={() => onAccountApproval(account, "pending")}
                         >
-                          <UserPlus size={14} /> Assign & approve
+                          <RefreshCw size={14} /> Review again
                         </button>
-                      </div>
+                        <details className="linked-account-assignment-disclosure">
+                          <summary>Choose different character</summary>
+                          {assignmentControls}
+                        </details>
+                      </>
+                    ) : (
+                      assignmentControls
                     )}
                   </div>
-                  <em className={`link-status ${account.characterStatus}`}>{account.characterStatus || "unlinked"}</em>
-                  <div className="toolbar">
-                    {(["approved", "pending", "rejected"] as const).map((status) => (
+                  <details className="linked-account-more-actions">
+                    <summary aria-label={`More actions for ${accountDisplayName}`} title={`More actions for ${accountDisplayName}`}>
+                      <EllipsisVertical size={17} />
+                    </summary>
+                    <div className="linked-account-more-menu">
                       <button
-                        className={`toolbar-button ${account.characterStatus === status ? "primary" : ""}`}
-                        disabled={!account.characterPlayerId || pending(`account-approval:${account.id}`)}
-                        title={`Mark this character link as ${status}.`}
-                        key={status}
-                        onClick={() => onAccountApproval(account, status)}
+                        className="toolbar-button danger"
+                        disabled={accountActionPending}
+                        title="Permanently remove this user's app account and associated app data."
+                        onClick={() => {
+                          setPrivacyDeletionConfirmation("");
+                          setPrivacyDeletionTarget(account);
+                        }}
                       >
-                        {status === "approved" ? <CheckCircle2 size={14} /> : status === "pending" ? <Clock size={14} /> : <Ban size={14} />}
-                        {status[0].toUpperCase() + status.slice(1)}
+                        <Trash2 size={14} /> Delete account data
                       </button>
-                    ))}
-                    <button
-                      className="toolbar-button danger"
-                      disabled={pending(`account-privacy-delete:${account.id}`)}
-                      title="Permanently remove this user's app account and associated app data."
-                      onClick={() => {
-                        setPrivacyDeletionConfirmation("");
-                        setPrivacyDeletionTarget(account);
-                      }}
-                    >
-                      <Trash2 size={14} /> Delete account data
-                    </button>
-                  </div>
+                    </div>
+                  </details>
                 </div>
               );
             }) : <p className="legend">No Discord users have signed in yet.</p>}
