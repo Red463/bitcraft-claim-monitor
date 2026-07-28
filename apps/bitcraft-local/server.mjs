@@ -106,6 +106,7 @@ import {
   finishDiscordOAuthFailureResponse,
   discordOAuthProfileAccount,
   discordOAuthSuccessRedirect,
+  recordDiscordOAuthLegalAcceptance,
 } from "./src/server/discordOAuthFlow.mjs";
 import {
   ADMIN_SESSION_COOKIE_NAME,
@@ -3741,15 +3742,11 @@ async function handleDiscordOAuthCallback(req, res, url) {
       statements.upsertUserAccount.run(account.discordId, account.username, account.globalName, account.avatar, account.createdAt, account.lastLoginAt);
       const user = statements.userByDiscordId.get(account.discordId);
       statements.updateUserLastLogin.run(loginAt, user.id);
-      statements.insertUserLegalAcceptance.run(
-        user.id,
-        stateCookie.legal.version,
-        stateCookie.legal.termsDigest,
-        stateCookie.legal.privacyDigest,
-        1,
-        stateCookie.legal.acceptedAt,
-        "discord-oauth",
-      );
+      recordDiscordOAuthLegalAcceptance({
+        statements,
+        userId: user.id,
+        legal: stateCookie.legal,
+      });
       const session = createAppUserSession(user.id);
       const adminSession = createAdminSessionForDiscordProfile(profile, loginAt);
       const redirect = discordOAuthSuccessRedirect({
