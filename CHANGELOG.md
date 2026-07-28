@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.48.1-beta.1] - 2026-07-28
+
+### Fixed
+
+- Fixed regular Discord sign-in failing after legal acceptance when opened from User Settings.
+
 ## [0.48.0-beta.2] - 2026-07-27
 
 ### Changed
