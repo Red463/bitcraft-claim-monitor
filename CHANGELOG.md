@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.48.1-beta.3] - 2026-07-28
+
+### Fixed
+
+- Fixed Discord sign-in becoming stuck when the application supports multiple installation contexts.
+
 ## [0.48.1-beta.2] - 2026-07-28
 
 ### Fixed

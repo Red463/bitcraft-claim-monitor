@@ -30,6 +30,7 @@ test("buildDiscordAuthorizeUrl preserves the existing Discord authorize paramete
   assert.equal(authorize.searchParams.get("redirect_uri"), enabledConfig.redirectUri);
   assert.equal(authorize.searchParams.get("scope"), "identify");
   assert.equal(authorize.searchParams.get("state"), "state-token");
+  assert.equal(authorize.searchParams.get("integration_type"), "0");
 });
 
 test("discordOAuthCallbackDecision redirects denied and invalid callbacks to safe return paths", () => {
