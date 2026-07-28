@@ -1,6 +1,7 @@
 import { safeReturnPath } from "./httpRequests.mjs";
 
 export const DISCORD_OAUTH_REQUEST_TIMEOUT_MS = 10_000;
+export const DISCORD_OAUTH_FAILURE_FALLBACK_LOCATION = "/?auth=discord-error&reason=discord-session";
 
 const DISCORD_OAUTH_STAGES = new Set(["callback", "token", "profile", "session"]);
 const DISCORD_OAUTH_EVENTS = new Set(["start", "success", "failure"]);
@@ -93,11 +94,12 @@ export async function discordOAuthJsonRequest({
 }) {
   const startedAt = now();
   onDiagnostic({ stage, event: "start" });
+  const signal = AbortSignal.timeout(timeoutMs);
   let response;
   try {
     response = await fetchImpl(request.url, {
       ...request.init,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
     const reason = error?.name === "TimeoutError" ? "timeout" : "network";
@@ -115,10 +117,14 @@ export async function discordOAuthJsonRequest({
     const durationMs = Math.max(0, Math.round(now() - startedAt));
     onDiagnostic({ stage, event: "success", status: response.status, durationMs });
     return value;
-  } catch {
+  } catch (error) {
+    const reason = error?.name === "TimeoutError"
+      || (signal.aborted && signal.reason?.name === "TimeoutError")
+      ? "timeout"
+      : "response";
     const durationMs = Math.max(0, Math.round(now() - startedAt));
-    onDiagnostic({ stage, event: "failure", reason: "response", status: response.status, durationMs });
-    throw new DiscordOAuthRequestError(stage, "response", response.status);
+    onDiagnostic({ stage, event: "failure", reason, status: response.status, durationMs });
+    throw new DiscordOAuthRequestError(stage, reason, response.status);
   }
 }
 
@@ -140,8 +146,110 @@ export function discordOAuthFailureRedirect({ returnTo, stage, reason }) {
   const safeReturnTo = safeReturnPath(returnTo);
   const safeStage = ["token", "profile", "session"].includes(stage) ? stage : "session";
   const safeReason = DISCORD_OAUTH_FAILURE_REASONS.has(reason) ? reason : "local";
+  const boundedReason = safeStage === "session"
+    ? "discord-session"
+    : `discord-${safeStage}-${safeReason}`;
   return `${safeReturnTo}${safeReturnTo.includes("?") ? "&" : "?"}`
-    + `auth=discord-error&reason=discord-${safeStage}-${safeReason}`;
+    + `auth=discord-error&reason=${boundedReason}`;
+}
+
+export function finishDiscordOAuthFailureResponse({
+  res,
+  returnTo,
+  stage,
+  reason,
+  clearStateCookie,
+}) {
+  const stateCookie = clearStateCookie();
+  try {
+    res.writeHead(302, {
+      location: discordOAuthFailureRedirect({ returnTo, stage, reason }),
+      "set-cookie": stateCookie,
+    });
+  } catch {
+    if (res.headersSent) {
+      res.end();
+      return true;
+    }
+    res.writeHead(302, {
+      location: DISCORD_OAUTH_FAILURE_FALLBACK_LOCATION,
+      "set-cookie": stateCookie,
+    });
+  }
+  res.end();
+  return true;
+}
+
+export async function discordOAuthCallbackController({
+  res,
+  config,
+  code,
+  returnTo,
+  clearStateCookie,
+  persistSession,
+  requestJson = discordOAuthJsonRequest,
+  onDiagnostic = () => {},
+}) {
+  onDiagnostic({ stage: "callback", event: "start" });
+  let tokenJson;
+  try {
+    tokenJson = await requestJson({
+      request: discordOAuthTokenRequest({ config, code }),
+      stage: "token",
+      onDiagnostic,
+    });
+  } catch (error) {
+    const failure = error instanceof DiscordOAuthRequestError
+      ? error
+      : new DiscordOAuthRequestError("token", "network");
+    return finishDiscordOAuthFailureResponse({
+      res,
+      returnTo,
+      stage: failure.stage,
+      reason: failure.reason,
+      clearStateCookie,
+    });
+  }
+
+  let profile;
+  try {
+    profile = await requestJson({
+      request: discordOAuthProfileRequest(tokenJson.access_token),
+      stage: "profile",
+      onDiagnostic,
+    });
+  } catch (error) {
+    const failure = error instanceof DiscordOAuthRequestError
+      ? error
+      : new DiscordOAuthRequestError("profile", "network");
+    return finishDiscordOAuthFailureResponse({
+      res,
+      returnTo,
+      stage: failure.stage,
+      reason: failure.reason,
+      clearStateCookie,
+    });
+  }
+
+  onDiagnostic({ stage: "session", event: "start" });
+  try {
+    const sessionResult = await persistSession(profile);
+    if (sessionResult?.successful !== false) {
+      onDiagnostic({ stage: "session", event: "success" });
+    }
+    return sessionResult && typeof sessionResult === "object" && "value" in sessionResult
+      ? sessionResult.value
+      : sessionResult;
+  } catch {
+    onDiagnostic({ stage: "session", event: "failure", reason: "local" });
+    return finishDiscordOAuthFailureResponse({
+      res,
+      returnTo,
+      stage: "session",
+      reason: "local",
+      clearStateCookie,
+    });
+  }
 }
 
 export function discordOAuthTokenBody({ config, code }) {
