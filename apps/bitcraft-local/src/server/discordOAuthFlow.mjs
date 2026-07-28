@@ -1,5 +1,21 @@
 import { safeReturnPath } from "./httpRequests.mjs";
 
+export const DISCORD_OAUTH_REQUEST_TIMEOUT_MS = 10_000;
+
+const DISCORD_OAUTH_STAGES = new Set(["callback", "token", "profile", "session"]);
+const DISCORD_OAUTH_EVENTS = new Set(["start", "success", "failure"]);
+const DISCORD_OAUTH_FAILURE_REASONS = new Set(["timeout", "http", "network", "response", "local"]);
+
+export class DiscordOAuthRequestError extends Error {
+  constructor(stage, reason, status = null) {
+    super(`Discord OAuth ${stage} ${reason}`);
+    this.name = "DiscordOAuthRequestError";
+    this.stage = stage;
+    this.reason = reason;
+    this.status = status;
+  }
+}
+
 export function buildDiscordAuthorizeUrl({ config, state }) {
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", config.clientId);
@@ -66,6 +82,68 @@ export function discordOAuthProfileAccount(profile, loginAt) {
     lastLoginAt: loginAt,
   };
 }
+
+export async function discordOAuthJsonRequest({
+  request,
+  stage,
+  fetchImpl = fetch,
+  timeoutMs = DISCORD_OAUTH_REQUEST_TIMEOUT_MS,
+  now = Date.now,
+  onDiagnostic = () => {},
+}) {
+  const startedAt = now();
+  onDiagnostic({ stage, event: "start" });
+  let response;
+  try {
+    response = await fetchImpl(request.url, {
+      ...request.init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const reason = error?.name === "TimeoutError" ? "timeout" : "network";
+    const durationMs = Math.max(0, Math.round(now() - startedAt));
+    onDiagnostic({ stage, event: "failure", reason, durationMs });
+    throw new DiscordOAuthRequestError(stage, reason);
+  }
+  if (!response.ok) {
+    const durationMs = Math.max(0, Math.round(now() - startedAt));
+    onDiagnostic({ stage, event: "failure", reason: "http", status: response.status, durationMs });
+    throw new DiscordOAuthRequestError(stage, "http", response.status);
+  }
+  try {
+    const value = await response.json();
+    const durationMs = Math.max(0, Math.round(now() - startedAt));
+    onDiagnostic({ stage, event: "success", status: response.status, durationMs });
+    return value;
+  } catch {
+    const durationMs = Math.max(0, Math.round(now() - startedAt));
+    onDiagnostic({ stage, event: "failure", reason: "response", status: response.status, durationMs });
+    throw new DiscordOAuthRequestError(stage, "response", response.status);
+  }
+}
+
+export function discordOAuthDiagnosticLine(event) {
+  const stage = DISCORD_OAUTH_STAGES.has(event?.stage) ? event.stage : "callback";
+  const action = DISCORD_OAUTH_EVENTS.has(event?.event) ? event.event : "failure";
+  const fields = [`stage=${stage}`, `event=${action}`];
+  if (Number.isInteger(event?.status) && event.status >= 100 && event.status <= 599) {
+    fields.push(`status=${event.status}`);
+  }
+  if (DISCORD_OAUTH_FAILURE_REASONS.has(event?.reason)) fields.push(`reason=${event.reason}`);
+  if (Number.isFinite(event?.durationMs) && event.durationMs >= 0) {
+    fields.push(`durationMs=${Math.round(event.durationMs)}`);
+  }
+  return `[discord-oauth] ${fields.join(" ")}`;
+}
+
+export function discordOAuthFailureRedirect({ returnTo, stage, reason }) {
+  const safeReturnTo = safeReturnPath(returnTo);
+  const safeStage = ["token", "profile", "session"].includes(stage) ? stage : "session";
+  const safeReason = DISCORD_OAUTH_FAILURE_REASONS.has(reason) ? reason : "local";
+  return `${safeReturnTo}${safeReturnTo.includes("?") ? "&" : "?"}`
+    + `auth=discord-error&reason=discord-${safeStage}-${safeReason}`;
+}
+
 export function discordOAuthTokenBody({ config, code }) {
   return new URLSearchParams({
     client_id: config.clientId,
