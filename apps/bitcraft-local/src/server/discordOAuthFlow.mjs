@@ -7,6 +7,7 @@ export function buildDiscordAuthorizeUrl({ config, state }) {
   authorize.searchParams.set("redirect_uri", config.redirectUri);
   authorize.searchParams.set("scope", "identify");
   authorize.searchParams.set("state", state);
+  authorize.searchParams.set("integration_type", "0");
   return authorize.toString();
 }
 
