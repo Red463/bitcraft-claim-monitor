@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.48.1-beta.2] - 2026-07-28
+
+### Fixed
+
+- Fixed regular Discord sign-in from restricted pages failing after legal acceptance.
+
 ## [0.48.1-beta.1] - 2026-07-28
 
 ### Fixed
