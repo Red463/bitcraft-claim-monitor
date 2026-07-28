@@ -84,6 +84,18 @@ export function discordOAuthProfileAccount(profile, loginAt) {
   };
 }
 
+export function recordDiscordOAuthLegalAcceptance({ statements, userId, legal }) {
+  return statements.insertUserLegalAcceptance.run(
+    userId,
+    legal.version,
+    legal.termsDigest,
+    legal.privacyDigest,
+    1,
+    legal.acceptedAt,
+    "oauth",
+  );
+}
+
 export async function discordOAuthJsonRequest({
   request,
   stage,
