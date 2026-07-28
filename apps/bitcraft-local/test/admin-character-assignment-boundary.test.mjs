@@ -96,8 +96,11 @@ test("Linked Accounts keeps roster failures local without hiding later admin req
 test("Linked account assignment remains dense, layered, and touch-friendly on narrow screens", () => {
   assert.match(css, /\.linked-account-row\s*\{[^}]*grid-template-columns:\s*minmax/);
   assert.match(css, /\.linked-account-character-actions/);
+  assert.match(css, /\.linked-account-contextual-actions\s*>\s*\.toolbar-button\s*\{[^}]*width:\s*fit-content[^}]*justify-self:\s*start/);
+  assert.match(css, /\.linked-account-assignment-disclosure\s*>\s*summary::after,\s*\.linked-account-more-actions\s*>\s*summary::after\s*\{[^}]*content:\s*none[^}]*display:\s*none/);
   assert.match(css, /\.linked-account-more-menu\s*\{[^}]*z-index:\s*var\(--z-dropdown\)/);
   assert.match(css, /\.linked-account-more-actions\s*>\s*summary:focus-visible/);
   assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-row\s*\{[^}]*grid-template-columns:\s*1fr/);
+  assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-contextual-actions\s*>\s*\.toolbar-button,[\s\S]*width:\s*100%/);
   assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-contextual-actions[\s\S]*min-height:\s*44px/);
 });
