@@ -41,6 +41,13 @@ test("all app sign-in surfaces use the gated action instead of raw OAuth links",
   assert.doesNotMatch(dealWatchlist, /window\.location\.href\s*=\s*`\$\{LOCAL_API\}\/auth\/discord\/start/);
 });
 
+test("restricted access sign-in does not forward the React click event as the OAuth return path", () => {
+  assert.match(
+    appShell,
+    /guidance\.action === "discord-login"[\s\S]{0,180}onClick=\{\(\) => onDiscordLogin\(\)\}/,
+  );
+});
+
 test("acceptance is a fixed viewport dialog with bounded internal scrolling", () => {
   assert.match(css, /\.legal-acceptance-overlay\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s);
   assert.match(css, /\.legal-acceptance-dialog\s*\{[^}]*max-height:\s*calc\(100vh/s);

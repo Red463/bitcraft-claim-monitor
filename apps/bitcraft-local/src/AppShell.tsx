@@ -163,7 +163,7 @@ function RestrictedAccessState({
         <strong>{title} is restricted</strong>
         <span>{decision?.reason || "You do not have access to this area."}</span>
         <small>{guidance.message}</small>
-        {guidance.action === "discord-login" ? <button className="toolbar-button primary" onClick={onDiscordLogin}><MessageCircle size={15} /> Sign in with Discord</button> : null}
+        {guidance.action === "discord-login" ? <button className="toolbar-button primary" onClick={() => onDiscordLogin()}><MessageCircle size={15} /> Sign in with Discord</button> : null}
         {guidance.action === "user-settings" ? <button className="toolbar-button primary" onClick={onOpenUserSettings}><Settings size={15} /> Open User Settings</button> : null}
       </section>
     </div>
