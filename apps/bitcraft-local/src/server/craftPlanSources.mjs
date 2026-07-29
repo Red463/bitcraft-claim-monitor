@@ -115,7 +115,7 @@ function expectedPossibilityOutputs(detail, directOutputQuantity) {
   }));
 }
 
-export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new Map()) {
+function trackedCraftPlanOutputsFromPayloads(craftPayloads = [], detailsByKey = new Map()) {
   const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
   const craftsPayload = {
     items: payloads.flatMap((payload) => asArray(payload?.items)),
@@ -170,6 +170,29 @@ export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new M
   }).filter((item) => item.itemId && item.quantity > 0);
 }
 
+function craftClaimId(craft) {
+  return String(
+    craft?.claimEntityId
+      ?? craft?.claim_entity_id
+      ?? craft?.claim?.entityId
+      ?? craft?.claim?.id
+      ?? craft?.claimId
+      ?? "",
+  ).trim();
+}
+
+export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new Map(), monitoredClaimId = "") {
+  const expectedClaimId = String(monitoredClaimId).trim();
+  if (!expectedClaimId) return [];
+  const payloads = Array.isArray(craftPayloads) ? craftPayloads : [craftPayloads];
+  const scopedPayloads = payloads.map((payload) => ({
+    ...payload,
+    craftResults: asArray(payload?.craftResults)
+      .filter((craft) => craftClaimId(craft) === expectedClaimId),
+  }));
+  return trackedCraftPlanOutputsFromPayloads(scopedPayloads, detailsByKey);
+}
+
 function passiveCraftStatus(craft) {
   return String(craft?.status ?? craft?.state ?? "").trim().toLowerCase();
 }
@@ -192,7 +215,7 @@ export function trackedPassiveCraftPlanOutputs(passiveSources = [], detailsByKey
     }),
   }));
 
-  return trackedCraftPlanOutputs([{ craftResults: [] }, ...payloads], detailsByKey).map((output) => ({
+  return trackedCraftPlanOutputsFromPayloads([{ craftResults: [] }, ...payloads], detailsByKey).map((output) => ({
     ...output,
     passive: true,
     sourceType: "Passive craft",

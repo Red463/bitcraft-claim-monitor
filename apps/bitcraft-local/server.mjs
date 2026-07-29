@@ -2632,7 +2632,7 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     bankSources,
     deployableSources,
     activeCrafts: [
-      ...trackedCraftPlanOutputs(craftPayloads, detailsByKey),
+      ...trackedCraftPlanOutputs(craftPayloads, detailsByKey, claimId),
       ...trackedPassiveCraftPlanOutputs(playerPassiveCraftResults, detailsByKey),
     ],
     craftSourceErrors: [...craftSourceErrors, ...passiveCraftSourceErrors],
