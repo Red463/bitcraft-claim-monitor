@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.49.1-beta.1] - 2026-07-29
+
+### Fixed
+
+- Limited Craft Planner active station output to crafts running within the monitored claim while continuing to count passive crafts.
+
 ## [0.49.0-beta.3] - 2026-07-29
 
 ### Fixed
