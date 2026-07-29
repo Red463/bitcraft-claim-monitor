@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
+const MONITORED_CLAIM_ID = "claim-monitored";
+
 test("trackedPassiveCraftPlanOutputs counts processing and complete jobs but ignores other states", () => {
   const outputs = trackedPassiveCraftPlanOutputs([{
     playerId: "farmer-1",
@@ -51,10 +53,69 @@ test("trackedPassiveCraftPlanOutputs expands probabilistic farming products", ()
   assert.equal(straw?.status, "Passive craft in progress");
 });
 
+test("trackedCraftPlanOutputs counts only ordinary crafts that prove monitored claim ownership", () => {
+  const payload = {
+    craftResults: [
+      {
+        entityId: "matching",
+        claimEntityId: MONITORED_CLAIM_ID,
+        buildingName: "Fine Forestry Station",
+        craftedItem: [{ item_id: 100, quantity: 2, item_type: "item" }],
+      },
+      {
+        entityId: "foreign",
+        claimEntityId: "claim-foreign",
+        buildingName: "Ancient Forestry Station",
+        craftedItem: [{ item_id: 100, quantity: 26, item_type: "item" }],
+      },
+      {
+        entityId: "unverified",
+        buildingName: "Unknown Forestry Station",
+        craftedItem: [{ item_id: 100, quantity: 99, item_type: "item" }],
+      },
+    ],
+    items: [{ id: 100, name: "Simple Wood Log" }],
+  };
+
+  const outputs = trackedCraftPlanOutputs([payload], new Map(), MONITORED_CLAIM_ID);
+
+  assert.deepEqual(outputs.map((output) => [output.craftId, output.buildingName, output.quantity]), [
+    ["matching", "Fine Forestry Station", 2],
+  ]);
+});
+
+test("trackedCraftPlanOutputs retains matching private craft details during deduplication", () => {
+  const publicPayload = {
+    craftResults: [{
+      entityId: "shared",
+      claimEntityId: MONITORED_CLAIM_ID,
+      completed: false,
+      craftedItem: [{ item_id: 100, quantity: 1, item_type: "item" }],
+    }],
+  };
+  const playerPayload = {
+    craftResults: [{
+      entityId: "shared",
+      claimEntityId: MONITORED_CLAIM_ID,
+      ownerUsername: "Oddfawn",
+      buildingName: "Fine Forestry Station",
+      completed: true,
+      craftedItem: [{ item_id: 100, quantity: 1, item_type: "item" }],
+    }],
+  };
+
+  const outputs = trackedCraftPlanOutputs([publicPayload, playerPayload], new Map(), MONITORED_CLAIM_ID);
+
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].playerName, "Oddfawn");
+  assert.equal(outputs[0].status, "Ready to collect");
+});
+
 test("trackedCraftPlanOutputs expands farming product possibilities into expected Needs Board outputs", () => {
   const payload = {
     craftResults: [{
       entityId: "craft-wispweave",
+      claimEntityId: MONITORED_CLAIM_ID,
       ownerEntityId: "player-oddfawn",
       ownerUsername: "Oddfawn",
       buildingName: "Exquisite Farming Station",
@@ -75,7 +136,7 @@ test("trackedCraftPlanOutputs expands farming product possibilities into expecte
     ],
   }]]);
 
-  const outputs = trackedCraftPlanOutputs([payload], detailsByKey);
+  const outputs = trackedCraftPlanOutputs([payload], detailsByKey, MONITORED_CLAIM_ID);
   const filament = outputs.find((output) => output.itemId === "3100017");
 
   assert.equal(filament?.quantity, 2530);
@@ -89,6 +150,7 @@ test("trackedCraftPlanOutputs preserves ordinary direct craft outputs", () => {
   const payload = {
     craftResults: [{
       entityId: "craft-plank",
+      claimEntityId: MONITORED_CLAIM_ID,
       ownerEntityId: "player-modular",
       ownerUsername: "Modular",
       buildingName: "Exquisite Carpentry Station",
@@ -99,7 +161,7 @@ test("trackedCraftPlanOutputs preserves ordinary direct craft outputs", () => {
     items: [{ id: 1020003, name: "Rough Plank", tier: 1, tag: "Plank" }],
   };
 
-  const outputs = trackedCraftPlanOutputs([payload], new Map());
+  const outputs = trackedCraftPlanOutputs([payload], new Map(), MONITORED_CLAIM_ID);
 
   assert.equal(outputs.length, 1);
   assert.equal(outputs[0].itemId, "1020003");
@@ -112,6 +174,7 @@ test("trackedCraftPlanOutputs keeps expected output without guaranteeing a parti
   const payload = {
     craftResults: [{
       entityId: "craft-fish-products",
+      claimEntityId: MONITORED_CLAIM_ID,
       ownerEntityId: "player-fisher",
       craftCount: 2,
       craftedItem: [{ item_id: 1903, quantity: 1, item_type: "item" }],
@@ -128,7 +191,7 @@ test("trackedCraftPlanOutputs keeps expected output without guaranteeing a parti
     }],
   }]]);
 
-  const oil = trackedCraftPlanOutputs([payload], detailsByKey).find((output) => output.itemId === "1900");
+  const oil = trackedCraftPlanOutputs([payload], detailsByKey, MONITORED_CLAIM_ID).find((output) => output.itemId === "1900");
 
   assert.equal(oil?.quantity, 4);
   assert.equal(oil?.guaranteedQuantity, 0);
@@ -138,6 +201,7 @@ test("trackedCraftPlanOutputs estimates Straw from active Embergrain processing"
   const payload = {
     craftResults: [{
       entityId: "craft-embergrain",
+      claimEntityId: MONITORED_CLAIM_ID,
       ownerEntityId: "player-farmer",
       ownerUsername: "Farmer",
       buildingName: "Basic Farming Station",
@@ -157,7 +221,7 @@ test("trackedCraftPlanOutputs estimates Straw from active Embergrain processing"
     }],
   }]]);
 
-  const straw = trackedCraftPlanOutputs([payload], detailsByKey).find((output) => output.itemId === "straw");
+  const straw = trackedCraftPlanOutputs([payload], detailsByKey, MONITORED_CLAIM_ID).find((output) => output.itemId === "straw");
 
   assert.equal(straw?.quantity, 2);
   assert.equal(straw?.guaranteedQuantity, 0);
