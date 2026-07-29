@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import type { AnyRecord } from "../../main-app-data";
+import { resolveUserSettingsMembers } from "../../api/settlementMembers";
 import { DEFAULT_USER_TOAST_SETTINGS } from "../../settingsDefaults";
 import {
   clampThemeNumber,
@@ -36,7 +37,7 @@ import {
   type ThemeSettings,
 } from "../../theme";
 import type { AppSettings, AppUser, NotificationSoundId, NotificationSoundType, UserAuthState, UserToastSettings } from "../../types/settings";
-import { memberDisplayName } from "../../utils/memberTracking";
+import { memberDisplayName, memberTrackingId } from "../../utils/memberTracking";
 import { NOTIFICATION_SOUND_OPTIONS, previewNotificationSound } from "../../utils/notificationSounds";
 import { Dialog } from "./Dialog";
 import { PrivacyDataSection } from "./PrivacyDataSection";
@@ -64,6 +65,7 @@ export type UserSettingsDialogProps = {
   theme: ThemeSettings;
   onThemeChange: (theme: ThemeSettings) => void;
   auth: UserAuthState;
+  claimId: string;
   members: AnyRecord[];
   onDiscordLogin: () => void;
   onDiscordLogout: () => Promise<void>;
@@ -88,6 +90,7 @@ export function UserSettingsDialog({
   theme,
   onThemeChange,
   auth,
+  claimId,
   members,
   onDiscordLogin,
   onDiscordLogout,
@@ -112,7 +115,42 @@ export function UserSettingsDialog({
   const [lastThemeChoice, setLastThemeChoice] = React.useState("");
   const [selectedCharacterId, setSelectedCharacterId] = React.useState(auth.user?.characterPlayerId ?? "");
   const [accountStatus, setAccountStatus] = React.useState("");
+  const [fallbackMembers, setFallbackMembers] = React.useState<AnyRecord[]>([]);
+  const [membersLoading, setMembersLoading] = React.useState(false);
+  const [membersError, setMembersError] = React.useState("");
   React.useEffect(() => setSelectedCharacterId(auth.user?.characterPlayerId ?? ""), [auth.user?.characterPlayerId]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    if (!auth.user || members.length || !claimId.trim()) {
+      setFallbackMembers([]);
+      setMembersLoading(false);
+      setMembersError("");
+      return () => controller.abort();
+    }
+
+    setMembersLoading(true);
+    setMembersError("");
+    void resolveUserSettingsMembers(
+      members,
+      claimId,
+      (input, init) => fetch(input, { ...init, signal: controller.signal }),
+    )
+      .then((loadedMembers) => {
+        if (!controller.signal.aborted) setFallbackMembers(loadedMembers);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setFallbackMembers([]);
+          setMembersError(error instanceof Error ? error.message : "Unable to load settlement characters.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setMembersLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [auth.user, claimId, members]);
+  const availableMembers = members.length ? members : fallbackMembers;
   const themeFingerprint = JSON.stringify(theme);
   const customThemeFingerprint = JSON.stringify(customTheme);
   const matchedBuiltInPreset = THEME_PRESETS.find((preset) => JSON.stringify(preset.theme) === themeFingerprint)?.id;
@@ -189,7 +227,7 @@ export function UserSettingsDialog({
       setThemeShareStatus(error instanceof Error ? error.message : "Could not import that theme JSON.");
     }
   };
-  const selectedCharacter = members.find((member) => String(member.playerEntityId) === selectedCharacterId) ?? null;
+  const selectedCharacter = availableMembers.find((member) => memberTrackingId(member) === selectedCharacterId) ?? null;
   const soundVolumePercent = Math.round((toastSettings.soundVolume ?? DEFAULT_USER_TOAST_SETTINGS.soundVolume) * 100);
   const handleSoundVolumeChange = (event: React.FormEvent<HTMLInputElement>) => onToastSettingsChange({ ...toastSettings, soundVolume: Number(event.currentTarget.value) / 100 });
   const defaultSoundLabel = NOTIFICATION_SOUND_OPTIONS.find((sound) => sound.id === toastSettings.soundId)?.label ?? "Default";
@@ -271,13 +309,17 @@ export function UserSettingsDialog({
                   <label className="field">
                     <span>BitCraft character</span>
                     <select value={selectedCharacterId} disabled={characterLinkApproved} onChange={(event) => setSelectedCharacterId(event.target.value)}>
-                      <option value="">Select your character</option>
-                      {auth.user.characterPlayerId && !members.some((member) => String(member.playerEntityId) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
-                      {members.map((member) => <option key={member.playerEntityId ?? memberDisplayName(member)} value={String(member.playerEntityId ?? "")}>{memberDisplayName(member)}</option>)}
+                      <option value="">{membersLoading ? "Loading settlement characters..." : availableMembers.length ? "Select your character" : "No settlement characters available"}</option>
+                      {auth.user.characterPlayerId && !availableMembers.some((member) => memberTrackingId(member) === String(auth.user?.characterPlayerId)) ? <option value={auth.user.characterPlayerId}>{auth.user.characterName || auth.user.characterPlayerId}</option> : null}
+                      {availableMembers.map((member) => {
+                        const playerId = memberTrackingId(member);
+                        return <option key={playerId || memberDisplayName(member)} value={playerId}>{memberDisplayName(member)}</option>;
+                      })}
                     </select>
                   </label>
                   {characterLinkApproved ? <button className="toolbar-button" onClick={() => runAccountAction(() => onLinkCharacter(null), "Character link removed. You can request a new character link now.")}><RefreshCw size={14} /> Unlink character</button> : <button className="toolbar-button primary" disabled={!selectedCharacter} onClick={() => runAccountAction(() => onLinkCharacter(selectedCharacter), "Character link request saved for admin approval.")}><UserPlus size={14} /> Request link approval</button>}
                 </div>
+                {membersError ? <p className="theme-share-status" role="alert">{membersError} Refresh and retry.</p> : null}
                 <label className="toggle-row"><input type="checkbox" checked={discordMarketSaleDm} onChange={(event) => runAccountAction(() => onDiscordMarketSaleDmChange(event.target.checked), event.target.checked ? "Discord market sale DMs enabled." : "Discord market sale DMs disabled.")} /><span>Send me Discord DMs for my confirmed market sales</span></label>
                 <p className="theme-share-status">Settings sync automatically while you are signed in with Discord.</p>
                 {accountStatus ? <p className="theme-share-status">{accountStatus}</p> : null}
