@@ -106,6 +106,10 @@ built bundles, routes, CSP, assets, retries, and fallbacks.
 - Claim, member, inventory, active-craft, and deposit snapshots use numbered
   atomic generations; a valid subset can still commit when another HTTP domain
   is temporarily unavailable.
+- The Inventory page reads the provider-neutral inventory domain, resolves only
+  referenced item/cargo keys from the local typed catalog, preserves exact
+  decimal quantities, and loads item detail from normalized Relay catalog
+  descriptions without a browser or server BitJita detail request.
 - The local route enforces the configured claim, returns last-good stale
   envelopes, and returns `503` only when no requested domain has ever loaded.
 - Discord defaults to `record` mode. Message/DM sends return auditable synthetic

@@ -89,6 +89,8 @@ import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./sr
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
+  buildCatalogItemDetail,
+  enrichInventoryWithCatalog,
   gameDataResponse,
   parseDomainKeys,
   RelayBitCraftProvider,
@@ -10289,8 +10291,28 @@ const server = createServer(async (req, res) => {
         claimId,
         domains,
         repository: currentStateRepository,
+        transformData: (domain, data) => domain === "inventories"
+          ? enrichInventoryWithCatalog(data, (catalogKey) => providerCatalogRepository.getEntity(catalogKey))
+          : data,
       });
       return send(res, result.status, result.body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/catalog/item-detail") {
+      const kind = String(url.searchParams.get("kind") ?? "item").toLowerCase() === "cargo"
+        ? "cargo"
+        : "item";
+      const id = String(url.searchParams.get("id") ?? "").trim();
+      if (!/^\d+$/.test(id)) return send(res, 400, { error: "Catalog item id is required." });
+      const catalogKey = `${kind === "cargo" ? "cargo" : "items"}:${id}`;
+      const entity = providerCatalogRepository.getEntity(catalogKey);
+      if (!entity) return send(res, 404, { error: "Catalog item has not loaded yet." });
+      return send(res, 200, buildCatalogItemDetail({
+        kind,
+        id,
+        entity,
+        recipes: providerCatalogRepository.listDescriptions("crafting_recipe"),
+        skills: providerCatalogRepository.listDescriptions("skill"),
+      }));
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
       return proxyBitjita(req, url, res);

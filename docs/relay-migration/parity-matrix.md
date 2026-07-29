@@ -8,7 +8,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Members roster | Provider-neutral local game-data route | Relay HTTP members snapshot | in progress |
 | Member activity and skills | Provider-neutral local game-data route | Relay HTTP citizen levels plus member-filtered regional player subscription | ready for soak |
 | Member equipment and buffs | BitJita player routes | Proven member-filtered regional subscription plus global descriptions | baseline |
-| Inventory | Normalized Relay snapshot available; page still legacy | Relay HTTP joined inventory plus proven Town Bank owner join | in progress |
+| Inventory | Provider-neutral shared-storage page with local Relay catalog enrichment; Town Bank/player-bank coverage remains | Relay HTTP joined inventory plus proven Town Bank owner join | in progress |
 | Active/passive crafts | Normalized Relay active-craft snapshot available; page still legacy | Relay HTTP plus regional subscriptions | in progress |
 | Craft contributions | BitJita craft contribution route | Proven regional mapping | blocked on evidence |
 | Construction | BitJita construction/inventory joins | Regional state plus global catalogs | baseline |
@@ -36,3 +36,11 @@ production lifecycle/contributions, storage activity, trade backfill, regional
 buy-order averages, catalog refreshes, empire Hexite refreshes, Discord outbox,
 scheduled reports, health evaluation, and notification generation. Each job
 must be reconnected to normalized domains before its BitJita path is removed.
+
+Current-state ingestion must become subscription-driven or use a bounded
+single-flight Relay HTTP refresh loop. Scheduled jobs may reconcile, repair,
+retain, aggregate, report, or deliver, but no current-data page may wait for a
+periodic ingestion job. Each vertical milestone must also classify and remove
+legacy tables that exist only for BitJita bulk-fetch, pagination, rate-limit,
+or refresh-run bookkeeping. See
+[live-first-data-policy.md](./live-first-data-policy.md).

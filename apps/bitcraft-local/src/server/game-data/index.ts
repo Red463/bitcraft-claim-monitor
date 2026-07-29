@@ -4,6 +4,7 @@ export * from "./gameDataRoute.ts";
 export * from "./globalCatalogRuntime.ts";
 export * from "./globalCatalogSession.ts";
 export * from "./http.ts";
+export * from "./inventoryProjection.ts";
 export * from "./normalizers.ts";
 export * from "./persistedRuntimeHealth.ts";
 export * from "./primaryRegionPlayerSession.ts";

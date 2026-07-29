@@ -856,7 +856,7 @@ function DashboardApp() {
       ? `Showing cached data${lastUpdated ? ` from ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""} while refresh continues.`
       : "";
     return [
-      ...(state.error ? [`Main BitJita refresh failed: ${state.error}`] : []),
+      ...(state.error ? [`Main data refresh failed: ${state.error}`] : []),
       ...(staleWarning ? [staleWarning] : []),
       ...partialErrors,
     ];
@@ -875,7 +875,9 @@ function DashboardApp() {
       crafts: data.crafts.length,
       constructionProjects: Array.isArray(data.construction) ? data.construction.length : toNumber(data.construction?.projects?.length),
       marketListings: data.market.length,
-      inventories: Array.isArray(data.inventories?.inventories) ? data.inventories.inventories.length : 0,
+      inventories: Array.isArray(data.inventories?.buildings)
+        ? data.inventories.buildings.length
+        : Array.isArray(data.inventories?.inventories) ? data.inventories.inventories.length : 0,
       regionClaims: data.region.length,
     },
     warnings: apiWarnings,

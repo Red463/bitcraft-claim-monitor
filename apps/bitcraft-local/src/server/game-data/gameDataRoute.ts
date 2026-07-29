@@ -17,6 +17,7 @@ export function gameDataResponse(options: {
   claimId: EntityId;
   domains: DomainKey[];
   repository: CurrentStateReader;
+  transformData?: (domain: DomainKey, data: unknown) => unknown;
   now?: Date;
   freshForMs?: number;
 }) {
@@ -45,7 +46,7 @@ export function gameDataResponse(options: {
     const ageMs = Number.isFinite(observedMs) ? Math.max(0, now.getTime() - observedMs) : null;
     const stale = snapshot.lastError != null || ageMs == null || ageMs > freshForMs;
     domains[domain] = {
-      data: snapshot.data,
+      data: options.transformData ? options.transformData(domain, snapshot.data) : snapshot.data,
       freshness: stale ? "stale" : "fresh",
       confidence: snapshot.confidence,
       ageMs,

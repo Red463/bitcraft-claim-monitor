@@ -17,6 +17,17 @@ The maintained application remains unchanged and recoverable. This clone starts
 with a fresh database and does not import accounts, settings, secrets, or
 history.
 
+Live-first data policy:
+
+- subscription-backed domains publish validated changes continuously;
+- HTTP-only domains use bounded single-flight refresh loops rather than
+  page-triggered upstream fan-out;
+- open pages receive local provider-neutral generation notifications;
+- scheduled ingestion is a reconciliation mechanism, never something users
+  normally wait for;
+- legacy tables that only supported BitJita bulk fetching, rate limiting, or
+  refresh orchestration are removed after dependency and recovery proofs.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;
@@ -30,4 +41,8 @@ Implementation is dependency-ordered:
 
 See [evidence-baseline.md](./evidence-baseline.md),
 [diagnostic-findings.md](./diagnostic-findings.md), and
-[parity-matrix.md](./parity-matrix.md).
+[parity-matrix.md](./parity-matrix.md). The required freshness budgets,
+scheduled-job boundary, and table-retirement gates are defined in
+[live-first-data-policy.md](./live-first-data-policy.md). Current SQL ownership
+and retirement decisions are tracked in
+[table-inventory.md](./table-inventory.md).

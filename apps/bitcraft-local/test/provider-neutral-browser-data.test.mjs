@@ -55,8 +55,20 @@ test("claim overview, Members, Professions, and Leaderboard request provider-neu
 
 test("browser loader routes the first Milestone 3 pages through local game data", async () => {
   const source = await readFile(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
-  assert.match(source, /PROVIDER_NEUTRAL_PANELS[\s\S]*"dashboard"[\s\S]*"members"[\s\S]*"skills"[\s\S]*"leaderboard"/);
+  assert.match(source, /PROVIDER_NEUTRAL_PANELS[\s\S]*"dashboard"[\s\S]*"members"[\s\S]*"skills"[\s\S]*"leaderboard"[\s\S]*"inventory"/);
   assert.match(source, /PROVIDER_NEUTRAL_PANELS\.has\(activePanel\)/);
+  assert.deepEqual(pageDomains("inventory"), ["claim", "members", "inventories"]);
+});
+
+test("Inventory uses only provider-neutral local routes", async () => {
+  const source = await readFile(new URL("../src/pages/InventoryPage.tsx", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /\/api\/bitjita/);
+  assert.match(source, /const LOCAL_API = "\/api\/local"/);
+  assert.match(source, /LOCAL_API}\/catalog\/item-detail/);
+  assert.match(server, /\/api\/local\/catalog\/item-detail/);
+  assert.match(server, /enrichInventoryWithCatalog\(data/);
+  assert.match(server, /providerCatalogRepository\.listDescriptions\("crafting_recipe"\)/);
 });
 
 test("server background ingestion keeps citizens and the primary-region player session current", async () => {

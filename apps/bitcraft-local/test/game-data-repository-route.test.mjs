@@ -229,3 +229,32 @@ test("game-data route surfaces partial-domain warnings to browser status", () =>
     "players: Regional player_state omitted member 1.",
   ]);
 });
+
+test("game-data route composes requested domains through a provider-neutral local projection", () => {
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["inventories"],
+    repository: {
+      read: () => ({
+        data: { buildings: [{ entityId: "1" }] },
+        confidence: "joined",
+        generation: 6,
+        lastError: null,
+        provenance: relayProvenance("2026-07-29T21:00:00.000Z"),
+        warnings: [],
+      }),
+    },
+    transformData: (domain, data) => ({
+      ...data,
+      projectedBy: domain,
+    }),
+    now: new Date("2026-07-29T21:00:01.000Z"),
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.domains.inventories.data, {
+    buildings: [{ entityId: "1" }],
+    projectedBy: "inventories",
+  });
+});
