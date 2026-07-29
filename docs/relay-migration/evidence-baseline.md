@@ -110,6 +110,10 @@ built bundles, routes, CSP, assets, retries, and fallbacks.
   referenced item/cargo keys from the local typed catalog, preserves exact
   decimal quantities, and loads item detail from normalized Relay catalog
   descriptions without a browser or server BitJita detail request.
+- The Craft Monitor reads one provider-neutral claim craft snapshot. The
+  provider merges Relay's incomplete and completed current-state filters, then
+  the local typed recipe catalog separates progressive and passive rows without
+  member-by-member browser or server BitJita craft requests.
 - The local route enforces the configured claim, returns last-good stale
   envelopes, and returns `503` only when no requested domain has ever loaded.
 - Discord defaults to `record` mode. Message/DM sends return auditable synthetic

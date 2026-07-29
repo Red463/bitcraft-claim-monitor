@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { queryRowsWhenReady } from "../src/server/liveVerifierSqlite.mjs";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = await mkdtemp(path.join(tmpdir(), "bitcraft-relay-live-"));
@@ -26,35 +27,32 @@ let child;
 await writeFile(privacyLedgerKeyPath, "isolated-live-verification-key\n", { mode: 0o600 });
 
 function currentRows() {
-  if (!existsSync(databasePath)) return [];
-  const db = new DatabaseSync(databasePath, { readOnly: true, timeout: 1_000 });
-  try {
-    return db.prepare(`
+  return queryRowsWhenReady({
+    databaseExists: () => existsSync(databasePath),
+    openDatabase: () => new DatabaseSync(databasePath, { readOnly: true, timeout: 1_000 }),
+    sql: `
       SELECT domain, provider, source_key, region_id, freshness, confidence,
              generation, received_at, last_error
       FROM domain_payload_current
       WHERE claim_id = ?
       ORDER BY domain
-    `).all("1369094286777412590");
-  } finally {
-    db.close();
-  }
+    `,
+    parameters: ["1369094286777412590"],
+  });
 }
 
 function currentHealthRows() {
-  if (!existsSync(databasePath)) return [];
-  const db = new DatabaseSync(databasePath, { readOnly: true, timeout: 1_000 });
-  try {
-    return db.prepare(`
+  return queryRowsWhenReady({
+    databaseExists: () => existsSync(databasePath),
+    openDatabase: () => new DatabaseSync(databasePath, { readOnly: true, timeout: 1_000 }),
+    sql: `
       SELECT source_key, ready, database_name, schema_fingerprint,
              last_observed_at, last_error, updated_at
       FROM provider_source_health
       WHERE provider = 'relay'
       ORDER BY source_key
-    `).all();
-  } finally {
-    db.close();
-  }
+    `,
+  });
 }
 
 try {

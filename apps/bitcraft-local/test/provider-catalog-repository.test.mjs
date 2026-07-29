@@ -117,6 +117,12 @@ test("provider catalog repository replaces normalized description tables in the 
   assert.deepEqual(repository.listDescriptions("skill"), [
     { kind: "skill", id: "5", name: "Forestry" },
   ]);
+  assert.deepEqual(repository.getDescription("crafting_recipe", "77"), {
+    kind: "crafting_recipe",
+    id: "77",
+    name: "Saw Timber",
+  });
+  assert.equal(repository.getDescription("crafting_recipe", "999"), null);
 
   repository.replaceCatalogSnapshot({
     entities: [{ kind: "item", id: "42", name: "Timber", tier: 2 }],

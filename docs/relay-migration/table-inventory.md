@@ -63,3 +63,21 @@ Disposition values:
 - No SQL table was added for the Inventory cutover.
 - Town Bank and player-bank parity remain incomplete and block marking the
   whole inventory domain ready for soak.
+
+## Active/passive craft vertical evidence
+
+- `domain_payload_current` owns the exact Relay craft snapshot; no craft-page
+  cache table was added.
+- The provider reads the claim-scoped incomplete and completed Relay filters in
+  one refresh generation and deduplicates exact craft IDs.
+- `game_catalog_descriptions` supplies passive classification, requirements,
+  experience, and recipe/output metadata from the typed global subscription.
+  The page projection performs indexed lookups only for recipe IDs present in
+  the current snapshot; it does not scan or copy the full recipe catalog.
+- The Production page no longer calls `/api/bitjita`,
+  `/api/local/production/crafts`, or `/api/local/passive-crafts`.
+- `production_jobs` and `production_contributions` remain history/event tables
+  for lifecycle and notification semantics; they are not the current page's
+  source of truth.
+- Craft contributor parity and member Toolbelt eligibility remain explicitly
+  unavailable until their regional subscription mappings are delivered.

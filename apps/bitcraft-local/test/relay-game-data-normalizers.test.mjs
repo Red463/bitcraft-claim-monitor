@@ -7,6 +7,7 @@ const {
   normalizeDeposit,
   normalizeDeposits,
   normalizeClaimCrafts,
+  normalizeClaimCraftPayloads,
   normalizeClaimInventory,
   normalizeCatalogDescription,
   normalizeCatalogEntity,
@@ -236,6 +237,8 @@ test("typed recipe and skill descriptions are projected without wire DTOs", () =
     isPassive: false,
     buildingRequirement: { buildingType: 9, tier: 2 },
     levelRequirements: [{ skillId: 5, level: 20 }],
+    toolRequirements: [{ toolType: 4, level: 3, power: 25 }],
+    experiencePerProgress: [{ skillId: 5, quantity: 2.5 }],
     consumedItemStacks: [{
       itemId: 42,
       quantity: 3,
@@ -255,6 +258,8 @@ test("typed recipe and skill descriptions are projected without wire DTOs", () =
     isPassive: false,
     buildingRequirement: { buildingType: "9", tier: 2 },
     levelRequirements: [{ skillId: "5", level: 20 }],
+    toolRequirements: [{ toolType: 4, level: 3, power: 25 }],
+    experiencePerProgress: [{ skillId: "5", quantity: 2.5 }],
     inputs: [{ kind: "item", id: "42", quantity: "3", consumptionChance: 1 }],
     outputs: [{ kind: "cargo", id: "43", quantity: "1" }],
   });
@@ -374,4 +379,42 @@ test("claim craft and deposit payloads normalize into provider domain shapes", (
     ],
   });
   assert.deepEqual(deposits.map((deposit) => deposit.status), ["unknown", "respawning"]);
+});
+
+test("claim craft payloads merge incomplete and completed rows without losing exact identities", () => {
+  const crafts = normalizeClaimCraftPayloads([
+    {
+      crafts: [{
+        entity_id: "1369094286813753789",
+        building_entity_id: "1369094286799387835",
+        claim_entity_id: "1369094286777412590",
+        owner_entity_id: "864691128504576674",
+        completed: false,
+        craft_count: "9007199254740993",
+        progress: 2,
+        recipe_id: 209007,
+        total_actions_required: 8125,
+        crafted_item: [{ item_id: 42, item_type: "Cargo", quantity: 1 }],
+      }],
+    },
+    {
+      crafts: [{
+        entity_id: "1369094287235049109",
+        building_entity_id: "1369094286803079588",
+        claim_entity_id: "1369094286777412590",
+        owner_entity_id: "1224979098736429551",
+        completed: true,
+        craft_count: 1,
+        progress: 1,
+        recipe_id: 210017,
+        total_actions_required: 1,
+        crafted_item: [{ item_id: 42, item_type: "Item", quantity: 100 }],
+      }],
+    },
+  ]);
+
+  assert.equal(crafts.craftResults.length, 2);
+  assert.equal(crafts.craftResults[0].craftCount, "9007199254740993");
+  assert.equal(crafts.craftResults[0].craftedItem[0].itemType, "cargo");
+  assert.equal(crafts.craftResults[1].completed, true);
 });

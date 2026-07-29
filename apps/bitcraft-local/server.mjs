@@ -90,6 +90,7 @@ import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
+  enrichCraftsWithCatalog,
   enrichInventoryWithCatalog,
   gameDataResponse,
   parseDomainKeys,
@@ -322,6 +323,10 @@ const gameCatalogRefreshRetryDelaysMs = String(process.env.GAME_CATALOG_REFRESH_
 if (!gameCatalogRefreshRetryDelaysMs.length) gameCatalogRefreshRetryDelaysMs.push(15000, 60000, 300000);
 const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
+const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 15000);
+const relayHttpRefreshMs = Number.isFinite(relayHttpRefreshSetting)
+  ? Math.max(5000, Math.min(Math.floor(relayHttpRefreshSetting), 60000))
+  : 15000;
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
@@ -10291,9 +10296,22 @@ const server = createServer(async (req, res) => {
         claimId,
         domains,
         repository: currentStateRepository,
-        transformData: (domain, data) => domain === "inventories"
-          ? enrichInventoryWithCatalog(data, (catalogKey) => providerCatalogRepository.getEntity(catalogKey))
-          : data,
+        transformData: (domain, data) => {
+          if (domain === "inventories") {
+            return enrichInventoryWithCatalog(
+              data,
+              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+            );
+          }
+          if (domain === "crafts") {
+            return enrichCraftsWithCatalog(
+              data,
+              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+            );
+          }
+          return data;
+        },
       });
       return send(res, result.status, result.body);
     }
@@ -11887,7 +11905,7 @@ function startBackgroundTasks() {
     }, currentStateRepository).then(() => {
       relayProviderStarted = true;
       void refreshRelay("scheduled");
-      relayProviderRefreshTimer = setInterval(() => void refreshRelay(), serverRefreshIntervalMs());
+      relayProviderRefreshTimer = setInterval(() => void refreshRelay(), relayHttpRefreshMs);
       relayProviderRefreshTimer.unref?.();
     }).catch((error) => {
       if (!isTestRuntime) console.warn(`Relay provider startup failed: ${errorMessage(error)}`);

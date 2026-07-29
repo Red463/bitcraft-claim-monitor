@@ -11,97 +11,48 @@ import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { playerToolbeltTools } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
-import { SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
+import { SKILL_NAMES } from "../utils/professions";
 import { trackAnalyticsEvent } from "../utils/analytics";
-import type { LoadState } from "../types/app";
-import { useManualRefresh } from "../refresh/ManualRefreshContext";
-import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { formatDecimalQuantity } from "../server/game-data/inventoryProjection";
 import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
 
-const API = "/api/bitjita";
-const LOCAL_API = "/api/local";
-
-export function MemberPassiveCrafts({ members, refreshToken }: { members: AnyRecord[]; refreshToken: number }) {
-  const { request, trackPromise } = useManualRefresh();
-  const [state, setState] = React.useState<LoadState<AnyRecord[]>>({ data: null, error: null, loading: true });
-  const memberKey = members.map((member) => String(member.playerEntityId ?? "")).filter(Boolean).join(",");
-  React.useEffect(() => {
-    if (!memberKey) {
-      setState({ data: [], error: null, loading: false });
-      return;
-    }
-    const controller = new AbortController();
-    setState((previous) => previous.data ? { ...previous, loading: true, error: null } : { data: null, error: null, loading: true });
-    const memberEntries = members.filter((member) => member.playerEntityId);
-    const refresh = fetch(`${LOCAL_API}/passive-crafts`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...manualRefreshHeaders(request, "production") },
-      body: JSON.stringify({ members: memberEntries.map((member) => ({
-        playerEntityId: member.playerEntityId,
-        userName: member.userName ?? member.username,
-      })) }),
-      signal: controller.signal,
-    }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`passive crafts HTTP ${response.status}`)))
-      .then((payload) => {
-      if (controller.signal.aborted) return;
-      const rows = (payload.rows ?? []) as AnyRecord[];
-      const failures = toNumber(payload.failed);
-      setState({
-        data: rows,
-        error: failures ? `${failures} member${failures === 1 ? "" : "s"} could not be loaded.` : null,
-        loading: false,
-      });
-    });
-    void trackPromise("production-passive-crafts", refresh).catch((error) => {
-      if (controller.signal.aborted) return;
-      setState((previous) => ({
-        data: previous.data ?? [],
-        error: error instanceof Error ? error.message : String(error),
-        loading: false,
-      }));
-    });
-    return () => controller.abort();
-  }, [memberKey, refreshToken, request?.sequence, trackPromise]);
-  const rows = state.data ?? [];
+export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
   return (
     <section className="settlement-passive-crafts">
       <div className="split-header">
         <div className="dashboard-section-heading">
           <h3><Factory size={15} /> Member Passive Crafts</h3>
-          <p>Recent public passive output for current settlement members. BitJita does not report craft location, so entries may have been performed elsewhere.</p>
+          <p>Current settlement passive output joined to its member and structure by the Relay.</p>
         </div>
-        {state.loading && rows.length ? <span className="refreshing-label">Updating...</span> : null}
       </div>
-      {state.error ? <p className="legend">{state.error}</p> : null}
-      {state.loading && !state.data ? <p className="legend">Loading passive craft history...</p> : null}
-      {!state.loading && rows.length === 0 ? <div className="empty-state"><Factory />No passive craft history reported for settlement members.</div> : null}
+      {rows.length === 0 ? <div className="empty-state"><Factory />No current passive crafts reported for this settlement.</div> : null}
       {rows.length ? <DataTable rows={rows} scrollLabel="Production jobs table" emptyState="No production jobs match the current filters." columns={[
         ["Output", (row) => <strong>{row.recipe}</strong>],
         ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
         ["Member", (row) => row.memberName],
         ["Structure", (row) => row.structure],
         ["Status", (row) => <span className={`status-pill ${row.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(row.status)}</span>],
-        ["Quantity", (row) => formatNumber(row.quantity)],
-        ["Latest", (row) => timeAgo(row.timestamp)],
+        ["Quantity", (row) => formatDecimalQuantity(row.quantity)],
+        ["Latest", (row) => row.timestamp ? timeAgo(row.timestamp) : "Current Relay snapshot"],
       ]} /> : null}
     </section>
   );
 }
 
-export function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
-  const { request, trackPromise } = useManualRefresh();
+export function Production({ data, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
   const [showPrivateCrafts, setShowPrivateCrafts] = usePersistedState("production.showPrivateCrafts", true);
-  const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
-  const [toolbeltError, setToolbeltError] = React.useState(false);
-  const toolsForMemberRef = React.useRef<string | null>(null);
   const observedCraftProgressRef = React.useRef<Map<string, number>>(new Map());
   const [observedMovingCrafts, setObservedMovingCrafts] = React.useState<Set<string>>(() => new Set());
-  const itemLookup = new Map([...(data.raw?.crafts?.items ?? []), ...(data.raw?.crafts?.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
+  const itemLookup = new Map<string, AnyRecord>(
+    Object.entries(data.raw?.crafts?.catalog ?? {}).map(([key, value]) => [key, (value ?? {}) as AnyRecord]),
+  );
+  const passiveCrafts = Array.isArray(data.raw?.crafts?.passiveCraftResults)
+    ? data.raw.crafts.passiveCraftResults as AnyRecord[]
+    : [];
   const selectedMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   const selectedMemberName = selectedMember ? String(selectedMember.userName ?? selectedMember.username ?? "") : "";
   const selectedCitizen = selectedMember ? data.citizens.find((citizen: AnyRecord) => String(citizen.userName ?? citizen.username) === selectedMemberName) ?? null : null;
@@ -134,27 +85,6 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   const isCraftWorking = React.useCallback((job: AnyRecord, contributors: AnyRecord[]) => {
     return hasRecentCraftContribution(contributors) || isCraftObservedMoving(job);
   }, [isCraftObservedMoving]);
-  React.useEffect(() => {
-    if (!selectedMember?.playerEntityId) {
-      setToolbeltTools(null);
-      setToolbeltError(false);
-      toolsForMemberRef.current = null;
-      return;
-    }
-    const controller = new AbortController();
-    const memberId = String(selectedMember.playerEntityId);
-    if (toolsForMemberRef.current !== memberId) {
-      toolsForMemberRef.current = memberId;
-      setToolbeltTools(null);
-    }
-    setToolbeltError(false);
-    const refresh = fetch(`${API}/players/${memberId}/inventories`, { headers: manualRefreshHeaders(request, "production"), signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`inventories HTTP ${response.status}`)))
-      .then((payload) => setToolbeltTools(playerToolbeltTools(payload)));
-    void trackPromise("production-toolbelt", refresh)
-      .catch(() => { if (!controller.signal.aborted) setToolbeltError(true); });
-    return () => controller.abort();
-  }, [selectedMember?.playerEntityId, refreshToken, request?.sequence, trackPromise]);
   const selectCrafterPill = (name: string) => {
     if (!crafterMemberIdByName[name]) return;
     onSelectMember(selectedMemberName === name ? "All" : crafterMemberIdByName[name]);
@@ -164,24 +94,14 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
     if (!selectedMember) return null;
     const requirement = job.levelRequirements?.[0] ?? {};
     const requiredLevel = toNumber(requirement.level);
-    const skillId = toNumber(requirement.skill_id);
+    const skillId = toNumber(requirement.skillId ?? requirement.skill_id);
     const skillName = SKILL_NAMES[skillId] ?? "Required skill";
     const memberLevel = toNumber(selectedCitizen?.skills?.[String(skillId)]);
     const skillOk = memberLevel >= requiredLevel;
     const toolRequirement = job.toolRequirements?.[0];
-    const maxToolCraftTier = (item: AnyRecord) => toNumber(item.tier) + 1;
-    const craftTier = toNumber(toolRequirement?.level);
-    const expectedTool = toolRequirement ? TOOL_TAG_BY_TYPE[toNumber(toolRequirement.tool_type)] : null;
-    const ownedTool = !toolRequirement ? null : (toolbeltTools ?? []).find((item) => {
-      const correctType = toNumber(item.toolType) === toNumber(toolRequirement.tool_type) ||
-        String(item.tags ?? item.tag ?? "") === expectedTool;
-      return correctType && maxToolCraftTier(item) >= craftTier;
-    });
     if (!skillOk) return { ok: false, text: `Needs ${skillName} Lv ${requiredLevel} (has ${memberLevel})` };
-    if (toolbeltError && toolbeltTools == null) return { ok: false, pending: true, text: "Toolbelt unavailable" };
-    if (toolRequirement && toolbeltTools == null) return { ok: false, pending: true, text: "Checking Toolbelt..." };
-    if (toolRequirement && !ownedTool) return { ok: false, text: `Needs T${Math.max(1, craftTier - 1)}+ ${expectedTool ?? "required tool"} in Toolbelt` };
-    return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}${ownedTool ? ` - ${ownedTool.name} (${formatNumber(ownedTool.toolPower)} power)` : ""}` };
+    if (toolRequirement) return { ok: false, pending: true, text: "Skill met; Relay Toolbelt eligibility is not loaded yet" };
+    return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}` };
   }
   const privateCrafts = data.crafts.filter((job) => job.isPublic === false);
   const visibilityFilteredCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);
@@ -262,7 +182,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
             </select>
           </label>
           <Segmented options={[{ id: "Descending", label: "Descending" }, { id: "Ascending", label: "Ascending" }]} value={sortDir === "desc" ? "Descending" : "Ascending"} onChange={(direction) => setSortDir(direction === "Descending" ? "desc" : "asc")} label="Direction" />
-          <label className="production-private-toggle"><span><Lock size={13} /> Show private crafts</span><input type="checkbox" checked={showPrivateCrafts} onChange={(event) => setShowPrivateCrafts(event.target.checked)} /></label>
+          {privateCrafts.length ? <label className="production-private-toggle"><span><Lock size={13} /> Show private crafts</span><input type="checkbox" checked={showPrivateCrafts} onChange={(event) => setShowPrivateCrafts(event.target.checked)} /></label> : null}
         </div>
         {Object.keys(crafterCounts).length ? (
           <div className="production-crafter-line">
@@ -304,14 +224,14 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft. BitJita returned this through member craft data with isPublic false."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} members={data.members} /></span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft returned by the provider's member-scoped craft data."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} members={data.members} /></span></div>
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
-                <div className={`craft-title ${item?.iconAssetName ? "has-icon" : ""}`}>{item?.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{item?.name ?? (skillName ? `${skillName} craft` : `Item #${first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
+                <div className={`craft-title ${item?.iconAssetName ? "has-icon" : ""}`}>{item?.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{item?.name ?? job.recipeName ?? (skillName ? `${skillName} craft` : `${String(first.itemType ?? first.item_type).toLowerCase() === "cargo" ? "Cargo" : "Item"} #${first.itemId ?? first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
                 {!item.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
-                  <span>{formatNumber(job.craftCount)} craft{toNumber(job.craftCount) === 1 ? "" : "s"}</span>
+                  <span>{formatDecimalQuantity(job.craftCount)} craft{String(job.craftCount) === "1" ? "" : "s"}</span>
                   <span>{formatNumber(remaining)} effort to craft</span>
                   {experiencePerEffort ? <span>{formatNumber(totalXp)} total XP</span> : null}
                 </div>
@@ -326,13 +246,13 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                       <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} members={data.members} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
                     ))}
                   </div>
-                ) : <small>No contributions recorded by the API.</small>}
+                ) : <small>Contributor mapping is not yet available from the Relay.</small>}
               </section>
             </article>
           );
         })}
       </div>
-      <MemberPassiveCrafts members={data.members} refreshToken={refreshToken} />
+      <MemberPassiveCrafts rows={passiveCrafts} />
     </div>
   );
 }

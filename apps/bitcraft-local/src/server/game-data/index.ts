@@ -1,4 +1,5 @@
 export * from "./contracts.ts";
+export * from "./craftProjection.ts";
 export * from "./currentStateRepository.ts";
 export * from "./gameDataRoute.ts";
 export * from "./globalCatalogRuntime.ts";

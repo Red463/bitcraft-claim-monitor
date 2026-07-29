@@ -219,6 +219,7 @@ test("Relay provider commits a successful claim when members are temporarily una
 
 test("Relay provider loads bounded inventory, craft, and deposit HTTP domains", async () => {
   const responses = relayResponses();
+  const craftCompletedFilters = [];
   responses.set("/claim/1369094286777412590/inventory", {
     claim: { entity_id: "1369094286777412590", name: "Timbersteel Trade", region: 19 },
     dimensions: [{
@@ -248,6 +249,9 @@ test("Relay provider loads bounded inventory, craft, and deposit HTTP domains", 
   const provider = new RelayBitCraftProvider({
     fetcher: async (input) => {
       const url = new URL(String(input));
+      if (url.pathname.endsWith("/crafts")) {
+        craftCompletedFilters.push(url.searchParams.get("completed"));
+      }
       const body = responses.get(url.pathname);
       return body
         ? new Response(JSON.stringify(body), { status: 200 })
@@ -275,4 +279,54 @@ test("Relay provider loads bounded inventory, craft, and deposit HTTP domains", 
   assert.equal(batches.at(-1).domains.inventories.data.buildings[0].inventory[0].contents.itemType, "cargo");
   assert.equal(batches.at(-1).domains.crafts.data.craftResults[0].entityId, "1369094286813753789");
   assert.equal(batches.at(-1).domains.deposits.data[0].status, "unknown");
+  assert.deepEqual(craftCompletedFilters, ["false", "true"]);
+});
+
+test("Relay provider coalesces concurrent refreshes covered by the same in-flight domains", async () => {
+  const responses = relayResponses();
+  responses.set("/claim/1369094286777412590/inventory", {
+    claim: { entity_id: "1369094286777412590", name: "Timbersteel Trade", region: 19 },
+    dimensions: [],
+  });
+  let releaseInventory;
+  const inventoryGate = new Promise((resolve) => { releaseInventory = resolve; });
+  let inventoryCalls = 0;
+  const provider = new RelayBitCraftProvider({
+    fetcher: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/inventory")) {
+        inventoryCalls += 1;
+        await inventoryGate;
+      }
+      const body = responses.get(url.pathname);
+      return body
+        ? new Response(JSON.stringify(body), { status: 200 })
+        : new Response("missing", { status: 404 });
+    },
+    scheduleTopologyRefresh: () => () => {},
+  });
+  await provider.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    activeRegionIds: ["19"],
+  }, {
+    commitGeneration: async () => {},
+    appendEvents: async () => {},
+  });
+
+  const first = provider.refresh({
+    claimId: "1369094286777412590",
+    domains: ["claim", "inventories"],
+    reason: "scheduled",
+  });
+  while (inventoryCalls === 0) await new Promise((resolve) => setImmediate(resolve));
+  const second = provider.refresh({
+    claimId: "1369094286777412590",
+    domains: ["inventories"],
+    reason: "manual",
+  });
+  releaseInventory();
+
+  await Promise.all([first, second]);
+  assert.equal(inventoryCalls, 1);
 });

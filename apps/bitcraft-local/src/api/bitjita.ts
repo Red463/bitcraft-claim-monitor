@@ -24,6 +24,7 @@ const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
   "skills",
   "leaderboard",
   "inventory",
+  "craft-monitor",
 ]);
 
 function appendPartialError(raw: AnyRecord, message: string) {

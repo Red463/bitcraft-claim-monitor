@@ -417,6 +417,7 @@ Supported application server environment variables:
 | `BITCRAFT_RELAY_ORIGIN` | Relay topology and joined-cache origin | `https://relay.bitcraftsync.app` |
 | `BITCRAFT_APP_IDENTIFIER` | Stable clone identifier used for local hashing | relay repository identifier |
 | `ENABLE_RELAY_PROVIDER` | Enable worker-side Relay ingestion | enabled |
+| `RELAY_HTTP_REFRESH_MS` | Live Relay HTTP-domain refresh loop, bounded to 5-60 seconds | `15000` |
 | `DISCORD_DELIVERY_MODE` | `record` stores delivery evidence without sending; `live` sends | `record` |
 | `BITJITA_API_ORIGIN` | Alternate BitJita upstream origin | `https://bitjita.com` |
 | `BITJITA_APP_IDENTIFIER` | Identifier sent with upstream BitJita requests | project GitHub identifier |

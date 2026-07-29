@@ -7,9 +7,9 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Dashboard claim summary | Provider-neutral local game-data route | Relay HTTP claim snapshot | in progress |
 | Members roster | Provider-neutral local game-data route | Relay HTTP members snapshot | in progress |
 | Member activity and skills | Provider-neutral local game-data route | Relay HTTP citizen levels plus member-filtered regional player subscription | ready for soak |
-| Member equipment and buffs | BitJita player routes | Proven member-filtered regional subscription plus global descriptions | baseline |
+| Member equipment and buffs | BitJita player routes; Production now reports Toolbelt eligibility unavailable instead of fetching BitJita | Proven member-filtered regional subscription plus global descriptions | in progress |
 | Inventory | Provider-neutral shared-storage page with local Relay catalog enrichment; Town Bank/player-bank coverage remains | Relay HTTP joined inventory plus proven Town Bank owner join | in progress |
-| Active/passive crafts | Normalized Relay active-craft snapshot available; page still legacy | Relay HTTP plus regional subscriptions | in progress |
+| Active/passive crafts | Provider-neutral current page; Relay incomplete/completed claim rows split by typed recipe metadata | Relay HTTP plus global recipe catalog | ready for soak |
 | Craft contributions | BitJita craft contribution route | Proven regional mapping | blocked on evidence |
 | Construction | BitJita construction/inventory joins | Regional state plus global catalogs | baseline |
 | Research | BitJita research route | Regional tech state plus global catalogs | baseline |

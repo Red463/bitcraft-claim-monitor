@@ -28,7 +28,6 @@ test("local page history joins the same active refresh request", () => {
 for (const [label, path] of [
   ["dashboard", "../src/pages/DashboardPage.tsx"],
   ["craft planning", "../src/pages/CraftPlanningPage.tsx"],
-  ["production", "../src/pages/ProductionPage.tsx"],
   ["leaderboard", "../src/pages/LeaderboardPage.tsx"],
   ["public craft finder", "../src/pages/PublicCraftFinderPage.tsx"],
   ["empires", "../src/pages/EmpiresPage.tsx"],
@@ -46,3 +45,12 @@ for (const [label, path] of [
     assert.match(page, /request\?\.sequence/);
   });
 }
+
+test("provider-neutral Production refresh is owned by the shared game-data request", () => {
+  const page = source("../src/pages/ProductionPage.tsx");
+  const loader = source("../src/api/bitjita.ts");
+
+  assert.doesNotMatch(page, /useManualRefresh|manualRefreshHeaders|trackPromise/);
+  assert.match(loader, /PROVIDER_NEUTRAL_PANELS[\s\S]*"craft-monitor"/);
+  assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.manualHeaders\s*\}/);
+});

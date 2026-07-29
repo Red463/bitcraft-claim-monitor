@@ -97,6 +97,32 @@ global typed subscription as independent generation-safe current domains.
 Dashboard, Members, Professions, and Leaderboard now compose those local
 domains without using their legacy BitJita page routes.
 
+## Claim craft cache proof
+
+The ready Relay HTTP cache was queried for the configured claim using both
+bounded current-state filters:
+
+| Route | Rows observed | Finding |
+|---|---:|---|
+| `/claim/1369094286777412590/crafts?completed=false` | 77 | Current progressive and processing passive crafts are returned together. |
+| `/claim/1369094286777412590/crafts?completed=true` | 559 | Ready-to-collect passive crafts and completed progressive crafts are returned together. |
+
+Rows carried exact craft, building, claim, owner, recipe, and output identities
+plus the joined building and owner names. The HTTP rows do not label a recipe
+as passive; that distinction is joined locally from the typed global
+`crafting_recipe_desc.is_passive` field. The provider therefore fetches both
+current-state filters, deduplicates by exact craft entity ID, and the local
+projection separates:
+
+- incomplete non-passive recipes into active Production cards;
+- passive recipes into `processing` or `complete` rows from the explicit
+  `completed` flag;
+- completed non-passive recipes out of the current Production view.
+
+This replaces the Production page's claim/member BitJita craft fan-out and its
+per-member passive-craft helper. Contributor amounts remain excluded because
+the separate contributor mapping is not proven.
+
 ## Town Bank inventory
 
 The observed `bank_state.building_entity_id` was used in a second bounded

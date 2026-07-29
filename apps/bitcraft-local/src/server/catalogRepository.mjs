@@ -126,6 +126,10 @@ export function createProviderCatalogRepository(db) {
       WHERE description_kind = ?
       ORDER BY CAST(description_id AS INTEGER), description_id
     `),
+    getDescription: db.prepare(`
+      SELECT data_json FROM game_catalog_descriptions
+      WHERE description_kind = ? AND description_id = ?
+    `),
   };
 
   function replaceSnapshot(entities, descriptions, metadata) {
@@ -207,6 +211,10 @@ export function createProviderCatalogRepository(db) {
     listDescriptions(kind) {
       return statements.listDescriptions.all(String(kind ?? ""))
         .map((row) => JSON.parse(String(row.data_json)));
+    },
+    getDescription(kind, id) {
+      const row = statements.getDescription.get(String(kind ?? ""), String(id ?? ""));
+      return row ? JSON.parse(String(row.data_json)) : null;
     },
   };
 }

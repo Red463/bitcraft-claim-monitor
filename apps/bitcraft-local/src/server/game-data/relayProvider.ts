@@ -11,7 +11,7 @@ import type {
 import { RelayHttpClient } from "./http.ts";
 import {
   normalizeClaimPayload,
-  normalizeClaimCrafts,
+  normalizeClaimCraftPayloads,
   normalizeClaimInventory,
   normalizeClaimRegion,
   normalizeCitizensPayload,
@@ -50,6 +50,10 @@ export class RelayBitCraftProvider implements GameDataProvider {
   #generation = 0;
   #lastRefreshAt: string | null = null;
   #lastError: string | null = null;
+  #refreshInFlight: {
+    domains: Set<DomainKey>;
+    promise: Promise<RefreshResult>;
+  } | null = null;
 
   constructor(dependencies: ProviderDependencies = {}) {
     this.#fetcher = dependencies.fetcher ?? fetch;
@@ -97,14 +101,32 @@ export class RelayBitCraftProvider implements GameDataProvider {
     }
   }
 
-  async refresh(request: RefreshRequest): Promise<RefreshResult> {
+  refresh(request: RefreshRequest): Promise<RefreshResult> {
+    const config = this.#requireConfig();
+    if (request.claimId !== config.claimId) {
+      return Promise.reject(new Error("Refresh claim does not match the configured monitored claim."));
+    }
+    const domains = [...new Set(request.domains)].filter((domain) => HTTP_DOMAINS.has(domain));
+    const active = this.#refreshInFlight;
+    if (active) {
+      if (domains.every((domain) => active.domains.has(domain))) return active.promise;
+      return active.promise.catch(() => undefined).then(() => this.refresh(request));
+    }
+    const promise = this.#performRefresh({ ...request, domains });
+    this.#refreshInFlight = {
+      domains: new Set(domains),
+      promise,
+    };
+    return promise.finally(() => {
+      if (this.#refreshInFlight?.promise === promise) this.#refreshInFlight = null;
+    });
+  }
+
+  async #performRefresh(request: RefreshRequest): Promise<RefreshResult> {
     const config = this.#requireConfig();
     const sink = this.#requireSink();
     const http = this.#requireHttp();
-    if (request.claimId !== config.claimId) {
-      throw new Error("Refresh claim does not match the configured monitored claim.");
-    }
-    const domains = [...new Set(request.domains)].filter((domain) => HTTP_DOMAINS.has(domain));
+    const domains = request.domains;
     const receivedAt = this.#now().toISOString();
     const batch: DomainSnapshotBatch = {
       claimId: config.claimId,
@@ -241,8 +263,12 @@ export class RelayBitCraftProvider implements GameDataProvider {
     }
     if (domains.includes("crafts")) {
       try {
+        const craftPayloads = await Promise.all([
+          http.crafts(config.claimId, false),
+          http.crafts(config.claimId, true),
+        ]);
         batch.domains.crafts = {
-          data: normalizeClaimCrafts(await http.crafts(config.claimId)),
+          data: normalizeClaimCraftPayloads(craftPayloads),
           confidence: "joined",
           provenance: {
             provider: "relay",
@@ -332,6 +358,8 @@ export class RelayBitCraftProvider implements GameDataProvider {
   async stop(): Promise<void> {
     this.#cancelTopologyRefresh?.();
     this.#cancelTopologyRefresh = null;
+    await this.#refreshInFlight?.promise.catch(() => {});
+    this.#refreshInFlight = null;
     this.#running = false;
     await this.#persistHealth();
   }

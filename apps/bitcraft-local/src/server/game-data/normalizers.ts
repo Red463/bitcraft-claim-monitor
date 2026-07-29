@@ -101,6 +101,23 @@ function normalizeLevelRequirement(value: unknown) {
   };
 }
 
+function normalizeToolRequirement(value: unknown) {
+  const requirement = record(value, "catalog tool requirement");
+  return {
+    toolType: integer(requirement.toolType ?? requirement.tool_type, "tool requirement type"),
+    level: integer(requirement.level, "tool requirement level"),
+    power: integer(requirement.power, "tool requirement power"),
+  };
+}
+
+function normalizeExperienceStack(value: unknown) {
+  const stack = record(value, "catalog experience stack");
+  return {
+    skillId: decimalString(stack.skillId ?? stack.skill_id, "experience skill id"),
+    quantity: finiteNumber(stack.quantity, "experience quantity"),
+  };
+}
+
 function normalizeStats(value: unknown) {
   return records(value).map((stat) => ({
     stat: enumLabel(stat.id) ?? "Unknown",
@@ -129,6 +146,8 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
         tier: integer(building.tier, "building requirement tier"),
       } : null,
       levelRequirements: records(row.levelRequirements).map(normalizeLevelRequirement),
+      toolRequirements: records(row.toolRequirements).map(normalizeToolRequirement),
+      experiencePerProgress: records(row.experiencePerProgress).map(normalizeExperienceStack),
       inputs: records(row.consumedItemStacks).map(normalizeDescriptionStack),
       outputs: records(row.craftedItemStacks).map(normalizeDescriptionStack),
     };
@@ -516,6 +535,20 @@ export function normalizeClaimCrafts(value: unknown) {
         )),
       };
     }),
+    items: [],
+    cargos: [],
+  };
+}
+
+export function normalizeClaimCraftPayloads(values: unknown[]) {
+  const craftResults = new Map<string, ReturnType<typeof normalizeClaimCrafts>["craftResults"][number]>();
+  for (const value of values) {
+    for (const craft of normalizeClaimCrafts(value).craftResults) {
+      craftResults.set(craft.entityId, craft);
+    }
+  }
+  return {
+    craftResults: [...craftResults.values()],
     items: [],
     cargos: [],
   };
