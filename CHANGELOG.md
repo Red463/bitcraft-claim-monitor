@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.49.0-beta.3] - 2026-07-29
+
+### Fixed
+
+- Fixed the User Settings character selector appearing empty when opened from pages that do not load settlement members.
+
 ## [0.49.0-beta.2] - 2026-07-28
 
 ### Fixed
