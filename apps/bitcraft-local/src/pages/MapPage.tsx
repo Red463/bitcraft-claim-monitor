@@ -9,7 +9,7 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { bitjitaIconUrl } from "../utils/items";
+import { gameIconUrl } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
@@ -361,7 +361,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             {visibleResources.map((resource) => {
               const id = mapResourceToken(resource);
               const active = normalizedSelectedResources.includes(id);
-              const iconUrl = bitjitaIconUrl(resource);
+              const iconUrl = gameIconUrl(resource);
               return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
                 <span className="map-resource-icon">{iconUrl ? <img src={iconUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <MapPin size={15} />}</span>
                 <strong>{resource.name}</strong>

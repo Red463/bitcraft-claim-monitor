@@ -1,0 +1,21 @@
+[Unit]
+Description=Create the daily BitCraft Claim Monitor Relay Preview database backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=DATA_DIR=/var/lib/bitcraft-claim-monitor-relay
+Environment=BACKUP_DIR=/var/backups/bitcraft-claim-monitor-relay
+Environment=BACKUP_LOCK_FILE=/run/lock/bitcraft-claim-monitor-relay-backup.lock
+Environment=DEPLOY_LOCK_FILE=/run/lock/bitcraft-claim-monitor-relay-deploy.lock
+Environment=WORKER_SERVICE=bitcraft-claim-monitor-relay-worker.service
+Environment=COLLECTOR_SERVICE=bitcraft-claim-monitor-relay-collector.service
+Environment=COLLECTOR_TIMER=bitcraft-claim-monitor-relay-collector.timer
+Environment=BACKUP_ENCRYPTION_KEY_FILE=/etc/bitcraft-claim-monitor-relay/backup-encryption.key
+Environment=BACKUP_CRYPTO_HELPER=/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs
+ExecStart=/bin/bash /opt/bitcraft-claim-monitor-relay/current/deploy/backup-bitcraft-monitor daily
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

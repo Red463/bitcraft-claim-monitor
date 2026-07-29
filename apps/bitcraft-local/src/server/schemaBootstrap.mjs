@@ -193,7 +193,44 @@ export const schemaBootstrapSql = `
     last_success_at TEXT NOT NULL,
     last_error TEXT,
     updated_at TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'legacy',
+    source_key TEXT,
+    region_id TEXT,
+    database_name TEXT,
+    schema_fingerprint TEXT,
+    source_observed_at TEXT,
+    received_at TEXT,
+    freshness TEXT NOT NULL DEFAULT 'unavailable',
+    confidence TEXT NOT NULL DEFAULT 'unknown',
+    generation INTEGER NOT NULL DEFAULT 0,
+    warnings_json TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (claim_id, domain)
+  );
+  CREATE TABLE IF NOT EXISTS provider_source_health (
+    provider TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    ready INTEGER NOT NULL DEFAULT 0,
+    database_name TEXT,
+    schema_fingerprint TEXT,
+    last_observed_at TEXT,
+    last_error TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, source_key)
+  );
+  CREATE TABLE IF NOT EXISTS provider_subscription_health (
+    provider TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    generation INTEGER NOT NULL DEFAULT 0,
+    connected INTEGER NOT NULL DEFAULT 0,
+    apply_duration_ms INTEGER,
+    lag_ms INTEGER,
+    reconnects INTEGER NOT NULL DEFAULT 0,
+    malformed_rows INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, source_key, domain)
   );
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
@@ -371,6 +408,22 @@ export const schemaBootstrapSql = `
     icon_asset_name TEXT,
     item_list_id TEXT,
     updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_source_state (
+    source_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    schema_fingerprint TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    received_at TEXT NOT NULL,
+    row_count INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_descriptions (
+    description_kind TEXT NOT NULL,
+    description_id TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (description_kind, description_id)
   );
   CREATE TABLE IF NOT EXISTS game_catalog_recipes (
     recipe_key TEXT PRIMARY KEY,

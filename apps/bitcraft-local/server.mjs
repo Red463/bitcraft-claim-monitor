@@ -31,6 +31,7 @@ import {
   catalogRefreshShouldResume,
   createGameCatalogRepository,
 } from "./src/server/gameCatalog.mjs";
+import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
 import { fetchGameDataProbabilitySnapshot } from "./src/server/gameDataProbabilitySource.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
 import { classifyCatalogRefreshError, parseRetryAfterMs, withCatalogRefreshTargetContext } from "./src/server/catalogRefreshRecovery.mjs";
@@ -86,6 +87,20 @@ import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
+import {
+  createCurrentStateRepository,
+  gameDataResponse,
+  parseDomainKeys,
+  RelayBitCraftProvider,
+  RelayGlobalCatalogRuntime,
+  RelayPrimaryRegionRuntime,
+  runtimeHealthWithPersistedSnapshot,
+} from "./dist-server/game-data/index.js";
+import {
+  discordDeliveryMode,
+  recordedDiscordResponse,
+  requireLiveDiscord,
+} from "./src/server/discordDeliveryMode.mjs";
 import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
 import {
   createEmpireMembershipRepository,
@@ -260,6 +275,7 @@ const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_E
 const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
   ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
   : "https://discord.com/api/v10";
+const configuredDiscordDeliveryMode = discordDeliveryMode(process.env);
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
@@ -307,11 +323,11 @@ const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 3
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
-  ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
+  ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor-relay/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
 const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
-const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
+const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
 const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -366,6 +382,44 @@ const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
 
 const statements = createPreparedStatements(db);
+const currentStateRepository = createCurrentStateRepository(db);
+const relayProvider = new RelayBitCraftProvider();
+const providerCatalogRepository = createProviderCatalogRepository(db);
+const relayBindingManifest = JSON.parse(readFileSync(
+  path.join(root, "src", "server", "game-data", "bindings", "schema-manifest.json"),
+  "utf8",
+));
+const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
+  manifest: relayBindingManifest,
+  catalogRepository: providerCatalogRepository,
+  currentStateRepository,
+});
+const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+});
+let relayProviderRefreshTimer = null;
+let relayProviderStarted = false;
+let relayPrimaryRegionStarted = false;
+function gameDataProviderHealth() {
+  const processHealth = relayProvider.health();
+  const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
+  const globalCatalog = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayGlobalCatalogRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "catalogs"),
+    providerHealth: health,
+  });
+  const primaryRegion = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayPrimaryRegionRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "players"),
+    providerHealth: health,
+  });
+  return {
+    ...health,
+    globalCatalog,
+    primaryRegion,
+  };
+}
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
   statements,
   retentionDays: 14,
@@ -4543,6 +4597,7 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
+  if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
   const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: {
@@ -4557,6 +4612,7 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
 
 async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw()) {
   if (!settings.enabled || !settings.botToken || !/^\d+$/.test(String(userId))) throw new Error("Discord integration is not fully configured");
+  if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(`dm:${userId}`, payload);
   const channel = await discordApiRequest("/users/@me/channels", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -9354,7 +9410,14 @@ function databaseStatus() {
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
     counts,
     polling: collectorStatusPayload(),
-    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, outbox: discordOutboxCounts, gateway: { ...discordGatewayStatus } },
+    gameDataProvider: gameDataProviderHealth(),
+    discord: {
+      mode: configuredDiscordDeliveryMode,
+      lastDelivery: discordLastDelivery,
+      deliveryLog: discordDeliveryLog,
+      outbox: discordOutboxCounts,
+      gateway: { ...discordGatewayStatus },
+    },
     settings: getSettings(),
   };
 }
@@ -9593,7 +9656,7 @@ function scheduleDiscordGatewayReconnect(delayMs = 15000) {
 }
 
 function startDiscordGateway() {
-  if (!discordStartupEnabled) {
+  if (!discordStartupEnabled || configuredDiscordDeliveryMode !== "live") {
     stopDiscordGateway();
     discordGatewayStatus.lastError = null;
     return;
@@ -10085,6 +10148,7 @@ async function discordPriceCommand(itemName, regionOption) {
 }
 
 async function registerDiscordCommands() {
+  requireLiveDiscord(configuredDiscordDeliveryMode, "Discord command registration");
   const settings = getDiscordSettingsRaw();
   if (!settings.botToken || !settings.applicationId) throw new Error("Discord bot token and application ID are required");
   const route = settings.guildId
@@ -10203,8 +10267,31 @@ const server = createServer(async (req, res) => {
       version: appVersion,
       buildId: currentAppBuildId(),
       polling: collectorStatusPayload(),
+      gameDataProvider: gameDataProviderHealth(),
     });
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
+    if (req.method === "GET" && url.pathname === "/api/local/game-data") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      if (refresh.forceRefresh && relayProviderStarted) {
+        try {
+          await relayProvider.refresh({ claimId, domains, reason: "manual" });
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
+      const result = gameDataResponse({
+        configuredClaimId: currentClaimId(),
+        claimId,
+        domains,
+        repository: currentStateRepository,
+      });
+      return send(res, result.status, result.body);
+    }
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
       return proxyBitjita(req, url, res);
     }
@@ -11708,7 +11795,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430);
+const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 19430);
 const host = process.env.APP_HOST ?? "127.0.0.1";
 let serverPollTimer = null;
 
@@ -11736,6 +11823,62 @@ function scheduleServerPolling(delayMs = 0) {
 }
 
 function startBackgroundTasks() {
+  if (!isTestRuntime && process.env.ENABLE_RELAY_PROVIDER !== "false") {
+    const relayBaseUrl = process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app";
+    const reconcilePrimaryRegion = async () => {
+      const claimId = currentClaimId();
+      const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+      const members = currentStateRepository.read(claimId, "members")?.data ?? [];
+      const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+      if (!regionId || !Array.isArray(members) || members.length === 0) {
+        throw new Error("Relay primary-region session is waiting for claim and member snapshots");
+      }
+      if (!relayPrimaryRegionStarted) {
+        await relayPrimaryRegionRuntime.start({
+          relayBaseUrl,
+          claimId,
+          regionId,
+          members,
+        });
+        relayPrimaryRegionStarted = true;
+      } else {
+        await relayPrimaryRegionRuntime.reconcile({ regionId, members });
+      }
+    };
+    const refreshRelay = async (reason = "scheduled") => {
+      try {
+        await relayProvider.refresh({
+          claimId: currentClaimId(),
+          domains: ["claim", "members", "citizens", "inventories", "crafts", "deposits"],
+          reason,
+        });
+        await reconcilePrimaryRegion();
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
+      }
+    };
+    void relayProvider.start({
+      relayBaseUrl,
+      claimId: currentClaimId(),
+      activeRegionIds: parseRegionIds(`${getSettings().defaultRegion},${getSettings().additionalActiveRegions}`),
+      topologyRefreshMs: 60_000,
+    }, currentStateRepository).then(() => {
+      relayProviderStarted = true;
+      void refreshRelay("scheduled");
+      relayProviderRefreshTimer = setInterval(() => void refreshRelay(), serverRefreshIntervalMs());
+      relayProviderRefreshTimer.unref?.();
+    }).catch((error) => {
+      if (!isTestRuntime) console.warn(`Relay provider startup failed: ${errorMessage(error)}`);
+    });
+    if (process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false") {
+      void relayGlobalCatalogRuntime.start({
+        relayBaseUrl,
+        claimId: currentClaimId(),
+      }).catch((error) => {
+        if (!isTestRuntime) console.warn(`Relay global catalog startup failed: ${errorMessage(error)}`);
+      });
+    }
+  }
   startDiscordGateway();
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
   setInterval(processDiscordNotificationOutbox, discordNotificationOutboxIntervalMs);

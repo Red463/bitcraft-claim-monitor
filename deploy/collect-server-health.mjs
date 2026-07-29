@@ -10,7 +10,11 @@ const exec = promisify(execFile);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR || "/var/lib/bitcraft-claim-monitor";
 const outputDir = path.join(dataDir, "monitoring");
 const now = new Date();
-const services = ["bitcraft-claim-monitor", "bitcraft-claim-monitor-worker", "caddy"];
+const services = String(process.env.BITCRAFT_MONITOR_SERVICES ?? "bitcraft-claim-monitor,bitcraft-claim-monitor-worker,caddy")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .slice(0, 12);
 const secret = /((?:token|secret|password|passwd|api[_-]?key|authorization|cookie|session|dsn)\s*[=:]\s*)([^\s,;]+)/gi;
 const redact = (value) => String(value ?? "").replace(secret, "$1[redacted]").replace(/\b(Bearer|Bot)\s+\S+/gi, "$1 [redacted]").replace(/\b\d{17,20}\b/g, "[discord-id]").slice(0, 4000);
 const run = async (command, args) => (await exec(command, args, { timeout: 10_000, maxBuffer: 1_000_000 })).stdout.trim();

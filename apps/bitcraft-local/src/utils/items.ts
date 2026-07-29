@@ -1,4 +1,5 @@
 import { toNumber, type AnyRecord } from "../main-app-data";
+export { gameIconUrl } from "./gameAssets.mjs";
 
 export function catalogEntries(catalog: unknown): AnyRecord[] {
   if (Array.isArray(catalog)) return catalog;
@@ -21,13 +22,6 @@ export function playerInventoryItems(payload: AnyRecord | null | undefined, inve
 
 export function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[] {
   return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
-}
-
-export function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
-  const raw = String(item?.iconAssetName ?? item?.icon_asset_name ?? item?.iconAddress ?? item?.icon_address ?? "").replaceAll("\\", "/").replace(/^\/+/, "").replace(/\.webp$/i, "");
-  if (!raw || raw === "\uFFEE") return null;
-  const path = raw.startsWith("Items/") ? `GeneratedIcons/${raw}` : raw;
-  return `https://bitjita.com/${path}.webp`;
 }
 
 export function isMarketableItem(item: AnyRecord): boolean {

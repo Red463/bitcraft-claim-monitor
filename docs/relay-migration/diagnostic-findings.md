@@ -1,0 +1,166 @@
+# Relay diagnostic findings
+
+Captured: 2026-07-29
+Claim: `1369094286777412590`
+Derived region: `19`
+
+The relationship findings below came from bounded, read-only observations
+using Relay's documented `v1.json.spacetimedb` diagnostic protocol. Production
+ingestion does not use that protocol: the global catalog path now uses official
+generated TypeScript bindings and the SpacetimeDB 2.7.0 SDK.
+
+## Typed global subscription proof
+
+The pinned generated global bindings compiled with the application and
+completed a live SDK subscription against the topology-discovered source:
+
+| Field | Observed value |
+|---|---|
+| URI | `wss://relay.bitcraftsync.app:3000` |
+| Database | `relay-mirror-bc-global` |
+| Schema fingerprint | `cebd889939799c6317f12d86799a4ac38dde43dad265ff92ab7e03f6c8cb4f49` |
+| Normalized items | 8,167 |
+| Normalized cargo | 636 |
+| Crafting recipes | 7,747 |
+| Construction recipes | 829 |
+| Buildings | 1,084 |
+| Skills | 20 |
+| Resources | 616 |
+| Equipment descriptions | 2,166 |
+| Buff descriptions | 271 |
+| Claim technologies | 146 |
+
+The subscription is restricted to the ten required global description tables.
+All 21,682 normalized rows are copied atomically into the provider-neutral
+catalog repository; React and SQLite never receive the generated wire rows
+directly. Insert, update, and delete listeners trigger a new numbered catalog
+generation.
+
+Live rows also established that negative `tier` values are non-tiered
+sentinels. Values `-1` and `-2` were observed and normalize to `null`; real
+non-negative tiers remain integers.
+
+Binding generation currently uses the pinned official CLI's undocumented
+`--module-def` bridge because the 2.7.0 public CLI has no documented
+remote-schema codegen command. The bridge, CLI commit, fingerprints, and one
+generator repair are recorded in
+`apps/bitcraft-local/src/server/game-data/bindings/README.md`. A schema
+fingerprint change stops ingestion and requires regeneration rather than
+silently decoding with stale bindings.
+
+## Precision warning
+
+The v1 JSON protocol emits 64-bit entity IDs as JSON numbers. A normal
+`JSON.parse` rounded values such as the configured claim ID. Exact identifiers
+were retained only from raw diagnostic row strings when a follow-up equality
+query was necessary.
+
+This proves that v1 JSON must not feed normalized state or SQLite history.
+Production IDs remain decimal strings and the typed SDK/binding path is
+mandatory.
+
+## Claim-scoped regional rows
+
+A single filtered initial subscription in region 19 returned:
+
+| Table | Rows | Finding |
+|---|---:|---|
+| `claim_state` | 1 | Exact claim filter works. |
+| `claim_member_state` | 18 | Claim roster is directly filterable. |
+| `building_state` | 196 | Layout parents can be claim-filtered before location subscriptions. |
+| `marketplace_state` | 1 | The market building joins directly to the claim. |
+| `bank_state` | 1 | The Town Bank building joins directly to the claim. |
+| `sell_order_state` | 33 | Current settlement sell listings are claim-filterable. |
+| `buy_order_state` | 0 | No current rows were present during this observation. |
+| `claim_recruitment_state` | 1 | Recruitment is directly claim-filterable. |
+| `empire_settlement_state` | 1 | Settlement-to-empire membership is directly claim-filterable. |
+
+## Typed primary-region player subscription proof
+
+The generated regional bindings and SpacetimeDB 2.7.0 SDK completed a live
+subscription against the topology-discovered region-19 source. The session
+issued one equality-filtered `player_state` query per current claim member; it
+did not subscribe to the whole regional table.
+
+| Field | Observed value |
+|---|---|
+| Database | `relay-mirror-bc19` |
+| Schema fingerprint | `762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312` |
+| Claim members | 18 |
+| Regional player rows | 18 |
+| Signed-in members at observation | 2 |
+| Normalization warnings | 0 |
+
+An end-to-end worker run against a fresh temporary SQLite database also stored
+`citizens` from Relay HTTP, `players` from `region:19`, and `skills` from the
+global typed subscription as independent generation-safe current domains.
+Dashboard, Members, Professions, and Leaderboard now compose those local
+domains without using their legacy BitJita page routes.
+
+## Town Bank inventory
+
+The observed `bank_state.building_entity_id` was used in a second bounded
+subscription:
+
+```sql
+SELECT * FROM inventory_state WHERE owner_entity_id = <bank building id>
+```
+
+It returned 25 inventory rows. Each row also carried
+`player_owner_entity_id`, proving the ownership join needed to distinguish
+personal Town Bank inventories. Querying `inventory_state.entity_id` with the
+bank building ID returned no rows; `owner_entity_id` is the required edge.
+
+## Equipment and buffs
+
+For one member ID obtained from Relay HTTP:
+
+- `equipment_state.entity_id = player_entity_id` returned one current equipment
+  row;
+- `equipment_preset_state.player_entity_id = player_entity_id` returned two
+  preset rows with an explicit `active` flag;
+- `active_buff_state.entity_id = player_entity_id` returned one active-buff
+  row.
+
+The rows use generated algebraic encodings for optional equipment stacks and
+buff values. They must be decoded by generated bindings, then enriched from
+global equipment and buff descriptions.
+
+## Craft contributors
+
+One active Relay HTTP craft was queried by its exact craft entity ID:
+
+- `progressive_action_state.entity_id` returned the matching craft state;
+- `contribution_state.enemy_entity_id` returned no rows;
+- `contribution_state.entity_id` returned no rows.
+
+The `contribution_state` schema is combat-shaped
+(`player_entity_id`, `enemy_entity_id`, `contribution`) and is not evidence for
+craft contributors. Contributor parity remains blocked; no mapping should be
+invented.
+
+## Global versus regional completeness
+
+The same claim-scoped query set was applied to the global and region-19
+mirrors:
+
+| Table | Region 19 | Global |
+|---|---:|---:|
+| `claim_state` | 1 | 1 |
+| `sell_order_state` | 33 | 0 |
+| `buy_order_state` | 0 | 0 |
+| `empire_settlement_state` | 1 | 1 |
+
+Global is therefore not a complete current market source. Market ingestion must
+use regional sessions. The one matching empire-settlement row is useful but
+does not prove global completeness for empire nodes, siege, watchtowers, or
+membership; those remain subject to regional comparison.
+
+## Remaining diagnostic blockers
+
+- authoritative evidence distinguishing a completed sale from removal or
+  cancellation;
+- craft contributor identity and amounts;
+- complete global-versus-regional empire comparison;
+- bounded claim-location joins for every required layout entity class;
+- multi-region Hexite reserve aggregation.

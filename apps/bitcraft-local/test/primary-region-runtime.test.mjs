@@ -1,0 +1,175 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+let runtimeModule = null;
+try {
+  runtimeModule = await import("../src/server/game-data/primaryRegionRuntime.ts");
+} catch {
+  // The first TDD run proves the primary-region coordinator is absent.
+}
+
+function topology() {
+  return {
+    cacheReady: true,
+    global: null,
+    regions: new Map([["19", {
+      sourceKey: "region:19",
+      database: "relay-region-19",
+      port: 4019,
+      schemaFingerprint: "regional-v1",
+      ready: true,
+    }]]),
+    discoveredAt: "2026-07-29T20:40:00.000Z",
+  };
+}
+
+test("primary-region runtime publishes players and restarts only when membership changes", async () => {
+  assert.ok(runtimeModule, "primary-region runtime module must exist");
+  const starts = [];
+  const stops = [];
+  const writes = [];
+  const handlers = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      handlers.push(options.onSnapshot);
+      const index = handlers.length;
+      return {
+        start: async (config) => starts.push(config),
+        stop: async () => stops.push(index),
+        health: () => ({ connected: true, applied: true, lastAppliedAt: null, lastError: null }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 12,
+      commitGeneration: (batch) => writes.push(batch),
+    },
+  });
+  const members = [{ playerEntityId: "101", userName: "Ada" }];
+
+  await runtime.start({
+    relayBaseUrl: "https://relay.example/",
+    claimId: "1369094286777412590",
+    regionId: "19",
+    members,
+  });
+  assert.equal(starts.length, 1);
+  assert.deepEqual(starts[0], {
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    generation: 1,
+    regionId: "19",
+    members,
+  });
+
+  await handlers[0]({
+    players: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-29T20:41:00.000Z",
+  });
+  assert.deepEqual(writes[0], {
+    claimId: "1369094286777412590",
+    generation: 12,
+    domains: {
+      players: {
+        data: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "region:19",
+          regionId: "19",
+          database: "relay-region-19",
+          schemaFingerprint: "regional-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:41:00.000Z",
+        },
+        warnings: [],
+      },
+    },
+  });
+
+  await runtime.reconcile({ regionId: "19", members: [...members] });
+  assert.equal(starts.length, 1);
+  await runtime.reconcile({
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada Renamed" }],
+  });
+  assert.deepEqual(stops, [1]);
+  assert.equal(starts.length, 2);
+  await handlers[0]({
+    players: [{ playerEntityId: "101", username: "Stale Ada", signedIn: false }],
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-29T20:42:00.000Z",
+  });
+  assert.equal(writes.length, 1, "retired session callbacks must be ignored");
+  await runtime.reconcile({
+    regionId: "19",
+    members: [
+      { playerEntityId: "101", userName: "Ada Renamed" },
+      { playerEntityId: "202", userName: "Grace" },
+    ],
+  });
+  assert.deepEqual(stops, [1, 2]);
+  assert.equal(starts.length, 3);
+  assert.equal(starts[2].members.length, 2);
+});
+
+test("primary-region runtime preserves last-good data when the region source is unavailable", async () => {
+  assert.ok(runtimeModule, "primary-region runtime module must exist");
+  let constructed = false;
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ ...topology(), regions: new Map() }),
+    createSession: () => {
+      constructed = true;
+      return {};
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => assert.fail("must preserve last-good players"),
+    },
+  });
+  await assert.rejects(runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  }), /region 19 source is not ready/i);
+  assert.equal(constructed, false);
+});
+
+test("primary-region runtime stops a session whose startup rejects", async () => {
+  assert.ok(runtimeModule, "primary-region runtime module must exist");
+  let stopped = false;
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: () => ({
+      start: async () => { throw new Error("connection failed"); },
+      stop: async () => { stopped = true; },
+      health: () => ({}),
+    }),
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  await assert.rejects(runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  }), /connection failed/);
+  assert.equal(stopped, true);
+});

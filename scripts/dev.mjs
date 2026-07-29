@@ -8,7 +8,7 @@ const apiDir = path.join(rootDir, "artifacts", "api-server");
 const webDir = path.join(rootDir, "artifacts", "bitcraft-monitor");
 
 const apiPort = process.env.API_PORT ?? "8080";
-const webPort = process.env.PORT ?? "18428";
+const webPort = process.env.PORT ?? "19428";
 const basePath = process.env.BASE_PATH ?? "/";
 const apiProxyTarget = process.env.API_PROXY_TARGET ?? `http://localhost:${apiPort}`;
 

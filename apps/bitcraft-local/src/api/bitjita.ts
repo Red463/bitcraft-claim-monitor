@@ -7,19 +7,23 @@ import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
 import { marketEndpointMap } from "./bitjitaEndpoints.ts";
+import { loadGameData } from "./gameData.ts";
+import { pageDomains } from "./pageDomains.ts";
 
 /*
- * BitJita data loader for the public app pages.
- *
- * Normal page refreshes intentionally go through the local /api/bitjita proxy
- * rather than calling BitJita directly from the browser. The proxy centralises
- * CORS handling, upstream error wording, lightweight caching, and rate limiting.
- * Local /api/local helpers are used only where the app needs server-side
- * enrichment, batching, or locally recorded history.
+ * Transitional page loader. Migrated panels use the provider-neutral local
+ * game-data contract; remaining panels stay on the legacy proxy until their
+ * Relay vertical slice is complete.
  */
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
+const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
+  "dashboard",
+  "members",
+  "skills",
+  "leaderboard",
+]);
 
 function appendPartialError(raw: AnyRecord, message: string) {
   const current = Array.isArray(raw.partialErrors) ? raw.partialErrors : [];
@@ -122,24 +126,24 @@ export function useBitjitaData(
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
+        if (PROVIDER_NEUTRAL_PANELS.has(activePanel)) {
+          const raw = await loadGameData(
+            claimId,
+            pageDomains(activePanel),
+            fetch,
+            { headers: { ...manualHeaders }, signal: controller.signal },
+          );
+          const freshness = freshnessFromPayload(raw);
+          pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
+          if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
+          return;
+        }
         const requestedEndpoints = marketEndpointMap(claimId, activePanel);
         if (Object.keys(requestedEndpoints).length === 0) {
           if (!cancelled) React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
           return;
         }
         if (!cached) setState((prev) => ({ ...prev, loading: true, error: null }));
-        if (activePanel === "dashboard") {
-          // Dashboard combines data from several BitJita endpoints and local
-          // history tables, so it stays behind a page-specific local aggregate
-          // instead of duplicating that join logic in the browser.
-          const response = await fetch(`${LOCAL_API}/dashboard-data?claimId=${encodeURIComponent(claimId)}`, { headers: { ...manualHeaders }, signal: controller.signal });
-          if (!response.ok) throw new Error(`Unable to refresh dashboard data (HTTP ${response.status}). ${response.status >= 500 ? "BitJita or the local collector may be having a temporary issue." : "The request could not be completed."}`);
-          const raw = await response.json();
-          const freshness = freshnessFromPayload(raw);
-          pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
-          if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
-          return;
-        }
         const entries = await Promise.all(
           Object.entries(requestedEndpoints).map(async ([key, path]) => {
             return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
@@ -175,7 +179,7 @@ export function useBitjitaData(
           }
         }
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsPlayerDetail = activePanel === "members" || activePanel === "map" || activePanel === "leaderboard";
+        const readsPlayerDetail = activePanel === "map" || activePanel === "leaderboard";
         const readsProductionDetail = activePanel === "craft-monitor";
         const readsRegionDetail = activePanel === "region";
         const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([

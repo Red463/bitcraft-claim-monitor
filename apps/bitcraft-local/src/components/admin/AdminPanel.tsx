@@ -99,7 +99,7 @@ import {
 import { dateLabel, formatCompactNumber, formatDuration, formatNumber, shortDateLabel, timeAgo, timestampMs } from "../../utils/format";
 import { mapWithBrowserConcurrency } from "../../utils/concurrency";
 import { getTrackedOwnerName } from "../../utils/ownership";
-import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../../utils/items";
+import { isMarketableItem, playerToolbeltTools } from "../../utils/items";
 import { buyOrderAgeDays, normalizeBuyOrder, sortBuyOrdersByBestPrice } from "../../utils/marketOrders";
 import { unique } from "../../utils/array";
 import { applyMemberTrackingFilter, memberDisplayName, memberTrackingId } from "../../utils/memberTracking";
@@ -1226,9 +1226,32 @@ export function AdminPanel({
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">
-            <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Live pages use the BitJita proxy. Background collection is only for history, notifications, cached tools, analytics, and diagnostics.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
+            <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Relay data is collected server-side and served from generation-safe local snapshots, including last-good stale data during an outage.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
             <div className="status-detail">
-              <Info label="Background collection" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled; live pages still use the API proxy"} />
+              <Info label="Game data provider" value={status?.gameDataProvider?.running ? `Relay generation ${formatNumber(status.gameDataProvider.generation)}` : "Relay provider not running in this process"} />
+              <Info label="Relay cache" value={status?.gameDataProvider?.cacheReady ? "Ready" : "Unavailable or starting"} />
+              <Info label="Relay last refresh" value={dateLabel(status?.gameDataProvider?.lastRefreshAt)} />
+              <Info label="Relay last error" value={status?.gameDataProvider?.lastError ?? "None"} />
+              <Info label="Global catalog subscription" value={status?.gameDataProvider?.globalCatalog?.subscription?.connected
+                ? `Live (${formatNumber(status.gameDataProvider.globalCatalog.sourceState?.rowCount ?? 0)} rows)`
+                : status?.gameDataProvider?.globalCatalog?.subscription?.applied
+                  ? `Last applied by worker (${formatNumber(status.gameDataProvider.globalCatalog.sourceState?.rowCount ?? 0)} rows)`
+                  : "Unavailable or starting"} />
+              <Info label="Global catalog last apply" value={dateLabel(status?.gameDataProvider?.globalCatalog?.subscription?.lastAppliedAt)} />
+              <Info label="Global catalog last error" value={status?.gameDataProvider?.globalCatalog?.lastError
+                ?? status?.gameDataProvider?.globalCatalog?.subscription?.lastError
+                ?? "None"} />
+              <Info label="Primary-region player subscription" value={status?.gameDataProvider?.primaryRegion?.subscription?.connected
+                ? `Live (${status.gameDataProvider.primaryRegion.source?.sourceKey ?? "regional source"})`
+                : status?.gameDataProvider?.primaryRegion?.subscription?.applied
+                  ? `Last applied by worker (${status.gameDataProvider.primaryRegion.source?.sourceKey ?? "regional source"})`
+                  : "Unavailable or starting"} />
+              <Info label="Primary-region last apply" value={dateLabel(status?.gameDataProvider?.primaryRegion?.subscription?.lastAppliedAt)} />
+              <Info label="Primary-region last error" value={status?.gameDataProvider?.primaryRegion?.lastError
+                ?? status?.gameDataProvider?.primaryRegion?.subscription?.lastError
+                ?? "None"} />
+              <Info label="Discord delivery" value={status?.discord?.mode === "live" ? "Live delivery enabled" : "Record only (no messages sent)"} />
+              <Info label="Background collection" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Legacy collectors disabled; Relay provider health is shown above"} />
               <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
               <Info label="Next scheduled collection" value={dateLabel(status?.polling?.nextRunAt)} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />

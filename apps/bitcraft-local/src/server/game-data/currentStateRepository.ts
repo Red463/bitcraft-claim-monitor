@@ -1,0 +1,206 @@
+import type {
+  DomainEvent,
+  DomainKey,
+  DomainSnapshotBatch,
+  ProviderSink,
+  ProviderHealth,
+  StoredDomainSnapshot,
+} from "./contracts.ts";
+
+type Statement = {
+  all(...values: unknown[]): Record<string, unknown>[];
+  get(...values: unknown[]): Record<string, unknown> | undefined;
+  run(...values: unknown[]): { changes: number | bigint };
+};
+
+type SqliteDatabase = {
+  exec(sql: string): void;
+  prepare(sql: string): Statement;
+};
+
+export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink & {
+  read(claimId: string, domain: DomainKey): StoredDomainSnapshot | null;
+  readHealth(): ProviderHealth | null;
+  nextGeneration(claimId: string): number;
+} {
+  const upsert = db.prepare(`
+    INSERT INTO domain_payload_current (
+      claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+      last_error, updated_at, provider, source_key, region_id, database_name,
+      schema_fingerprint, source_observed_at, received_at, freshness, confidence,
+      generation, warnings_json
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(claim_id, domain) DO UPDATE SET
+      data_json = excluded.data_json,
+      collected_at = excluded.collected_at,
+      last_attempt_at = excluded.last_attempt_at,
+      last_success_at = excluded.last_success_at,
+      last_error = NULL,
+      updated_at = excluded.updated_at,
+      provider = excluded.provider,
+      source_key = excluded.source_key,
+      region_id = excluded.region_id,
+      database_name = excluded.database_name,
+      schema_fingerprint = excluded.schema_fingerprint,
+      source_observed_at = excluded.source_observed_at,
+      received_at = excluded.received_at,
+      freshness = excluded.freshness,
+      confidence = excluded.confidence,
+      generation = excluded.generation,
+      warnings_json = excluded.warnings_json
+    WHERE excluded.generation >= domain_payload_current.generation
+  `);
+  const read = db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ?");
+  const markError = db.prepare(`
+    UPDATE domain_payload_current
+    SET last_attempt_at = ?, last_error = ?, updated_at = ?
+    WHERE claim_id = ? AND domain = ?
+  `);
+  const maxGeneration = db.prepare("SELECT MAX(generation) AS generation FROM domain_payload_current WHERE claim_id = ?");
+  const upsertHealth = db.prepare(`
+    INSERT INTO provider_source_health (
+      provider, source_key, ready, database_name, schema_fingerprint,
+      last_observed_at, last_error, details_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, source_key) DO UPDATE SET
+      ready = excluded.ready,
+      database_name = excluded.database_name,
+      schema_fingerprint = excluded.schema_fingerprint,
+      last_observed_at = excluded.last_observed_at,
+      last_error = excluded.last_error,
+      details_json = excluded.details_json,
+      updated_at = excluded.updated_at
+  `);
+  const readHealth = db.prepare("SELECT * FROM provider_source_health WHERE provider = ? ORDER BY source_key");
+
+  return {
+    async commitGeneration(batch: DomainSnapshotBatch) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const [domain, snapshot] of Object.entries(batch.domains)) {
+          if (!snapshot) continue;
+          const receivedAt = snapshot.provenance.receivedAt;
+          upsert.run(
+            batch.claimId,
+            domain,
+            JSON.stringify(snapshot.data),
+            receivedAt,
+            receivedAt,
+            receivedAt,
+            receivedAt,
+            snapshot.provenance.provider,
+            snapshot.provenance.sourceKey,
+            snapshot.provenance.regionId,
+            snapshot.provenance.database,
+            snapshot.provenance.schemaFingerprint,
+            snapshot.provenance.sourceObservedAt,
+            receivedAt,
+            "fresh",
+            snapshot.confidence,
+            batch.generation,
+            JSON.stringify(snapshot.warnings),
+          );
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    async appendEvents(_events: DomainEvent[]) {
+      // Domain-specific durable event repositories are connected vertically.
+    },
+    async markError(claimId, domain, error, attemptedAt) {
+      markError.run(attemptedAt, error, attemptedAt, claimId, domain);
+    },
+    async recordHealth(health, observedAt) {
+      const details = {
+        running: health.running,
+        topologyReady: health.topologyReady,
+        cacheReady: health.cacheReady,
+        generation: health.generation,
+        lastRefreshAt: health.lastRefreshAt,
+      };
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        upsertHealth.run(
+          health.provider,
+          "relay-cache",
+          health.cacheReady ? 1 : 0,
+          null,
+          null,
+          health.lastRefreshAt,
+          health.lastError,
+          JSON.stringify(details),
+          observedAt,
+        );
+        for (const [sourceKey, source] of Object.entries(health.sources)) {
+          upsertHealth.run(
+            health.provider,
+            sourceKey,
+            source.ready ? 1 : 0,
+            source.database,
+            source.schemaFingerprint,
+            health.lastRefreshAt,
+            health.lastError,
+            "{}",
+            observedAt,
+          );
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    readHealth() {
+      const rows = readHealth.all("relay");
+      const cache = rows.find((row) => row.source_key === "relay-cache");
+      if (!cache) return null;
+      const details = JSON.parse(String(cache.details_json ?? "{}")) as Record<string, unknown>;
+      const sources: ProviderHealth["sources"] = {};
+      for (const row of rows) {
+        const sourceKey = String(row.source_key);
+        if (sourceKey === "relay-cache") continue;
+        sources[sourceKey] = {
+          ready: Number(row.ready) === 1,
+          database: row.database_name == null ? null : String(row.database_name),
+          schemaFingerprint: row.schema_fingerprint == null ? null : String(row.schema_fingerprint),
+        };
+      }
+      return {
+        provider: "relay",
+        running: details.running === true,
+        topologyReady: details.topologyReady === true,
+        cacheReady: details.cacheReady === true,
+        generation: Number(details.generation ?? 0),
+        lastRefreshAt: details.lastRefreshAt == null ? null : String(details.lastRefreshAt),
+        lastError: cache.last_error == null ? null : String(cache.last_error),
+        sources,
+      };
+    },
+    nextGeneration(claimId) {
+      return Number(maxGeneration.get(claimId)?.generation ?? 0) + 1;
+    },
+    read(claimId, domain) {
+      const row = read.get(claimId, domain);
+      if (!row) return null;
+      return {
+        data: JSON.parse(String(row.data_json)),
+        confidence: String(row.confidence ?? "unknown") as StoredDomainSnapshot["confidence"],
+        generation: Number(row.generation ?? 0),
+        lastError: row.last_error == null ? null : String(row.last_error),
+        provenance: {
+          provider: "relay",
+          sourceKey: String(row.source_key ?? "relay-cache") as StoredDomainSnapshot["provenance"]["sourceKey"],
+          regionId: row.region_id == null ? null : String(row.region_id),
+          database: row.database_name == null ? null : String(row.database_name),
+          schemaFingerprint: row.schema_fingerprint == null ? null : String(row.schema_fingerprint),
+          sourceObservedAt: row.source_observed_at == null ? null : String(row.source_observed_at),
+          receivedAt: String(row.received_at ?? row.last_success_at),
+        },
+        warnings: JSON.parse(String(row.warnings_json ?? "[]")),
+      };
+    },
+  };
+}

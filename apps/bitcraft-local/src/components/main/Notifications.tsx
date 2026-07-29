@@ -3,14 +3,14 @@ import { Bell, Factory, ShoppingCart, X } from "lucide-react";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { dedupeNotifications, formatToastMetaLine, type ToastNotice } from "../../notifications/toastNotices";
 import { timeAgo } from "../../utils/format";
-import { bitjitaIconUrl } from "../../utils/items";
+import { gameIconUrl } from "../../utils/items";
 import { ItemIcon } from "./ItemDisplay";
 import { Dialog } from "./Dialog";
 
 function ToastVisual({ notice }: { notice: ToastNotice }) {
   const item = notice.item ?? null;
   const tier = toNumber(item?.tier ?? item?.itemTier);
-  if (item && (bitjitaIconUrl(item) || item.name || item.itemName)) {
+  if (item && (gameIconUrl(item) || item.name || item.itemName)) {
     return (
       <span className={`toast-item-icon ${tier >= 1 && tier <= 10 ? `tier-framed tier-${tier}` : ""}`} aria-hidden="true">
         <ItemIcon item={item} />

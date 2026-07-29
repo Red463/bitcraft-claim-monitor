@@ -9,12 +9,12 @@ corepack pnpm install
 corepack pnpm --filter @workspace/bitcraft-local run dev
 ```
 
-Open `http://localhost:18428`.
+Open `http://localhost:19428`.
 
 The dev command starts two local services:
 
-- Vite frontend on `http://localhost:18428`
-- SQLite history API on `http://127.0.0.1:18430`
+- Vite frontend on `http://localhost:19428`
+- SQLite history API on `http://127.0.0.1:19430`
 
 The Vite dev server proxies `/api/bitjita/*` to `https://bitjita.com/api/*` and `/api/local/*` to the local SQLite API.
 
@@ -34,7 +34,7 @@ For hosting on an Ubuntu VPS, see [`DEPLOYMENT.md`](../../DEPLOYMENT.md). The pr
 
 ```sh
 corepack pnpm --filter @workspace/bitcraft-local run build
-NODE_ENV=production BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor corepack pnpm --filter @workspace/bitcraft-local run start
+NODE_ENV=production APP_PORT=19430 BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor-relay corepack pnpm --filter @workspace/bitcraft-local run start
 ```
 
 Configure Discord OAuth/bot settings before relying on Discord admin login in production. The full systemd and Caddy procedure is in the deployment guide.

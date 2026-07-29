@@ -24,6 +24,32 @@ app.timbersteeltrade.com {
 	}
 }
 
+# Relay-backed preview. Keep this route isolated until the parity soak passes.
+relay.timbersteeltrade.com {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Frame-Options SAMEORIGIN
+	}
+	reverse_proxy 127.0.0.1:19430 {
+		lb_try_duration 5s
+		lb_try_interval 250ms
+		lb_retry_match {
+			method GET HEAD
+		}
+	}
+	handle_errors {
+		@api path /api/*
+		handle @api {
+			header Content-Type application/json
+			respond `{"error":"Relay Claim Monitor is updating. Retry in a few seconds."}` 503
+		}
+		respond "Relay Claim Monitor is updating. Please retry in a few seconds." 503
+	}
+}
+
 # Legacy host redirects.
 claim.timbersteeltrade.com {
 	redir https://app.timbersteeltrade.com{uri} permanent

@@ -1,8 +1,22 @@
 # BitCraft Claim Monitor
 
-> **BitJita API reliability note:** This app currently relies on BitJita's public API, which can be unstable or stale at times. I have applied to join the BitCraft developer program and hope to provide more accurate and reliable data in the future if official developer access becomes available.
+> **Relay migration clone:** This standalone repository is migrating the
+> application from BitJita to the public
+> [BitCraft Sync Relay](https://relay.bitcraftsync.app/). Dashboard claim data
+> and the Members roster now use the provider-neutral local game-data route.
+> Remaining pages and background collectors are tracked in the
+> [relay parity matrix](./docs/relay-migration/parity-matrix.md) and must not be
+> treated as migrated until their entries pass.
+>
+> The global item/cargo catalog now has a live typed SpacetimeDB subscription
+> behind the server provider boundary. Local game-icon resolution and manifest
+> validation are implemented, but the approved asset files and written
+> permission reference still need to be supplied before that slice is complete.
 
-BitCraft Claim Monitor is a settlement operations dashboard built around the public [BitJita API](https://bitjita.com/docs/api). It combines live settlement information with locally persisted market and activity history, providing one place to check supplies, members, professions, skills, production, storage, research, trade, and regional context.
+BitCraft Claim Monitor is a settlement operations dashboard combining current
+game data with locally persisted market and activity history. Relay wire and
+HTTP records are normalized behind a server-side provider so React and durable
+history do not depend on an upstream transport shape.
 
 The application is currently in beta and under active development. Versioning follows semantic versioning with a beta pre-release suffix while features and data presentation continue to evolve. See [VERSIONING.md](./VERSIONING.md) for the release policy.
 
@@ -266,15 +280,18 @@ The optional Discord bot does not use analytics cookies. When enabled, Discord s
 
 ### Public Live Data
 
-Live game data is read from the public BitJita API through the application's same-origin proxy:
+The target browser contract is the provider-neutral same-origin route:
 
 ```text
-/api/bitjita/* -> https://bitjita.com/api/*
+/api/local/game-data?claimId=<configured-claim>&domains=claim,members
 ```
 
-The dashboard uses endpoints for claims, members, citizens, structures, inventories, construction, research, crafts, markets, player information, storage logs, region status, and trade summaries.
-
-See [`BITJITA_API_AUDIT.md`](./BITJITA_API_AUDIT.md) for the endpoint audit performed during development.
+The server discovers Relay topology and cache readiness, normalizes Relay data,
+and atomically stores last-complete domain generations. During migration, only
+the domains marked as implemented in
+[`docs/relay-migration/parity-matrix.md`](./docs/relay-migration/parity-matrix.md)
+are provider-neutral. Legacy routes remain solely as enumerated migration work;
+final acceptance removes `/api/bitjita/*` completely.
 
 ### Local Database
 
@@ -307,10 +324,13 @@ apps/bitcraft-local/data/bitcraft-local.sqlite
 Production default configured by the deployment service:
 
 ```text
-/var/lib/bitcraft-claim-monitor/bitcraft-local.sqlite
+/var/lib/bitcraft-claim-monitor-relay/bitcraft-local.sqlite
 ```
 
-Normal browser pages refresh live BitJita data through the local `/api/bitjita/*` proxy. The server still owns background collection for history, notifications, analytics, recipes, regional buy-order cache and diagnostics, but those collectors are not the source of truth for normal page rendering.
+Migrated browser pages read normalized current state from `/api/local/game-data`.
+The relay worker owns collection so snapshots and notifications continue without
+a browser open. Unmigrated pages and collectors are explicitly tracked and block
+production cutover.
 
 Uploaded branding is stored under `branding/` and administrator-created SQLite backups under `backups/` inside the same data directory.
 
@@ -349,14 +369,14 @@ Default development URLs:
 
 | Service | URL |
 | --- | --- |
-| Frontend | `http://localhost:18428` |
-| Local SQLite/API server | `http://127.0.0.1:18430` |
+| Frontend | `http://localhost:19428` |
+| Local SQLite/API server | `http://127.0.0.1:19430` |
 
 To use alternate ports in PowerShell:
 
 ```powershell
-$env:PORT = "18433"
-$env:LOCAL_API_PORT = "18434"
+$env:PORT = "19433"
+$env:LOCAL_API_PORT = "19434"
 corepack pnpm --filter @workspace/bitcraft-local run dev
 ```
 
@@ -390,10 +410,14 @@ Supported application server environment variables:
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `APP_HOST` | Host interface for production server | `127.0.0.1` |
-| `APP_PORT` | Production HTTP port | `18430` |
-| `LOCAL_API_PORT` | Development local API port | `18430` |
-| `PORT` | Development Vite frontend port | `18428` |
+| `APP_PORT` | Production HTTP port | `19430` |
+| `LOCAL_API_PORT` | Development local API port | `19430` |
+| `PORT` | Development Vite frontend port | `19428` |
 | `BITCRAFT_LOCAL_DATA_DIR` | SQLite storage directory | `apps/bitcraft-local/data` |
+| `BITCRAFT_RELAY_ORIGIN` | Relay topology and joined-cache origin | `https://relay.bitcraftsync.app` |
+| `BITCRAFT_APP_IDENTIFIER` | Stable clone identifier used for local hashing | relay repository identifier |
+| `ENABLE_RELAY_PROVIDER` | Enable worker-side Relay ingestion | enabled |
+| `DISCORD_DELIVERY_MODE` | `record` stores delivery evidence without sending; `live` sends | `record` |
 | `BITJITA_API_ORIGIN` | Alternate BitJita upstream origin | `https://bitjita.com` |
 | `BITJITA_APP_IDENTIFIER` | Identifier sent with upstream BitJita requests | project GitHub identifier |
 | `ADMIN_SETUP_KEY` | Optional compatibility key for legacy first-admin password setup | unset |
@@ -422,10 +446,10 @@ The intended production setup is:
 
 - Ubuntu VPS.
 - Node.js 24.
-- Application installed at `/opt/bitcraft-claim-monitor`.
-- Persistent data at `/var/lib/bitcraft-claim-monitor`.
-- systemd running the web Node process on `127.0.0.1:18430` and a separate worker process for collectors and scheduled jobs.
-- Caddy serving `https://app.timbersteeltrade.com` as the public HTTPS domain, with `https://claim.timbersteeltrade.com` and `https://claim.hostred.co.uk` redirected to it.
+- Application installed at `/opt/bitcraft-claim-monitor-relay`.
+- Persistent data at `/var/lib/bitcraft-claim-monitor-relay`.
+- systemd running the web Node process on `127.0.0.1:19430` and a separate worker process for collectors and scheduled jobs.
+- Caddy serving the preview at `https://relay.timbersteeltrade.com`.
 
 Full bootstrap, migration, rollback and recovery instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 

@@ -16,6 +16,27 @@ test("normalizePlayer preserves BitJita total played and signed-in durations", (
   assert.equal(player.timeSignedInSeconds, 4_147_200);
 });
 
+test("normalizePlayer preserves provider-neutral durations and advances an ISO sign-in session", () => {
+  const originalNow = Date.now;
+  Date.now = () => Date.parse("2026-07-29T20:45:00.000Z");
+  try {
+    const player = normalizePlayer({
+      playerEntityId: "1369094286756659093",
+      username: "Modular",
+      signedIn: true,
+      signInTimestamp: "2026-07-29T20:30:00.000Z",
+      sessionSeconds: 30,
+      timePlayedSeconds: 7200,
+      timeSignedInSeconds: 3600,
+    });
+    assert.equal(player.sessionSeconds, 900);
+    assert.equal(player.timePlayedSeconds, 7200);
+    assert.equal(player.timeSignedInSeconds, 3600);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test("normalizePlayer treats BitJita online aliases as signed in", () => {
   assert.equal(normalizePlayer({ username: "Mosswick", online: true }).signedIn, true);
   assert.equal(normalizePlayer({ username: "Oddfawn", isOnline: true }).signedIn, true);

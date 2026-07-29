@@ -66,7 +66,7 @@ import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
 import { settlementMarketTitle } from "../navigation/navigationLabels";
 import { getTrackedOwnerName } from "../utils/ownership";
-import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
+import { isMarketableItem, playerToolbeltTools } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";

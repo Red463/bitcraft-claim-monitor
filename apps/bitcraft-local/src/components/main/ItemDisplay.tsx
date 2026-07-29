@@ -1,10 +1,10 @@
 import React from "react";
 
 import { toNumber, type AnyRecord } from "../../main-app-data";
-import { bitjitaIconUrl } from "../../utils/items";
+import { gameIconUrl } from "../../utils/items";
 
 export function ItemIcon({ item }: { item: AnyRecord }) {
-  const url = bitjitaIconUrl(item);
+  const url = gameIconUrl(item);
   const [failed, setFailed] = React.useState(false);
   const fallback = String(item.name ?? "?").trim().slice(0, 2).toUpperCase();
 

@@ -495,6 +495,7 @@ test("server collection paginates listings and protects production mutations", a
       EMPIRE_SCOUT_CACHE_TTL_MS: "100",
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
+      DISCORD_DELIVERY_MODE: "live",
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
     },
@@ -1982,6 +1983,8 @@ test("background polling failures keep the server online", async (t) => {
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
+  const unavailableGameData = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=claim,members`);
+  assert.equal(unavailableGameData.status, 503);
   const fallbackDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   const fallbackCollectedAt = "2026-06-30T09:00:00.000Z";
   const fallbackPayload = fallbackDb.prepare(`
@@ -1991,6 +1994,12 @@ test("background polling failures keep the server online", async (t) => {
   fallbackPayload.run(claimId, "claim", JSON.stringify({ claim: { entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" } }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
   fallbackPayload.run(claimId, "members", JSON.stringify({ members: [{ playerEntityId: "player-1", userName: "Cached Tester" }] }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
   fallbackDb.close();
+  const lastGoodGameDataResponse = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=claim,members`);
+  assert.equal(lastGoodGameDataResponse.status, 200);
+  const lastGoodGameData = await lastGoodGameDataResponse.json();
+  assert.equal(lastGoodGameData.domains.claim.freshness, "stale");
+  assert.equal(lastGoodGameData.domains.members.data.members[0].userName, "Cached Tester");
+  assert.equal((await fetch(`${origin}/api/local/game-data?claimId=99999999&domains=claim`)).status, 403);
   const fallbackDashboardResponse = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`);
   assert.equal(fallbackDashboardResponse.status, 200);
   const fallbackDashboard = await fallbackDashboardResponse.json();

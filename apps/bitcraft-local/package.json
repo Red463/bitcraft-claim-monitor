@@ -9,12 +9,21 @@
   "scripts": {
     "dev": "node dev.mjs",
     "dev:web": "vite --host 0.0.0.0",
+    "predev:db": "corepack pnpm run build:server",
     "dev:db": "node server.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build:provider": "tsc -p tsconfig.server.json",
+    "build:bindings": "tsc -p tsconfig.bindings.json && vite build --config vite.bindings.config.ts",
+    "build:server": "corepack pnpm run build:provider && corepack pnpm run build:bindings",
+    "build": "corepack pnpm run build:server && tsc -p tsconfig.json --noEmit && vite build",
+    "pretest": "corepack pnpm run build:server",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "prestart": "corepack pnpm run build:server",
     "start": "node server.mjs",
     "worker": "node worker.mjs",
+    "verify:relay-live": "corepack pnpm run build:server && node scripts/verify-relay-provider-live.mjs",
+    "verify:relay-global-live": "corepack pnpm run build:server && node scripts/verify-relay-global-catalog-live.mjs",
+    "verify:relay-region-live": "corepack pnpm run build:server && node scripts/verify-relay-primary-region-live.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
@@ -25,6 +34,7 @@
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "spacetimedb": "2.7.0",
     "typescript": "~5.9.3",
     "vite": "catalog:"
   },

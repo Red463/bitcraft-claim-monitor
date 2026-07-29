@@ -1,0 +1,30 @@
+{
+  "capturedAt": "2026-07-29T18:50:00.000Z",
+  "relayOrigin": "https://relay.bitcraftsync.app",
+  "schemas": {
+    "global": {
+      "databaseObserved": "relay-mirror-bc-global",
+      "fingerprint": "cebd889939799c6317f12d86799a4ac38dde43dad265ff92ab7e03f6c8cb4f49",
+      "schemaSha256": "cebd889939799c6317f12d86799a4ac38dde43dad265ff92ab7e03f6c8cb4f49",
+      "bindingsGenerated": true,
+      "bindingDirectory": "global",
+      "generatedFileCount": 697
+    },
+    "regional": {
+      "databaseObserved": "relay-mirror-bc19",
+      "fingerprint": "762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312",
+      "schemaSha256": "762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312",
+      "bindingsGenerated": true,
+      "bindingDirectory": "regional",
+      "generatedFileCount": 1040
+    }
+  },
+  "codegen": {
+    "status": "generated",
+    "mode": "pinned-cli-module-def-v9",
+    "cliVersion": "2.7.0",
+    "cliCommit": "d220349adb7af7eefa810eb08a185609356b83f6",
+    "supportStatus": "undocumented-pinned-bridge",
+    "reason": "The pinned official CLI has a hidden --module-def path. Relay schema version 9 responses were wrapped in the CLI's V9 RawModuleDef container and generated successfully. This avoids a hand-written BSATN codec, but regeneration remains pinned because the flag is not a documented public CLI contract."
+  }
+}

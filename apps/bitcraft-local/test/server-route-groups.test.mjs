@@ -32,7 +32,9 @@ test("securityHeaders applies public release browser protections and preserves e
   assert.equal(headers["referrer-policy"], "strict-origin-when-cross-origin");
   assert.equal(headers["cross-origin-opener-policy"], "same-origin");
   assert.match(headers["content-security-policy"], /default-src 'self'/);
-  assert.match(headers["content-security-policy"], /connect-src 'self' https:\/\/bitjita\.com https:\/\/discord\.com/);
+  assert.match(headers["content-security-policy"], /connect-src 'self'(?:;|$)/);
+  assert.match(headers["content-security-policy"], /img-src 'self' data:(?:;|$)/);
+  assert.doesNotMatch(headers["content-security-policy"], /bitjita/i);
   assert.match(headers["content-security-policy"], /frame-ancestors 'self'/);
 });
 

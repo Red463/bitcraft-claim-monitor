@@ -14,13 +14,17 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
  * when the API has not provided a usable value.
  */
 export function normalizePlayer(player: AnyRecord): AnyRecord {
-  const signInTs = toNumber(
-    player.signInTimestamp ??
+  const signInValue = player.signInTimestamp ??
     player.sign_in_timestamp ??
     player.signedInTimestamp ??
     player.sessionStartTimestamp ??
-    player.session_start_timestamp,
-  );
+    player.session_start_timestamp;
+  const numericSignIn = toNumber(signInValue);
+  const signInTs = numericSignIn > 0
+    ? Math.floor(numericSignIn > 10_000_000_000 ? numericSignIn / 1000 : numericSignIn)
+    : typeof signInValue === "string" && Number.isFinite(Date.parse(signInValue))
+      ? Math.floor(Date.parse(signInValue) / 1000)
+      : 0;
   const now = Math.floor(Date.now() / 1000);
   const signedIn = Boolean(player.signedIn ?? player.online ?? player.isOnline ?? (signInTs > 0));
   const existingSessionSeconds = toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds);
@@ -29,6 +33,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     player.totalTimePlayed ??
     player.totalPlayed ??
     player.totalPlayedSeconds ??
+    player.timePlayedSeconds ??
     player.time_played ??
     player.total_time_played,
   );
@@ -37,6 +42,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     player.totalTimeSignedIn ??
     player.totalSignedIn ??
     player.totalSignedInSeconds ??
+    player.timeSignedInSeconds ??
     player.time_signed_in ??
     player.total_time_signed_in,
   );
