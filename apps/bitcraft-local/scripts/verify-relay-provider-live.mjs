@@ -17,6 +17,7 @@ const expectedDomains = [
   "members",
   "citizens",
   "players",
+  "equipment",
   "skills",
   "inventories",
   "crafts",
@@ -84,7 +85,12 @@ try {
     if (child.exitCode != null) throw new Error(`Relay worker exited with code ${child.exitCode}`);
   }
   if (!expectedDomains.every((domain) => rows.some((row) => row.domain === domain))) {
-    throw new Error("Relay HTTP domain generation did not load within 30 seconds");
+    throw new Error(
+      `Relay domain generation did not load within 30 seconds: ${JSON.stringify({
+        observedDomains: rows.map((row) => row.domain),
+        health: currentHealthRows(),
+      })}`,
+    );
   }
   process.stdout.write(`${JSON.stringify({
     ok: true,

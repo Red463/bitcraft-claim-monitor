@@ -68,6 +68,8 @@ test("primary-region runtime publishes players and restarts only when membership
   await handlers[0]({
     players: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
     warnings: [],
+    equipment: { members: [{ playerEntityId: "101", username: "Ada" }] },
+    equipmentWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -80,6 +82,20 @@ test("primary-region runtime publishes players and restarts only when membership
     domains: {
       players: {
         data: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "region:19",
+          regionId: "19",
+          database: "relay-region-19",
+          schemaFingerprint: "regional-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:41:00.000Z",
+        },
+        warnings: [],
+      },
+      equipment: {
+        data: { members: [{ playerEntityId: "101", username: "Ada" }] },
         confidence: "authoritative",
         provenance: {
           provider: "relay",
@@ -106,6 +122,8 @@ test("primary-region runtime publishes players and restarts only when membership
   await handlers[0]({
     players: [{ playerEntityId: "101", username: "Stale Ada", signedIn: false }],
     warnings: [],
+    equipment: { members: [] },
+    equipmentWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",

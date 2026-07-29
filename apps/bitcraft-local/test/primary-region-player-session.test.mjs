@@ -26,17 +26,24 @@ function fakeBindings() {
     signedIn: true,
     travelerTasksExpiration: 0,
   }];
-  const playerState = {
-    iter: () => rows[Symbol.iterator](),
-    onInsert: (callback) => state.callbacks.set("insert", callback),
-    onUpdate: (callback) => state.callbacks.set("update", callback),
-    onDelete: (callback) => state.callbacks.set("delete", callback),
-    removeOnInsert: () => state.callbacks.delete("insert"),
-    removeOnUpdate: () => state.callbacks.delete("update"),
-    removeOnDelete: () => state.callbacks.delete("delete"),
-  };
+  const cachedTable = (name, tableRows = []) => ({
+    iter: () => tableRows[Symbol.iterator](),
+    onInsert: (callback) => state.callbacks.set(`${name}:insert`, callback),
+    onUpdate: (callback) => state.callbacks.set(`${name}:update`, callback),
+    onDelete: (callback) => state.callbacks.set(`${name}:delete`, callback),
+    removeOnInsert: () => state.callbacks.delete(`${name}:insert`),
+    removeOnUpdate: () => state.callbacks.delete(`${name}:update`),
+    removeOnDelete: () => state.callbacks.delete(`${name}:delete`),
+  });
+  const playerState = cachedTable("player", rows);
+  const equipmentState = cachedTable("equipment", [{
+    entityId: 101n,
+    equipmentSlots: [],
+  }]);
+  const equipmentPresetState = cachedTable("preset", []);
+  const activeBuffState = cachedTable("buff", []);
   const connection = {
-    db: { playerState },
+    db: { playerState, equipmentState, equipmentPresetState, activeBuffState },
     subscriptionBuilder() {
       const builder = {
         onApplied(callback) {
@@ -119,8 +126,10 @@ test("primary-region player session subscribes only to member IDs and emits norm
   });
   fake.state.onConnect(fake.connection);
   assert.deepEqual(fake.state.queries, [
-    "SELECT * FROM player_state WHERE entity_id = 101",
-    "SELECT * FROM player_state WHERE entity_id = 202",
+    "SELECT * FROM player_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM equipment_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM equipment_preset_state WHERE player_entity_id = 101 OR player_entity_id = 202",
+    "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
   ]);
 
   fake.state.onApplied({});
@@ -148,6 +157,25 @@ test("primary-region player session subscribes only to member IDs and emits norm
       },
     ],
     warnings: ["Regional player_state omitted member 202."],
+    equipment: {
+      members: [
+        {
+          playerEntityId: "101",
+          username: "Ada",
+          equipment: { equipmentSlots: [] },
+          equipmentPresets: { presets: [] },
+          buffs: { buffs: [] },
+        },
+        {
+          playerEntityId: "202",
+          username: "Grace",
+          equipment: { equipmentSlots: [] },
+          equipmentPresets: { presets: [] },
+          buffs: { buffs: [] },
+        },
+      ],
+    },
+    equipmentWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -155,7 +183,7 @@ test("primary-region player session subscribes only to member IDs and emits norm
     receivedAt: "2026-07-29T20:35:00.000Z",
   });
 
-  fake.state.callbacks.get("update")({}, {}, {});
+  fake.state.callbacks.get("equipment:update")({}, {}, {});
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
@@ -213,8 +241,8 @@ test("primary-region player session coalesces rapid changes while a snapshot app
   });
   fake.state.onConnect(fake.connection);
   fake.state.onApplied({});
-  fake.state.callbacks.get("update")({}, {}, {});
-  fake.state.callbacks.get("insert")({}, {});
+  fake.state.callbacks.get("player:update")({}, {}, {});
+  fake.state.callbacks.get("buff:insert")({}, {});
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(snapshots.length, 1);

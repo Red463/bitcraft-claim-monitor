@@ -91,6 +91,16 @@ try {
     memberCount: members.length,
     playerCount: snapshot.players.length,
     signedInCount: snapshot.players.filter(({ signedIn }) => signedIn).length,
+    equipmentMemberCount: snapshot.equipment.members.length,
+    equippedItemCount: snapshot.equipment.members.reduce(
+      (total, member) => total
+        + member.equipment.equipmentSlots.filter(({ item }) => item != null).length,
+      0,
+    ),
+    activeBuffCount: snapshot.equipment.members.reduce(
+      (total, member) => total + member.buffs.buffs.length,
+      0,
+    ),
     regionalRowsFound,
     warningCount: snapshot.warnings.length,
   }, null, 2));

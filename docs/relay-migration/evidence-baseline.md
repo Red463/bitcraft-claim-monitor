@@ -71,6 +71,10 @@ member-filtered equipment/preset/buff rows, and that global rows are not a
 complete market source. Exact observations are recorded in
 [diagnostic-findings.md](./diagnostic-findings.md).
 
+The live primary-region verifier now exercises those member-filtered equipment,
+preset, and buff subscriptions alongside `player_state`. Their normalized
+current domain is committed without introducing a new SQL cache table.
+
 ## Runtime BitJita baseline
 
 At the base revision, runtime and presentation references were concentrated in:

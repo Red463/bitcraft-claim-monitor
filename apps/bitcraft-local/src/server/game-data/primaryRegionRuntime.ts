@@ -174,6 +174,20 @@ export class RelayPrimaryRegionRuntime {
             },
             warnings: snapshot.warnings,
           },
+          equipment: {
+            data: snapshot.equipment,
+            confidence: snapshot.equipmentWarnings.length ? "partial" : "authoritative",
+            provenance: {
+              provider: "relay",
+              sourceKey,
+              regionId: snapshot.regionId,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings: snapshot.equipmentWarnings,
+          },
         },
       });
       this.#lastError = null;

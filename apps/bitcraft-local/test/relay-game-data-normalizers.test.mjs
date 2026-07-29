@@ -15,9 +15,97 @@ const {
   normalizeMembers,
   normalizeMembersPayload,
   normalizeCitizensPayload,
+  normalizeRegionalEquipment,
   normalizeRegionalPlayers,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional equipment and buff rows are decoded into member-scoped provider data", () => {
+  const result = normalizeRegionalEquipment({
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+    equipmentRows: [{
+      entityId: 101n,
+      equipmentSlots: [{
+        primary: { tag: "HeadClothing" },
+        item: { itemId: 42, itemType: { tag: "Item" }, quantity: 1, durability: 9007199254740993n },
+      }],
+    }],
+    presetRows: [{
+      entityId: 501n,
+      playerEntityId: 101n,
+      index: 1,
+      active: true,
+      equipmentSlots: [],
+    }],
+    buffRows: [{
+      entityId: 101n,
+      activeBuffs: [{
+        buffId: 77,
+        buffStartTimestamp: { value: 1785352200 },
+        buffDuration: 3600,
+        values: [1.5, 2],
+      }],
+    }],
+  });
+
+  assert.deepEqual(result, {
+    data: {
+      members: [{
+        playerEntityId: "101",
+        username: "Ada",
+        equipment: {
+          equipmentSlots: [{
+            primary: "head_clothing",
+            item: {
+              id: "42",
+              itemId: "42",
+              itemType: "item",
+              quantity: "1",
+              durability: "9007199254740993",
+            },
+          }],
+        },
+        equipmentPresets: {
+          presets: [{
+            entityId: "501",
+            index: 1,
+            active: true,
+            equipmentSlots: [],
+          }],
+        },
+        buffs: {
+          buffs: [{
+            buffId: "77",
+            startTimestampSeconds: "1785352200",
+            startedAt: null,
+            durationSeconds: 3600,
+            values: [1.5, 2],
+          }],
+        },
+      }],
+    },
+    warnings: [],
+  });
+});
+
+test("regional buffs omit zero-valued inactive slots instead of inventing an epoch date", () => {
+  const result = normalizeRegionalEquipment({
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+    equipmentRows: [],
+    presetRows: [],
+    buffRows: [{
+      entityId: 101n,
+      activeBuffs: [{
+        buffId: 77,
+        buffStartTimestamp: { value: 0 },
+        buffDuration: 30,
+        values: [],
+      }],
+    }],
+  });
+
+  assert.deepEqual(result.data.members[0].buffs.buffs, []);
+});
 
 test("Relay claim normalization preserves 64-bit IDs as decimal strings", () => {
   assert.deepEqual(normalizeClaim({

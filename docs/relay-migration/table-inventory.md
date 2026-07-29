@@ -81,3 +81,14 @@ Disposition values:
   source of truth.
 - Craft contributor parity and member Toolbelt eligibility remain explicitly
   unavailable until their regional subscription mappings are delivered.
+
+## Member equipment and buff subscription evidence
+
+- Current equipment, preset, and active-buff rows share
+  `domain_payload_current` with the other provider domains.
+- No equipment, preset, buff, or page cache table was added.
+- Four member-filtered regional subscriptions push changes immediately and
+  swap `players` plus `equipment` in one repository generation.
+- Global equipment/buff descriptions remain in the existing indexed catalog
+  read model. UI enrichment and Toolbelt inventory are the next vertical
+  boundary; the legacy page calls are not considered retired yet.

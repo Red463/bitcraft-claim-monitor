@@ -1,4 +1,7 @@
-import { normalizeRegionalPlayers } from "./normalizers.ts";
+import {
+  normalizeRegionalEquipment,
+  normalizeRegionalPlayers,
+} from "./normalizers.ts";
 import {
   assertSchemaFingerprint,
   schemaBindingsReady,
@@ -27,7 +30,12 @@ type SubscriptionBuilder = {
 };
 
 type BindingConnection = {
-  db: { playerState: CachedTable };
+  db: {
+    playerState: CachedTable;
+    equipmentState: CachedTable;
+    equipmentPresetState: CachedTable;
+    activeBuffState: CachedTable;
+  };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
 };
@@ -72,6 +80,8 @@ type SessionDependencies = {
 export type RegionalPlayerSnapshot = {
   players: ReturnType<typeof normalizeRegionalPlayers>["data"];
   warnings: string[];
+  equipment: ReturnType<typeof normalizeRegionalEquipment>["data"];
+  equipmentWarnings: string[];
   database: string;
   regionId: string;
   schemaFingerprint: string;
@@ -94,8 +104,14 @@ function memberEntityId(member: Member, index: number): string {
 }
 
 export function playerStateQueries(members: Member[]): string[] {
-  return [...new Set(members.map(memberEntityId))]
-    .map((id) => `SELECT * FROM player_state WHERE entity_id = ${id}`);
+  const ids = [...new Set(members.map(memberEntityId))];
+  const where = (column: string) => ids.map((id) => `${column} = ${id}`).join(" OR ");
+  return [
+    `SELECT * FROM player_state WHERE ${where("entity_id")}`,
+    `SELECT * FROM equipment_state WHERE ${where("entity_id")}`,
+    `SELECT * FROM equipment_preset_state WHERE ${where("player_entity_id")}`,
+    `SELECT * FROM active_buff_state WHERE ${where("entity_id")}`,
+  ];
 }
 
 export class RelayPrimaryRegionPlayerSession {
@@ -176,12 +192,20 @@ export class RelayPrimaryRegionPlayerSession {
         playerRows: [...connection.db.playerState.iter()],
         observedAt: receivedAt,
       });
+      const equipment = normalizeRegionalEquipment({
+        members: config.members,
+        equipmentRows: [...connection.db.equipmentState.iter()],
+        presetRows: [...connection.db.equipmentPresetState.iter()],
+        buffRows: [...connection.db.activeBuffState.iter()],
+      });
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
       this.#applyInFlight = true;
       const result = this.#onSnapshot({
         players: normalized.data,
         warnings: normalized.warnings,
+        equipment: equipment.data,
+        equipmentWarnings: equipment.warnings,
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -212,18 +236,31 @@ export class RelayPrimaryRegionPlayerSession {
 
   #attachTableListeners(connection: BindingConnection): void {
     if (this.#listenersAttached) return;
-    connection.db.playerState.onInsert?.(this.#tableChanged);
-    connection.db.playerState.onUpdate?.(this.#tableChanged);
-    connection.db.playerState.onDelete?.(this.#tableChanged);
+    for (const table of this.#tables(connection)) {
+      table.onInsert?.(this.#tableChanged);
+      table.onUpdate?.(this.#tableChanged);
+      table.onDelete?.(this.#tableChanged);
+    }
     this.#listenersAttached = true;
   }
 
   #removeTableListeners(): void {
     if (!this.#listenersAttached || !this.#connection) return;
-    this.#connection.db.playerState.removeOnInsert?.(this.#tableChanged);
-    this.#connection.db.playerState.removeOnUpdate?.(this.#tableChanged);
-    this.#connection.db.playerState.removeOnDelete?.(this.#tableChanged);
+    for (const table of this.#tables(this.#connection)) {
+      table.removeOnInsert?.(this.#tableChanged);
+      table.removeOnUpdate?.(this.#tableChanged);
+      table.removeOnDelete?.(this.#tableChanged);
+    }
     this.#listenersAttached = false;
+  }
+
+  #tables(connection: BindingConnection): CachedTable[] {
+    return [
+      connection.db.playerState,
+      connection.db.equipmentState,
+      connection.db.equipmentPresetState,
+      connection.db.activeBuffState,
+    ];
   }
 
   #queueSnapshot(): void {

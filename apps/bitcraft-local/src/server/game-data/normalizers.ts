@@ -441,6 +441,120 @@ export function normalizeRegionalPlayers(options: {
   return { data, warnings };
 }
 
+function snakeCaseEnum(value: unknown, fallback: string): string {
+  const label = enumLabel(value) ?? fallback;
+  return label
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase();
+}
+
+function normalizeEquippedItem(value: unknown) {
+  if (value == null) return null;
+  const item = record(value, "regional equipped item");
+  const itemId = decimalString(item.itemId ?? item.item_id, "regional equipped item id");
+  return {
+    id: itemId,
+    itemId,
+    itemType: normalizeItemKind(enumLabel(item.itemType ?? item.item_type)),
+    quantity: decimalString(item.quantity, "regional equipped item quantity"),
+    ...(item.durability == null ? {} : {
+      durability: decimalString(item.durability, "regional equipped item durability"),
+    }),
+  };
+}
+
+function normalizeEquipmentSlot(value: unknown) {
+  const slot = record(value, "regional equipment slot");
+  return {
+    primary: snakeCaseEnum(slot.primary, "none"),
+    item: normalizeEquippedItem(slot.item),
+  };
+}
+
+export function normalizeRegionalEquipment(options: {
+  members: unknown[];
+  equipmentRows: unknown[];
+  presetRows: unknown[];
+  buffRows: unknown[];
+}) {
+  const equipmentByPlayer = new Map(options.equipmentRows.map((value) => {
+    const row = record(value, "regional equipment_state row");
+    return [decimalString(row.entityId ?? row.entity_id, "regional equipment player id"), row] as const;
+  }));
+  const presetsByPlayer = new Map<string, WireRecord[]>();
+  for (const value of options.presetRows) {
+    const row = record(value, "regional equipment_preset_state row");
+    const playerId = decimalString(
+      row.playerEntityId ?? row.player_entity_id,
+      "regional equipment preset player id",
+    );
+    const rows = presetsByPlayer.get(playerId) ?? [];
+    rows.push(row);
+    presetsByPlayer.set(playerId, rows);
+  }
+  const buffsByPlayer = new Map(options.buffRows.map((value) => {
+    const row = record(value, "regional active_buff_state row");
+    return [decimalString(row.entityId ?? row.entity_id, "regional buff player id"), row] as const;
+  }));
+
+  return {
+    data: {
+      members: options.members.map((value, index) => {
+        const member = record(value, `regional equipment member ${index}`);
+        const playerEntityId = decimalString(
+          member.playerEntityId ?? member.player_entity_id,
+          `regional equipment member ${index} id`,
+        );
+        const equipment = equipmentByPlayer.get(playerEntityId);
+        const buffState = buffsByPlayer.get(playerEntityId);
+        const presets = (presetsByPlayer.get(playerEntityId) ?? [])
+          .sort((left, right) => integer(left.index, "equipment preset index") - integer(right.index, "equipment preset index"))
+          .map((row) => ({
+            entityId: decimalString(row.entityId ?? row.entity_id, "equipment preset entity id"),
+            index: integer(row.index, "equipment preset index"),
+            active: row.active === true,
+            equipmentSlots: records(row.equipmentSlots ?? row.equipment_slots).map(normalizeEquipmentSlot),
+          }));
+        const buffs = records(buffState?.activeBuffs ?? buffState?.active_buffs).flatMap((row) => {
+          const start = record(
+            row.buffStartTimestamp ?? row.buff_start_timestamp,
+            "active buff start timestamp",
+          );
+          const startTimestampSeconds = integer(
+            start.value,
+            "active buff start timestamp",
+          );
+          const durationSeconds = Math.max(
+            0,
+            integer(row.buffDuration ?? row.buff_duration ?? 0, "active buff duration"),
+          );
+          if (startTimestampSeconds <= 0 || durationSeconds <= 0) return [];
+          return [{
+            buffId: decimalString(row.buffId ?? row.buff_id, "active buff id"),
+            startTimestampSeconds: String(startTimestampSeconds),
+            startedAt: null,
+            durationSeconds,
+            values: (Array.isArray(row.values) ? row.values : [])
+              .map((entry) => finiteNumber(entry, "active buff value")),
+          }];
+        });
+        return {
+          playerEntityId,
+          username: String(member.userName ?? member.user_name ?? ""),
+          equipment: {
+            equipmentSlots: records(equipment?.equipmentSlots ?? equipment?.equipment_slots)
+              .map(normalizeEquipmentSlot),
+          },
+          equipmentPresets: { presets },
+          buffs: { buffs },
+        };
+      }),
+    },
+    warnings: [],
+  };
+}
+
 export function normalizeDeposit(value: unknown) {
   const row = record(value, "Relay deposit");
   const explicit = String(row.status ?? "").trim().toLowerCase();

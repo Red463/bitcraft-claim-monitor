@@ -152,6 +152,15 @@ The rows use generated algebraic encodings for optional equipment stacks and
 buff values. They must be decoded by generated bindings, then enriched from
 global equipment and buff descriptions.
 
+The primary-region runtime now subscribes to these four member-filtered tables
+with one bounded predicate per table: `player_state`, `equipment_state`,
+`equipment_preset_state`, and `active_buff_state`. A fresh live verification on
+2026-07-29 loaded all 18 monitored members and atomically published the
+`players` and `equipment` domains. Zero-valued inactive buff slots are omitted.
+The remaining `OnlineTimestamp` values are preserved as exact source counters
+with no calendar date because live rows prove the field is not consistently a
+Unix timestamp.
+
 ## Craft contributors
 
 One active Relay HTTP craft was queried by its exact craft entity ID:
