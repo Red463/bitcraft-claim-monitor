@@ -98,6 +98,9 @@ test("Linked account assignment remains dense, layered, and touch-friendly on na
   assert.match(css, /\.linked-account-character-actions/);
   assert.match(css, /\.linked-account-contextual-actions\s*>\s*\.toolbar-button\s*\{[^}]*width:\s*fit-content[^}]*justify-self:\s*start/);
   assert.match(css, /\.linked-account-assignment-disclosure\s*>\s*summary::after,\s*\.linked-account-more-actions\s*>\s*summary::after\s*\{[^}]*content:\s*none[^}]*display:\s*none/);
+  assert.match(css, /\.linked-account-more-actions\s*>\s*summary\s*\{[^}]*padding:\s*0[^}]*display:\s*flex[^}]*align-items:\s*center[^}]*justify-content:\s*center[^}]*line-height:\s*0/);
+  assert.match(css, /\.linked-account-more-actions\s*>\s*summary::marker,[\s\S]*\.linked-account-more-actions\s*>\s*summary::-webkit-details-marker\s*\{[^}]*content:\s*["']{2}[^}]*display:\s*none/);
+  assert.match(css, /\.linked-account-more-actions\s*>\s*summary\s*>\s*svg\s*\{[^}]*display:\s*block[^}]*margin:\s*0/);
   assert.match(css, /\.linked-account-more-menu\s*\{[^}]*z-index:\s*var\(--z-dropdown\)/);
   assert.match(css, /\.linked-account-more-actions\s*>\s*summary:focus-visible/);
   assert.match(css, /@media \(max-width:\s*860px\)[\s\S]*\.linked-account-row\s*\{[^}]*grid-template-columns:\s*1fr/);

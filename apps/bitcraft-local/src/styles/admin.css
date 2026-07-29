@@ -883,16 +883,27 @@
 .linked-account-more-actions > summary {
   width: 36px;
   height: 36px;
+  padding: 0;
   border: 1px solid rgba(108,123,145,.28);
   border-radius: 7px;
   color: #aeb9c9;
   background: rgba(4,7,11,.5);
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
   list-style: none;
 }
-.linked-account-more-actions > summary::-webkit-details-marker { display: none; }
+.linked-account-more-actions > summary::marker,
+.linked-account-more-actions > summary::-webkit-details-marker {
+  content: "";
+  display: none;
+}
+.linked-account-more-actions > summary > svg {
+  display: block;
+  margin: 0;
+}
 .linked-account-more-actions > summary:hover,
 .linked-account-more-actions[open] > summary {
   border-color: rgba(240,198,79,.38);
