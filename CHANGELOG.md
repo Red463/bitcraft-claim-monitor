@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.49.1-beta.2] - 2026-07-29
+
+### Fixed
+
+- Centred the Linked Accounts “More actions” icons consistently across supported browsers and screen sizes.
+
 ## [0.49.1-beta.1] - 2026-07-29
 
 ### Fixed
