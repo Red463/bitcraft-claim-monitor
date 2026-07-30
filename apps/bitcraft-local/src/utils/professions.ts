@@ -55,7 +55,7 @@ export const TOOL_TAG_BY_TYPE: Record<number, string> = {
   14: "Tool",
 };
 
-export function bitjitaSkillRows(skills: AnyRecord, category: "Profession" | "Adventure"): AnyRecord[] {
+export function skillRows(skills: AnyRecord, category: "Profession" | "Adventure"): AnyRecord[] {
   const key = category === "Profession" ? "profession" : "adventure";
   return Array.isArray(skills?.[key]) ? skills[key] : [];
 }

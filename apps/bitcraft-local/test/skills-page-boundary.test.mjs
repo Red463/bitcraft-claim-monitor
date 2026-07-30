@@ -55,3 +55,11 @@ test("Profession summary collapses below the tablet breakpoint without losing se
     /@media \(max-width:\s*900px\)[\s\S]*\.skills-page \.summary-grid\.skills-summary\s*\{[^}]*grid-template-columns:\s*1fr/s,
   );
 });
+
+test("Professions use provider-neutral normalized skill rows", () => {
+  const helpers = readFileSync(new URL("../src/utils/professions.ts", import.meta.url), "utf8");
+  assert.match(page, /\bskillRows\(data\.skills,/);
+  assert.match(helpers, /export function skillRows\(/);
+  assert.doesNotMatch(page, /bitjita/i);
+  assert.doesNotMatch(helpers, /bitjita/i);
+});

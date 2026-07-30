@@ -116,6 +116,9 @@ be a committed domain event, not a scheduled ingestion sweep.
 
 ## Member equipment and buff subscription evidence
 
+- Professions and Leaderboard read the committed citizen/player generation
+  directly through provider-neutral skill projections; no leaderboard or
+  profession cache table exists.
 - Current equipment, preset, and active-buff rows share
   `domain_payload_current` with the other provider domains.
 - No equipment, preset, buff, or page cache table was added.

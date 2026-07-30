@@ -39,3 +39,9 @@ test("Leaderboard time columns provide raw values for sorting", () => {
     assert.match(leaderboard, new RegExp(`toNumber\\(entry\\.${field}\\)`), `${field} should sort by raw seconds`);
   }
 });
+
+test("Leaderboard describes Relay current data without legacy provider coupling", () => {
+  assert.match(leaderboardPage, /current Relay citizen profession data/);
+  assert.match(leaderboardPage, /current Relay member and player data/);
+  assert.doesNotMatch(leaderboardPage, /bitjita/i);
+});

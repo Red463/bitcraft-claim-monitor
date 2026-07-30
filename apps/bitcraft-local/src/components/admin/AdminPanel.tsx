@@ -107,7 +107,7 @@ import { discordColorToHex, hexToDiscordColor, normalizeAppSettings, uniqueKey }
 import { listingTrackingKey } from "../../utils/displayHelpers";
 import { NAV } from "../../navigation";
 import { ACCESS_RULE_MODES, normalizeAccessControlConfig, pageAccessTargets, tabAccessTargets, type AccessControlConfig, type AccessRuleMode } from "../../access/accessControl.mjs";
-import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../../utils/professions";
+import { PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_IDS, SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../../utils/professions";
 import type {
   ActiveRegion,
   AppSettings,

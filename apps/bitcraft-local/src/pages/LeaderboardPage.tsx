@@ -12,7 +12,7 @@ import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime
 import { usePersistedState } from "../hooks/usePersistedState";
 import { memberTrackingKeys } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
-import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_NAMES } from "../utils/professions";
+import { PROFESSION_IDS, skillNameFromRows, skillRows, skillTier, SKILL_NAMES } from "../utils/professions";
 import type { LoadState } from "../types/app";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
@@ -116,7 +116,7 @@ export function Leaderboard({
     : contributors.filter((entry) => entry.professions?.some?.((profession: AnyRecord) => profession.profession === professionFilter));
   const topContributor = contributors[0];
   const topProfession = professions[0];
-  const professionRows = bitjitaSkillRows(data.skills, "Profession");
+  const professionRows = skillRows(data.skills, "Profession");
   const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
   const professionLabel = (id: number) => skillNameFromRows(professionRows, id) || SKILL_NAMES[id] || `Profession ${id}`;
   const citizens: AnyRecord[] = React.useMemo(() => {
@@ -244,7 +244,7 @@ export function Leaderboard({
       </div>
       <section className="dashboard-card leaderboard-card leaderboard-context">
         <header className="dashboard-card-title"><span>{activeTabMeta.icon} {activeTabMeta.label}</span></header>
-        <p>{currentTab === "activity" || currentTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : currentTab === "professions" ? "This tab uses current BitJita citizen profession data for the monitored settlement." : currentTab === "online" ? "This tab uses current member and player detail data when BitJita provides it." : "This tab uses recorded BitJita craft contribution data observed by the app."}</p>
+        <p>{currentTab === "activity" || currentTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : currentTab === "professions" ? "This tab uses current Relay citizen profession data for the monitored settlement." : currentTab === "online" ? "This tab uses current Relay member and player data." : "This tab uses locally recorded craft contribution data observed by the app."}</p>
       </section>
       {currentTab === "contribution" ? (
       <section className="dashboard-card leaderboard-card">
@@ -304,7 +304,7 @@ export function Leaderboard({
               </label>
             </div>
           </header>
-          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when BitJita returns citizen skill data." : "Choose another profession or show all professions."} /> : (
+          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when Relay returns citizen skill data." : "Choose another profession or show all professions."} /> : (
             <DataTable rows={sortedProfessionRows} scrollLabel="Profession leaderboard table" emptyState="No profession leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],

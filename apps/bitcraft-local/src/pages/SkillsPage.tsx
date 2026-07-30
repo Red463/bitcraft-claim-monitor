@@ -13,7 +13,7 @@ import {
   ADVENTURE_SKILL_IDS,
   PROFESSION_IDS,
   TIER_COLORS,
-  bitjitaSkillRows,
+  skillRows,
   levelClass,
   skillNameFromRows,
   skillTier,
@@ -21,9 +21,8 @@ import {
 } from "../utils/professions";
 import { buildProfessionCapability, prioritizeSettlementNeeds, tierRequiredLevel, type ProfessionCapability } from "./professionCapability";
 
-// The UI calls these "Professions" even though BitJita exposes them as skill
-// rows. This page keeps the profession/adventure split explicit so future skill
-// categories can be displayed without changing the underlying BitJita mapping.
+// The UI calls these "Professions" while the normalized provider domain keeps
+// them as skill rows. The explicit split leaves room for future categories.
 type SortKey = "name" | "total" | "highest" | number;
 
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
@@ -35,8 +34,8 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [adventureSortKey, setAdventureSortKey] = usePersistedState<SortKey>("skills.adventure-sort", "total");
   const [adventureSortDir, setAdventureSortDir] = usePersistedState<"asc" | "desc">("skills.adventure-direction", "desc");
   const citizens = data.citizens;
-  const professionRows = bitjitaSkillRows(data.skills, "Profession");
-  const adventureRows = bitjitaSkillRows(data.skills, "Adventure");
+  const professionRows = skillRows(data.skills, "Profession");
+  const adventureRows = skillRows(data.skills, "Adventure");
   const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
   const adventureSkillIds = adventureRows.length ? adventureRows.map((skill) => toNumber(skill.id)).filter(Boolean) : ADVENTURE_SKILL_IDS;
   const skillLabel = (id: number) => skillNameFromRows([...professionRows, ...adventureRows], id);
