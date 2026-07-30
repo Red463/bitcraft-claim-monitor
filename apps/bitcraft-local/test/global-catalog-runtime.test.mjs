@@ -80,6 +80,16 @@ test("global catalog runtime discovers topology and atomically publishes reposit
       buff: [],
       claim_tech: [],
     },
+    regions: [{
+      regionId: "19",
+      regionName: "Zephra",
+      active: true,
+      syncing: false,
+      allowPlayerSpawns: true,
+      signedInPlayers: 42,
+      playersInQueue: 2,
+    }],
+    changed: ["catalogs", "region"],
     database: "relay-global",
     schemaFingerprint: "global-v1",
     generation: 8,
@@ -147,8 +157,54 @@ test("global catalog runtime discovers topology and atomically publishes reposit
         },
         warnings: [],
       },
+      region: {
+        data: {
+          regions: [{
+            regionId: "19",
+            regionName: "Zephra",
+            active: true,
+            syncing: false,
+            allowPlayerSpawns: true,
+            signedInPlayers: 42,
+            playersInQueue: 2,
+          }],
+        },
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "global",
+          regionId: null,
+          database: "relay-global",
+          schemaFingerprint: "global-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:20:00.000Z",
+        },
+        warnings: [],
+      },
     },
   });
+
+  await snapshotHandler({
+    entities: [],
+    descriptions: {},
+    regions: [{
+      regionId: "19",
+      regionName: "Zephra",
+      active: true,
+      syncing: false,
+      allowPlayerSpawns: true,
+      signedInPlayers: 43,
+      playersInQueue: 1,
+    }],
+    changed: ["region"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 9,
+    receivedAt: "2026-07-29T20:21:00.000Z",
+  });
+  assert.equal(catalogWrites.length, 1, "population updates must not rewrite the catalog");
+  assert.deepEqual(Object.keys(domainWrites[1].domains), ["region"]);
+  assert.equal(domainWrites[1].domains.region.data.regions[0].signedInPlayers, 43);
 });
 
 test("global catalog runtime refuses an unavailable global source without constructing a session", async () => {
@@ -220,4 +276,67 @@ test("global catalog runtime stops a session whose startup rejects", async () =>
     claimId: "1",
   }), /connection failed/);
   assert.equal(stopped, true);
+});
+
+test("global catalog runtime rediscovers topology after disconnect and changes claim atomically", async () => {
+  assert.ok(runtimeModule, "global catalog runtime module must exist");
+  const sessions = [];
+  let discoveryCount = 0;
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      return {
+        cacheReady: true,
+        global: {
+          sourceKey: "global",
+          database: `relay-global-${discoveryCount}`,
+          port: 3000 + discoveryCount,
+          schemaFingerprint: "global-v1",
+          ready: true,
+        },
+        regions: new Map(),
+        discoveredAt: "2026-07-30T08:00:00.000Z",
+      };
+    },
+    createSession: () => {
+      const state = {
+        connected: true,
+        applied: true,
+        lastAppliedAt: "2026-07-30T08:00:00.000Z",
+        lastError: null,
+      };
+      const session = {
+        state,
+        stopped: false,
+        async start() {},
+        health: () => ({ ...state }),
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  assert.equal(await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" }), false);
+
+  sessions[0].state.connected = false;
+  sessions[0].state.lastError = "socket closed";
+  assert.equal(await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" }), true);
+  assert.equal(sessions[0].stopped, true);
+  assert.equal(discoveryCount, 2);
+
+  assert.equal(await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "2" }), true);
+  assert.equal(sessions[1].stopped, true);
+  assert.equal(runtime.health().claimId, "2");
+  assert.equal(discoveryCount, 3);
 });

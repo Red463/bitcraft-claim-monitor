@@ -182,6 +182,8 @@ test("server collection paginates listings and protects production mutations", a
   let failCacheTest = false;
   let resourceCatalogRequests = 0;
   let creatureCatalogRequests = 0;
+  let regionStatusRequests = 0;
+  let regionListRequests = 0;
   let passiveCraftRequests = 0;
   let playerDetailRequests = 0;
   let craftContributionRequests = 0;
@@ -311,8 +313,14 @@ test("server collection paginates listings and protects production mutations", a
       });
     }
     if (url.pathname === "/api/skills") return json(res, { skills: [{ id: 1, name: "Carpentry" }] });
-    if (url.pathname === "/api/regions/status") return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
-    if (url.pathname === "/api/regions") return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
+    if (url.pathname === "/api/regions/status") {
+      regionStatusRequests += 1;
+      return json(res, { regions: [{ regionId: 19, regionName: "Zephra", active: true, syncing: true, signedInPlayers: 42 }, { regionId: 3, regionName: "Region 3", active: true, syncing: false }] });
+    }
+    if (url.pathname === "/api/regions") {
+      regionListRequests += 1;
+      return json(res, [{ regionId: 23, regionName: "Region 22" }, { regionId: 19, regionName: "Zephra" }]);
+    }
     if (url.pathname === "/api/empires") {
       if (failEmpireList) return json(res, { error: "empire unavailable" }, 500);
       return json(res, [
@@ -583,8 +591,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(resourceCatalogRequests, 1);
   assert.equal(creatureCatalogRequests, 0);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
-  assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
-  assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");
+  assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["19"]);
+  assert.equal(activeRegions.regions[0].source, "default");
+  assert.equal(activeRegions.regions[0].freshness, "unavailable");
+  assert.equal(regionStatusRequests, 0);
+  assert.equal(regionListRequests, 0);
 
   const regionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
   assert.equal(regionalEmpires.summary.empires, 1);

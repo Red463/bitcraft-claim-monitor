@@ -376,6 +376,35 @@ invented.
 
 ## Global versus regional completeness
 
+### Active-region scope and population
+
+The generated global binding exposes three small authoritative control tables:
+`region_population_info` (`region_id`, signed-in players, queued players),
+`region_control_info` (initialization and player/spawn admission), and
+`world_region_name_state` (player-facing names). They are subscribed together
+and published as the normalized `region` generation. Regional database
+readiness remains topology-owned and is joined from persisted provider source
+health at the local route.
+
+The app deliberately returns only the monitored claim region, configured
+default region, and admin overrides. A browser `include` query is compatibility
+input only and cannot authorize a new cross-region scope. This replaces the
+legacy interpretation of every BitJita-listed region as automatically
+queryable.
+
+The global session is supervised independently of the Relay HTTP provider.
+Disconnects and startup failures retain the last complete `region` generation,
+rediscover topology, and retry on the required jittered
+1/2/4/8/16/30-second schedule. A throttled operational heartbeat lets the web
+process distinguish a live worker subscription from stale last-good state
+without adding a region feature cache. Claim changes restart the provider and
+all claim-owned regional runtimes; those old runtimes are fenced before the
+new provider is attempted, including when that new provider cannot start.
+Connecting global sessions receive a bounded 30-second initial-apply grace,
+while explicit disconnect/error states retry immediately through the backoff
+supervisor. Browser last-good preservation is keyed to the same claim and
+configured-region scope.
+
 The same claim-scoped query set was applied to the global and region-19
 mirrors:
 

@@ -21,7 +21,7 @@ test("server propagates a request-scoped bypass to live aggregate caches", () =>
   assert.match(server, /settlementProductionCrafts\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /passiveCraftSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /playerDetailSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
-  assert.match(server, /fetchCachedActiveRegions\(include,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /relayActiveRegions\(\{/);
   assert.match(server, /regionalEmpireOverview\(regionId,\s*\{\s*forceRefresh\s*\}\)/);
   assert.match(server, /regionalEmpireDetails\(empireId,\s*regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
   assert.match(server, /regionalEmpireClaimMembers\(claimId,\s*\{\s*forceRefresh\s*\}\)/);

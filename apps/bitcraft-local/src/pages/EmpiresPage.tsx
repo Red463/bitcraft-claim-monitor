@@ -7,6 +7,7 @@ import { AppSkeleton } from "../components/main/AppChrome";
 import { Dialog } from "../components/main/Dialog";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { useActiveRegions } from "../hooks/useActiveRegions";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
@@ -22,34 +23,7 @@ import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 const LOCAL_API = "/api/local";
 
 type EmpireTab = "overview" | "watchtowers" | "deposits";
-type ActiveRegion = { regionId: string; regionName?: string; source?: string };
-
-function useEmpireRegions(includeRegionId?: string): ActiveRegion[] {
-  const { request, trackPromise } = useManualRefresh();
-  const [regions, setRegions] = React.useState<ActiveRegion[]>([]);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    const include = includeRegionId && /^\d+$/.test(String(includeRegionId)) ? `?include=${encodeURIComponent(String(includeRegionId))}` : "";
-    const refresh = fetch(`${LOCAL_API}/regions/active${include}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`active regions HTTP ${response.status}`)))
-      .then((payload) => {
-        const rows = Array.isArray(payload.regions) ? payload.regions : [];
-        setRegions(rows.map((region: AnyRecord) => ({
-          regionId: String(region.regionId ?? ""),
-          regionName: String(region.regionName ?? region.name ?? `Region ${region.regionId ?? ""}`),
-          source: String(region.source ?? ""),
-        })).filter((region: ActiveRegion) => /^\d+$/.test(region.regionId)));
-      });
-    void trackPromise("empire-regions", refresh)
-      .catch(() => {
-        if (!controller.signal.aborted && includeRegionId) setRegions([{ regionId: String(includeRegionId), regionName: `Region ${includeRegionId}`, source: "fallback" }]);
-      });
-    return () => controller.abort();
-  }, [includeRegionId, request?.sequence, trackPromise]);
-  return regions;
-}
-
-function regionLabel(region: ActiveRegion, monitoredRegionId?: string) {
+function regionLabel(region: { regionId: string; regionName?: string }, monitoredRegionId?: string) {
   const suffix = String(region.regionId) === String(monitoredRegionId ?? "") ? " (settlement)" : "";
   return `R${region.regionId}${region.regionName ? ` - ${region.regionName}` : ""}${suffix}`;
 }
@@ -252,12 +226,16 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
 }
 export function Empires({
   monitoredRegionId,
+  monitoredClaimId,
+  activeRegionScopeKey,
   providerData,
   providerLoading,
   providerError,
   access,
 }: {
   monitoredRegionId: string;
+  monitoredClaimId: string;
+  activeRegionScopeKey?: string;
   providerData: AnyRecord | null;
   providerLoading: boolean;
   providerError: string | null;
@@ -280,7 +258,7 @@ export function Empires({
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
   const [watchtowerRiskOnly, setWatchtowerRiskOnly] = usePersistedState("empires.watchtowerRiskOnly", false);
-  const regions = useEmpireRegions(monitoredRegionId);
+  const regions = useActiveRegions(monitoredRegionId, monitoredClaimId, activeRegionScopeKey);
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
   const [selectedTower, setSelectedTower] = React.useState<AnyRecord | null>(null);

@@ -86,13 +86,18 @@ export class RelayClaimMarketRuntime {
     await this.#startSession(config.regionId);
   }
 
-  async reconcile(config: { regionId: string }): Promise<void> {
+  async reconcile(config: { claimId?: string; regionId: string }): Promise<void> {
+    const claimId = decimalInteger(
+      config.claimId ?? this.#claimId,
+      "Relay claim-market claim id",
+    );
     const regionId = decimalInteger(config.regionId, "Relay claim-market region id");
-    if (this.#session && this.#regionId === regionId) return;
+    if (this.#session && this.#claimId === claimId && this.#regionId === regionId) return;
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
     this.#session = null;
+    this.#claimId = claimId;
     await this.#startSession(regionId);
   }
 

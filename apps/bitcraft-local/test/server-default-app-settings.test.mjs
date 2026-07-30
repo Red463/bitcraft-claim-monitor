@@ -5,6 +5,7 @@ import {
   applyDefaultAppSettings,
   defaultAppSettingRows,
   defaultClaimId,
+  defaultRegionId,
   defaultSyncUrl,
   defaultTheme,
   obsoleteAppSettingKeys,
@@ -44,6 +45,7 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
   assert.equal(rows.find((row) => row.key === "theme_json")?.value, JSON.stringify(defaultTheme));
   assert.equal(rows.find((row) => row.key === "server_refresh_seconds")?.value, "45");
   assert.equal(rows.find((row) => row.key === "default_page")?.value, "dashboard");
+  assert.equal(rows.find((row) => row.key === "default_region")?.value, defaultRegionId);
 });
 
 test("defaultAppSettingRows preserves JSON defaults used by admin and notification flows", () => {

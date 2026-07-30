@@ -20,6 +20,7 @@ export function useGameDataGeneration(claimId: string, domains: string[]): numbe
     const lastGeneration = { current: 0 };
     let closed = false;
     let pollTimer: number | null = null;
+    let pollInFlight = false;
 
     const apply = (event: GenerationEvent) => {
       const generation = generationNumber(event?.generation);
@@ -28,11 +29,15 @@ export function useGameDataGeneration(claimId: string, domains: string[]): numbe
       setSequence((current) => current + 1);
     };
     const poll = async () => {
+      if (closed || pollInFlight) return;
+      pollInFlight = true;
       try {
         const response = await fetch(`/api/local/game-data/generation?${search}`);
         if (response.ok) apply(await response.json());
       } catch {
         // Keep the last rendered generation; the next bounded poll retries locally.
+      } finally {
+        pollInFlight = false;
       }
     };
     const startPolling = () => {
@@ -52,6 +57,10 @@ export function useGameDataGeneration(claimId: string, domains: string[]): numbe
       events.close();
       startPolling();
     };
+    // Provider commits can occur in a separate worker process, whose in-memory
+    // SSE listeners are not shared with this web process. Keep the bounded
+    // local generation poll active even while SSE is healthy.
+    startPolling();
 
     return () => {
       closed = true;

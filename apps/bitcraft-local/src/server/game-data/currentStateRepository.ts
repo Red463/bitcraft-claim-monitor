@@ -31,6 +31,29 @@ export function createCurrentStateRepository(
 ): ProviderSink & {
   read(claimId: string, domain: DomainKey): StoredDomainSnapshot | null;
   readHealth(): ProviderHealth | null;
+  recordSubscriptionHealth(health: {
+    sourceKey: string;
+    domain: DomainKey;
+    generation: number;
+    connected: boolean;
+    applyDurationMs?: number | null;
+    lagMs?: number | null;
+    reconnects?: number;
+    malformedRows?: number;
+    lastError?: string | null;
+  }, observedAt: string): Promise<void>;
+  readSubscriptionHealth(sourceKey: string, domain: DomainKey): {
+    sourceKey: string;
+    domain: DomainKey;
+    generation: number;
+    connected: boolean;
+    applyDurationMs: number | null;
+    lagMs: number | null;
+    reconnects: number;
+    malformedRows: number;
+    lastError: string | null;
+    updatedAt: string;
+  } | null;
   nextGeneration(claimId: string): number;
 } {
   const upsert = db.prepare(`
@@ -82,6 +105,25 @@ export function createCurrentStateRepository(
       updated_at = excluded.updated_at
   `);
   const readHealth = db.prepare("SELECT * FROM provider_source_health WHERE provider = ? ORDER BY source_key");
+  const upsertSubscriptionHealth = db.prepare(`
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, generation, connected, apply_duration_ms,
+      lag_ms, reconnects, malformed_rows, last_error, updated_at
+    ) VALUES ('relay', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, source_key, domain) DO UPDATE SET
+      generation = excluded.generation,
+      connected = excluded.connected,
+      apply_duration_ms = excluded.apply_duration_ms,
+      lag_ms = excluded.lag_ms,
+      reconnects = excluded.reconnects,
+      malformed_rows = excluded.malformed_rows,
+      last_error = excluded.last_error,
+      updated_at = excluded.updated_at
+  `);
+  const readSubscriptionHealth = db.prepare(`
+    SELECT * FROM provider_subscription_health
+    WHERE provider = 'relay' AND source_key = ? AND domain = ?
+  `);
   const insertSourcedActivity = db.prepare(`
     INSERT OR IGNORE INTO activity_events (
       claim_id, event_type, summary, occurred_at, metadata_json, source_key
@@ -236,6 +278,36 @@ export function createCurrentStateRepository(
         lastRefreshAt: details.lastRefreshAt == null ? null : String(details.lastRefreshAt),
         lastError: cache.last_error == null ? null : String(cache.last_error),
         sources,
+      };
+    },
+    async recordSubscriptionHealth(health, observedAt) {
+      upsertSubscriptionHealth.run(
+        health.sourceKey,
+        health.domain,
+        health.generation,
+        health.connected ? 1 : 0,
+        health.applyDurationMs ?? null,
+        health.lagMs ?? null,
+        health.reconnects ?? 0,
+        health.malformedRows ?? 0,
+        health.lastError ?? null,
+        observedAt,
+      );
+    },
+    readSubscriptionHealth(sourceKey, domain) {
+      const row = readSubscriptionHealth.get(sourceKey, domain);
+      if (!row) return null;
+      return {
+        sourceKey: String(row.source_key),
+        domain: String(row.domain) as DomainKey,
+        generation: Number(row.generation ?? 0),
+        connected: Number(row.connected) === 1,
+        applyDurationMs: row.apply_duration_ms == null ? null : Number(row.apply_duration_ms),
+        lagMs: row.lag_ms == null ? null : Number(row.lag_ms),
+        reconnects: Number(row.reconnects ?? 0),
+        malformedRows: Number(row.malformed_rows ?? 0),
+        lastError: row.last_error == null ? null : String(row.last_error),
+        updatedAt: String(row.updated_at),
       };
     },
     nextGeneration(claimId) {

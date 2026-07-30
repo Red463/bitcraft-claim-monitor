@@ -193,7 +193,7 @@ test("Local Market uses the live claim-scoped Relay order generation", async () 
   assert.match(server, /RelayClaimMarketRuntime/);
   assert.match(server, /domain === "market"/);
   assert.match(server, /enrichMarketWithCatalog/);
-  const reconcileStart = server.indexOf("const reconcilePrimaryRegion = async () =>");
+  const reconcileStart = server.indexOf("const reconcilePrimaryRegion = async (claimId) =>");
   const reconcileEnd = server.indexOf("const refreshRelay = async", reconcileStart);
   const reconcile = server.slice(reconcileStart, reconcileEnd);
   assert.ok(
@@ -212,7 +212,7 @@ test("server background ingestion keeps citizens, primary-region state, and publ
   assert.match(source, /relayPublicCraftRuntime\.warmActiveRegions/);
   assert.match(source, /primaryRegion\s*=\s*runtimeHealthWithPersistedSnapshot\(/);
   assert.match(source, /publicCrafts\s*=\s*runtimeHealthWithPersistedSnapshot\(/);
-  const reconcileStart = source.indexOf("const reconcilePrimaryRegion = async () =>");
+  const reconcileStart = source.indexOf("const reconcilePrimaryRegion = async (claimId) =>");
   const reconcileEnd = source.indexOf("const refreshRelay = async", reconcileStart);
   const reconcile = source.slice(reconcileStart, reconcileEnd);
   assert.ok(
@@ -220,10 +220,10 @@ test("server background ingestion keeps citizens, primary-region state, and publ
     "public crafts must start once the region is known and must not wait for member data",
   );
   const refreshStart = source.indexOf("const refreshRelay = async");
-  const refreshEnd = source.indexOf("void relayProvider.start", refreshStart);
+  const refreshEnd = source.indexOf("requestRelayRuntimeRefresh =", refreshStart);
   assert.match(
     source.slice(refreshStart, refreshEnd),
-    /await reconcilePrimaryRegion\(\);[\s\S]*relayPublicCraftRuntime\.warmActiveRegions\(\)/,
+    /relayClaimScopeFence\.run\(claimId,[\s\S]*await reconcilePrimaryRegion\(claimId\);[\s\S]*relayPublicCraftRuntime\.warmActiveRegions\(\)/,
     "every live refresh must keep configured public-craft regions warm",
   );
 });

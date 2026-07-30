@@ -82,14 +82,16 @@ export class RelayPrimaryRegionRuntime {
     await this.#startSession(config.regionId, config.members);
   }
 
-  async reconcile(config: { regionId: string; members: Member[] }): Promise<void> {
+  async reconcile(config: { claimId?: string; regionId: string; members: Member[] }): Promise<void> {
+    const claimId = String(config.claimId ?? this.#claimId ?? "").trim();
     const nextSignature = membershipSignature(config.regionId, config.members);
-    if (this.#session && nextSignature === this.#signature) return;
+    if (this.#session && claimId === this.#claimId && nextSignature === this.#signature) return;
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
     this.#session = null;
     this.#signature = null;
+    this.#claimId = claimId;
     await this.#startSession(config.regionId, config.members);
   }
 

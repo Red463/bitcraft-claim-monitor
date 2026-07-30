@@ -189,6 +189,39 @@ test("repository persists provider health for the separate web process", async (
   db.close();
 });
 
+test("repository persists subscription-specific health for split worker/web reads", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+
+  await repository.recordSubscriptionHealth({
+    sourceKey: "global",
+    domain: "region",
+    generation: 12,
+    connected: true,
+    applyDurationMs: 18,
+    lagMs: 4,
+    reconnects: 2,
+    malformedRows: 0,
+    lastError: null,
+  }, "2026-07-30T12:00:00.000Z");
+
+  assert.deepEqual(repository.readSubscriptionHealth("global", "region"), {
+    sourceKey: "global",
+    domain: "region",
+    generation: 12,
+    connected: true,
+    applyDurationMs: 18,
+    lagMs: 4,
+    reconnects: 2,
+    malformedRows: 0,
+    lastError: null,
+    updatedAt: "2026-07-30T12:00:00.000Z",
+  });
+  db.close();
+});
+
 test("repository durably deduplicates normalized Relay storage events", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

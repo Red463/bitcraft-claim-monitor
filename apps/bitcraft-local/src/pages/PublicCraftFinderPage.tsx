@@ -21,14 +21,14 @@ import {
   remainingCraftEffort,
 } from "./publicCraftMath";
 
-export function PublicCraftFinder({ providerData, providerLoading, providerError, monitoredRegionId, monitoredOwnerName, defaultRegionId, onShowMap }: { providerData?: AnyRecord | null; providerLoading: boolean; providerError: string | null; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
+export function PublicCraftFinder({ providerData, providerLoading, providerError, monitoredClaimId, monitoredRegionId, monitoredOwnerName, defaultRegionId, activeRegionScopeKey, onShowMap }: { providerData?: AnyRecord | null; providerLoading: boolean; providerError: string | null; monitoredClaimId: string; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; activeRegionScopeKey?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
   const [regionId, setRegionId] = usePersistedState("public-crafts.region", defaultRegionId || monitoredRegionId || "All");
   const [sortKey, setSortKey] = usePersistedState<PublicCraftSortKey>("public-crafts.sort", "remaining");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("public-crafts.direction", "desc");
   const hasSavedRegion = React.useRef(hasPersistedState("public-crafts.region"));
-  const activeRegions = useActiveRegions(monitoredRegionId);
+  const activeRegions = useActiveRegions(monitoredRegionId, monitoredClaimId, activeRegionScopeKey);
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("skill")) setSkillId(params.get("skill")!);

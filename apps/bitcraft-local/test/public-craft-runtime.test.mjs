@@ -298,3 +298,41 @@ test("public craft runtime preserves last-good data when a configured region is 
   }), /region 19 source is not ready/i);
   assert.equal(constructed, false);
 });
+
+test("public craft runtime restarts its pool when the monitored claim changes", async () => {
+  assert.ok(runtimeModule, "public craft runtime module must exist");
+  let starts = 0;
+  const stops = [];
+  const runtime = new runtimeModule.RelayPublicCraftRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: () => ({
+      start: async () => { starts += 1; },
+      stop: async () => stops.push(true),
+      health: () => ({ connected: true, applied: true, lastError: null }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    poolOptions: {
+      maxSessions: 1,
+      staggerMs: 0,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+  });
+  const firstConfig = {
+    relayBaseUrl: "https://relay.example",
+    claimId: "1",
+    primaryRegionId: "19",
+    activeRegionIds: ["19"],
+  };
+  await runtime.start(firstConfig);
+  assert.equal(await runtime.reconcile(firstConfig), false);
+  assert.equal(await runtime.reconcile({ ...firstConfig, claimId: "2" }), true);
+  assert.equal(starts, 2);
+  assert.equal(stops.length, 1);
+  await runtime.stop();
+});

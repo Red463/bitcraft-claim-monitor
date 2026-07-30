@@ -113,7 +113,7 @@ function MapPlayerTrackingControls({
     </section>
   );
 }
-export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void }) {
+export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string }) {
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
   const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
@@ -158,7 +158,11 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   const playerDetailDiagnostics = rawData?.playerDetailDiagnostics ?? {};
   const degradedPlayerCount = roster.filter((player) => player.detailAvailable === false).length;
   const rosterSource = degradedPlayerCount ? "members + partial detail" : roster.length ? "members + player detail" : "empty";
-  const activeRegions = useActiveRegions(String(data.claim.regionId ?? ""));
+  const activeRegions = useActiveRegions(
+    String(data.claim.regionId ?? ""),
+    String(data.claim.entityId ?? ""),
+    activeRegionScopeKey,
+  );
   const catalogGeneration = useGameDataGeneration(String(data.claim.entityId ?? ""), ["catalogs"]);
   React.useEffect(() => {
     const controller = new AbortController();

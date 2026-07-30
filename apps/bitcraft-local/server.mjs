@@ -25,6 +25,9 @@ import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, 
 import { bitjitaTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
+import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
+import { relayReconnectDelayMs } from "./src/server/relayRuntimeBackoff.mjs";
 import {
   combinedMarketStatus,
   globalCatalogStatus,
@@ -493,10 +496,39 @@ const relayGlobalCatalogStaleMs = Math.max(
 );
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
+let relayGlobalCatalogSupervisorTimer = null;
+let relayGlobalCatalogReconnectAttempt = 0;
+let relayGlobalCatalogNextAttemptAt = 0;
+let relayGlobalCatalogApplyDeadlineAt = 0;
+let relayGlobalCatalogReconcileInFlight = null;
+let relayGlobalCatalogLastHealthPersistedAt = 0;
+let requestRelayRuntimeRefresh = null;
 let relayPrimaryRegionStarted = false;
 let relayClaimMarketStarted = false;
 let relayPublicCraftStarted = false;
 let relayRegionalMarketStarted = false;
+const relayClaimScopeFence = createRelayClaimScopeFence([
+  {
+    stop: async () => {
+      try { await relayPublicCraftRuntime.stop(); } finally { relayPublicCraftStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayRegionalMarketRuntime.stop(); } finally { relayRegionalMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayClaimMarketRuntime.stop(); } finally { relayClaimMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayPrimaryRegionRuntime.stop(); } finally { relayPrimaryRegionStarted = false; }
+    },
+  },
+]);
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
@@ -533,6 +565,45 @@ function gameDataProviderHealth() {
     claimMarket,
     regionalMarket,
   };
+}
+function globalRegionSubscriptionHealth() {
+  const runtime = relayGlobalCatalogRuntime.health();
+  if (runtime.running) return runtime;
+  const persisted = currentStateRepository.readSubscriptionHealth("global", "region");
+  if (!persisted) return runtime;
+  const observedAtMs = Date.parse(persisted.updatedAt);
+  const heartbeatFreshForMs = Math.max(relayHttpRefreshMs * 3, 30_000);
+  const heartbeatFresh = Number.isFinite(observedAtMs)
+    && Date.now() - observedAtMs <= heartbeatFreshForMs;
+  const lastError = persisted.lastError
+    ?? (heartbeatFresh ? null : "Relay global region subscription heartbeat is stale.");
+  return {
+    ...runtime,
+    persisted: true,
+    subscription: {
+      connected: heartbeatFresh && persisted.connected && !lastError,
+      applied: persisted.generation > 0,
+      lastAppliedAt: persisted.updatedAt,
+      lastError,
+    },
+    lastError,
+  };
+}
+async function persistGlobalRegionSubscriptionHealth() {
+  const runtime = relayGlobalCatalogRuntime.health();
+  const subscription = runtime.subscription ?? {};
+  const snapshot = currentStateRepository.read(currentClaimId(), "region");
+  await currentStateRepository.recordSubscriptionHealth({
+    sourceKey: "global",
+    domain: "region",
+    generation: snapshot?.generation ?? 0,
+    connected: runtime.running
+      && subscription.connected === true
+      && subscription.applied === true
+      && !subscription.lastError
+      && !runtime.lastError,
+    lastError: subscription.lastError ?? runtime.lastError ?? null,
+  }, new Date().toISOString());
 }
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
   statements,
@@ -1400,7 +1471,6 @@ const empireScoutInflight = new Map();
 const regionCache = new Map();
 const regionClaimListCache = new Map();
 const empireScoutCache = new Map();
-let activeRegionsCache = null;
 const claimDetailCache = new Map();
 const playerDetailCache = new Map();
 const craftContributionCache = new Map();
@@ -6148,22 +6218,6 @@ async function fetchCachedRegionClaims(regionId, options = {}) {
   return value;
 }
 
-
-function normalizeRegionRow(row, source = "bitjita") {
-  const regionId = String(row?.regionId ?? row?.id ?? "").trim();
-  if (!/^\d+$/.test(regionId)) return null;
-  return {
-    regionId,
-    regionName: String(row?.regionName ?? row?.name ?? `Region ${regionId}`),
-    active: row?.active !== false,
-    syncing: row?.syncing === true,
-    signedInPlayers: toNumber(row?.signedInPlayers ?? row?.playersOnline ?? row?.onlinePlayers),
-    playersInQueue: toNumber(row?.playersInQueue ?? row?.queuedPlayers),
-    updatedAt: row?.updatedAt ?? null,
-    source,
-  };
-}
-
 function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPayload, claimId) {
   const directRegionId = String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim();
   if (/^\d+$/.test(directRegionId)) return directRegionId;
@@ -6181,49 +6235,6 @@ function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPa
     if (regionClaimId === String(claimId ?? "") && /^\d+$/.test(regionId)) return regionId;
   }
   return "";
-}
-
-async function fetchCachedActiveRegions(extraRegionIds = [], options = {}) {
-  const settings = getSettings();
-  const overrideIds = parseRegionIds(settings.additionalActiveRegions);
-  const includeIds = parseRegionIds(extraRegionIds.join(","));
-  const cacheKey = [...overrideIds, ...includeIds].sort((a, b) => toNumber(a) - toNumber(b)).join(",");
-  if (!options.forceRefresh && activeRegionsCache && activeRegionsCache.key === cacheKey && activeRegionsCache.expiresAt > Date.now()) return activeRegionsCache.value;
-  const [statusPayload, regionsPayload] = await Promise.all([
-    fetchBitjita("/regions/status", { forceRefresh: options.forceRefresh === true }).catch(() => ({ regions: [] })),
-    fetchBitjita("/regions", { forceRefresh: options.forceRefresh === true }).catch(() => []),
-  ]);
-  const byId = new Map();
-  for (const row of unwrap(statusPayload, "regions", [])) {
-    const normalized = normalizeRegionRow(row, "status");
-    if (normalized) byId.set(normalized.regionId, normalized);
-  }
-  for (const row of unwrap(regionsPayload, "regions", Array.isArray(regionsPayload) ? regionsPayload : [])) {
-    const normalized = normalizeRegionRow(row, "regions");
-    if (!normalized) continue;
-    byId.set(normalized.regionId, { ...normalized, ...byId.get(normalized.regionId), regionName: byId.get(normalized.regionId)?.regionName ?? normalized.regionName });
-  }
-  for (const regionId of [...overrideIds, ...includeIds]) {
-    byId.set(regionId, {
-      regionId,
-      regionName: byId.get(regionId)?.regionName ?? `Region ${regionId}`,
-      active: true,
-      syncing: byId.get(regionId)?.syncing ?? false,
-      signedInPlayers: byId.get(regionId)?.signedInPlayers ?? 0,
-      playersInQueue: byId.get(regionId)?.playersInQueue ?? 0,
-      updatedAt: byId.get(regionId)?.updatedAt ?? null,
-      source: byId.has(regionId) ? byId.get(regionId).source : "admin",
-    });
-  }
-  const value = {
-    regions: [...byId.values()]
-      .filter((region) => region.active !== false)
-      .sort((a, b) => toNumber(a.regionId) - toNumber(b.regionId)),
-    overrideRegionIds: overrideIds,
-    updatedAt: new Date().toISOString(),
-  };
-  activeRegionsCache = { key: cacheKey, expiresAt: Date.now() + 5 * 60 * 1000, value };
-  return value;
 }
 
 function passiveCraftTimestamp(value) {
@@ -9153,9 +9164,21 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "regions-active", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const include = parseRegionIds(url.searchParams.get("include"));
-      return send(res, 200, await fetchCachedActiveRegions(include, { forceRefresh }));
+      const settings = getSettings();
+      const claimId = currentClaimId();
+      const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+      return send(res, 200, relayActiveRegions({
+        claimRegionId: claim.regionId ?? claim.region_id ?? claim.region,
+        defaultRegionId: settings.defaultRegion,
+        additionalRegionIds: parseRegionIds(settings.additionalActiveRegions),
+        requestedIncludeRegionIds: parseRegionIds(url.searchParams.get("include")),
+        regionSnapshot: currentStateRepository.read(claimId, "region"),
+        providerHealth: {
+          ...gameDataProviderHealth(),
+          globalCatalog: globalRegionSubscriptionHealth(),
+        },
+        staleAfterMs: relayGlobalCatalogStaleMs,
+      }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
@@ -9574,13 +9597,13 @@ const server = createServer(async (req, res) => {
         if (youtubeJob) statements.updateScheduledJobSettings.run(youtubeSchedule, youtubeJob.enabled === 0 ? 0 : 1, nextScheduledRunIso(youtubeSchedule), updatedAt, "youtube_channel_monitor");
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
-        activeRegionsCache = null;
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
         refreshCollectorStatusSettings();
         audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
+        requestRelayRuntimeRefresh?.("manual");
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
@@ -10551,10 +10574,79 @@ function scheduleServerPolling(delayMs = 0) {
   }, delayMs);
 }
 
+async function superviseRelayGlobalCatalog() {
+  const now = Date.now();
+  const runtime = relayGlobalCatalogRuntime.health();
+  const subscription = runtime.subscription ?? {};
+  const healthy = runtime.running
+    && runtime.claimId === currentClaimId()
+    && subscription.connected === true
+    && subscription.applied === true
+    && !subscription.lastError
+    && !runtime.lastError;
+  const applyingWithinGrace = runtime.running
+    && runtime.claimId === currentClaimId()
+    && subscription.applied !== true
+    && (subscription.state === "connecting" || subscription.state === "connected")
+    && !subscription.lastError
+    && !runtime.lastError
+    && now < relayGlobalCatalogApplyDeadlineAt;
+  const persistHealthIfDue = async (force = false) => {
+    if (!force && now - relayGlobalCatalogLastHealthPersistedAt < 10_000) return;
+    await persistGlobalRegionSubscriptionHealth();
+    relayGlobalCatalogLastHealthPersistedAt = Date.now();
+  };
+  if (healthy) {
+    relayGlobalCatalogReconnectAttempt = 0;
+    relayGlobalCatalogNextAttemptAt = 0;
+    relayGlobalCatalogApplyDeadlineAt = 0;
+    await persistHealthIfDue();
+    return;
+  }
+  if (applyingWithinGrace) {
+    await persistHealthIfDue();
+    return;
+  }
+  if (relayGlobalCatalogReconcileInFlight || now < relayGlobalCatalogNextAttemptAt) {
+    await persistHealthIfDue();
+    return;
+  }
+  relayGlobalCatalogReconnectAttempt += 1;
+  relayGlobalCatalogNextAttemptAt = now + relayReconnectDelayMs(
+    relayGlobalCatalogReconnectAttempt,
+  );
+  const reconcile = relayGlobalCatalogRuntime.reconcile({
+    relayBaseUrl,
+    claimId: currentClaimId(),
+  });
+  relayGlobalCatalogReconcileInFlight = reconcile;
+  try {
+    await reconcile;
+    relayGlobalCatalogApplyDeadlineAt = Date.now() + 30_000;
+  } catch (error) {
+    if (!isTestRuntime) console.warn(`Relay global catalog reconcile failed: ${errorMessage(error)}`);
+  } finally {
+    if (relayGlobalCatalogReconcileInFlight === reconcile) {
+      relayGlobalCatalogReconcileInFlight = null;
+    }
+    await persistHealthIfDue(true).catch((error) => {
+      if (!isTestRuntime) console.warn(`Relay global region health persistence failed: ${errorMessage(error)}`);
+    });
+  }
+}
+
 function startBackgroundTasks() {
   if (!isTestRuntime && process.env.ENABLE_RELAY_PROVIDER !== "false") {
-    const reconcilePrimaryRegion = async () => {
-      const claimId = currentClaimId();
+    const providerConfig = (claimId) => ({
+      relayBaseUrl,
+      claimId,
+      activeRegionIds: parseRegionIds(
+        `${getSettings().defaultRegion},${getSettings().additionalActiveRegions}`,
+      ),
+      topologyRefreshMs: 60_000,
+    });
+    const reconcilePrimaryRegion = async (claimId) => {
+      if (currentClaimId() !== claimId) return;
       const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
       const members = currentStateRepository.read(claimId, "members")?.data ?? [];
       const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
@@ -10576,6 +10668,20 @@ function startBackgroundTasks() {
           relayPublicCraftStarted = true;
         } catch (error) {
           if (!isTestRuntime) console.warn(`Relay public-craft startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          const settings = getSettings();
+          await relayPublicCraftRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: parseRegionIds(
+              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay public-craft reconcile failed: ${errorMessage(error)}`);
         }
       }
       if (!relayRegionalMarketStarted) {
@@ -10618,7 +10724,7 @@ function startBackgroundTasks() {
           });
           relayClaimMarketStarted = true;
         } else {
-          await relayClaimMarketRuntime.reconcile({ regionId });
+          await relayClaimMarketRuntime.reconcile({ claimId, regionId });
         }
       } catch (error) {
         if (!isTestRuntime) console.warn(`Relay claim-market startup failed: ${errorMessage(error)}`);
@@ -10635,23 +10741,28 @@ function startBackgroundTasks() {
         });
         relayPrimaryRegionStarted = true;
       } else {
-        await relayPrimaryRegionRuntime.reconcile({ regionId, members });
+        await relayPrimaryRegionRuntime.reconcile({ claimId, regionId, members });
       }
     };
     const refreshRelay = async (reason = "scheduled") => {
+      const claimId = currentClaimId();
       try {
+        await relayClaimScopeFence.reconcile(claimId);
+        await relayProvider.reconcile(providerConfig(claimId), currentStateRepository);
+        relayProviderStarted = true;
         await relayProvider.refresh({
-          claimId: currentClaimId(),
+          claimId,
           domains: ["claim", "members", "citizens", "inventories", "crafts", "deposits"],
           reason,
         });
-        await reconcilePrimaryRegion();
-        if (relayPublicCraftStarted) {
-          void relayPublicCraftRuntime.warmActiveRegions().catch((error) => {
-            if (!isTestRuntime) console.warn(`Relay public-craft region warmup failed: ${errorMessage(error)}`);
-          });
-        }
-        const claimId = currentClaimId();
+        if (currentClaimId() !== claimId) return;
+        const reconciledCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
+          await reconcilePrimaryRegion(claimId);
+          if (relayPublicCraftStarted) {
+            await relayPublicCraftRuntime.warmActiveRegions();
+          }
+        });
+        if (!reconciledCurrentClaim || currentClaimId() !== claimId) return;
         const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
         const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
         const inventories = currentStateRepository.read(claimId, "inventories")?.data ?? { buildings: [] };
@@ -10671,29 +10782,27 @@ function startBackgroundTasks() {
           pollStatus.storageLastError = errorMessage(error);
         });
       } catch (error) {
+        relayProviderStarted = relayProvider.health().running;
         if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
       }
     };
-    void relayProvider.start({
-      relayBaseUrl,
-      claimId: currentClaimId(),
-      activeRegionIds: parseRegionIds(`${getSettings().defaultRegion},${getSettings().additionalActiveRegions}`),
-      topologyRefreshMs: 60_000,
-    }, currentStateRepository).then(() => {
-      relayProviderStarted = true;
-      void refreshRelay("scheduled");
+    requestRelayRuntimeRefresh = (reason = "manual") => {
+      void refreshRelay(reason);
+    };
+    void refreshRelay("scheduled");
+    if (!relayProviderRefreshTimer) {
       relayProviderRefreshTimer = setInterval(() => void refreshRelay(), relayHttpRefreshMs);
       relayProviderRefreshTimer.unref?.();
-    }).catch((error) => {
-      if (!isTestRuntime) console.warn(`Relay provider startup failed: ${errorMessage(error)}`);
-    });
+    }
     if (process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false") {
-      void relayGlobalCatalogRuntime.start({
-        relayBaseUrl,
-        claimId: currentClaimId(),
-      }).catch((error) => {
-        if (!isTestRuntime) console.warn(`Relay global catalog startup failed: ${errorMessage(error)}`);
-      });
+      void superviseRelayGlobalCatalog();
+      if (!relayGlobalCatalogSupervisorTimer) {
+        relayGlobalCatalogSupervisorTimer = setInterval(
+          () => void superviseRelayGlobalCatalog(),
+          1_000,
+        );
+        relayGlobalCatalogSupervisorTimer.unref?.();
+      }
     }
   }
   startDiscordGateway();

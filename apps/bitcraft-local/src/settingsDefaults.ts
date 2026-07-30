@@ -163,7 +163,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   serverRefreshSeconds: 30,
   collectorSettings: DEFAULT_COLLECTOR_SETTINGS,
   defaultPage: "dashboard",
-  defaultRegion: "",
+  defaultRegion: "19",
   additionalActiveRegions: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
   marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minActiveListings: 3, discordDmEnabled: true },

@@ -22,6 +22,7 @@ const {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeGlobalRegions,
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
@@ -679,6 +680,35 @@ test("typed enemy descriptions retain map finder identity and huntable metadata"
     rarity: "Common",
     huntable: true,
   });
+});
+
+test("global region rows join population, control, and player-facing names", () => {
+  assert.deepEqual(normalizeGlobalRegions(
+    [{
+      regionId: 19,
+      signedInPlayers: 42,
+      playersInQueue: 3,
+    }],
+    [{
+      regionId: 19,
+      initialized: true,
+      allowPlayers: true,
+      allowPlayerSpawns: false,
+    }],
+    [{
+      id: 19,
+      playerFacingName: "Zephra",
+      moduleNamePrefix: "bitcraft-live-",
+    }],
+  ), [{
+    regionId: "19",
+    regionName: "Zephra",
+    active: true,
+    syncing: false,
+    allowPlayerSpawns: false,
+    signedInPlayers: 42,
+    playersInQueue: 3,
+  }]);
 });
 
 test("claim technology descriptions retain progression caps and automatic unlocks", () => {

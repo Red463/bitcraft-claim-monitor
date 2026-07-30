@@ -18,15 +18,25 @@ function fakeBindings() {
     unsubscribed: false,
     tableCallbacks: new Map(),
   };
-  const cachedTable = (rows) => ({
+  const cachedTable = (rows) => {
+    let updateCallback = null;
+    return {
     iter: () => rows[Symbol.iterator](),
     onInsert: (callback) => state.tableCallbacks.set("insert", callback),
-    onUpdate: (callback) => state.tableCallbacks.set("update", callback),
+    onUpdate: (callback) => {
+      updateCallback = callback;
+      state.tableCallbacks.set("update", callback);
+    },
     onDelete: (callback) => state.tableCallbacks.set("delete", callback),
     removeOnInsert: () => state.tableCallbacks.delete("insert"),
-    removeOnUpdate: () => state.tableCallbacks.delete("update"),
+    removeOnUpdate: () => {
+      updateCallback = null;
+      state.tableCallbacks.delete("update");
+    },
     removeOnDelete: () => state.tableCallbacks.delete("delete"),
-  });
+    triggerUpdate: () => updateCallback?.({}, {}, {}),
+    };
+  };
   const connection = {
     db: {
       itemDesc: cachedTable([{
@@ -119,6 +129,22 @@ function fakeBindings() {
       }]),
       buffDesc: cachedTable([]),
       claimTechDesc: cachedTable([]),
+      regionPopulationInfo: cachedTable([{
+        regionId: 19,
+        signedInPlayers: 42,
+        playersInQueue: 3,
+      }]),
+      regionControlInfo: cachedTable([{
+        regionId: 19,
+        initialized: true,
+        allowPlayers: true,
+        allowPlayerSpawns: false,
+      }]),
+      worldRegionNameState: cachedTable([{
+        id: 19,
+        playerFacingName: "Zephra",
+        moduleNamePrefix: "bitcraft-live-",
+      }]),
     },
     subscriptionBuilder() {
       const subscriptionBuilder = {
@@ -196,7 +222,9 @@ test("typed global catalog session subscribes narrowly and emits normalized item
     manifest: readyManifest,
     generation: 9,
   });
+  assert.equal(session.health().state, "connecting");
   fake.state.onConnect(fake.connection, {}, "secret-token");
+  assert.equal(session.health().state, "connected");
 
   assert.deepEqual(fake.state.connectConfig, {
     uri: "wss://relay.bitcraftsync.app:3000",
@@ -218,6 +246,9 @@ test("typed global catalog session subscribes narrowly and emits normalized item
     "SELECT * FROM tool_desc",
     "SELECT * FROM buff_desc",
     "SELECT * FROM claim_tech_desc",
+    "SELECT * FROM region_population_info",
+    "SELECT * FROM region_control_info",
+    "SELECT * FROM world_region_name_state",
   ]);
 
   fake.state.onApplied({});
@@ -319,6 +350,16 @@ test("typed global catalog session subscribes narrowly and emits normalized item
       buff: [],
       claim_tech: [],
     },
+    regions: [{
+      regionId: "19",
+      regionName: "Zephra",
+      active: true,
+      syncing: false,
+      allowPlayerSpawns: false,
+      signedInPlayers: 42,
+      playersInQueue: 3,
+    }],
+    changed: ["catalogs", "region"],
     database: "relay-mirror-bc-global",
     schemaFingerprint: "global-v1",
     generation: 9,
@@ -326,14 +367,20 @@ test("typed global catalog session subscribes narrowly and emits normalized item
   }]);
   assert.equal(session.health().applied, true);
 
-  fake.state.tableCallbacks.get("update")({}, {}, {});
+  fake.connection.db.regionPopulationInfo.triggerUpdate();
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(snapshots.length, 2);
   assert.equal(snapshots[1].generation, 10);
+  assert.deepEqual(snapshots[1].changed, ["region"]);
+  assert.deepEqual(snapshots[1].entities, []);
+  assert.deepEqual(snapshots[1].descriptions, {});
 
+  fake.state.onDisconnect({}, undefined);
+  assert.equal(session.health().state, "disconnected");
   await session.stop();
+  assert.equal(session.health().state, "stopped");
   assert.equal(fake.state.unsubscribed, true);
   assert.equal(fake.state.disconnected, true);
   assert.equal(fake.state.tableCallbacks.size, 0);

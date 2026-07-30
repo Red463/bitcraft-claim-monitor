@@ -19,6 +19,8 @@ history.
 
 Live-first data policy:
 
+- the optimization target is the shortest correct Relay-to-screen path, not
+  the fewest SQL tables;
 - current screens and tools are event-driven and must never depend on a
   scheduled ingestion job becoming due;
 - subscription-backed domains publish validated changes continuously;
@@ -33,6 +35,8 @@ Live-first data policy:
 - new Relay domains add no dedicated current-state SQL table by default;
 - a derived-current table is retained only with measured indexed-query,
   cross-process, or restart-recovery value and must update from domain events;
+- a table that duplicates committed current state or inserts scheduled
+  materialization delay is removed in the same vertical-domain migration;
 - legacy tables that only supported BitJita bulk fetching, rate limiting, or
   refresh orchestration are removed after dependency and recovery proofs;
 - table retirement is part of each vertical-domain delivery, not a cleanup
@@ -52,8 +56,9 @@ Live-first data policy:
   bounded provider refresh loops keep the next generation ready;
 - committed domain generations notify open browsers through the
   provider-neutral local event stream; when streaming is unavailable, a
-  750-millisecond local generation poll keeps the same invalidation path
-  inside the one-second browser publication budget;
+  single-flight 750-millisecond local generation poll keeps the same
+  invalidation path inside the one-second browser publication budget without
+  accumulating requests behind a slow response;
 - a migrated feature is not accepted if disabling ingestion schedules makes
   its current data stop updating, even when a scheduled fallback could mask
   the problem in production.
@@ -131,6 +136,28 @@ local map catalog route serves the atomic durable catalog projection, reports
 freshness, and is invalidated by `catalogs` generation events. The legacy
 ten-minute resources/creatures request cache is removed; no map-catalog table
 or scheduled refresh job replaces it.
+
+Active-region controls now read the small global
+`region_population_info`, `region_control_info`, and
+`world_region_name_state` tables through that same continuous typed
+subscription. The normalized `region` generation is joined to persisted Relay
+topology health and filtered to the monitored/default/admin-configured region
+scope before it reaches the browser. Arbitrary `include` parameters cannot
+widen that scope. The former BitJita region/status requests, five-minute
+process cache, and browser wait for a refresh job are removed; no replacement
+region cache table or ingestion schedule exists. Region-table events publish
+only the small `region` domain; they do not rebuild or rewrite the much larger
+catalog projection. The worker supervises this subscription independently of
+Relay HTTP readiness, persists a throttled heartbeat for the web process, and
+reconnects with 1/2/4/8/16/30-second backoff plus bounded jitter and fresh
+topology discovery. A newly connected global session receives a bounded
+30-second initial-apply grace period so a valid large generation is not torn
+down while it is still staging. Claim changes first fence and stop every
+claim-owned regional runtime, then attempt the new provider, so a failed new
+claim cannot leave the old claim live. Claim and configured-region changes
+otherwise reconcile immediately without a process restart, while browser
+last-good rows are retained only for the exact same claim and configured
+scope.
 
 Implementation is dependency-ordered:
 

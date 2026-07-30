@@ -245,7 +245,6 @@ test("shared command panel primitives use neutral class names", () => {
     "../src/pages/PublicCraftFinderPage.tsx",
     "../src/pages/ResearchPage.tsx",
     "../src/pages/RegionPage.tsx",
-    "../src/pages/market/BuyOrderFinder.tsx",
     "../src/pages/market/DealWatchlist.tsx",
   ];
   const forbidden = [];
@@ -484,8 +483,6 @@ test("market page styles live in the market stylesheet", () => {
     ".market-analytics",
     ".market-best-leaderboard",
     ".price-finder",
-    ".buy-order-opportunities",
-    ".opportunity-strip",
     ".pagination-row",
     ".deal-watch-action",
     ".deal-watch-add-card",

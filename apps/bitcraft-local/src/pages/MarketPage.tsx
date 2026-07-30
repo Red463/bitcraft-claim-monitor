@@ -35,6 +35,7 @@ export function Market({
   access,
   locationSearch,
   fallbackRegionId,
+  activeRegionScopeKey,
   onQueryStateChange,
   onNavigate,
   onShowMap,
@@ -44,6 +45,7 @@ export function Market({
   access?: EffectiveAccess | null;
   locationSearch: string;
   fallbackRegionId: string;
+  activeRegionScopeKey?: string;
   onQueryStateChange: () => void;
   onNavigate: (panel: ActivePanel, tab?: string) => void;
   onShowMap: (focus: NonNullable<MapFocus>, regionId?: string) => void;
@@ -60,7 +62,7 @@ export function Market({
       return [];
     }
   });
-  const activeRegions = useActiveRegions();
+  const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
   const regionId = regionChoice !== "All" && activeRegionIds.has(regionChoice) ? regionChoice : "";
   const views = React.useMemo(() => MARKET_VIEWS.filter((entry) => effectiveTargetAllowed(access, targetIdForTab("market", entry.id))), [access]);

@@ -54,6 +54,7 @@ export class RelayBitCraftProvider implements GameDataProvider {
     domains: Set<DomainKey>;
     promise: Promise<RefreshResult>;
   } | null = null;
+  #reconcileInFlight: Promise<boolean> | null = null;
 
   constructor(dependencies: ProviderDependencies = {}) {
     this.#fetcher = dependencies.fetcher ?? fetch;
@@ -99,6 +100,32 @@ export class RelayBitCraftProvider implements GameDataProvider {
       await this.#persistHealth();
       throw error;
     }
+  }
+
+  reconcile(config: ProviderConfig, sink: ProviderSink): Promise<boolean> {
+    const normalized = {
+      ...config,
+      relayBaseUrl: config.relayBaseUrl.replace(/\/+$/, ""),
+      claimId: String(config.claimId).trim(),
+      activeRegionIds: [...new Set(config.activeRegionIds.map(String))].sort(),
+    };
+    const current = this.#config;
+    const sameConfig = this.#running
+      && current?.relayBaseUrl === normalized.relayBaseUrl
+      && current.claimId === normalized.claimId
+      && (current.topologyRefreshMs ?? 60_000) === (normalized.topologyRefreshMs ?? 60_000)
+      && [...current.activeRegionIds].sort().join(",") === normalized.activeRegionIds.join(",");
+    if (sameConfig) return Promise.resolve(false);
+    if (this.#reconcileInFlight) return this.#reconcileInFlight;
+    const reconcile = (async () => {
+      if (this.#running || this.#config) await this.stop();
+      await this.start(normalized, sink);
+      return true;
+    })();
+    this.#reconcileInFlight = reconcile;
+    return reconcile.finally(() => {
+      if (this.#reconcileInFlight === reconcile) this.#reconcileInFlight = null;
+    });
   }
 
   refresh(request: RefreshRequest): Promise<RefreshResult> {

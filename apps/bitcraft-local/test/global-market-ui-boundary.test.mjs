@@ -126,6 +126,10 @@ test("Browse invalidates on regional-market generation events and keeps history 
   assert.match(generationHook, /new EventSource/);
   assert.match(generationHook, /setInterval/);
   assert.match(generationHook, /\/api\/local\/game-data\/generation/);
+  assert.match(generationHook, /separate worker process[\s\S]*startPolling\(\);/);
+  assert.match(generationHook, /let pollInFlight = false/);
+  assert.match(generationHook, /if \(closed \|\| pollInFlight\) return/);
+  assert.match(generationHook, /finally \{\s*pollInFlight = false/);
 });
 
 test("Market source copy identifies every migrated live Relay workspace", () => {

@@ -145,6 +145,35 @@ export class RelayPublicCraftRuntime {
     }
   }
 
+  async reconcile(config: {
+    relayBaseUrl: string;
+    claimId: string;
+    primaryRegionId: string;
+    activeRegionIds: string[];
+  }): Promise<boolean> {
+    const relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
+    const claimId = decimalInteger(config.claimId, "Relay public-craft claim id");
+    const primaryRegionId = decimalInteger(
+      config.primaryRegionId,
+      "Relay public-craft primary region id",
+    );
+    const activeRegionIds = [...new Set([
+      primaryRegionId,
+      ...config.activeRegionIds.map((regionId, index) => (
+        decimalInteger(regionId, `Relay public-craft active region ${index}`)
+      )),
+    ])].sort(numericStringOrder);
+    const unchanged = this.#started
+      && this.#relayBaseUrl === relayBaseUrl
+      && this.#claimId === claimId
+      && this.#primaryRegionId === primaryRegionId
+      && this.#activeRegionIds.join(",") === activeRegionIds.join(",");
+    if (unchanged) return false;
+    await this.stop();
+    await this.start({ relayBaseUrl, claimId, primaryRegionId, activeRegionIds });
+    return true;
+  }
+
   async warmActiveRegions(): Promise<void> {
     if (!this.#pool || !this.#started) {
       throw new Error("Relay public-craft runtime is not started");

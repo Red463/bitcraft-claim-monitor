@@ -114,6 +114,8 @@ test("claim-market runtime publishes one generic live market generation", async 
     },
   });
   assert.equal(runtime.health().running, true);
+  await runtime.reconcile({ claimId: "200", regionId: "19" });
+  assert.equal(starts[1].claimId, "200");
   await runtime.stop();
 });
 

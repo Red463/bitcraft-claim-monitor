@@ -272,6 +272,16 @@ test("primary-region runtime publishes players and restarts only when membership
   assert.deepEqual(stops, [1, 2]);
   assert.equal(starts.length, 3);
   assert.equal(starts[2].members.length, 2);
+  await runtime.reconcile({
+    claimId: "2",
+    regionId: "19",
+    members: [
+      { playerEntityId: "101", userName: "Ada Renamed" },
+      { playerEntityId: "202", userName: "Grace" },
+    ],
+  });
+  assert.deepEqual(stops, [1, 2, 3]);
+  assert.equal(starts[3].claimId, "2");
 });
 
 test("primary-region runtime preserves last-good data when the region source is unavailable", async () => {

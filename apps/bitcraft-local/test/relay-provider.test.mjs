@@ -367,3 +367,52 @@ test("Relay provider coalesces concurrent refreshes covered by the same in-fligh
   await Promise.all([first, second]);
   assert.equal(inventoryCalls, 1);
 });
+
+test("Relay provider restarts against a changed monitored claim without a process restart", async () => {
+  const responses = relayResponses();
+  responses.set("/claim/2", {
+    ...responses.get("/claim/1369094286777412590"),
+    entity_id: "2",
+    name: "Second Claim",
+  });
+  responses.set("/claim/2/members", { count: 0, members: [], skill_names: {} });
+  const requested = [];
+  const batches = [];
+  const sink = {
+    commitGeneration: async (batch) => batches.push(batch),
+    appendEvents: async () => {},
+    nextGeneration: () => 1,
+  };
+  const provider = new RelayBitCraftProvider({
+    fetcher: async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      requested.push(pathname);
+      const body = responses.get(pathname);
+      return body
+        ? new Response(JSON.stringify(body), { status: 200 })
+        : new Response("missing", { status: 404 });
+    },
+    scheduleTopologyRefresh: () => () => {},
+  });
+
+  await provider.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    activeRegionIds: ["19"],
+  }, sink);
+  assert.equal(await provider.reconcile({
+    relayBaseUrl: "https://relay.example/",
+    claimId: "1369094286777412590",
+    activeRegionIds: ["19"],
+  }, sink), false);
+  assert.equal(await provider.reconcile({
+    relayBaseUrl: "https://relay.example",
+    claimId: "2",
+    activeRegionIds: ["19"],
+  }, sink), true);
+
+  assert.equal(provider.health().running, true);
+  assert.equal(batches.at(-1).claimId, "2");
+  assert.equal(batches.at(-1).domains.claim.data.name, "Second Claim");
+  assert.equal(requested.filter((pathname) => pathname === "/health").length, 2);
+});

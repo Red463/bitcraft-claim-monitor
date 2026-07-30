@@ -86,6 +86,56 @@ function records(value: unknown): WireRecord[] {
     : [];
 }
 
+export function normalizeGlobalRegions(
+  populationValues: unknown[],
+  controlValues: unknown[],
+  nameValues: unknown[],
+) {
+  const populations = new Map(records(populationValues).map((row) => {
+    const regionId = decimalString(row.regionId ?? row.region_id, "region population id");
+    return [regionId, {
+      signedInPlayers: integer(
+        row.signedInPlayers ?? row.signed_in_players ?? 0,
+        `region ${regionId} signed-in players`,
+      ),
+      playersInQueue: integer(
+        row.playersInQueue ?? row.players_in_queue ?? 0,
+        `region ${regionId} queued players`,
+      ),
+    }] as const;
+  }));
+  const controls = new Map(records(controlValues).map((row) => {
+    const regionId = decimalString(row.regionId ?? row.region_id, "region control id");
+    return [regionId, {
+      initialized: row.initialized === true,
+      allowPlayers: row.allowPlayers === true || row.allow_players === true,
+      allowPlayerSpawns: row.allowPlayerSpawns === true || row.allow_player_spawns === true,
+    }] as const;
+  }));
+  const names = new Map(records(nameValues).map((row) => {
+    const regionId = decimalString(row.id, "region name id");
+    return [regionId, String(row.playerFacingName ?? row.player_facing_name ?? "").trim()] as const;
+  }));
+  const regionIds = [...new Set([
+    ...populations.keys(),
+    ...controls.keys(),
+    ...names.keys(),
+  ])].sort((left, right) => (BigInt(left) < BigInt(right) ? -1 : BigInt(left) > BigInt(right) ? 1 : 0));
+  return regionIds.map((regionId) => {
+    const population = populations.get(regionId);
+    const control = controls.get(regionId);
+    return {
+      regionId,
+      regionName: names.get(regionId) || `Region ${regionId}`,
+      active: control ? control.initialized && control.allowPlayers : null,
+      syncing: control ? !control.initialized : null,
+      allowPlayerSpawns: control?.allowPlayerSpawns ?? null,
+      signedInPlayers: population?.signedInPlayers ?? null,
+      playersInQueue: population?.playersInQueue ?? null,
+    };
+  });
+}
+
 function normalizeDescriptionStack(value: unknown) {
   const stack = record(value, "catalog item stack");
   return {

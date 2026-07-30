@@ -1,4 +1,5 @@
 export const defaultClaimId = "1369094286777412590";
+export const defaultRegionId = "19";
 export const defaultSyncUrl = "https://bitcraftsync.app/s/MUFJw3#claims=1369094286777412590&players=1369094286756659093%2C576460752388321942%2C864691128512324120&shopping=i.2036617800%3A20&p.exc=1369094286756659093%3A1369094286764705296%2C1369094286756792917%3B864691128512324120%3A1369094286778153104%2C1369094286772328807%2C1369094286761962469%3B576460752388321942%3A1369094286783870822&crafts=1&crafts.pf=includedPlayers";
 
 export const defaultTheme = {
@@ -26,7 +27,7 @@ export function defaultAppSettingRows({ serverRefreshSeconds, updatedAt }) {
     settingRow("server_refresh_seconds", String(serverRefreshSeconds), updatedAt),
     settingRow("collector_settings_json", JSON.stringify({}), updatedAt),
     settingRow("default_page", "dashboard", updatedAt),
-    settingRow("default_region", "", updatedAt),
+    settingRow("default_region", defaultRegionId, updatedAt),
     settingRow("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), updatedAt),
     settingRow("market_deal_watch_json", JSON.stringify({ maxWatchesPerUser: 10, thresholdPercent: 30, minActiveListings: 3, discordDmEnabled: true }), updatedAt),
     settingRow("branding_json", JSON.stringify({}), updatedAt),

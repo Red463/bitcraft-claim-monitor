@@ -1,6 +1,7 @@
 import {
   normalizeCatalogDescription,
   normalizeCatalogEntity,
+  normalizeGlobalRegions,
   type CatalogDescriptionKind,
 } from "./normalizers.ts";
 import {
@@ -24,6 +25,9 @@ export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM tool_desc",
   "SELECT * FROM buff_desc",
   "SELECT * FROM claim_tech_desc",
+  "SELECT * FROM region_population_info",
+  "SELECT * FROM region_control_info",
+  "SELECT * FROM world_region_name_state",
 ] as const;
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
@@ -52,6 +56,9 @@ type BindingConnection = {
   db: Record<string, CachedTable> & {
     itemDesc: CachedTable;
     cargoDesc: CachedTable;
+    regionPopulationInfo: CachedTable;
+    regionControlInfo: CachedTable;
+    worldRegionNameState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -75,11 +82,15 @@ type GlobalBindingModule = {
 export type GlobalCatalogSnapshot = {
   entities: ReturnType<typeof normalizeCatalogEntity>[];
   descriptions: Record<CatalogDescriptionKind, ReturnType<typeof normalizeCatalogDescription>[]>;
+  regions: ReturnType<typeof normalizeGlobalRegions>;
+  changed: Array<"catalogs" | "region">;
   database: string;
   schemaFingerprint: string;
   generation: number;
   receivedAt: string;
 };
+
+type SnapshotGroup = GlobalCatalogSnapshot["changed"][number];
 
 const DESCRIPTION_TABLES: ReadonlyArray<{
   accessor: string;
@@ -129,10 +140,13 @@ export class RelayGlobalCatalogSession {
   #nextGeneration = 0;
   #snapshotQueued = false;
   #applyInFlight = false;
-  #applyPending = false;
+  readonly #queuedGroups = new Set<SnapshotGroup>();
+  readonly #pendingGroups = new Set<SnapshotGroup>();
   #listenersAttached = false;
-  readonly #tableChanged = () => this.#queueSnapshot();
+  readonly #catalogChanged = () => this.#queueSnapshot("catalogs");
+  readonly #regionChanged = () => this.#queueSnapshot("region");
   #health = {
+    state: "stopped" as "stopped" | "connecting" | "connected" | "disconnected",
     connected: false,
     applied: false,
     lastAppliedAt: null as string | null,
@@ -156,49 +170,72 @@ export class RelayGlobalCatalogSession {
     }
     this.#config = config;
     this.#nextGeneration = config.generation;
+    this.#health = {
+      state: "connecting",
+      connected: false,
+      applied: false,
+      lastAppliedAt: null,
+      lastError: null,
+    };
 
     const bindings = await this.#loadBindings();
     this.#connection = bindings.DbConnection.builder()
       .withUri(config.uri)
       .withDatabaseName(config.database)
       .onConnect((connection) => {
+        this.#health.state = "connected";
         this.#health.connected = true;
         this.#health.lastError = null;
         this.#subscription = connection.subscriptionBuilder()
           .onApplied(() => {
-            this.#applySnapshot(connection);
+            this.#applySnapshot(connection, new Set(["catalogs", "region"]));
             this.#attachTableListeners(connection);
           })
           .onError((_context, error) => this.#recordError(error))
           .subscribe([...GLOBAL_CATALOG_QUERIES]);
       })
-      .onConnectError((_context, error) => this.#recordError(error))
+      .onConnectError((_context, error) => {
+        this.#health.state = "disconnected";
+        this.#recordError(error);
+      })
       .onDisconnect((_context, error) => {
+        this.#health.state = "disconnected";
         this.#health.connected = false;
         if (error) this.#recordError(error);
       })
       .build();
   }
 
-  #applySnapshot(connection: BindingConnection): void {
+  #applySnapshot(connection: BindingConnection, changed: Set<SnapshotGroup>): void {
     const config = this.#config;
     if (!config) return;
     if (this.#applyInFlight) {
-      this.#applyPending = true;
+      for (const group of changed) this.#pendingGroups.add(group);
       return;
     }
     try {
-      const entities = [
-        ...Array.from(connection.db.itemDesc.iter(), (row) => normalizeCatalogEntity(row, "item")),
-        ...Array.from(connection.db.cargoDesc.iter(), (row) => normalizeCatalogEntity(row, "cargo")),
-      ];
-      const descriptions = Object.fromEntries(DESCRIPTION_TABLES.map(({ accessor, kind }) => [
-        kind,
-        Array.from(
-          connection.db[accessor].iter(),
-          (row) => normalizeCatalogDescription(row, kind),
-        ),
-      ])) as GlobalCatalogSnapshot["descriptions"];
+      const entities = changed.has("catalogs")
+        ? [
+            ...Array.from(connection.db.itemDesc.iter(), (row) => normalizeCatalogEntity(row, "item")),
+            ...Array.from(connection.db.cargoDesc.iter(), (row) => normalizeCatalogEntity(row, "cargo")),
+          ]
+        : [];
+      const descriptions = changed.has("catalogs")
+        ? Object.fromEntries(DESCRIPTION_TABLES.map(({ accessor, kind }) => [
+            kind,
+            Array.from(
+              connection.db[accessor].iter(),
+              (row) => normalizeCatalogDescription(row, kind),
+            ),
+          ])) as GlobalCatalogSnapshot["descriptions"]
+        : {} as GlobalCatalogSnapshot["descriptions"];
+      const regions = changed.has("region")
+        ? normalizeGlobalRegions(
+            [...connection.db.regionPopulationInfo.iter()],
+            [...connection.db.regionControlInfo.iter()],
+            [...connection.db.worldRegionNameState.iter()],
+          )
+        : [];
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
@@ -206,6 +243,8 @@ export class RelayGlobalCatalogSession {
       const result = this.#onSnapshot({
         entities,
         descriptions,
+        regions,
+        changed: [...changed],
         database: config.database,
         schemaFingerprint: config.schemaFingerprint,
         generation,
@@ -226,19 +265,25 @@ export class RelayGlobalCatalogSession {
 
   #completeApply(connection: BindingConnection): void {
     this.#applyInFlight = false;
-    if (!this.#applyPending) return;
-    this.#applyPending = false;
+    if (!this.#pendingGroups.size) return;
+    const changed = new Set(this.#pendingGroups);
+    this.#pendingGroups.clear();
     queueMicrotask(() => {
-      if (this.#connection === connection) this.#applySnapshot(connection);
+      if (this.#connection === connection) this.#applySnapshot(connection, changed);
     });
   }
 
   #attachTableListeners(connection: BindingConnection): void {
     if (this.#listenersAttached) return;
     for (const table of this.#catalogTables(connection)) {
-      table.onInsert?.(this.#tableChanged);
-      table.onUpdate?.(this.#tableChanged);
-      table.onDelete?.(this.#tableChanged);
+      table.onInsert?.(this.#catalogChanged);
+      table.onUpdate?.(this.#catalogChanged);
+      table.onDelete?.(this.#catalogChanged);
+    }
+    for (const table of this.#regionTables(connection)) {
+      table.onInsert?.(this.#regionChanged);
+      table.onUpdate?.(this.#regionChanged);
+      table.onDelete?.(this.#regionChanged);
     }
     this.#listenersAttached = true;
   }
@@ -246,9 +291,14 @@ export class RelayGlobalCatalogSession {
   #removeTableListeners(): void {
     if (!this.#listenersAttached || !this.#connection) return;
     for (const table of this.#catalogTables(this.#connection)) {
-      table.removeOnInsert?.(this.#tableChanged);
-      table.removeOnUpdate?.(this.#tableChanged);
-      table.removeOnDelete?.(this.#tableChanged);
+      table.removeOnInsert?.(this.#catalogChanged);
+      table.removeOnUpdate?.(this.#catalogChanged);
+      table.removeOnDelete?.(this.#catalogChanged);
+    }
+    for (const table of this.#regionTables(this.#connection)) {
+      table.removeOnInsert?.(this.#regionChanged);
+      table.removeOnUpdate?.(this.#regionChanged);
+      table.removeOnDelete?.(this.#regionChanged);
     }
     this.#listenersAttached = false;
   }
@@ -261,12 +311,24 @@ export class RelayGlobalCatalogSession {
     ];
   }
 
-  #queueSnapshot(): void {
-    if (this.#snapshotQueued || !this.#connection) return;
+  #regionTables(connection: BindingConnection): CachedTable[] {
+    return [
+      connection.db.regionPopulationInfo,
+      connection.db.regionControlInfo,
+      connection.db.worldRegionNameState,
+    ];
+  }
+
+  #queueSnapshot(group: SnapshotGroup): void {
+    if (!this.#connection) return;
+    this.#queuedGroups.add(group);
+    if (this.#snapshotQueued) return;
     this.#snapshotQueued = true;
     queueMicrotask(() => {
       this.#snapshotQueued = false;
-      if (this.#connection) this.#applySnapshot(this.#connection);
+      const changed = new Set(this.#queuedGroups);
+      this.#queuedGroups.clear();
+      if (this.#connection) this.#applySnapshot(this.#connection, changed);
     });
   }
 
@@ -288,7 +350,9 @@ export class RelayGlobalCatalogSession {
     this.#nextGeneration = 0;
     this.#snapshotQueued = false;
     this.#applyInFlight = false;
-    this.#applyPending = false;
+    this.#queuedGroups.clear();
+    this.#pendingGroups.clear();
+    this.#health.state = "stopped";
     this.#health.connected = false;
   }
 }

@@ -9,6 +9,13 @@ The application must expose normalized Relay data as soon as it is safely
 available. A user must not have to wait for a daily, hourly, or multi-minute
 scheduled ingestion job before a page or feature becomes useful.
 
+The optimization target is the shortest correct path from a Relay observation
+to user-visible data, not the smallest possible table count. Remove a table
+when it duplicates committed current state or adds a scheduled materialization
+delay. Retain a compact, incrementally updated SQL projection when measured
+local-read latency, cross-process sharing, or restart recovery makes it the
+fastest correct path.
+
 SQLite remains the application's durable local read model, history store, and
 cross-process boundary. It must not retain tables, queues, or job state whose
 only purpose was working around BitJita bulk-request sizes or rate limits.

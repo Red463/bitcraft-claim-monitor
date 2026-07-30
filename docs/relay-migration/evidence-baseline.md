@@ -103,9 +103,10 @@ built bundles, routes, CSP, assets, retries, and fallbacks.
 
 ## External evidence gates
 
-- The icon files must not be vendored until the written permission artifact or
-  stable reference is placed in this repository. User confirmation is recorded,
-  but the permission evidence itself is not present yet.
+- The repository owner's confirmation in
+  [`asset-permission.md`](./asset-permission.md) satisfies the permission gate
+  for vendoring the icons. The files, source identities, and digests still
+  need to be acquired and verified before the local-asset gate can pass.
 - Relay operator production intent, HTTP/WebSocket limits, multi-region load,
   schema-change channel, and incident expectations have not yet been recorded.
 - The seven-day observation period cannot begin until useful parity is deployed
