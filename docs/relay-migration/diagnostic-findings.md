@@ -574,12 +574,51 @@ present in these authoritative current rows. Their cards and payloads are
 retired rather than relabelled. They can return only after a completed-trade
 signal is proven.
 
+## Empire global-versus-regional completeness — 2026-07-30
+
+The read-only production verifier
+`apps/bitcraft-local/scripts/verify-relay-empire-completeness-live.mjs`
+compared every current region-19 primary key with an exact equality
+subscription against the global mirror. It used generated SDK bindings and
+topology discovery; it did not implement a wire codec or hard-code database
+names.
+
+At the observation time, all 221 `empire_state`, 10,778
+`empire_player_data_state`, 2,200 `empire_rank_state`, 602
+`empire_settlement_state`, 555 `empire_node_state`, and 21
+`empire_node_siege_state` rows matched the global mirror. However, the global
+mirror returned only 37,630 of the region's 37,631 `empire_chunk_state` rows;
+chunk `113241` was missing.
+
+That single missing live row is enough to reject the global mirror as the
+authority for complete empire/watchtower coverage. Empire current state must
+come from configured regional sessions. The primary region remains connected;
+other configured regions use the bounded adaptive session pool. Global rows
+may assist diagnostics, but they cannot silently fill or replace a regional
+generation.
+
+The observed keys also establish the current join direction:
+
+- `empire_settlement_state` links an empire to its claim and settlement
+  building;
+- `empire_node_state` owns node/watchtower energy, active state, upkeep, and
+  location;
+- `empire_chunk_state.watchtower_entity_id` assigns covered chunks to a node;
+- `empire_node_siege_state.building_entity_id` identifies the sieged building,
+  while its `empire_entity_id` must not be labelled as attacker or defender
+  until that role is proven from an authoritative transition.
+
+Current rows belong in the provider's atomic last-good `empires` generation,
+not feature-specific SQL cache tables. Durable membership periods,
+notifications, and future locally observed siege transitions remain valid
+history/event data.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or
   cancellation;
 - craft contributor identity and amounts;
-- complete global-versus-regional empire comparison;
+- attacker/defender meaning and completion semantics for empire siege rows;
 - multi-region Hexite reserve aggregation.
 
 ## Deal Watch live-order baseline

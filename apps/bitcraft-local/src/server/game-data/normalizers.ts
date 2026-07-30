@@ -246,6 +246,294 @@ export function normalizeRegionalClaims(options: {
   return { data: { regionId, claims }, warnings };
 }
 
+export function normalizeRegionalEmpires(options: {
+  regionId: string;
+  empireRows: unknown[];
+  playerRows: unknown[];
+  rankRows: unknown[];
+  settlementRows: unknown[];
+  nodeRows: unknown[];
+  siegeRows: unknown[];
+  chunkRows: unknown[];
+  claimRows: unknown[];
+  usernameRows: unknown[];
+  nicknameRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional empires region id");
+  const warnings: string[] = [];
+  const byId = (values: unknown[], label: string) => {
+    const result = new Map<string, WireRecord>();
+    for (const [index, value] of values.entries()) {
+      const row = record(value, `${label} row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `${label} row ${index} entity id`,
+      );
+      result.set(entityId, row);
+    }
+    return result;
+  };
+  const locationFields = (value: unknown, label: string) => {
+    const location = record(value, `${label} location`);
+    return {
+      locationX: integer(location.x, `${label} location x`),
+      locationZ: integer(location.z, `${label} location z`),
+      locationDimension: decimalString(
+        location.dimension,
+        `${label} location dimension`,
+      ),
+    };
+  };
+  const usernames = new Map(
+    [...byId(options.usernameRows, "Regional player_username_state")].map(
+      ([entityId, row]) => [entityId, String(row.username ?? "").trim()],
+    ),
+  );
+  const nicknames = new Map(
+    [...byId(options.nicknameRows, "Regional building_nickname_state")].map(
+      ([entityId, row]) => [entityId, String(row.nickname ?? "").trim()],
+    ),
+  );
+  const claims = byId(options.claimRows, "Regional claim_state");
+  const ranks = new Map<string, WireRecord>();
+  for (const [index, value] of options.rankRows.entries()) {
+    const row = record(value, `Regional empire_rank_state row ${index}`);
+    const empireEntityId = decimalString(
+      row.empireEntityId ?? row.empire_entity_id,
+      `Regional empire_rank_state row ${index} empire id`,
+    );
+    const rank = integer(row.rank, `Regional empire_rank_state row ${index} rank`);
+    ranks.set(`${empireEntityId}:${rank}`, row);
+  }
+
+  const members = options.playerRows.map((value, index) => {
+    const row = record(value, `Regional empire_player_data_state row ${index}`);
+    const entityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional empire player row ${index} entity id`,
+    );
+    const empireEntityId = decimalString(
+      row.empireEntityId ?? row.empire_entity_id,
+      `Regional empire player ${entityId} empire id`,
+    );
+    const rank = integer(row.rank, `Regional empire player ${entityId} rank`);
+    const rankRow = ranks.get(`${empireEntityId}:${rank}`);
+    return {
+      entityId,
+      empireEntityId,
+      username: usernames.get(entityId) || null,
+      rank,
+      rankTitle: rankRow ? String(rankRow.title ?? "").trim() || null : null,
+      permissions: rankRow && Array.isArray(rankRow.permissions)
+        ? rankRow.permissions.map(Boolean)
+        : [],
+      donatedShards: decimalString(
+        row.donatedShards ?? row.donated_shards ?? 0,
+        `Regional empire player ${entityId} donated shards`,
+      ),
+      donatedEmpireCurrency: decimalString(
+        row.donatedEmpireCurrency ?? row.donated_empire_currency ?? 0,
+        `Regional empire player ${entityId} donated empire currency`,
+      ),
+    };
+  });
+  members.sort((left, right) => (
+    BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
+  ));
+
+  const settlements = options.settlementRows.map((value, index) => {
+    const row = record(value, `Regional empire_settlement_state row ${index}`);
+    const buildingEntityId = decimalString(
+      row.buildingEntityId ?? row.building_entity_id,
+      `Regional empire settlement row ${index} building id`,
+    );
+    const claimEntityId = decimalString(
+      row.claimEntityId ?? row.claim_entity_id,
+      `Regional empire settlement ${buildingEntityId} claim id`,
+    );
+    const empireEntityId = decimalString(
+      row.empireEntityId ?? row.empire_entity_id,
+      `Regional empire settlement ${buildingEntityId} empire id`,
+    );
+    const claim = claims.get(claimEntityId);
+    const claimOwnerEntityId = claim
+      ? decimalString(
+          claim.ownerPlayerEntityId ?? claim.owner_player_entity_id,
+          `Regional empire settlement ${buildingEntityId} claim owner id`,
+        )
+      : null;
+    if (!claim) {
+      warnings.push(
+        `Regional empire settlement ${buildingEntityId} has no claim_state row for ${claimEntityId}.`,
+      );
+    }
+    return {
+      buildingEntityId,
+      claimEntityId,
+      empireEntityId,
+      chunkIndex: decimalString(
+        row.chunkIndex ?? row.chunk_index,
+        `Regional empire settlement ${buildingEntityId} chunk index`,
+      ),
+      canHouseEmpireStorehouse: row.canHouseEmpireStorehouse === true
+        || row.can_house_empire_storehouse === true,
+      membersDonations: decimalString(
+        row.membersDonations ?? row.members_donations ?? 0,
+        `Regional empire settlement ${buildingEntityId} member donations`,
+      ),
+      ...locationFields(row.location, `Regional empire settlement ${buildingEntityId}`),
+      claimName: claim ? String(claim.name ?? "").trim() : null,
+      claimOwnerEntityId,
+      claimOwnerName: claimOwnerEntityId ? usernames.get(claimOwnerEntityId) || null : null,
+    };
+  });
+  settlements.sort((left, right) => (
+    BigInt(left.buildingEntityId) < BigInt(right.buildingEntityId) ? -1 : 1
+  ));
+
+  const chunkCountByNode = new Map<string, number>();
+  const chunkCountByEmpire = new Map<string, number>();
+  for (const [index, value] of options.chunkRows.entries()) {
+    const row = record(value, `Regional empire_chunk_state row ${index}`);
+    const watchtowerEntityId = decimalString(
+      row.watchtowerEntityId ?? row.watchtower_entity_id,
+      `Regional empire chunk row ${index} watchtower id`,
+    );
+    const empireEntityId = decimalString(
+      row.empireEntityId ?? row.empire_entity_id,
+      `Regional empire chunk row ${index} empire id`,
+    );
+    chunkCountByNode.set(watchtowerEntityId, (chunkCountByNode.get(watchtowerEntityId) ?? 0) + 1);
+    chunkCountByEmpire.set(empireEntityId, (chunkCountByEmpire.get(empireEntityId) ?? 0) + 1);
+  }
+
+  const siegesByBuilding = new Map<string, Array<Record<string, unknown>>>();
+  for (const [index, value] of options.siegeRows.entries()) {
+    const row = record(value, `Regional empire_node_siege_state row ${index}`);
+    const entityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional empire siege row ${index} entity id`,
+    );
+    const buildingEntityId = decimalString(
+      row.buildingEntityId ?? row.building_entity_id,
+      `Regional empire siege ${entityId} building id`,
+    );
+    const startTimestamp = row.startTimestamp ?? row.start_timestamp;
+    const normalizedStartTimestamp = startTimestamp == null
+      ? undefined
+      : normalizeTimestamp(
+          decimalString(
+            record(startTimestamp, `Regional empire siege ${entityId} start timestamp`)
+              .__timestamp_micros_since_unix_epoch__,
+            `Regional empire siege ${entityId} start timestamp micros`,
+          ),
+          "microseconds",
+        );
+    const siege = {
+      entityId,
+      buildingEntityId,
+      empireEntityId: decimalString(
+        row.empireEntityId ?? row.empire_entity_id,
+        `Regional empire siege ${entityId} empire id`,
+      ),
+      role: "unknown",
+      energy: decimalString(row.energy ?? 0, `Regional empire siege ${entityId} energy`),
+      active: row.active === true,
+      ...(normalizedStartTimestamp ? { startTimestamp: normalizedStartTimestamp } : {}),
+    };
+    const existing = siegesByBuilding.get(buildingEntityId) ?? [];
+    existing.push(siege);
+    siegesByBuilding.set(buildingEntityId, existing);
+    warnings.push(
+      `Regional siege ${entityId} empire role is unresolved; attacker/defender is not inferred.`,
+    );
+  }
+
+  const nodes = options.nodeRows.map((value, index) => {
+    const row = record(value, `Regional empire_node_state row ${index}`);
+    const entityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional empire node row ${index} entity id`,
+    );
+    return {
+      entityId,
+      empireEntityId: decimalString(
+        row.empireEntityId ?? row.empire_entity_id,
+        `Regional empire node ${entityId} empire id`,
+      ),
+      chunkIndex: decimalString(
+        row.chunkIndex ?? row.chunk_index,
+        `Regional empire node ${entityId} chunk index`,
+      ),
+      energy: decimalString(row.energy, `Regional empire node ${entityId} energy`),
+      active: row.active === true,
+      upkeep: decimalString(row.upkeep, `Regional empire node ${entityId} upkeep`),
+      ...locationFields(row.location, `Regional empire node ${entityId}`),
+      nickname: nicknames.get(entityId) || null,
+      coveredChunks: chunkCountByNode.get(entityId) ?? 0,
+      sieges: siegesByBuilding.get(entityId) ?? [],
+    };
+  });
+  nodes.sort((left, right) => (
+    BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
+  ));
+
+  const memberCountByEmpire = new Map<string, number>();
+  const settlementCountByEmpire = new Map<string, number>();
+  for (const member of members) {
+    memberCountByEmpire.set(member.empireEntityId, (memberCountByEmpire.get(member.empireEntityId) ?? 0) + 1);
+  }
+  for (const settlement of settlements) {
+    settlementCountByEmpire.set(
+      settlement.empireEntityId,
+      (settlementCountByEmpire.get(settlement.empireEntityId) ?? 0) + 1,
+    );
+  }
+  const empires = options.empireRows.map((value, index) => {
+    const row = record(value, `Regional empire_state row ${index}`);
+    const entityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional empire row ${index} entity id`,
+    );
+    return {
+      entityId,
+      capitalBuildingEntityId: decimalString(
+        row.capitalBuildingEntityId ?? row.capital_building_entity_id,
+        `Regional empire ${entityId} capital building id`,
+      ),
+      name: String(row.name ?? "").trim(),
+      shardTreasury: decimalString(
+        row.shardTreasury ?? row.shard_treasury ?? 0,
+        `Regional empire ${entityId} shard treasury`,
+      ),
+      nobilityThreshold: integer(
+        row.nobilityThreshold ?? row.nobility_threshold,
+        `Regional empire ${entityId} nobility threshold`,
+      ),
+      numClaims: integer(
+        row.numClaims ?? row.num_claims,
+        `Regional empire ${entityId} claim count`,
+      ),
+      ...locationFields(row.location, `Regional empire ${entityId}`),
+      empireCurrencyTreasury: decimalString(
+        row.empireCurrencyTreasury ?? row.empire_currency_treasury ?? 0,
+        `Regional empire ${entityId} currency treasury`,
+      ),
+      ownerType: enumLabel(row.ownerType ?? row.owner_type) ?? null,
+      memberCount: memberCountByEmpire.get(entityId) ?? 0,
+      settlementCount: settlementCountByEmpire.get(entityId) ?? 0,
+      territoryChunks: chunkCountByEmpire.get(entityId) ?? 0,
+    };
+  });
+  empires.sort((left, right) => (
+    BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
+  ));
+  return {
+    data: { regionId, empires, members, settlements, nodes },
+    warnings,
+  };
+}
+
 function normalizeDescriptionStack(value: unknown) {
   const stack = record(value, "catalog item stack");
   return {
