@@ -189,6 +189,19 @@ test("regional construction rows preserve exact claim ownership and contributed 
         __timestamp_micros_since_unix_epoch__: 1785096910248578n,
       },
     }],
+    buildingRows: [{
+      entityId: 7001n,
+      claimEntityId: 1369094286777412590n,
+      directionIndex: 2,
+      buildingDescriptionId: 6020,
+      constructedByPlayerEntityId: 101n,
+    }, {
+      entityId: 7002n,
+      claimEntityId: 888n,
+      directionIndex: 0,
+      buildingDescriptionId: 6022,
+      constructedByPlayerEntityId: 202n,
+    }],
   });
 
   assert.deepEqual(result, {
@@ -205,9 +218,17 @@ test("regional construction rows preserve exact claim ownership and contributed 
         direction: 2,
         lastHitAt: "2026-07-26T20:15:10.248Z",
       }],
+      buildings: [{
+        entityId: "7001",
+        claimEntityId: "1369094286777412590",
+        directionIndex: 2,
+        buildingDescriptionId: "6020",
+        constructedByPlayerEntityId: "101",
+      }],
     },
     warnings: [
       "Regional project_site_state omitted cross-claim project 999 owned by 888.",
+      "Regional building_state omitted cross-claim building 7002 owned by 888.",
     ],
   });
 });

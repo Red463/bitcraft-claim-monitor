@@ -256,7 +256,8 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /buildingProgress/);
   assert.match(manager, /delete nextProgress\[itemKey\(target\)\]/);
   assert.match(server, /reconcileCraftPlanBuildingProgress/);
-  assert.match(server, /\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
+  assert.match(server, /currentClaimBuildingsProjection\(claimId\)/);
+  assert.doesNotMatch(server, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
   assert.match(server, /providerCatalogRepository\.listDescriptions\("building"\)/);
   assert.match(server, /providerCatalogRepository\.listDescriptions\("construction_recipe"\)/);

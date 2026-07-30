@@ -125,6 +125,9 @@ be a committed domain event, not a scheduled ingestion sweep.
   generation with the existing live inventory generation.
 - Global recipe, building, item, and cargo rows are resolved only for the
   projects/materials in the response.
+- Claim-owned `building_state` rows publish in the same regional generation
+  and drive Craft Planner workstation progress without another table or
+  page-load fetch.
 - `domain_payload_current` is the durable last-good boundary. No Relay
   construction table, refresh ledger, pagination state, or scheduled ingestion
   job was added.
@@ -132,9 +135,9 @@ be a committed domain event, not a scheduled ingestion sweep.
   Server fallback/background compositions now read the same normalized Relay
   projection. No independent construction notification/history rows existed
   to retain or migrate.
-- The legacy buildings-count fetch is temporarily owned by the claim collector
-  and is explicitly part of the later layout/building migration, not
-  construction current-state ownership.
+- Craft Planner no longer owns a legacy claim-buildings fetch. The later
+  layout vertical may enrich these same filtered building rows with bounded
+  location data; it must not add duplicate current-state ownership.
 
 ## Research vertical evidence
 

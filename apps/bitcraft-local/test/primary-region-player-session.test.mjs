@@ -60,6 +60,13 @@ function fakeBindings() {
       __timestamp_micros_since_unix_epoch__: 1785096910248578n,
     },
   }]);
+  const buildingState = cachedTable("building", [{
+    entityId: 7001n,
+    claimEntityId: 1369094286777412590n,
+    directionIndex: 2,
+    buildingDescriptionId: 6020,
+    constructedByPlayerEntityId: 101n,
+  }]);
   const claimTechState = cachedTable("research", [{
     entityId: 1369094286777412590n,
     learned: [1, 200, 748616905],
@@ -84,6 +91,7 @@ function fakeBindings() {
       equipmentPresetState,
       activeBuffState,
       projectSiteState,
+      buildingState,
       claimTechState,
       claimRecruitmentState,
     },
@@ -175,6 +183,7 @@ test("primary-region session filters member and settlement state and emits norma
     "SELECT * FROM equipment_preset_state WHERE player_entity_id = 101 OR player_entity_id = 202",
     "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
     "SELECT * FROM project_site_state WHERE owner_id = 1369094286777412590",
+    "SELECT * FROM building_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM claim_tech_state WHERE entity_id = 1369094286777412590",
     "SELECT * FROM claim_recruitment_state WHERE claim_entity_id = 1369094286777412590",
   ]);
@@ -235,6 +244,13 @@ test("primary-region session filters member and settlement state and emits norma
         lastCritOutcome: 1,
         direction: 2,
         lastHitAt: "2026-07-26T20:15:10.248Z",
+      }],
+      buildings: [{
+        entityId: "7001",
+        claimEntityId: "1369094286777412590",
+        directionIndex: 2,
+        buildingDescriptionId: "6020",
+        constructedByPlayerEntityId: "101",
       }],
     },
     constructionWarnings: [],

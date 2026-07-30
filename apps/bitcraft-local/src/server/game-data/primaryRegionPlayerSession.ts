@@ -39,6 +39,7 @@ type BindingConnection = {
     equipmentPresetState: CachedTable;
     activeBuffState: CachedTable;
     projectSiteState: CachedTable;
+    buildingState: CachedTable;
     claimTechState: CachedTable;
     claimRecruitmentState: CachedTable;
   };
@@ -135,6 +136,14 @@ function constructionQuery(claimIdValue: string): string {
   return `SELECT * FROM project_site_state WHERE owner_id = ${claimId}`;
 }
 
+function buildingQuery(claimIdValue: string): string {
+  const claimId = String(claimIdValue ?? "").trim();
+  if (!/^\d+$/.test(claimId)) {
+    throw new TypeError("regional building claim id is invalid");
+  }
+  return `SELECT * FROM building_state WHERE claim_entity_id = ${claimId}`;
+}
+
 function researchQuery(claimIdValue: string): string {
   const claimId = String(claimIdValue ?? "").trim();
   if (!/^\d+$/.test(claimId)) {
@@ -189,6 +198,7 @@ export class RelayPrimaryRegionPlayerSession {
     const queries = [
       ...playerStateQueries(config.members),
       constructionQuery(config.claimId),
+      buildingQuery(config.claimId),
       researchQuery(config.claimId),
       recruitmentQuery(config.claimId),
     ];
@@ -243,6 +253,7 @@ export class RelayPrimaryRegionPlayerSession {
       const construction = normalizeRegionalConstruction({
         claimId: config.claimId,
         projectRows: [...connection.db.projectSiteState.iter()],
+        buildingRows: [...connection.db.buildingState.iter()],
       });
       const research = normalizeRegionalResearch({
         claimId: config.claimId,
@@ -321,6 +332,7 @@ export class RelayPrimaryRegionPlayerSession {
       connection.db.equipmentPresetState,
       connection.db.activeBuffState,
       connection.db.projectSiteState,
+      connection.db.buildingState,
       connection.db.claimTechState,
       connection.db.claimRecruitmentState,
     ];

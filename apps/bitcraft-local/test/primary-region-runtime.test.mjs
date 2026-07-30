@@ -79,6 +79,13 @@ test("primary-region runtime publishes players and restarts only when membership
         items: [],
         cargos: [],
       }],
+      buildings: [{
+        entityId: "7001",
+        claimEntityId: "1369094286777412590",
+        directionIndex: 2,
+        buildingDescriptionId: "6020",
+        constructedByPlayerEntityId: "101",
+      }],
     },
     constructionWarnings: [],
     research: {
@@ -149,6 +156,13 @@ test("primary-region runtime publishes players and restarts only when membership
             ownerId: "1369094286777412590",
             items: [],
             cargos: [],
+          }],
+          buildings: [{
+            entityId: "7001",
+            claimEntityId: "1369094286777412590",
+            directionIndex: 2,
+            buildingDescriptionId: "6020",
+            constructedByPlayerEntityId: "101",
           }],
         },
         confidence: "authoritative",
@@ -225,7 +239,7 @@ test("primary-region runtime publishes players and restarts only when membership
     warnings: [],
     equipment: { members: [] },
     equipmentWarnings: [],
-    construction: { projects: [] },
+    construction: { projects: [], buildings: [] },
     constructionWarnings: [],
     research: {
       claimId: "1369094286777412590",

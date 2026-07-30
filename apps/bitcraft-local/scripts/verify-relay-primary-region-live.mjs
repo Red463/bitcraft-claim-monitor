@@ -86,9 +86,18 @@ try {
   const crossClaimProjects = snapshot.construction.projects.filter(
     ({ ownerId }) => ownerId !== claimId,
   );
-  if (crossClaimProjects.length || snapshot.constructionWarnings.length) {
+  const crossClaimBuildings = snapshot.construction.buildings.filter(
+    ({ claimEntityId }) => claimEntityId !== claimId,
+  );
+  if (
+    crossClaimProjects.length
+    || crossClaimBuildings.length
+    || snapshot.construction.buildings.length === 0
+    || snapshot.constructionWarnings.length
+  ) {
     throw new Error(
       `Regional construction verification found ${crossClaimProjects.length} cross-claim projects`
+      + ` and ${crossClaimBuildings.length} cross-claim buildings`
       + ` with ${snapshot.constructionWarnings.length} warnings`,
     );
   }
@@ -137,6 +146,7 @@ try {
       0,
     ),
     constructionProjectCount: snapshot.construction.projects.length,
+    claimBuildingCount: snapshot.construction.buildings.length,
     contributedConstructionStackCount: snapshot.construction.projects.reduce(
       (total, project) => total + project.items.length + project.cargos.length,
       0,

@@ -662,9 +662,11 @@ export function normalizeRegionalRecruitment(options: {
 export function normalizeRegionalConstruction(options: {
   claimId: string;
   projectRows: unknown[];
+  buildingRows?: unknown[];
 }) {
   const claimId = decimalString(options.claimId, "regional construction claim id");
   const projects = [];
+  const buildings = [];
   const warnings: string[] = [];
   for (const [index, value] of options.projectRows.entries()) {
     try {
@@ -738,8 +740,47 @@ export function normalizeRegionalConstruction(options: {
       );
     }
   }
+  for (const [index, value] of (options.buildingRows ?? []).entries()) {
+    try {
+      const row = record(value, `regional building_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `regional building_state row ${index} entity id`,
+      );
+      const claimEntityId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `regional building_state row ${index} claim id`,
+      );
+      if (claimEntityId !== claimId) {
+        warnings.push(
+          `Regional building_state omitted cross-claim building ${entityId} owned by ${claimEntityId}.`,
+        );
+        continue;
+      }
+      buildings.push({
+        entityId,
+        claimEntityId,
+        directionIndex: integer(
+          row.directionIndex ?? row.direction_index,
+          `regional building_state row ${index} direction index`,
+        ),
+        buildingDescriptionId: decimalString(
+          row.buildingDescriptionId ?? row.building_description_id,
+          `regional building_state row ${index} building description id`,
+        ),
+        constructedByPlayerEntityId: decimalString(
+          row.constructedByPlayerEntityId ?? row.constructed_by_player_entity_id,
+          `regional building_state row ${index} constructor id`,
+        ),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional building_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   return {
-    data: { projects },
+    data: { projects, buildings },
     warnings,
   };
 }

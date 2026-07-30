@@ -2188,6 +2188,13 @@ function currentConstructionProjection(claimId) {
   ).data;
 }
 
+function currentClaimBuildingsProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "construction");
+  const buildings = current?.data?.buildings;
+  if (!Array.isArray(buildings)) throw new Error("Relay claim buildings have not loaded yet");
+  return { buildings };
+}
+
 function currentRecruitmentProjection(claimId) {
   const current = currentStateRepository.read(String(claimId), "recruitment");
   if (!current) return { claimId: String(claimId), isRecruiting: false, recruitment: [] };
@@ -2588,11 +2595,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     return plan;
   }
   try {
-    const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`, { forceRefresh });
+    const buildingsPayload = currentClaimBuildingsProjection(claimId);
     const reconciled = reconcileCraftPlanBuildingProgress(config, buildingsPayload);
     config = reconciled.changed ? saveCraftPlanConfig(reconciled.config) : reconciled.config;
   } catch {
-    // Keep prior baselines and observed completions when BitJita building discovery is unavailable.
+    // Keep prior baselines and observed completions while the first Relay building generation loads.
   }
   const catalogTargets = craftPlanCatalogTargets(config);
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(
