@@ -155,6 +155,16 @@ test("Inventory uses only provider-neutral local routes", async () => {
   assert.match(server, /providerCatalogRepository\.listDescriptions\("crafting_recipe"\)/);
 });
 
+test("Activity member filters use the current Relay member domain", async () => {
+  const activityPage = await readFile(new URL("../src/pages/ActivityPage.tsx", import.meta.url), "utf8");
+  const appShell = await readFile(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.equal(usesProviderNeutralGameData("activity"), true);
+  assert.deepEqual(pageDomains("activity"), ["claim", "members"]);
+  assert.match(appShell, /<ActivityPanel[^>]*members=\{data\.members\}/);
+  assert.doesNotMatch(activityPage, /\/api\/bitjita|fetch\([^)]*members/);
+});
+
 test("server background ingestion keeps citizens and the primary-region player session current", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(source, /RelayPrimaryRegionRuntime/);

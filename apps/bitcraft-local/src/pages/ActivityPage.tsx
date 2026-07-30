@@ -3,7 +3,7 @@ import "../styles/activity.css";
 import { Activity, Box, Building2, RefreshCw } from "lucide-react";
 
 import { MiniStat } from "../components/main/Stats";
-import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo, timestampMs } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { unique } from "../utils/array";
@@ -13,7 +13,6 @@ import { activityStyle } from "./activity/activityDisplay";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
 const ACTIVITY_FILTERS = [
@@ -26,7 +25,7 @@ const ACTIVITY_FILTERS = [
   ["buildings", "Structures"],
 ] as const;
 
-export function ActivityPanel({ activity, activityTotal, claimId, error, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; access?: EffectiveAccess | null }) {
+export function ActivityPanel({ activity, activityTotal, claimId, error, members, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; members: AnyRecord[]; access?: EffectiveAccess | null }) {
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
@@ -37,15 +36,6 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
   React.useEffect(() => {
     if (resolvedFilter && resolvedFilter !== filter) setFilter(resolvedFilter);
   }, [filter, resolvedFilter, setFilter]);
-  const [members, setMembers] = React.useState<AnyRecord[]>([]);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${API}/claims/${claimId}/members`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`members HTTP ${response.status}`)))
-      .then((payload) => setMembers(unwrap<AnyRecord[]>(payload, "members", [])))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [claimId]);
   const trimmedSearch = searchQuery.trim();
   React.useEffect(() => {
     if (!trimmedSearch) {
