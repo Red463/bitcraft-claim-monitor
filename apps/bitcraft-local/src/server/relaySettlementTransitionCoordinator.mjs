@@ -146,6 +146,7 @@ export function createRelaySettlementTransitionCoordinator({
   let retryTimer = null;
   let retryAttempt = 0;
   let retryClaimId = null;
+  let healthRecoveryPending = false;
   const lastAppliedFingerprintByClaim = new Map();
   const failedClaimIds = new Set();
   const idleWaiters = new Set();
@@ -228,7 +229,8 @@ export function createRelaySettlementTransitionCoordinator({
             fingerprint,
           };
           if (lastAppliedFingerprintByClaim.get(claimId) === fingerprint) {
-            if (failedClaimIds.delete(claimId)) {
+            if (failedClaimIds.delete(claimId) || healthRecoveryPending) {
+              healthRecoveryPending = false;
               retryAttempt = 0;
               retryClaimId = null;
               safelyNotify(onRecovery, event, context);
@@ -241,13 +243,23 @@ export function createRelaySettlementTransitionCoordinator({
           failedClaimIds.delete(claimId);
           retryAttempt = 0;
           retryClaimId = null;
-          safelyNotify(onSuccess, event, context, attempt);
+          if (normalizedClaimId(configuredClaimId()) === claimId) {
+            healthRecoveryPending = false;
+            safelyNotify(onSuccess, event, context, attempt);
+          } else {
+            healthRecoveryPending = true;
+          }
         } catch (error) {
-          failedClaimIds.add(claimId);
-          safelyNotify(onFailure, error, event, attempt);
           const pendingGeneration = validGeneration(pendingEvent?.generation);
           const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);
           const configuredClaimIdAtFailure = normalizedClaimId(configuredClaimId());
+          if (configuredClaimIdAtFailure === claimId) {
+            healthRecoveryPending = false;
+            failedClaimIds.add(claimId);
+            safelyNotify(onFailure, error, event, attempt);
+          } else {
+            healthRecoveryPending = true;
+          }
           if (
             !(error instanceof SettlementSourceValidationError)
             && configuredClaimIdAtFailure === claimId
