@@ -89,6 +89,7 @@ import {
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
+  enrichMarketWithCatalog,
   enrichPublicCraftsWithCatalog,
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
@@ -97,6 +98,7 @@ import {
   parseDomainKeys,
   RelayHttpClient,
   RelayBitCraftProvider,
+  RelayClaimMarketRuntime,
   RelayGlobalCatalogRuntime,
   RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
@@ -407,6 +409,10 @@ const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
 });
+const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+});
 const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
@@ -419,6 +425,7 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
 let relayPrimaryRegionStarted = false;
+let relayClaimMarketStarted = false;
 let relayPublicCraftStarted = false;
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
@@ -438,11 +445,17 @@ function gameDataProviderHealth() {
     snapshot: currentStateRepository.read(currentClaimId(), "public-crafts"),
     providerHealth: health,
   });
+  const claimMarket = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayClaimMarketRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "market"),
+    providerHealth: health,
+  });
   return {
     ...health,
     globalCatalog,
     primaryRegion,
     publicCrafts,
+    claimMarket,
   };
 }
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
@@ -9435,6 +9448,16 @@ const server = createServer(async (req, res) => {
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
             };
           }
+          if (domain === "market") {
+            const projected = enrichMarketWithCatalog(data, {
+              getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              claim: currentStateRepository.read(currentClaimId(), "claim")?.data ?? null,
+            });
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
+          }
           if (domain === "equipment") {
             return {
               data: enrichEquipmentWithCatalog(
@@ -11099,17 +11122,35 @@ function startBackgroundTasks() {
         throw new Error("Relay regional sessions are waiting for a claim region");
       }
       if (!relayPublicCraftStarted) {
-        const settings = getSettings();
-        const activeRegionIds = parseRegionIds(
-          `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
-        );
-        await relayPublicCraftRuntime.start({
-          relayBaseUrl,
-          claimId,
-          primaryRegionId: regionId,
-          activeRegionIds,
-        });
-        relayPublicCraftStarted = true;
+        try {
+          const settings = getSettings();
+          const activeRegionIds = parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          );
+          await relayPublicCraftRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayPublicCraftStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay public-craft startup failed: ${errorMessage(error)}`);
+        }
+      }
+      try {
+        if (!relayClaimMarketStarted) {
+          await relayClaimMarketRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+          });
+          relayClaimMarketStarted = true;
+        } else {
+          await relayClaimMarketRuntime.reconcile({ regionId });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay claim-market startup failed: ${errorMessage(error)}`);
       }
       if (!Array.isArray(members) || members.length === 0) {
         return;

@@ -48,6 +48,13 @@ joins, merge complete generations into the generic current-state repository,
 and project catalog labels locally. It adds no feature-specific SQL table and
 remains usable from last-good state during a Relay outage.
 
+Local Market follows the same rule for the monitored settlement: typed
+claim-scoped order subscriptions and bounded owner joins continuously publish
+the generic `market` generation used by Local Market and Dashboard. Existing
+market tables are not the current page source; they remain only where durable
+transition history, notifications, or measured cross-region indexes still
+justify them.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;

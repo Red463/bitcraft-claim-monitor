@@ -10,7 +10,7 @@ const { legacyPageEndpointMap } = await import(
 );
 
 test("claim overview, Members, Professions, and Leaderboard request provider-neutral local domains", async () => {
-  assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players", "construction"]);
+  assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players", "construction", "market"]);
   assert.deepEqual(pageDomains("members"), [
     "claim",
     "members",
@@ -177,6 +177,29 @@ test("Public Craft Finder uses the live cross-region Relay projection without br
   assert.match(server, /RelayPublicCraftRuntime/);
   assert.match(server, /domain === "public-crafts"/);
   assert.match(server, /enrichPublicCraftsWithCatalog/);
+});
+
+test("Local Market uses the live claim-scoped Relay order generation", async () => {
+  assert.equal(usesProviderNeutralGameData("settlement-market"), true);
+  assert.deepEqual(pageDomains("settlement-market"), ["claim", "members", "market"]);
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "settlement-market"), {});
+  const page = await readFile(new URL("../src/pages/SettlementMarketPage.tsx", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const componentStart = page.indexOf("export function SettlementMarket");
+  const componentEnd = page.indexOf("\nexport function ", componentStart + 10);
+  const component = page.slice(componentStart, componentEnd === -1 ? page.length : componentEnd);
+  assert.doesNotMatch(component, /\/api\/bitjita|fetch\(`\$\{API\}/);
+  assert.match(component, /fetch\(`\$\{LOCAL_API\}\/market\/history/);
+  assert.match(server, /RelayClaimMarketRuntime/);
+  assert.match(server, /domain === "market"/);
+  assert.match(server, /enrichMarketWithCatalog/);
+  const reconcileStart = server.indexOf("const reconcilePrimaryRegion = async () =>");
+  const reconcileEnd = server.indexOf("const refreshRelay = async", reconcileStart);
+  const reconcile = server.slice(reconcileStart, reconcileEnd);
+  assert.ok(
+    reconcile.indexOf("relayClaimMarketRuntime.start") < reconcile.indexOf("members.length === 0"),
+    "claim-market subscriptions must not wait for settlement member data",
+  );
 });
 
 test("server background ingestion keeps citizens, primary-region state, and public crafts current", async () => {

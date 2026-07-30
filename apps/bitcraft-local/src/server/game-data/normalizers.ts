@@ -1366,6 +1366,175 @@ export function normalizeRegionalPublicCrafts(options: {
   return { data: { craftResults }, complete, warnings };
 }
 
+export function normalizeRegionalMarket(options: {
+  claimId: string;
+  regionId: string;
+  sellRows: unknown[];
+  buyRows: unknown[];
+  usernameRows: unknown[];
+  marketplaceRows: unknown[];
+}) {
+  const claimId = decimalString(options.claimId, "regional market claim id");
+  const regionId = decimalString(options.regionId, "regional market region id");
+  const warnings: string[] = [];
+  const usernames = new Map<string, WireRecord>();
+  for (const [index, value] of options.usernameRows.entries()) {
+    try {
+      const row = record(value, `Regional player_username_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional player_username_state row ${index} entity id`,
+      );
+      if (!usernames.has(entityId)) usernames.set(entityId, row);
+    } catch (error) {
+      warnings.push(
+        `Regional player_username_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const marketplaces: Array<Record<string, unknown>> = [];
+  for (const [index, value] of options.marketplaceRows.entries()) {
+    try {
+      const row = record(value, `Regional marketplace_state row ${index}`);
+      const rowClaimId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional marketplace_state row ${index} claim id`,
+      );
+      if (rowClaimId !== claimId) {
+        warnings.push(
+          `Regional marketplace_state omitted cross-claim row for claim ${rowClaimId}.`,
+        );
+        continue;
+      }
+      const coordinates = record(
+        row.coordinates,
+        `Regional marketplace_state row ${index} coordinates`,
+      );
+      marketplaces.push({
+        buildingEntityId: decimalString(
+          row.buildingEntityId ?? row.building_entity_id,
+          `Regional marketplace_state row ${index} building id`,
+        ),
+        claimEntityId: rowClaimId,
+        locationX: integer(coordinates.x, `Regional marketplace_state row ${index} x`),
+        locationZ: integer(coordinates.z, `Regional marketplace_state row ${index} z`),
+        dimension: decimalString(
+          coordinates.dimension,
+          `Regional marketplace_state row ${index} dimension`,
+        ),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional marketplace_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  marketplaces.sort((left, right) => (
+    String(left.buildingEntityId).localeCompare(String(right.buildingEntityId))
+  ));
+  const location = marketplaces[0] ?? null;
+
+  function orderTimestamp(row: WireRecord, entityId: string): string {
+    const value = record(row.timestamp, `Regional market order ${entityId} timestamp`);
+    return normalizeTimestamp(
+      decimalString(
+        value.__timestamp_micros_since_unix_epoch__
+          ?? value.microsSinceUnixEpoch
+          ?? value.micros_since_unix_epoch,
+        `Regional market order ${entityId} timestamp micros`,
+      ),
+      "microseconds",
+    );
+  }
+
+  const listings: Array<Record<string, unknown>> = [];
+  function appendOrders(values: unknown[], side: "sell" | "buy") {
+    for (const [index, value] of values.entries()) {
+      try {
+        const row = record(value, `Regional ${side}_order_state row ${index}`);
+        const entityId = decimalString(
+          row.entityId ?? row.entity_id,
+          `Regional ${side}_order_state row ${index} entity id`,
+        );
+        const rowClaimId = decimalString(
+          row.claimEntityId ?? row.claim_entity_id,
+          `Regional market order ${entityId} claim id`,
+        );
+        if (rowClaimId !== claimId) {
+          warnings.push(
+            `Regional ${side}_order_state omitted cross-claim order ${entityId} for claim ${rowClaimId}.`,
+          );
+          continue;
+        }
+        const ownerEntityId = decimalString(
+          row.ownerEntityId ?? row.owner_entity_id,
+          `Regional market order ${entityId} owner id`,
+        );
+        const username = usernames.get(ownerEntityId);
+        if (!username) {
+          warnings.push(
+            `Regional market order ${entityId} has no player_username_state row for ${ownerEntityId}.`,
+          );
+        }
+        const itemTypeValue = integer(
+          row.itemType ?? row.item_type,
+          `Regional market order ${entityId} item type`,
+        );
+        if (itemTypeValue !== 0 && itemTypeValue !== 1) {
+          throw new TypeError(
+            `Regional market order ${entityId} item type must be 0 or 1.`,
+          );
+        }
+        const price = decimalString(
+          row.priceThreshold ?? row.price_threshold,
+          `Regional market order ${entityId} price`,
+        );
+        listings.push({
+          entityId,
+          claimEntityId: rowClaimId,
+          regionId,
+          ownerEntityId,
+          ownerUsername: username ? String(username.username ?? "") : "",
+          itemId: decimalString(
+            row.itemId ?? row.item_id,
+            `Regional market order ${entityId} item id`,
+          ),
+          itemType: itemTypeValue === 1 ? "cargo" : "item",
+          price,
+          priceThreshold: price,
+          quantity: decimalString(
+            row.quantity,
+            `Regional market order ${entityId} quantity`,
+          ),
+          storedCoins: decimalString(
+            row.storedCoins ?? row.stored_coins ?? 0,
+            `Regional market order ${entityId} stored coins`,
+          ),
+          side,
+          timestamp: orderTimestamp(row, entityId),
+          locationX: location?.locationX ?? null,
+          locationZ: location?.locationZ ?? null,
+        });
+      } catch (error) {
+        warnings.push(
+          `Regional ${side}_order_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+  appendOrders(options.sellRows, "sell");
+  appendOrders(options.buyRows, "buy");
+  if (!marketplaces.length) {
+    warnings.push(`Regional market has no marketplace_state row for claim ${claimId}.`);
+  }
+
+  return {
+    data: { claimId, regionId, marketplaces, listings },
+    warnings,
+  };
+}
+
 export function normalizeClaimCrafts(value: unknown) {
   const payload = record(value, "Relay claim crafts payload");
   const crafts = Array.isArray(payload.crafts) ? payload.crafts : [];

@@ -17,7 +17,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Research | Provider-neutral page and Craft Planner tier presets over claim-filtered regional technology state and the global technology catalog; scheduled collector retired | Regional tech state plus global catalogs | ready for soak |
 | Recruitment | Members reads claim-filtered live regional posting state enriched from the global skill catalog; legacy endpoint and collector ownership retired | Regional recruitment state plus global skill catalog | ready for soak |
 | Storage activity | Relay live HTTP tail on the 15-second provider loop, with bounded container rotation, exact item/cargo catalog enrichment, and idempotent durable copy into `activity_events`; legacy scheduled collector retired | Relay storage-log durable copy | ready for soak |
-| Settlement market | BitJita listings | Proven regional buy/sell order state | baseline |
+| Settlement market | Local Market and Dashboard current-listing metrics read the generic `market` generation from a continuously connected claim-scoped regional session. Orders join exact owner usernames and typed item/cargo catalog identities; analytics/history still use legacy observed rows | Regional buy/sell/marketplace state plus local catalog projection; transition history after sale semantics are proven | in progress |
 | Global market tools | BitJita search/history/trades | Local aggregation and region pool | baseline |
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
 | Region | BitJita region/status/trade volume | Configured regional sessions | baseline |

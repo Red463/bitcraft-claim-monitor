@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { legacyPageEndpointMap } from "../src/api/legacyPageEndpoints.ts";
 
-test("legacy Settlement Market requests the monitored claim listing feed", () => {
+test("migrated Settlement Market has no legacy endpoint map", () => {
   const endpoints = legacyPageEndpointMap("claim-42", "settlement-market");
 
-  assert.equal(endpoints.market, "/claims/claim-42/market/listings?limit=200");
+  assert.deepEqual(endpoints, {});
 });
 
 test("migrated Craft Monitor has no legacy endpoint map", () => {

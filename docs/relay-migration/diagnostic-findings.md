@@ -356,6 +356,32 @@ use regional sessions. The one matching empire-settlement row is useful but
 does not prove global completeness for empire nodes, siege, watchtowers, or
 membership; those remain subject to regional comparison.
 
+## Typed settlement market subscription proof
+
+The generated regional bindings completed the staged Local Market subscription
+against the topology-discovered region-19 source on 2026-07-30:
+
+| Field | Observed value |
+|---|---|
+| Claim | `1369094286777412590` |
+| Database | `relay-mirror-bc19` |
+| Schema fingerprint | `762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312` |
+| Sell orders | 33 |
+| Buy orders | 0 |
+| Marketplace rows | 1 |
+| Normalization warnings | 0 |
+
+The first stage contains only exact `claim_entity_id` filters for sell orders,
+buy orders, and marketplace state. The second stage derives current owner IDs
+and subscribes to bounded equality filters in `player_username_state`. Item and
+Cargo identities are projected through separate local catalog keys. No
+cross-claim row is allowed to commit.
+
+This current state is stored only as the generic `market` last-good domain and
+is consumed by Local Market and Dashboard. Legacy market tables are not the
+live page source and remain only until transition history, sale corroboration,
+notifications, and regional aggregation ownership are resolved.
+
 ## Hexite deposit HTTP semantics
 
 The Region 19 Relay deposit route was sampled again on 2026-07-30. It returned
@@ -436,11 +462,14 @@ exact through `BigInt` calculation and formatting.
 
 The production typed-session verifier is
 `apps/bitcraft-local/scripts/verify-relay-public-crafts-live.mjs`. Its
-2026-07-30 run could not complete because region 19 changed to unready during
-validation: Relay health reported both the local mirror and upstream as
-`down` with `local-stdb reconnect`. The runtime correctly preserves last-good
-data in this state. A successful applied-session proof remains required before
-this surface is marked ready for soak.
+2026-07-30 runs could not complete: Relay first changed to unready with both
+the local mirror and upstream reporting `down`/`local-stdb reconnect`; after a
+brief recovery long enough for the claim-market verifier to pass, the larger
+Public Craft staged subscription again failed to apply before the bounded
+timeout and the source returned to unready. Stage diagnostics are retained in
+the session health model. The runtime correctly preserves last-good data, but
+a successful applied-session proof remains required before this surface is
+marked ready for soak.
 
 ## Remaining diagnostic blockers
 

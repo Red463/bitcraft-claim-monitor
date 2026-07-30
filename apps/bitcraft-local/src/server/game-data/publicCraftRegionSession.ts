@@ -175,6 +175,7 @@ export class RelayPublicCraftRegionSession {
   #health = {
     connected: false,
     applied: false,
+    stage: "idle",
     lastAppliedAt: null as string | null,
     lastApplyDurationMs: null as number | null,
     rowCount: 0,
@@ -219,6 +220,7 @@ export class RelayPublicCraftRegionSession {
       .withDatabaseName(config.database)
       .onConnect((connection) => {
         this.#health.connected = true;
+        this.#health.stage = "public-markers";
         this.#health.lastError = null;
         this.#publicSubscription = connection.subscriptionBuilder()
           .onApplied(() => this.#guard(() => {
@@ -245,6 +247,7 @@ export class RelayPublicCraftRegionSession {
       );
     }
     this.#refreshing = true;
+    this.#health.stage = "craft-details";
     this.#refreshEpoch += 1;
     const epoch = this.#refreshEpoch;
     this.#clearDetailSubscriptions();
@@ -315,6 +318,7 @@ export class RelayPublicCraftRegionSession {
     buildingIds: Set<string>,
   ): void {
     const config = this.#requiredConfig();
+    this.#health.stage = "claims";
     const claimIds: string[] = [];
     for (const [index, value] of rows(connection.db.buildingState).entries()) {
       const row = wireRecord(value, `Relay public-craft building ${index}`);
@@ -356,6 +360,7 @@ export class RelayPublicCraftRegionSession {
     claimIds: Set<string>,
   ): void {
     const config = this.#requiredConfig();
+    this.#health.stage = "locations";
     const locationIds = [...buildingIds];
     for (const [index, value] of rows(connection.db.claimState).entries()) {
       const row = wireRecord(value, `Relay public-craft claim ${index}`);
@@ -390,6 +395,7 @@ export class RelayPublicCraftRegionSession {
   #completeDetailRefresh(connection: BindingConnection, epoch: number): void {
     if (epoch !== this.#refreshEpoch) return;
     this.#refreshing = false;
+    this.#health.stage = "applying";
     this.#attachTableListeners(connection);
     this.#applySnapshot(connection);
   }
@@ -454,6 +460,7 @@ export class RelayPublicCraftRegionSession {
       });
       Promise.resolve(result).then(() => {
         this.#health.applied = true;
+        this.#health.stage = "applied";
         this.#health.lastAppliedAt = receivedAt;
         this.#health.lastError = null;
       }).catch((error: unknown) => this.#recordError(error))
@@ -574,5 +581,6 @@ export class RelayPublicCraftRegionSession {
     this.#applyPending = false;
     this.#refreshing = false;
     this.#health.connected = false;
+    this.#health.stage = "stopped";
   }
 }

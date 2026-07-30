@@ -1,4 +1,6 @@
 export * from "./contracts.ts";
+export * from "./claimMarketRegionSession.ts";
+export * from "./claimMarketRuntime.ts";
 export * from "./constructionProjection.ts";
 export * from "./craftProjection.ts";
 export * from "./equipmentProjection.ts";
@@ -8,6 +10,7 @@ export * from "./globalCatalogRuntime.ts";
 export * from "./globalCatalogSession.ts";
 export * from "./http.ts";
 export * from "./inventoryProjection.ts";
+export * from "./marketProjection.ts";
 export * from "./normalizers.ts";
 export * from "./playerDataService.ts";
 export * from "./persistedRuntimeHealth.ts";

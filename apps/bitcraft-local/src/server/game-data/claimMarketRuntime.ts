@@ -1,0 +1,205 @@
+import {
+  RelayClaimMarketRegionSession,
+  type RegionalClaimMarketSnapshot,
+} from "./claimMarketRegionSession.ts";
+import type { DomainSnapshotBatch } from "./contracts.ts";
+import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
+import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
+
+type BindingManifest = Parameters<RelayClaimMarketRegionSession["start"]>[0]["manifest"];
+
+type CurrentStateRepository = {
+  nextGeneration(claimId: string): number;
+  commitGeneration(batch: DomainSnapshotBatch): Promise<void> | void;
+};
+
+type ClaimMarketSession = {
+  start(config: Parameters<RelayClaimMarketRegionSession["start"]>[0]): Promise<void>;
+  health(): ReturnType<RelayClaimMarketRegionSession["health"]>;
+  stop(): Promise<void>;
+};
+
+type ClaimMarketSessionFactory = (
+  options: ConstructorParameters<typeof RelayClaimMarketRegionSession>[0],
+) => ClaimMarketSession;
+
+type RuntimeDependencies = {
+  manifest: BindingManifest;
+  currentStateRepository: CurrentStateRepository;
+  discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
+  createSession?: ClaimMarketSessionFactory;
+};
+
+function decimalInteger(value: unknown, label: string): string {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/.test(normalized)) throw new TypeError(`${label} must be a decimal integer`);
+  return normalized;
+}
+
+export class RelayClaimMarketRuntime {
+  readonly #manifest: BindingManifest;
+  readonly #currentStateRepository: CurrentStateRepository;
+  readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
+  readonly #createSession: ClaimMarketSessionFactory;
+  #session: ClaimMarketSession | null = null;
+  #relayBaseUrl: string | null = null;
+  #claimId: string | null = null;
+  #regionId: string | null = null;
+  #sessionEpoch = 0;
+  #commitTail: Promise<void> = Promise.resolve();
+  #source: {
+    sourceKey: `region:${number}`;
+    regionId: string;
+    database: string;
+    schemaFingerprint: string;
+    uri: string;
+  } | null = null;
+  #lastError: string | null = null;
+
+  constructor(dependencies: RuntimeDependencies) {
+    this.#manifest = dependencies.manifest;
+    this.#currentStateRepository = dependencies.currentStateRepository;
+    this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
+    this.#createSession = dependencies.createSession
+      ?? ((options) => new RelayClaimMarketRegionSession(options));
+  }
+
+  async start(config: {
+    relayBaseUrl: string;
+    claimId: string;
+    regionId: string;
+  }): Promise<void> {
+    if (this.#session) throw new Error("Relay claim-market runtime is already started");
+    this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
+    this.#claimId = decimalInteger(config.claimId, "Relay claim-market claim id");
+    await this.#startSession(config.regionId);
+  }
+
+  async reconcile(config: { regionId: string }): Promise<void> {
+    const regionId = decimalInteger(config.regionId, "Relay claim-market region id");
+    if (this.#session && this.#regionId === regionId) return;
+    this.#sessionEpoch += 1;
+    await this.#session?.stop();
+    await this.#commitTail;
+    this.#session = null;
+    await this.#startSession(regionId);
+  }
+
+  async #startSession(regionIdValue: string): Promise<void> {
+    const relayBaseUrl = this.#relayBaseUrl;
+    const claimId = this.#claimId;
+    if (!relayBaseUrl || !claimId) throw new Error("Relay claim-market runtime is not configured");
+    const regionId = decimalInteger(regionIdValue, "Relay claim-market region id");
+    let openingSession: ClaimMarketSession | null = null;
+    try {
+      const topology = await this.#discoverTopology(relayBaseUrl);
+      const region = topology.regions.get(regionId);
+      if (!region?.ready || !region.schemaFingerprint) {
+        throw new Error(`Relay region ${regionId} source is not ready or has no schema fingerprint`);
+      }
+      const source = {
+        sourceKey: `region:${Number(regionId)}` as const,
+        regionId,
+        database: region.database,
+        schemaFingerprint: region.schemaFingerprint,
+        uri: relayWebSocketUri(relayBaseUrl, region.port),
+      };
+      const sessionEpoch = this.#sessionEpoch + 1;
+      this.#sessionEpoch = sessionEpoch;
+      openingSession = this.#createSession({
+        onSnapshot: (snapshot) => this.#enqueueSnapshot(snapshot, sessionEpoch),
+      });
+      await openingSession.start({
+        uri: source.uri,
+        database: source.database,
+        schemaFingerprint: source.schemaFingerprint,
+        manifest: this.#manifest,
+        generation: 1,
+        regionId,
+        claimId,
+      });
+      this.#session = openingSession;
+      this.#regionId = regionId;
+      this.#source = source;
+      this.#lastError = null;
+    } catch (error) {
+      this.#lastError = error instanceof Error ? error.message : String(error);
+      try {
+        await openingSession?.stop();
+      } catch {
+        // Preserve the actionable startup failure.
+      }
+      this.#session = null;
+      throw error;
+    }
+  }
+
+  #enqueueSnapshot(snapshot: RegionalClaimMarketSnapshot, sessionEpoch: number): Promise<void> {
+    const commit = this.#commitTail.then(async () => {
+      if (sessionEpoch !== this.#sessionEpoch) return;
+      await this.#commitSnapshot(snapshot);
+    });
+    this.#commitTail = commit.catch(() => {});
+    return commit;
+  }
+
+  async #commitSnapshot(snapshot: RegionalClaimMarketSnapshot): Promise<void> {
+    const claimId = this.#claimId;
+    if (!claimId) throw new Error("Relay claim-market runtime has no configured claim");
+    if (snapshot.data.claimId !== claimId || snapshot.regionId !== this.#regionId) {
+      throw new Error("Relay claim-market snapshot escaped its configured claim or region");
+    }
+    const sourceKey = `region:${Number(snapshot.regionId)}` as const;
+    try {
+      await this.#currentStateRepository.commitGeneration({
+        claimId,
+        generation: this.#currentStateRepository.nextGeneration(claimId),
+        domains: {
+          market: {
+            data: snapshot.data,
+            confidence: snapshot.warnings.length ? "partial" : "authoritative",
+            provenance: {
+              provider: "relay",
+              sourceKey,
+              regionId: snapshot.regionId,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings: snapshot.warnings,
+          },
+        },
+      });
+      this.#lastError = null;
+    } catch (error) {
+      this.#lastError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
+  health() {
+    return {
+      running: this.#session != null,
+      source: this.#source ? { ...this.#source } : null,
+      subscription: this.#session?.health() ?? {
+        connected: false,
+        applied: false,
+        lastAppliedAt: null,
+        lastError: null,
+      },
+      lastError: this.#lastError,
+    };
+  }
+
+  async stop(): Promise<void> {
+    this.#sessionEpoch += 1;
+    await this.#session?.stop();
+    await this.#commitTail;
+    this.#session = null;
+    this.#relayBaseUrl = null;
+    this.#claimId = null;
+    this.#regionId = null;
+    this.#source = null;
+  }
+}
