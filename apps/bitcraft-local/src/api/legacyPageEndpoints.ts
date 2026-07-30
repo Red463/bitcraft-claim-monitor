@@ -11,7 +11,6 @@ export function legacyPageEndpointMap(claimId: string, activePanel?: ActivePanel
     inventories: `/claims/${claimId}/inventories`,
     market: `/claims/${claimId}/market/listings?limit=200`,
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
-    layout: `/claims/${claimId}/layout`,
     skills: "/skills",
   } as const;
   if (!activePanel) return endpoints;

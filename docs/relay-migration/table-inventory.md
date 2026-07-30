@@ -71,7 +71,8 @@ generation plus `domain_payload_current` for durable last-good recovery.
 | Construction | No dedicated table | Claim-filtered regional subscription; recipe/building enrichment from the continuously maintained global catalog |
 | Research and recruitment | No dedicated table | Claim-filtered regional subscriptions with incremental catalog joins |
 | Equipment, buffs, and player state | No dedicated table | Member-filtered regional subscriptions |
-| Claim layout and current locations | No dedicated table | Bounded claim/entity-filtered regional subscriptions |
+| Legacy claim layout payload | Retire | No replacement: static usage proof found no reader. Claim focus uses the live claim domain; Map player tracking uses live member/player IDs |
+| Future in-app current locations | No dedicated table | Add bounded entity-filtered regional subscriptions only when a retained feature actually consumes coordinates |
 | Current empire, watchtower, and siege state | No dedicated table | Global rows where proven complete; otherwise bounded adaptive regional sessions |
 | Current Hexite deposit state | No dedicated table | Bounded Relay HTTP snapshot on the 15-second live loop with durable last-good recovery in `domain_payload_current` |
 | Current market orders and listings | No raw mirror table by default | Order subscriptions and incremental transition handling |
@@ -242,9 +243,10 @@ be a committed domain event, not a scheduled ingestion sweep.
   Server fallback/background compositions now read the same normalized Relay
   projection. No independent construction notification/history rows existed
   to retain or migrate.
-- Craft Planner no longer owns a legacy claim-buildings fetch. The later
-  layout vertical may enrich these same filtered building rows with bounded
-  location data; it must not add duplicate current-state ownership.
+- Craft Planner no longer owns a legacy claim-buildings fetch. Any later
+  retained feature that needs building coordinates may enrich these same
+  filtered rows with bounded location data; it must not add duplicate
+  current-state ownership.
 
 ## Research vertical evidence
 
@@ -303,5 +305,21 @@ be a committed domain event, not a scheduled ingestion sweep.
 - The BitJita-era ten-minute in-process map catalog cache is removed. No
   dedicated resource, creature, map-catalog, refresh-ledger, or scheduled-job
   table was added.
-- Claim layout, player locations, and active-region discovery remain separate
-  incomplete Map/Region verticals and are not inferred from catalog rows.
+- Active-region discovery is a separate live global-domain input and is not
+  inferred from catalog rows.
+
+## Map input retirement evidence
+
+- Static usage proof found no `data.layout` reader in the application. The
+  legacy `/claims/{id}/layout` response was fetched, copied into
+  `domain_payload_current`, normalized, and requested by Map without affecting
+  rendering or behavior.
+- Map now requests only the live `claim`, `members`, and `players` domains.
+  Claim coordinates provide settlement focus, and live player identities and
+  sign-in state drive the existing player-tracking map integration.
+- The legacy endpoint, collector fetch, payload key, provider domain key,
+  normalizer field, proxy-cache pattern, and stale persisted `layout` rows are
+  removed together.
+- No typed location subscription or SQL projection replaces unused data.
+  Bounded `location_state` joins remain the rule if a future retained feature
+  requires in-app coordinates.

@@ -553,7 +553,6 @@ marked ready for soak.
   cancellation;
 - craft contributor identity and amounts;
 - complete global-versus-regional empire comparison;
-- bounded claim-location joins for every required layout entity class;
 - multi-region Hexite reserve aggregation.
 
 ## Deal Watch live-order baseline

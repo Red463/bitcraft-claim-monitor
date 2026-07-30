@@ -14,6 +14,7 @@ const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
   "empires",
   "activity",
   "publiccrafts",
+  "map",
 ]);
 
 export function usesProviderNeutralGameData(activePanel: ActivePanel): boolean {
@@ -40,7 +41,7 @@ export function pageDomains(activePanel: ActivePanel): DomainKey[] {
     case "settlement-market":
       return ["claim", "members", "market"];
     case "map":
-      return ["claim", "members", "players", "layout"];
+      return ["claim", "members", "players"];
     case "region":
       return ["claim", "members", "players", "region"];
     case "empires":

@@ -25,6 +25,7 @@ test("legacy endpoint inventory no longer includes Recruitment", () => {
   const endpoints = legacyPageEndpointMap("claim-42");
 
   assert.equal(endpoints.recruitment, undefined);
+  assert.equal(endpoints.layout, undefined);
 });
 
 test("global Market does not request monitored claim listings", () => {

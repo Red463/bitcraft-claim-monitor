@@ -165,6 +165,20 @@ test("Activity member filters use the current Relay member domain", async () => 
   assert.doesNotMatch(activityPage, /\/api\/bitjita|fetch\([^)]*members/);
 });
 
+test("Map uses live Relay identity and catalog inputs without the unused legacy layout payload", async () => {
+  const mapPage = await readFile(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const normalizer = await readFile(new URL("../src/utils/normalize.ts", import.meta.url), "utf8");
+
+  assert.equal(usesProviderNeutralGameData("map"), true);
+  assert.deepEqual(pageDomains("map"), ["claim", "members", "players"]);
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "map"), {});
+  assert.doesNotMatch(mapPage, /data\.layout/);
+  assert.doesNotMatch(server, /fetchBitjita\(`\/claims\/\$\{id\}\/layout`/);
+  assert.doesNotMatch(server, /payload\("layout"/);
+  assert.doesNotMatch(normalizer, /raw\?\.layout|\blayout,/);
+});
+
 test("Public Craft Finder uses the live cross-region Relay projection without browser upstream calls", async () => {
   assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
   assert.deepEqual(pageDomains("publiccrafts"), ["claim", "public-crafts"]);

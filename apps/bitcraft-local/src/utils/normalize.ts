@@ -90,12 +90,11 @@ export function normalizeData(raw: AnyRecord | null) {
   const crafts = unwrap<AnyRecord[]>(raw?.crafts, "craftResults", []);
   const players = unwrap<AnyRecord[]>(raw?.players, "players", []).map(normalizePlayer);
   const region = unwrap<AnyRecord[]>(raw?.region, "claims", []);
-  const layout = raw?.layout ?? {};
   const skills = raw?.skills ?? {};
   const contributions = raw?.contributions ?? {};
   const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
   const regionStatus = unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []);
   const tradeVolume = raw?.tradeVolume ?? {};
-  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, skills, contributions, marketApi, regionStatus, tradeVolume };
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, skills, contributions, marketApi, regionStatus, tradeVolume };
 }
 

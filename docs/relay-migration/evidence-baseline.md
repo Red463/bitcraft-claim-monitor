@@ -60,10 +60,15 @@ produce durable fixtures:
 - craft contributor identity and contribution amounts;
 - completed sale versus removed/cancelled listing;
 - global versus regional empire completeness;
-- claim layout and bounded location joins;
 - multi-region Hexite reserve calculations.
 
 No unobserved mapping may be filled with invented data.
+
+The legacy claim-layout diagnostic is no longer a cutover blocker. Static
+usage proof found that the application had no reader for the fetched layout
+payload, so the migration intentionally retires that request and persisted
+payload instead of recreating an unused Relay join. Future in-app coordinate
+features still require bounded entity-filtered evidence before implementation.
 
 Bounded diagnostics have now proven the Town Bank
 `bank_state.building_entity_id -> inventory_state.owner_entity_id` join,

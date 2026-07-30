@@ -3,7 +3,7 @@ export const DEFAULT_BITJITA_PROXY_CACHE_POLICIES = [
   { pattern: /^\/api\/market$/, ttlMs: 5 * 60 * 1000 },
   { pattern: /^\/api\/players\/[^/]+$/, ttlMs: 60 * 1000 },
   { pattern: /^\/api\/claims\/[^/]+\/(?:members|citizens)$/, ttlMs: 30 * 1000 },
-  { pattern: /^\/api\/claims\/[^/]+\/(?:market\/listings|buildings|inventories|construction|layout)$/, ttlMs: 15 * 1000 },
+  { pattern: /^\/api\/claims\/[^/]+\/(?:market\/listings|buildings|inventories|construction)$/, ttlMs: 15 * 1000 },
   { pattern: /^\/api\/crafts(?:\/|$)/, ttlMs: 15 * 1000 },
   { pattern: /^\/api\/logs\/storage$/, ttlMs: 10 * 1000 },
 ];

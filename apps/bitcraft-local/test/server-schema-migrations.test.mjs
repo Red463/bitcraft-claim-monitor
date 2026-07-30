@@ -260,4 +260,5 @@ test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh'/);
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights'/);
   assert.match(executed[0], /DELETE FROM app_settings WHERE key = 'global_market_overview_json'/);
+  assert.match(executed[0], /DELETE FROM domain_payload_current WHERE domain = 'layout'/);
 });

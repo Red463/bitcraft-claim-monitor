@@ -242,7 +242,8 @@ They are not permitted to be the primary update path for:
 - inventories, active/passive crafts, or contributions;
 - construction, research, recruitment, equipment, or buffs;
 - market orders/listing transitions or current regional aggregates;
-- layout, location, empire, watchtower, siege, or deposit current state;
+- location rows required by a retained feature, empire, watchtower, siege, or
+  deposit current state;
 - catalog and Craft Planner source data.
 
 Disabling reconciliation and reporting jobs in a test environment must not
@@ -318,6 +319,7 @@ Initial candidates requiring explicit dependency proof are:
 | `domain_payload_current`, `provider_source_health`, `provider_subscription_health` | Keep as the atomic last-good and operational boundary unless a typed projection demonstrably replaces the same responsibility. |
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |
 | Selected-player inventory, Toolbelt, and housing | No dedicated table. Fetch one monitored member through `/api/local/player-data`, coalesce in flight, and retain independent 15-second process-memory last-good entries. |
+| Legacy claim layout payload | Retired. The Map UI never read it; claim focus comes from the live claim domain and player tracking passes live member/player IDs to the existing map integration. No Relay subscription or SQL projection replaces unused data. |
 | Market, activity, membership, production, notification, and audit history | Keep according to explicit retention because Relay supplies current state, not the application's observation history. |
 
 No table is kept merely because the legacy application had it, and no table is
@@ -402,9 +404,9 @@ failure for retry or repair.
   tables for a Milestone 6 bulk cleanup.
 - Update derived planner, market, construction, map, and empire projections
   incrementally from committed domain changes.
-- Construction, research, recruitment, equipment, buffs, layout, and current
-  empire state must not use scheduled-materialization tables merely to mirror
-  Relay rows.
+- Construction, research, recruitment, equipment, buffs, retained location
+  features, and current empire state must not use scheduled-materialization
+  tables merely to mirror Relay rows.
 - Measure regional session and HTTP-loop load; adjust freshness intervals only
   from observed capacity and operator guidance.
 

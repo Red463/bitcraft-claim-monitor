@@ -31,7 +31,7 @@ test("collector settings normalize saved dashboard configuration safely", () => 
 
 test("due collectors select only the domain payloads they own", () => {
   assert.deepEqual(payloadDomainsForCollectors(["members", "inventory"]), [
-    "members", "inventories", "layout",
+    "members", "inventories",
   ]);
   assert.deepEqual(payloadDomainsForCollectors([]), []);
 });
@@ -49,6 +49,8 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(collectorPrimaryPayloadDomain.construction, undefined);
   assert.equal(payloadDomainCollector.construction, undefined);
   assert.equal(domainPayloadKeys.includes("construction"), false);
+  assert.equal(domainPayloadKeys.includes("layout"), false);
+  assert.equal(payloadDomainCollector.layout, undefined);
   assert.equal(collectorCurrentTables.storageActivity, undefined);
   const browserDefaults = readFileSync(
     new URL("../src/settingsDefaults.ts", import.meta.url),

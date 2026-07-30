@@ -6708,7 +6708,6 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     tradeVolume: payload("tradeVolume", {}),
     inventories: payload("inventories", { buildings: [] }),
     recruitment: currentRecruitmentProjection(claimId),
-    layout: payload("layout", {}),
     skills: payload("skills", {}),
     partialErrors: [...new Set(partialErrors)],
     serverFreshness: {
@@ -6837,7 +6836,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     productionPayload,
     playerPayload,
     inventoriesPayload,
-    layoutPayload,
     skillsPayload,
     regionStatus,
   ] = await Promise.all([
@@ -6852,7 +6850,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
       : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
     collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
     collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => timedCollectorFetch(metrics, "inventory", "layout", () => fetchBitjita(`/claims/${id}/layout`))) : Promise.resolve(previousPayload(previous, "layout", {})),
     collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
     collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
@@ -6895,7 +6892,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     tradeVolume,
     inventories: inventoriesPayload,
     recruitment: recruitmentPayload,
-    layout: layoutPayload,
     skills: skillsPayload,
   };
 }
