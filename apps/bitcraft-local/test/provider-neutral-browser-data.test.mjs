@@ -8,7 +8,7 @@ const { loadGameData, pageDomains } = await import(
 
 test("claim overview, Members, Professions, and Leaderboard request provider-neutral local domains", async () => {
   assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players"]);
-  assert.deepEqual(pageDomains("members"), ["claim", "members", "citizens", "players"]);
+  assert.deepEqual(pageDomains("members"), ["claim", "members", "citizens", "players", "equipment", "crafts"]);
   assert.deepEqual(pageDomains("skills"), ["claim", "members", "citizens", "players", "skills"]);
   assert.deepEqual(pageDomains("leaderboard"), ["claim", "members", "citizens", "players", "skills"]);
 
@@ -67,8 +67,20 @@ test("Craft Monitor uses the provider-neutral craft snapshot and local catalog p
   assert.doesNotMatch(source, /\/api\/bitjita/);
   assert.doesNotMatch(source, /\/api\/local\/passive-crafts/);
   assert.match(source, /data\.raw\?\.crafts\?\.passiveCraftResults/);
+  assert.match(source, /\/api\/local\/player-data/);
+  assert.match(source, /playerToolbeltTools/);
+  assert.doesNotMatch(source, /players\/\$\{memberId\}\/inventories/);
   assert.match(server, /enrichCraftsWithCatalog/);
   assert.match(server, /providerCatalogRepository\.getDescription\("crafting_recipe", recipeId\)/);
+});
+
+test("Members uses Relay equipment, passive crafts, and bounded player inventory", async () => {
+  const source = await readFile(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /data\.raw\?\.equipment\?\.members/);
+  assert.match(source, /data\.raw\?\.crafts\?\.passiveCraftResults/);
+  assert.match(source, /\/api\/local\/player-data/);
+  assert.doesNotMatch(source, /players\/\$\{selectedId\}\/(?:buffs|equipment|equipment\/presets|inventories|passive-crafts)/);
+  assert.doesNotMatch(source, /BitJita has not reported gear/);
 });
 
 test("Inventory uses only provider-neutral local routes", async () => {
@@ -95,6 +107,18 @@ test("Relay HTTP current domains refresh on their own live loop instead of the l
   assert.match(server, /RELAY_HTTP_REFRESH_MS \?\? 15000/);
   assert.match(server, /setInterval\(\(\) => void refreshRelay\(\), relayHttpRefreshMs\)/);
   assert.doesNotMatch(server, /setInterval\(\(\) => void refreshRelay\(\), serverRefreshIntervalMs\(\)\)/);
+});
+
+test("bounded member inventory is exposed through a provider-neutral guarded local route", async () => {
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const routeIndex = server.indexOf('url.pathname === "/api/local/player-data"');
+  assert.notEqual(routeIndex, -1);
+  const boundary = server.indexOf("\n    if (req.method", routeIndex + 10);
+  const handler = server.slice(routeIndex, boundary === -1 ? routeIndex + 2200 : boundary);
+  assert.match(handler, /manualRefreshAccess\(req, res\)/);
+  assert.match(handler, /relayPlayerDataService\.inventory/);
+  assert.match(handler, /domains:\s*\{\s*inventory/);
+  assert.doesNotMatch(handler, /bitjita/i);
 });
 
 test("browser loader keeps usable stale envelopes and rejects an all-unavailable response", async () => {

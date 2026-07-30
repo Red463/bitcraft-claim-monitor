@@ -9,6 +9,7 @@ export type CatalogDescriptionKind =
   | "skill"
   | "resource"
   | "equipment"
+  | "tool"
   | "buff"
   | "claim_tech";
 
@@ -128,7 +129,9 @@ function normalizeStats(value: unknown) {
 
 export function normalizeCatalogDescription(value: unknown, kind: CatalogDescriptionKind) {
   const row = record(value, `Relay ${kind} description`);
-  const idValue = kind === "equipment" ? row.itemId ?? row.item_id : row.id;
+  const idValue = kind === "equipment" || kind === "tool"
+    ? row.itemId ?? row.item_id
+    : row.id;
   const id = decimalString(idValue, `${kind}.id`);
   const base = { kind, id };
 
@@ -221,6 +224,14 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
         .map((entry) => decimalString(entry, "equipment achievement id")),
       requiredKnowledges: (Array.isArray(row.requiredKnowledges) ? row.requiredKnowledges : [])
         .map((entry) => decimalString(entry, "equipment knowledge id")),
+    };
+  }
+  if (kind === "tool") {
+    return {
+      ...base,
+      toolType: integer(row.toolType ?? row.tool_type, "tool type"),
+      level: integer(row.level, "tool level"),
+      power: integer(row.power, "tool power"),
     };
   }
   if (kind === "buff") {
@@ -623,6 +634,48 @@ export function normalizeClaimInventory(value: unknown) {
     },
     dimensions,
     buildings: dimensions.flatMap((dimension) => dimension.buildings),
+  };
+}
+
+export function normalizePlayerInventory(value: unknown) {
+  const payload = record(value, "Relay player inventory payload");
+  const player = record(payload.player, "Relay player inventory player");
+  const normalizePlayerTimestamp = (field: unknown, label: string) => (
+    field == null ? {} : { [label]: normalizeTimestamp(decimalString(field, label), "seconds") }
+  );
+  const inventories = (Array.isArray(payload.inventories) ? payload.inventories : []).map((value, inventoryIndex) => {
+    const inventory = record(value, `Relay player inventory ${inventoryIndex}`);
+    const items = (Array.isArray(inventory.items) ? inventory.items : []).map((value, stackIndex) => (
+      normalizeStack(value, `inventories[${inventoryIndex}].items[${stackIndex}]`)
+    ));
+    const name = String(inventory.name ?? "");
+    return {
+      entityId: decimalString(inventory.entity_id, `inventories[${inventoryIndex}].entity_id`),
+      inventoryName: name,
+      name,
+      nickname: String(inventory.nickname ?? ""),
+      category: String(inventory.category ?? "").trim().toLowerCase(),
+      ...(inventory.claim_entity_id == null ? {} : {
+        claimEntityId: decimalString(
+          inventory.claim_entity_id,
+          `inventories[${inventoryIndex}].claim_entity_id`,
+        ),
+      }),
+      ...(inventory.claim_name == null ? {} : { claimName: String(inventory.claim_name) }),
+      items,
+      pockets: items.map((contents) => ({ contents })),
+    };
+  });
+  return {
+    player: {
+      entityId: decimalString(player.entity_id, "player.entity_id"),
+      username: String(player.username ?? ""),
+      regionId: decimalString(player.region, "player.region"),
+      signedIn: player.signed_in === true,
+      ...normalizePlayerTimestamp(player.last_active_timestamp, "lastActiveTimestamp"),
+      ...normalizePlayerTimestamp(player.last_login_timestamp, "lastLoginTimestamp"),
+    },
+    inventories,
   };
 }
 

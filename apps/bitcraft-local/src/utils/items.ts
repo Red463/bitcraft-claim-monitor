@@ -1,4 +1,4 @@
-import { toNumber, type AnyRecord } from "../main-app-data";
+import { toNumber, type AnyRecord } from "../main-app-data.ts";
 export { gameIconUrl } from "./gameAssets.mjs";
 
 export function catalogEntries(catalog: unknown): AnyRecord[] {
@@ -16,12 +16,20 @@ export function playerInventoryItems(payload: AnyRecord | null | undefined, inve
       const itemType = contents.itemType ?? contents.item_type;
       if (itemId == null || itemType === 1 || itemType === "cargo") return [];
       const item = lookup.get(String(itemId));
-      return item ? [{ ...item, quantity: toNumber(contents.quantity), inventoryName: inventory.inventoryName ?? "Inventory" }] : [];
+      return item ? [{
+        ...item,
+        quantity: typeof contents.quantity === "bigint"
+          ? contents.quantity.toString()
+          : contents.quantity ?? "0",
+        inventoryName: inventory.inventoryName ?? "Inventory",
+      }] : [];
     }));
 }
 
 export function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[] {
-  return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
+  return playerInventoryItems(payload, "Toolbelt").filter((item) => (
+    item.toolType != null || String(item.tag ?? item.tags ?? "").includes("Tool")
+  ));
 }
 
 export function isMarketableItem(item: AnyRecord): boolean {

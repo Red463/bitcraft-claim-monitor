@@ -45,6 +45,10 @@ export class RelayHttpClient {
     return this.#request(`/claim/${encodeURIComponent(claimId)}/inventory`);
   }
 
+  playerInventory(playerId: string) {
+    return this.#request(`/player/${encodeURIComponent(playerId)}/inventory`);
+  }
+
   crafts(claimId: string, completed = false) {
     return this.#request(`/claim/${encodeURIComponent(claimId)}/crafts?completed=${completed ? "true" : "false"}`);
   }

@@ -1,5 +1,6 @@
 export * from "./contracts.ts";
 export * from "./craftProjection.ts";
+export * from "./equipmentProjection.ts";
 export * from "./currentStateRepository.ts";
 export * from "./gameDataRoute.ts";
 export * from "./globalCatalogRuntime.ts";
@@ -7,6 +8,7 @@ export * from "./globalCatalogSession.ts";
 export * from "./http.ts";
 export * from "./inventoryProjection.ts";
 export * from "./normalizers.ts";
+export * from "./playerDataService.ts";
 export * from "./persistedRuntimeHealth.ts";
 export * from "./primaryRegionPlayerSession.ts";
 export * from "./primaryRegionRuntime.ts";

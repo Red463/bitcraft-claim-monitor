@@ -161,6 +161,16 @@ The remaining `OnlineTimestamp` values are preserved as exact source counters
 with no calendar date because live rows prove the field is not consistently a
 Unix timestamp.
 
+The Relay's bounded `GET /player/:playerId/inventory` route returns named
+inventory categories including `toolbelt`, `pockets`, `wallet`, `wagon`, and
+claim-bank inventories. Item and Cargo identities remain separate even when
+their numeric IDs collide. The application now requests this route only for
+the selected monitored member, enriches regular Toolbelt items from typed
+global `item_desc` and `tool_desc` rows, and exposes them through
+`/api/local/player-data`. Concurrent requests coalesce and successful results
+remain in process memory for 15 seconds; no player-inventory SQL table or
+scheduled fan-out job was added.
+
 ## Craft contributors
 
 One active Relay HTTP craft was queried by its exact craft entity ID:

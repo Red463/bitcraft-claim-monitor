@@ -30,6 +30,14 @@ Browser navigation must never fan out into Relay HTTP calls or create a new
 SpacetimeDB subscription. Multiple users share the provider's existing
 connections and the same committed local generation.
 
+The one bounded exception is entity-detail data that Relay exposes only as an
+HTTP lookup, such as a selected member's inventory. The browser still calls
+only a provider-neutral local route. The server validates that the entity
+belongs to the monitored claim, coalesces concurrent requests, keeps a short
+memory-only last-good cache, and contacts Relay once for that selected entity.
+This lookup must not fan out across every member and must not create a current
+state SQL table merely to avoid a page-level request.
+
 ## Browser delivery
 
 `GET /api/local/game-data` returns the latest complete local envelopes
@@ -83,6 +91,7 @@ apply time.
 | Incremental derived-current update after its source generation | p95 at or below 2 seconds |
 | Primary HTTP operational domains | Provisional refresh target of 15 seconds, tightened only within confirmed Relay limits |
 | Lower-change HTTP domains | Provisional refresh target of 60 seconds, with immediate priority refresh when requested and safe |
+| Selected-entity HTTP details | Return memory-cached data immediately within a 15-second budget; otherwise one coalesced bounded request, with stale last-good fallback |
 
 The Admin provider-health view records, per source and domain:
 
@@ -172,6 +181,7 @@ Initial candidates requiring explicit dependency proof are:
 | `scheduled_jobs` | Keep for legitimate maintenance and delivery work; delete retired ingestion-job definitions and UI controls. |
 | `domain_payload_current`, `provider_source_health`, `provider_subscription_health` | Keep as the atomic last-good and operational boundary unless a typed projection demonstrably replaces the same responsibility. |
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |
+| Selected-player inventory/Toolbelt | No dedicated table. Fetch one monitored member through `/api/local/player-data`, coalesce in flight, and retain only a 15-second process-memory last-good entry. |
 | Market, activity, membership, production, notification, and audit history | Keep according to explicit retention because Relay supplies current state, not the application's observation history. |
 
 No table is kept merely because the legacy application had it, and no table is

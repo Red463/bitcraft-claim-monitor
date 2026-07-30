@@ -17,6 +17,7 @@ export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM skill_desc",
   "SELECT * FROM resource_desc",
   "SELECT * FROM equipment_desc",
+  "SELECT * FROM tool_desc",
   "SELECT * FROM buff_desc",
   "SELECT * FROM claim_tech_desc",
 ] as const;
@@ -86,6 +87,7 @@ const DESCRIPTION_TABLES: ReadonlyArray<{
   { accessor: "skillDesc", kind: "skill" },
   { accessor: "resourceDesc", kind: "resource" },
   { accessor: "equipmentDesc", kind: "equipment" },
+  { accessor: "toolDesc", kind: "tool" },
   { accessor: "buffDesc", kind: "buff" },
   { accessor: "claimTechDesc", kind: "claim_tech" },
 ];

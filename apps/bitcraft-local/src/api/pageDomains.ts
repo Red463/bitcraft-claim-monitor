@@ -6,7 +6,7 @@ export function pageDomains(activePanel: ActivePanel): DomainKey[] {
     case "dashboard":
       return ["claim", "members", "citizens", "players"];
     case "members":
-      return ["claim", "members", "citizens", "players"];
+      return ["claim", "members", "citizens", "players", "equipment", "crafts"];
     case "skills":
     case "leaderboard":
       return ["claim", "members", "citizens", "players", "skills"];

@@ -7,7 +7,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Dashboard claim summary | Provider-neutral local game-data route | Relay HTTP claim snapshot | in progress |
 | Members roster | Provider-neutral local game-data route | Relay HTTP members snapshot | in progress |
 | Member activity and skills | Provider-neutral local game-data route | Relay HTTP citizen levels plus member-filtered regional player subscription | ready for soak |
-| Member equipment and buffs | Normalized live regional domain is available; Members detail still uses BitJita and Production Toolbelt remains unavailable | Proven member-filtered regional subscription plus global descriptions | in progress |
+| Member equipment and buffs | Members reads the live regional equipment/buff/preset domain; selected-member Toolbelt uses a monitored-member-only Relay HTTP lookup with 15-second memory last-good caching and no SQL table | Proven member-filtered regional subscription, global equipment/tool/buff descriptions, and bounded Relay player inventory | ready for soak |
 | Inventory | Provider-neutral shared-storage page with local Relay catalog enrichment; Town Bank/player-bank coverage remains | Relay HTTP joined inventory plus proven Town Bank owner join | in progress |
 | Active/passive crafts | Provider-neutral current page; Relay incomplete/completed claim rows split by typed recipe metadata | Relay HTTP plus global recipe catalog | ready for soak |
 | Craft contributions | BitJita craft contribution route | Proven regional mapping | blocked on evidence |

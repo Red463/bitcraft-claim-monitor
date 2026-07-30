@@ -30,6 +30,7 @@ test("server propagates a request-scoped bypass to live aggregate caches", () =>
 
 test("every live page aggregate admits the guarded manual refresh identifier", () => {
   for (const route of [
+    "/api/local/player-data",
     "/api/local/regions/active",
     "/api/local/region/claims",
     "/api/local/empires",

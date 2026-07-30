@@ -11,11 +11,15 @@ import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { playerToolbeltTools } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
-import { SKILL_NAMES } from "../utils/professions";
+import { SKILL_NAMES, TOOL_TAG_BY_TYPE } from "../utils/professions";
 import { trackAnalyticsEvent } from "../utils/analytics";
 import { formatDecimalQuantity } from "../server/game-data/inventoryProjection";
+import { useManualRefresh } from "../refresh/ManualRefreshContext";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
+import { evaluateCraftEligibility } from "./production/toolEligibility";
 
 export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
   return (
@@ -40,11 +44,15 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
   );
 }
 
-export function Production({ data, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
+export function Production({ data, refreshToken, selectedMemberId, onSelectMember }: { data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }; refreshToken: number; selectedMemberId: string; onSelectMember: (id: string) => void }) {
+  const { request, trackPromise } = useManualRefresh();
   type ProductionSortKey = "tier" | "totalXp" | "remainingXp" | "remainingEffort" | "completion" | "name";
   const [sortKey, setSortKey] = usePersistedState<ProductionSortKey>("production.sort", "tier");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("production.direction", "desc");
   const [showPrivateCrafts, setShowPrivateCrafts] = usePersistedState("production.showPrivateCrafts", true);
+  const [toolbeltTools, setToolbeltTools] = React.useState<AnyRecord[] | null>(null);
+  const [toolbeltError, setToolbeltError] = React.useState(false);
+  const toolsForMemberRef = React.useRef<string | null>(null);
   const observedCraftProgressRef = React.useRef<Map<string, number>>(new Map());
   const [observedMovingCrafts, setObservedMovingCrafts] = React.useState<Set<string>>(() => new Set());
   const itemLookup = new Map<string, AnyRecord>(
@@ -85,6 +93,48 @@ export function Production({ data, selectedMemberId, onSelectMember }: { data: R
   const isCraftWorking = React.useCallback((job: AnyRecord, contributors: AnyRecord[]) => {
     return hasRecentCraftContribution(contributors) || isCraftObservedMoving(job);
   }, [isCraftObservedMoving]);
+  React.useEffect(() => {
+    if (!selectedMember?.playerEntityId) {
+      setToolbeltTools(null);
+      setToolbeltError(false);
+      toolsForMemberRef.current = null;
+      return;
+    }
+    const controller = new AbortController();
+    const memberId = String(selectedMember.playerEntityId);
+    if (toolsForMemberRef.current !== memberId) {
+      toolsForMemberRef.current = memberId;
+      setToolbeltTools(null);
+    }
+    setToolbeltError(false);
+    const claimId = String(data.claim.entityId ?? data.raw?.claimId ?? "");
+    const query = new URLSearchParams({ claimId, playerId: memberId, domains: "inventory" });
+    const refresh = fetch(`/api/local/player-data?${query.toString()}`, {
+      headers: manualRefreshHeaders(request, "craft-monitor"),
+      signal: controller.signal,
+    })
+      .then((response) => (
+        response.ok
+          ? response.json()
+          : Promise.reject(new Error(`Relay player inventory HTTP ${response.status}`))
+      ))
+      .then((payload) => {
+        const inventory = payload?.domains?.inventory?.data ?? null;
+        setToolbeltTools(playerToolbeltTools(inventory));
+      });
+    void trackPromise("production-toolbelt", refresh)
+      .catch(() => {
+        if (!controller.signal.aborted) setToolbeltError(true);
+      });
+    return () => controller.abort();
+  }, [
+    selectedMember?.playerEntityId,
+    data.claim.entityId,
+    data.raw?.claimId,
+    refreshToken,
+    request?.sequence,
+    trackPromise,
+  ]);
   const selectCrafterPill = (name: string) => {
     if (!crafterMemberIdByName[name]) return;
     onSelectMember(selectedMemberName === name ? "All" : crafterMemberIdByName[name]);
@@ -97,11 +147,17 @@ export function Production({ data, selectedMemberId, onSelectMember }: { data: R
     const skillId = toNumber(requirement.skillId ?? requirement.skill_id);
     const skillName = SKILL_NAMES[skillId] ?? "Required skill";
     const memberLevel = toNumber(selectedCitizen?.skills?.[String(skillId)]);
-    const skillOk = memberLevel >= requiredLevel;
     const toolRequirement = job.toolRequirements?.[0];
-    if (!skillOk) return { ok: false, text: `Needs ${skillName} Lv ${requiredLevel} (has ${memberLevel})` };
-    if (toolRequirement) return { ok: false, pending: true, text: "Skill met; Relay Toolbelt eligibility is not loaded yet" };
-    return { ok: true, text: `Can craft - ${skillName} Lv ${memberLevel}` };
+    const toolType = toNumber(toolRequirement?.toolType ?? toolRequirement?.tool_type);
+    return evaluateCraftEligibility({
+      skillName,
+      requiredLevel,
+      memberLevel,
+      toolRequirement,
+      expectedTool: toolRequirement ? TOOL_TAG_BY_TYPE[toolType] : null,
+      tools: toolbeltTools,
+      toolbeltUnavailable: toolbeltError && toolbeltTools == null,
+    });
   }
   const privateCrafts = data.crafts.filter((job) => job.isPublic === false);
   const visibilityFilteredCrafts = showPrivateCrafts ? data.crafts : data.crafts.filter((job) => job.isPublic !== false);

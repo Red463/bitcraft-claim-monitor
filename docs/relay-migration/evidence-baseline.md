@@ -75,6 +75,15 @@ The live primary-region verifier now exercises those member-filtered equipment,
 preset, and buff subscriptions alongside `player_state`. Their normalized
 current domain is committed without introducing a new SQL cache table.
 
+Members now consumes that normalized `equipment` domain directly, and its
+passive-craft panel consumes the normalized `crafts` domain. The selected
+member's Toolbelt is the only on-demand player-inventory read: the local
+provider-neutral route enforces claim membership, uses the bounded Relay HTTP
+lookup, enriches tools from the typed global catalog, coalesces concurrent
+requests, and keeps only a 15-second memory last-good entry. Production uses
+the same local route for skill/tool eligibility. No dedicated equipment,
+buff, preset, or player-inventory SQL table was introduced.
+
 ## Runtime BitJita baseline
 
 At the base revision, runtime and presentation references were concentrated in:

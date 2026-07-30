@@ -91,11 +91,14 @@ import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
   enrichCraftsWithCatalog,
+  enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
   gameDataResponse,
   parseDomainKeys,
+  RelayHttpClient,
   RelayBitCraftProvider,
   RelayGlobalCatalogRuntime,
+  RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
@@ -327,6 +330,7 @@ const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 1500
 const relayHttpRefreshMs = Number.isFinite(relayHttpRefreshSetting)
   ? Math.max(5000, Math.min(Math.floor(relayHttpRefreshSetting), 60000))
   : 15000;
+const relayBaseUrl = process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app";
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
@@ -392,6 +396,17 @@ const statements = createPreparedStatements(db);
 const currentStateRepository = createCurrentStateRepository(db);
 const relayProvider = new RelayBitCraftProvider();
 const providerCatalogRepository = createProviderCatalogRepository(db);
+const relayPlayerDataService = new RelayPlayerDataService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  readMembers: (claimId) => {
+    const data = currentStateRepository.read(claimId, "members")?.data;
+    if (Array.isArray(data)) return data;
+    return Array.isArray(data?.members) ? data.members : [];
+  },
+  getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  getDescription: (kind, id) => providerCatalogRepository.getDescription(kind, id),
+  ttlMs: relayHttpRefreshMs,
+});
 const relayBindingManifest = JSON.parse(readFileSync(
   path.join(root, "src", "server", "game-data", "bindings", "schema-manifest.json"),
   "utf8",
@@ -10310,10 +10325,53 @@ const server = createServer(async (req, res) => {
               (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
             );
           }
+          if (domain === "equipment") {
+            return enrichEquipmentWithCatalog(
+              data,
+              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              (kind, id) => providerCatalogRepository.getDescription(kind, id),
+            );
+          }
           return data;
         },
       });
       return send(res, result.status, result.body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/player-data") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const playerId = String(url.searchParams.get("playerId") ?? "").trim();
+      const domains = String(url.searchParams.get("domains") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (!playerId) return send(res, 400, { error: "playerId is required." });
+      if (domains.length !== 1 || domains[0] !== "inventory") {
+        return send(res, 400, { error: "The player-data route currently supports only the inventory domain." });
+      }
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      try {
+        const inventory = await relayPlayerDataService.inventory({
+          configuredClaimId: currentClaimId(),
+          claimId,
+          playerId,
+          forceRefresh: refresh.forceRefresh,
+        });
+        return send(res, 200, {
+          claimId,
+          playerId,
+          generatedAt: new Date().toISOString(),
+          domains: { inventory },
+          partialErrors: inventory.warnings,
+        });
+      } catch (error) {
+        const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+        return send(res, status, {
+          error: error instanceof Error ? error.message : "Unable to load Relay player data.",
+          source: "relay-player-data",
+        });
+      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/catalog/item-detail") {
       const kind = String(url.searchParams.get("kind") ?? "item").toLowerCase() === "cargo"
@@ -11864,7 +11922,6 @@ function scheduleServerPolling(delayMs = 0) {
 
 function startBackgroundTasks() {
   if (!isTestRuntime && process.env.ENABLE_RELAY_PROVIDER !== "false") {
-    const relayBaseUrl = process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app";
     const reconcilePrimaryRegion = async () => {
       const claimId = currentClaimId();
       const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};

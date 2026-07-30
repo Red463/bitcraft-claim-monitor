@@ -46,11 +46,13 @@ for (const [label, path] of [
   });
 }
 
-test("provider-neutral Production refresh is owned by the shared game-data request", () => {
+test("provider-neutral Production joins selected-member Toolbelt to the active refresh", () => {
   const page = source("../src/pages/ProductionPage.tsx");
   const loader = source("../src/api/bitjita.ts");
 
-  assert.doesNotMatch(page, /useManualRefresh|manualRefreshHeaders|trackPromise/);
+  assert.match(page, /useManualRefresh|manualRefreshHeaders|trackPromise/);
+  assert.match(page, /request\?\.sequence/);
+  assert.match(page, /\/api\/local\/player-data/);
   assert.match(loader, /PROVIDER_NEUTRAL_PANELS[\s\S]*"craft-monitor"/);
   assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.manualHeaders\s*\}/);
 });

@@ -99,6 +99,21 @@ test("Relay HTTP retries one transient response but never retries a permanent 4x
   assert.equal(permanentCalls, 1);
 });
 
+test("Relay HTTP requests one bounded player inventory by encoded player ID", async () => {
+  const requested = [];
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async (input) => {
+      requested.push(String(input));
+      return new Response(JSON.stringify({ player: {}, inventories: [] }), { status: 200 });
+    },
+    retryDelayMs: 0,
+  });
+
+  await client.playerInventory("101/with separator");
+  assert.deepEqual(requested, ["https://relay.example/player/101%2Fwith%20separator/inventory"]);
+});
+
 test("Relay HTTP opens its circuit after five failures in one minute", async () => {
   let calls = 0;
   const client = new RelayHttpClient({

@@ -14,6 +14,7 @@ const {
   normalizeItemKind,
   normalizeMembers,
   normalizeMembersPayload,
+  normalizePlayerInventory,
   normalizeCitizensPayload,
   normalizeRegionalEquipment,
   normalizeRegionalPlayers,
@@ -373,6 +374,22 @@ test("typed recipe and skill descriptions are projected without wire DTOs", () =
   });
 });
 
+test("typed tool descriptions are keyed by item identity for live Toolbelt enrichment", () => {
+  assert.deepEqual(normalizeCatalogDescription({
+    id: 9,
+    itemId: 42,
+    toolType: 4,
+    level: 3,
+    power: 25,
+  }, "tool"), {
+    kind: "tool",
+    id: "42",
+    toolType: 4,
+    level: 3,
+    power: 25,
+  });
+});
+
 test("deposit status is unknown unless Relay explicitly proves active or respawning", () => {
   assert.equal(normalizeDeposit({ entity_id: "1", region: 19 }).status, "unknown");
   assert.equal(normalizeDeposit({ entity_id: "2", region: 19, status: "unknown" }).status, "unknown");
@@ -436,6 +453,59 @@ test("claim inventory normalization preserves item/cargo collisions and exact qu
     { itemId: "42", itemType: "cargo", quantity: "2" },
   ]);
   assert.equal(inventory.buildings[0].entityId, "1369094286778488967");
+});
+
+test("player inventory normalization preserves bounded categories and exact item identities", () => {
+  const payload = normalizePlayerInventory({
+    player: {
+      entity_id: "90071992547409931",
+      username: "Ada",
+      region: "19",
+      signed_in: true,
+      last_active_timestamp: "1785409200",
+      last_login_timestamp: "1785409100",
+    },
+    inventories: [
+      {
+        entity_id: "7001",
+        name: "Toolbelt",
+        nickname: null,
+        category: "toolbelt",
+        claim_entity_id: "1369094286777412590",
+        claim_name: "Timbersteel Trade",
+        items: [
+          { item_id: "42", item_type: "Item", quantity: "1" },
+          { item_id: "42", item_type: "Cargo", quantity: "18446744073709551615" },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(payload.player, {
+    entityId: "90071992547409931",
+    username: "Ada",
+    regionId: "19",
+    signedIn: true,
+    lastActiveTimestamp: "2026-07-30T11:00:00.000Z",
+    lastLoginTimestamp: "2026-07-30T10:58:20.000Z",
+  });
+  assert.deepEqual(payload.inventories[0], {
+    entityId: "7001",
+    inventoryName: "Toolbelt",
+    name: "Toolbelt",
+    nickname: "",
+    category: "toolbelt",
+    claimEntityId: "1369094286777412590",
+    claimName: "Timbersteel Trade",
+    items: [
+      { itemId: "42", itemType: "item", quantity: "1" },
+      { itemId: "42", itemType: "cargo", quantity: "18446744073709551615" },
+    ],
+    pockets: [
+      { contents: { itemId: "42", itemType: "item", quantity: "1" } },
+      { contents: { itemId: "42", itemType: "cargo", quantity: "18446744073709551615" } },
+    ],
+  });
 });
 
 test("claim craft and deposit payloads normalize into provider domain shapes", () => {
