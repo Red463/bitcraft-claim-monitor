@@ -118,7 +118,7 @@ test("initial route failures and skeletons are exclusive from empty operational 
   const empires = source("../src/pages/EmpiresPage.tsx");
 
   assert.match(leaderboard, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
-  assert.match(publicCrafts, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
+  assert.match(publicCrafts, /if \(providerLoading && !providerData\) return <AppSkeleton \/>;\s*if \(providerError && !providerData\) return <AsyncState kind="error"/);
   assert.match(empires, /overview\.loading && !overview\.data\s*\? <AppSkeleton \/>\s*:\s*overview\.error && !overview\.data\s*\? <AsyncState kind="error"/);
   assert.match(empires, /watchtowers\.loading && !watchtowers\.data\s*\? <AppSkeleton \/>\s*:\s*watchtowers\.error && !watchtowers\.data\s*\? <AsyncState kind="error"/);
 });

@@ -47,7 +47,7 @@ export function pageDomains(activePanel: ActivePanel): DomainKey[] {
     case "activity":
       return ["claim", "members"];
     case "publiccrafts":
-      return ["claim"];
+      return ["claim", "public-crafts"];
     case "market":
       return ["market", "catalogs"];
     default:

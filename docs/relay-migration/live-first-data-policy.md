@@ -44,6 +44,34 @@ have an independent role. A compact indexed projection may remain when it
 measurably makes a feature faster, provided Relay changes update it
 incrementally and atomically.
 
+## Concrete effect on Craft Planner and other heavy tools
+
+Craft Planner must not choose between "live" and "fast." Its source catalogs,
+recipes, construction state, inventories, and active crafts are kept current by
+Relay subscriptions or bounded HTTP refresh loops. The planner then reads
+locally indexed normalized data and calculates the requested plan on demand.
+
+This means:
+
+- remove BitJita-era bulk-response caches, crawl cursors, refresh-run tables,
+  and scheduler ownership once no other reader depends on them;
+- keep the normalized `game_catalog_*` read model while it provides fast
+  indexed joins, cross-process sharing between the collector and web process,
+  and immediate restart recovery;
+- update catalog and planner indexes from every committed Relay generation,
+  rather than rebuilding them on an hourly or daily schedule;
+- invalidate only calculations affected by changed entities instead of
+  clearing or rebuilding the entire planner cache;
+- allow a bounded in-process calculation cache only when it is keyed by source
+  generation, so a new generation cannot be hidden behind a time-to-live;
+- return the last complete plan inputs immediately during a Relay outage,
+  clearly marked with their freshness and age.
+
+The same rule applies to market search, construction requirements, regional
+summaries, and other expensive views: retain a compact local index when it
+materially reduces interactive latency, but make domain events—not scheduled
+jobs—its freshness owner.
+
 ## Current-state storage hierarchy
 
 Use the smallest and fastest layer that preserves correctness:
@@ -85,6 +113,13 @@ indexes, restart cost, readers, writers, and the latency improvement obtained.
 Browser navigation must never fan out into Relay HTTP calls or create a new
 SpacetimeDB subscription. Multiple users share the provider's existing
 connections and the same committed local generation.
+
+An open page must also never wait for a full-domain rebuild when a smaller
+incremental update is possible. Source changes are applied to a staging
+generation, validated, and published quickly; unrelated pages continue reading
+the previous complete generation until that swap. Background reconciliation
+and compaction must yield to interactive local reads and live-generation
+publication.
 
 The one bounded exception is entity-detail data that Relay exposes only as an
 HTTP lookup, such as a selected member's inventory. The browser still calls
@@ -346,6 +381,11 @@ Add focused coverage proving:
 - derived planner and market projections update incrementally;
 - current-data API p95 latency remains within budget while a reconciliation or
   history-retention job is running;
+- Craft Planner and other indexed tools are usable immediately after startup
+  from the durable last-good generation, then observe the first healthy Relay
+  generation without waiting for any scheduled catalog or ingestion job;
+- a catalog or settlement change invalidates only affected generation-keyed
+  calculations and becomes visible on the next local read;
 - every dedicated current-state table has measured exception evidence, and
   domains without that evidence use no table beyond
   `domain_payload_current`;

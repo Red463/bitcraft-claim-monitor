@@ -404,6 +404,44 @@ ID and records `itemId` separately. Toolbelt enrichment resolves the strongest
 matching row by item ID. Keying tool descriptions directly by item ID would
 silently collapse valid rows.
 
+## Public craft regional join proof
+
+A bounded 2026-07-30 region-19 diagnostic observed 551 rows in
+`public_progressive_action_state`. Exact equality subscriptions proved this
+join chain:
+
+1. public marker `entity_id` to `progressive_action_state.entity_id`;
+2. marker `building_entity_id` to `building_state.entity_id`;
+3. building `claim_entity_id` to `claim_state.entity_id`;
+4. marker/craft `owner_entity_id` to `player_username_state.entity_id`;
+5. craft-building ID to `location_state.entity_id`;
+6. claim `owner_building_entity_id` to the settlement location row.
+
+The claim entity ID itself had no location row in the bounded sample, so the
+implementation does not use it as a location key. It subscribes to the
+naturally bounded public-marker table, then issues chunked equality
+subscriptions only for the referenced craft, building, owner, claim, and
+location IDs. It never subscribes to all `location_state`.
+
+Each complete regional join is normalized with exact decimal-string IDs,
+staged as one numbered generation, and merged into the generic
+`public-crafts` last-good domain. Marker/detail building or owner mismatches
+reject the candidate generation. Missing optional labels or locations retain
+the usable row with partial warnings.
+
+Public Craft Finder consumes that local domain and global catalog projection
+directly. It does not fetch from the browser, wait for a scheduled job, or own
+a dedicated SQL cache table. Large total and remaining action counts stay
+exact through `BigInt` calculation and formatting.
+
+The production typed-session verifier is
+`apps/bitcraft-local/scripts/verify-relay-public-crafts-live.mjs`. Its
+2026-07-30 run could not complete because region 19 changed to unready during
+validation: Relay health reported both the local mirror and upstream as
+`down` with `local-stdb reconnect`. The runtime correctly preserves last-good
+data in this state. A successful applied-session proof remains required before
+this surface is marked ready for soak.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or

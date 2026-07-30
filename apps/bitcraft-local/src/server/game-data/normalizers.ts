@@ -1189,6 +1189,183 @@ export function normalizePlayerHousing(value: unknown) {
   };
 }
 
+export function normalizeRegionalPublicCrafts(options: {
+  regionId: string;
+  publicRows: unknown[];
+  craftRows: unknown[];
+  buildingRows: unknown[];
+  buildingNicknameRows: unknown[];
+  claimRows: unknown[];
+  usernameRows: unknown[];
+  locationRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional public craft region id");
+  const warnings: string[] = [];
+  let complete = true;
+
+  function rowsByEntityId(values: unknown[], label: string): Map<string, WireRecord> {
+    const indexed = new Map<string, WireRecord>();
+    for (const [index, value] of values.entries()) {
+      try {
+        const row = record(value, `${label} row ${index}`);
+        const entityId = decimalString(
+          row.entityId ?? row.entity_id,
+          `${label} row ${index} entity id`,
+        );
+        if (!indexed.has(entityId)) indexed.set(entityId, row);
+      } catch (error) {
+        warnings.push(`${label} omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return indexed;
+  }
+
+  const crafts = rowsByEntityId(options.craftRows, "Regional progressive_action_state");
+  const buildings = rowsByEntityId(options.buildingRows, "Regional building_state");
+  const buildingNicknames = rowsByEntityId(
+    options.buildingNicknameRows,
+    "Regional building_nickname_state",
+  );
+  const claims = rowsByEntityId(options.claimRows, "Regional claim_state");
+  const usernames = rowsByEntityId(options.usernameRows, "Regional player_username_state");
+  const locations = rowsByEntityId(options.locationRows, "Regional location_state");
+  const seen = new Set<string>();
+  const craftResults: Array<Record<string, unknown>> = [];
+
+  for (const [index, value] of options.publicRows.entries()) {
+    try {
+      const marker = record(value, `Regional public_progressive_action_state row ${index}`);
+      const entityId = decimalString(
+        marker.entityId ?? marker.entity_id,
+        `Regional public_progressive_action_state row ${index} entity id`,
+      );
+      if (seen.has(entityId)) continue;
+      seen.add(entityId);
+      const buildingEntityId = decimalString(
+        marker.buildingEntityId ?? marker.building_entity_id,
+        `Regional public craft ${entityId} building id`,
+      );
+      const ownerEntityId = decimalString(
+        marker.ownerEntityId ?? marker.owner_entity_id,
+        `Regional public craft ${entityId} owner id`,
+      );
+      const craft = crafts.get(entityId);
+      if (!craft) {
+        warnings.push(`Regional public craft marker ${entityId} has no progressive_action_state row.`);
+        complete = false;
+        continue;
+      }
+      const craftBuildingEntityId = decimalString(
+        craft.buildingEntityId ?? craft.building_entity_id,
+        `Regional public craft ${entityId} detail building id`,
+      );
+      if (craftBuildingEntityId !== buildingEntityId) {
+        warnings.push(
+          `Regional public craft ${entityId} marker/detail building ids do not match (${buildingEntityId}/${craftBuildingEntityId}).`,
+        );
+        complete = false;
+        continue;
+      }
+      const craftOwnerEntityId = decimalString(
+        craft.ownerEntityId ?? craft.owner_entity_id,
+        `Regional public craft ${entityId} detail owner id`,
+      );
+      if (craftOwnerEntityId !== ownerEntityId) {
+        warnings.push(
+          `Regional public craft ${entityId} marker/detail owner ids do not match (${ownerEntityId}/${craftOwnerEntityId}).`,
+        );
+        complete = false;
+        continue;
+      }
+      const building = buildings.get(buildingEntityId);
+      if (!building) {
+        warnings.push(`Regional public craft ${entityId} has no building_state row for ${buildingEntityId}.`);
+      }
+      const claimEntityId = building
+        ? decimalString(
+            building.claimEntityId ?? building.claim_entity_id,
+            `Regional public craft ${entityId} claim id`,
+          )
+        : null;
+      const claim = claimEntityId ? claims.get(claimEntityId) : undefined;
+      if (claimEntityId && !claim) {
+        warnings.push(`Regional public craft ${entityId} has no claim_state row for ${claimEntityId}.`);
+      }
+      const username = usernames.get(ownerEntityId);
+      if (!username) {
+        warnings.push(`Regional public craft ${entityId} has no player_username_state row for ${ownerEntityId}.`);
+      }
+      const buildingLocation = locations.get(buildingEntityId);
+      const claimOwnerBuildingId = claim
+        ? decimalString(
+            claim.ownerBuildingEntityId ?? claim.owner_building_entity_id,
+            `Regional public craft ${entityId} claim owner building id`,
+          )
+        : null;
+      const claimLocation = claimOwnerBuildingId ? locations.get(claimOwnerBuildingId) : undefined;
+      const nickname = buildingNicknames.get(buildingEntityId);
+
+      craftResults.push({
+        entityId,
+        buildingEntityId,
+        buildingDescriptionId: building
+          ? decimalString(
+              building.buildingDescriptionId ?? building.building_description_id,
+              `Regional public craft ${entityId} building description id`,
+            )
+          : null,
+        buildingNickname: nickname ? String(nickname.nickname ?? "") : null,
+        buildingLocationX: buildingLocation
+          ? integer(buildingLocation.x, `Regional public craft ${entityId} building location x`)
+          : null,
+        buildingLocationZ: buildingLocation
+          ? integer(buildingLocation.z, `Regional public craft ${entityId} building location z`)
+          : null,
+        claimEntityId,
+        claimName: claim ? String(claim.name ?? "") : "",
+        claimLocationX: claimLocation
+          ? integer(claimLocation.x, `Regional public craft ${entityId} claim location x`)
+          : null,
+        claimLocationZ: claimLocation
+          ? integer(claimLocation.z, `Regional public craft ${entityId} claim location z`)
+          : null,
+        claimDimension: claimLocation
+          ? decimalString(
+              claimLocation.dimension,
+              `Regional public craft ${entityId} claim location dimension`,
+            )
+          : null,
+        ownerEntityId,
+        ownerUsername: username ? String(username.username ?? "") : "",
+        recipeId: decimalString(
+          craft.recipeId ?? craft.recipe_id,
+          `Regional public craft ${entityId} recipe id`,
+        ),
+        progress: decimalString(
+          craft.progress ?? 0,
+          `Regional public craft ${entityId} progress`,
+        ),
+        craftCount: decimalString(
+          craft.craftCount ?? craft.craft_count ?? 0,
+          `Regional public craft ${entityId} craft count`,
+        ),
+        preparation: craft.preparation === true,
+        completed: false,
+        isPublic: true,
+        regionId,
+      });
+    } catch (error) {
+      complete = false;
+      warnings.push(
+        `Regional public_progressive_action_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  craftResults.sort((left, right) => String(left.entityId).localeCompare(String(right.entityId)));
+  return { data: { craftResults }, complete, warnings };
+}
+
 export function normalizeClaimCrafts(value: unknown) {
   const payload = record(value, "Relay claim crafts payload");
   const crafts = Array.isArray(payload.crafts) ? payload.crafts : [];

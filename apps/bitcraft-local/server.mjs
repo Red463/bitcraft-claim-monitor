@@ -89,6 +89,7 @@ import {
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
+  enrichPublicCraftsWithCatalog,
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
@@ -99,6 +100,7 @@ import {
   RelayGlobalCatalogRuntime,
   RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
+  RelayPublicCraftRuntime,
   RelayStorageActivityService,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
@@ -405,9 +407,19 @@ const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
 });
+const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_REGION_MAX_SESSIONS ?? 4)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_REGION_STAGGER_MS ?? 250)),
+  },
+});
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
 let relayPrimaryRegionStarted = false;
+let relayPublicCraftStarted = false;
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
@@ -421,10 +433,16 @@ function gameDataProviderHealth() {
     snapshot: currentStateRepository.read(currentClaimId(), "players"),
     providerHealth: health,
   });
+  const publicCrafts = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayPublicCraftRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "public-crafts"),
+    providerHealth: health,
+  });
   return {
     ...health,
     globalCatalog,
     primaryRegion,
+    publicCrafts,
   };
 }
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
@@ -9407,6 +9425,16 @@ const server = createServer(async (req, res) => {
               ),
             };
           }
+          if (domain === "public-crafts") {
+            const projected = enrichPublicCraftsWithCatalog(data, {
+              getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              getDescription: (kind, id) => providerCatalogRepository.getDescription(kind, id),
+            });
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
+          }
           if (domain === "equipment") {
             return {
               data: enrichEquipmentWithCatalog(
@@ -11067,8 +11095,24 @@ function startBackgroundTasks() {
       const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
       const members = currentStateRepository.read(claimId, "members")?.data ?? [];
       const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
-      if (!regionId || !Array.isArray(members) || members.length === 0) {
-        throw new Error("Relay primary-region session is waiting for claim and member snapshots");
+      if (!regionId) {
+        throw new Error("Relay regional sessions are waiting for a claim region");
+      }
+      if (!relayPublicCraftStarted) {
+        const settings = getSettings();
+        const activeRegionIds = parseRegionIds(
+          `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+        );
+        await relayPublicCraftRuntime.start({
+          relayBaseUrl,
+          claimId,
+          primaryRegionId: regionId,
+          activeRegionIds,
+        });
+        relayPublicCraftStarted = true;
+      }
+      if (!Array.isArray(members) || members.length === 0) {
+        return;
       }
       if (!relayPrimaryRegionStarted) {
         await relayPrimaryRegionRuntime.start({
@@ -11090,6 +11134,11 @@ function startBackgroundTasks() {
           reason,
         });
         await reconcilePrimaryRegion();
+        if (relayPublicCraftStarted) {
+          void relayPublicCraftRuntime.warmActiveRegions().catch((error) => {
+            if (!isTestRuntime) console.warn(`Relay public-craft region warmup failed: ${errorMessage(error)}`);
+          });
+        }
         const claimId = currentClaimId();
         const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
         const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();

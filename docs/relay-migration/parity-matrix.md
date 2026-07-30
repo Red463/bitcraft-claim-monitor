@@ -21,7 +21,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Global market tools | BitJita search/history/trades | Local aggregation and region pool | baseline |
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
 | Region | BitJita region/status/trade volume | Configured regional sessions | baseline |
-| Adaptive region-session pool | Typed pool foundation pins the monitored region, single-flights concurrent opens, enforces configured-region and hard connection limits including in-flight opens, staggers warmups, and closes idle non-primary sessions | Shared runtime owner for cross-region crafts, market, region, map, and empires | in progress |
+| Adaptive region-session pool | Typed pool foundation pins the monitored region, single-flights concurrent opens, enforces configured-region and hard connection limits including in-flight opens, staggers warmups, and closes idle non-primary sessions. The Public Craft runtime is its first live consumer and refreshes configured leases on the 15-second provider loop | Shared runtime owner for cross-region crafts, market, region, map, and empires | in progress |
 | Empires/watchtowers/siege | BitJita empire routes | Proven global rows or regional sessions | blocked on evidence |
 | Deposits | Empires Hexite Deposits tab reads the provider-neutral 15-second Relay snapshot with last-good fallback; `unknown` and overdue rows are never promoted to active; no deposit-specific table or scheduled job | Relay HTTP deposits with explicit state | ready for soak |
 | Map/layout | BitJita layout/player routes | Claim parents and bounded location rows | blocked on evidence |
@@ -30,7 +30,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Activity/history/charts | Activity member filters now receive the current Relay member generation through `AppShell` with no page-level provider request or roster cache table; retained event/chart rows still need every legacy collector reconnected | Local SQLite derived from normalized domain events | in progress |
 | Discord outbox and delivery | Local outbox, delivery gated by environment | Same outbox, default record mode until approval | in progress |
 | Admin health | Mixed legacy collector diagnostics plus Relay | Provider topology/freshness/generation | in progress |
-| Sync and public tools | Craft Calculator and Sync start no unused settlement request; Craft Calculator reads the live local catalog. Public Craft Finder receives monitored-settlement context from the Relay claim domain, while its cross-region job feed still requires the adaptive regional session pool | Provider-neutral domain repository | in progress |
+| Sync and public tools | Craft Calculator and Sync start no unused settlement request; Craft Calculator reads the live local catalog. Public Craft Finder now reads the generic `public-crafts` generation built by typed, bounded regional subscriptions and local catalog projection, with exact effort arithmetic and no browser upstream call or dedicated SQL table. A production-session apply proof remains pending because region 19 became unready during the 2026-07-30 verifier run | Provider-neutral domain repository | in progress |
 
 ## Scheduled/background inventory
 

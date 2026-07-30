@@ -34,10 +34,19 @@ Live-first data policy:
 - a derived-current table is retained only with measured indexed-query,
   cross-process, or restart-recovery value and must update from domain events;
 - legacy tables that only supported BitJita bulk fetching, rate limiting, or
-  refresh orchestration are removed after dependency and recovery proofs.
+  refresh orchestration are removed after dependency and recovery proofs;
 - calculation-heavy features such as Craft Planner execute against
   continuously maintained local normalized indexes, so they neither repeat
-  large Relay reads nor wait for a scheduled catalog build.
+  large Relay reads nor wait for a scheduled catalog build;
+- browser requests and scheduled jobs never own live-data freshness: page
+  navigation reads an already committed generation, while subscriptions and
+  bounded provider refresh loops keep the next generation ready.
+
+The first cross-region implementation of this policy is Public Craft Finder:
+configured regional sessions follow public markers through bounded typed
+joins, merge complete generations into the generic current-state repository,
+and project catalog labels locally. It adds no feature-specific SQL table and
+remains usable from last-good state during a Relay outage.
 
 Implementation is dependency-ordered:
 

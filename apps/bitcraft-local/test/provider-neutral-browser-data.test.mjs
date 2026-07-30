@@ -165,18 +165,44 @@ test("Activity member filters use the current Relay member domain", async () => 
   assert.doesNotMatch(activityPage, /\/api\/bitjita|fetch\([^)]*members/);
 });
 
-test("Public Craft Finder gets monitored-settlement context from Relay", () => {
+test("Public Craft Finder uses the live cross-region Relay projection without browser upstream calls", async () => {
   assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
-  assert.deepEqual(pageDomains("publiccrafts"), ["claim"]);
+  assert.deepEqual(pageDomains("publiccrafts"), ["claim", "public-crafts"]);
   assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "publiccrafts"), {});
+  const page = await readFile(new URL("../src/pages/PublicCraftFinderPage.tsx", import.meta.url), "utf8");
+  const appShell = await readFile(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /\/api\/bitjita|fetch\(/);
+  assert.match(appShell, /providerData=\{data\.raw\?\.\["public-crafts"\]\}/);
+  assert.match(server, /RelayPublicCraftRuntime/);
+  assert.match(server, /domain === "public-crafts"/);
+  assert.match(server, /enrichPublicCraftsWithCatalog/);
 });
 
-test("server background ingestion keeps citizens and the primary-region player session current", async () => {
+test("server background ingestion keeps citizens, primary-region state, and public crafts current", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(source, /RelayPrimaryRegionRuntime/);
+  assert.match(source, /RelayPublicCraftRuntime/);
   assert.match(source, /domains:\s*\[[^\]]*"claim"[^\]]*"members"[^\]]*"citizens"/);
   assert.match(source, /relayPrimaryRegionRuntime\.(?:start|reconcile)/);
+  assert.match(source, /relayPublicCraftRuntime\.start/);
+  assert.match(source, /relayPublicCraftRuntime\.warmActiveRegions/);
   assert.match(source, /primaryRegion\s*=\s*runtimeHealthWithPersistedSnapshot\(/);
+  assert.match(source, /publicCrafts\s*=\s*runtimeHealthWithPersistedSnapshot\(/);
+  const reconcileStart = source.indexOf("const reconcilePrimaryRegion = async () =>");
+  const reconcileEnd = source.indexOf("const refreshRelay = async", reconcileStart);
+  const reconcile = source.slice(reconcileStart, reconcileEnd);
+  assert.ok(
+    reconcile.indexOf("relayPublicCraftRuntime.start") < reconcile.indexOf("members.length === 0"),
+    "public crafts must start once the region is known and must not wait for member data",
+  );
+  const refreshStart = source.indexOf("const refreshRelay = async");
+  const refreshEnd = source.indexOf("void relayProvider.start", refreshStart);
+  assert.match(
+    source.slice(refreshStart, refreshEnd),
+    /await reconcilePrimaryRegion\(\);[\s\S]*relayPublicCraftRuntime\.warmActiveRegions\(\)/,
+    "every live refresh must keep configured public-craft regions warm",
+  );
 });
 
 test("Relay HTTP current domains refresh on their own live loop instead of the legacy collector schedule", async () => {

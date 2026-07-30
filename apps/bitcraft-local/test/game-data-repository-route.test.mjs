@@ -17,6 +17,9 @@ const { createCurrentStateRepository } = await import(
 const { gameDataResponse } = await import(
   new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
 );
+const { parseDomainKeys } = await import(
+  new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
+);
 
 function relayProvenance(receivedAt, sourceObservedAt = receivedAt) {
   return {
@@ -215,6 +218,13 @@ test("game-data route rejects other claims and returns 503 before any requested 
     "claim has not loaded yet.",
     "members has not loaded yet.",
   ]);
+});
+
+test("game-data route accepts the provider-neutral public crafts domain", () => {
+  assert.deepEqual(
+    parseDomainKeys("claim,public-crafts,public-crafts,not-a-domain"),
+    ["claim", "public-crafts"],
+  );
 });
 
 test("game-data route serves last-good data as stale with age and partial errors", () => {

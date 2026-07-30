@@ -34,7 +34,6 @@ for (const [label, path] of [
   ["dashboard", "../src/pages/DashboardPage.tsx"],
   ["craft planning", "../src/pages/CraftPlanningPage.tsx"],
   ["leaderboard", "../src/pages/LeaderboardPage.tsx"],
-  ["public craft finder", "../src/pages/PublicCraftFinderPage.tsx"],
   ["empires", "../src/pages/EmpiresPage.tsx"],
   ["market", "../src/pages/MarketPage.tsx"],
   ["members", "../src/pages/MembersPage.tsx"],
@@ -50,6 +49,15 @@ for (const [label, path] of [
     assert.match(page, /request\?\.sequence/);
   });
 }
+
+test("provider-neutral Public Craft Finder uses the central live manual refresh", () => {
+  const page = source("../src/pages/PublicCraftFinderPage.tsx");
+  const loader = source("../src/api/gameDataLoader.ts");
+
+  assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
+  assert.doesNotMatch(page, /useManualRefresh|manualRefreshHeaders|trackPromise|fetch\(/);
+  assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.manualHeaders\s*\}/);
+});
 
 test("provider-neutral Production joins selected-member Toolbelt to the active refresh", () => {
   const page = source("../src/pages/ProductionPage.tsx");
