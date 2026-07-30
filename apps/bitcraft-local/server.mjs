@@ -65,7 +65,7 @@ import {
 } from "./src/server/craftPlanProgressAudit.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
-import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
+import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { buildMarketOverview, collectMarketSnapshots, snapshotRetentionCutoff } from "./src/server/globalMarketInsights.mjs";
@@ -2222,8 +2222,9 @@ async function craftPlanTierPresets(claimId) {
 }
 
 async function craftPlanWorkstationPresets() {
-  const payload = await fetchBitjita("/buildings", { cache: true });
-  return buildWorkstationPresets(payload);
+  return buildWorkstationPresets({
+    buildings: providerCatalogRepository.listDescriptions("building"),
+  });
 }
 
 async function resolveCraftPlanWorkstationPreset(tier) {
@@ -2231,11 +2232,25 @@ async function resolveCraftPlanWorkstationPreset(tier) {
   if (!Number.isInteger(cleanTier) || cleanTier < 2 || cleanTier > 10) throw new Error("Choose a workstation tier from T2 to T10");
   const presets = await craftPlanWorkstationPresets();
   const preset = presets.find((entry) => entry.tier === cleanTier);
-  if (!preset?.workstations?.length) throw new Error(`No T${cleanTier} workstation definitions were returned by BitJita`);
-  const workstations = await mapWithConcurrency(preset.workstations, 4, async (workstation) => {
-    const payload = await fetchBitjita(`/buildings/${encodeURIComponent(workstation.id)}`, { cache: true });
-    const target = normalizeWorkstationTarget(payload, workstation);
-    if (!target.requirements.length) throw new Error(`${target.name} has no construction requirements in BitJita`);
+  if (!preset?.workstations?.length) throw new Error(`No T${cleanTier} workstation definitions are available in the Relay catalog`);
+  const buildingsById = new Map(
+    providerCatalogRepository.listDescriptions("building")
+      .map((building) => [String(building.id ?? ""), building]),
+  );
+  const recipesByBuilding = new Map(
+    providerCatalogRepository.listDescriptions("construction_recipe")
+      .map((recipe) => [String(recipe.buildingDescriptionId ?? ""), recipe]),
+  );
+  const workstations = preset.workstations.map((workstation) => {
+    const building = buildingsById.get(String(workstation.id)) ?? workstation;
+    const recipe = recipesByBuilding.get(String(workstation.id));
+    if (!recipe) throw new Error(`${workstation.name} has no construction recipe in the Relay catalog`);
+    const target = normalizeCatalogWorkstationTarget(
+      building,
+      recipe,
+      (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    );
+    if (!target.requirements.length) throw new Error(`${target.name} has no construction requirements in the Relay catalog`);
     return target;
   });
   return { ...preset, workstations };

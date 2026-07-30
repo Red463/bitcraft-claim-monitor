@@ -4,6 +4,7 @@ import {
   discoverRelayTopology,
   RelayGlobalCatalogSession,
 } from "../dist-server/game-data/index.js";
+import { buildWorkstationPresets } from "../src/server/craftPlanWorkstationPresets.mjs";
 
 const relayBaseUrl = String(
   process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app",
@@ -74,6 +75,28 @@ try {
       `Relay catalog description tables were unexpectedly empty: ${emptyDescriptionKinds.join(", ")}`,
     );
   }
+  const workstationPresets = buildWorkstationPresets({
+    buildings: snapshot.descriptions.building,
+  });
+  const constructionRecipeBuildingIds = new Set(
+    snapshot.descriptions.construction_recipe
+      .map((recipe) => String(recipe.buildingDescriptionId ?? "")),
+  );
+  const workstationCount = workstationPresets
+    .reduce((total, preset) => total + preset.workstations.length, 0);
+  const missingWorkstationRecipeIds = workstationPresets
+    .flatMap((preset) => preset.workstations)
+    .map((workstation) => String(workstation.id))
+    .filter((buildingId) => !constructionRecipeBuildingIds.has(buildingId));
+  if (!workstationCount || missingWorkstationRecipeIds.length) {
+    throw new Error(
+      `Relay workstation catalog join was incomplete: ${workstationCount} workstations, `
+      + `${missingWorkstationRecipeIds.length} missing construction recipes`
+      + (missingWorkstationRecipeIds.length
+        ? ` (${missingWorkstationRecipeIds.slice(0, 10).join(", ")})`
+        : ""),
+    );
+  }
   console.log(JSON.stringify({
     ok: true,
     uri: relayUrl.origin,
@@ -83,6 +106,8 @@ try {
     itemCount,
     cargoCount,
     descriptionCounts,
+    workstationPresetCount: workstationPresets.length,
+    workstationCount,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

@@ -565,6 +565,38 @@ test("typed recipe and skill descriptions are projected without wire DTOs", () =
   });
 });
 
+test("typed building descriptions retain Relay compendium visibility and workstation slots", () => {
+  assert.deepEqual(normalizeCatalogDescription({
+    id: 6020,
+    name: "Peerless Carpentry Station",
+    description: "A station",
+    iconAssetName: "Buildings/Carpentry",
+    showInCompendium: true,
+    maxHealth: 5000,
+    functions: [{
+      functionType: 3,
+      level: 6,
+      craftingSlots: 12,
+      storageSlots: 4,
+    }],
+  }, "building"), {
+    kind: "building",
+    id: "6020",
+    name: "Peerless Carpentry Station",
+    description: "A station",
+    iconAssetName: "Buildings/Carpentry",
+    showInCompendium: true,
+    maxHealth: 5000,
+    functions: [{
+      functionType: 3,
+      level: 6,
+      craftingSlots: 12,
+      storageSlots: 4,
+      refiningSlots: 0,
+    }],
+  });
+});
+
 test("claim technology descriptions retain progression caps and automatic unlocks", () => {
   assert.deepEqual(normalizeCatalogDescription({
     id: 1826500486,

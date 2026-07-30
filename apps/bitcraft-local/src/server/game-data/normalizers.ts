@@ -177,12 +177,14 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
       name: String(row.name ?? "").trim(),
       description: String(row.description ?? ""),
       iconAssetName: String(row.iconAssetName ?? row.icon_asset_name ?? ""),
+      showInCompendium: row.showInCompendium ?? row.show_in_compendium ?? false,
       maxHealth: integer(row.maxHealth ?? 0, "building max health"),
       functions: records(row.functions).map((entry) => ({
         functionType: integer(entry.functionType ?? 0, "building function type"),
         level: integer(entry.level ?? 0, "building function level"),
         craftingSlots: integer(entry.craftingSlots ?? 0, "building crafting slots"),
         storageSlots: integer(entry.storageSlots ?? 0, "building storage slots"),
+        refiningSlots: integer(entry.refiningSlots ?? 0, "building refining slots"),
       })),
     };
   }
