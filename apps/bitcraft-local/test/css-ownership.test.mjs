@@ -247,7 +247,6 @@ test("shared command panel primitives use neutral class names", () => {
     "../src/pages/RegionPage.tsx",
     "../src/pages/market/BuyOrderFinder.tsx",
     "../src/pages/market/DealWatchlist.tsx",
-    "../src/pages/market/PriceFinder.tsx",
   ];
   const forbidden = [];
   for (const relativePath of checkedFiles) {
@@ -488,7 +487,6 @@ test("market page styles live in the market stylesheet", () => {
     ".buy-order-opportunities",
     ".opportunity-strip",
     ".pagination-row",
-    ".price-recommendation",
     ".deal-watch-action",
     ".deal-watch-add-card",
     ".deal-watchlist-section",

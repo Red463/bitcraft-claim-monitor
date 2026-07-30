@@ -32,6 +32,7 @@ import {
   regionalMarketDealsView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
+  regionalMarketPriceQuote,
   regionalMarketStallsView,
   regionalMarketStatus,
 } from "./src/server/regionalMarketViews.mjs";
@@ -3242,8 +3243,6 @@ const analyticsEvents = new Set([
   "member_details_opened",
   "market_tab_viewed",
   "market_member_filter_used",
-  "price_finder_search",
-  "price_finder_region_changed",
   "public_craft_map_opened",
   "public_craft_skill_filter_used",
   "public_craft_region_filter_used",
@@ -3327,6 +3326,20 @@ function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sou
 
 function formatGold(value) {
   return `${Math.round(toNumber(value)).toLocaleString()}g`;
+}
+
+function formatExactInteger(value) {
+  const normalized = String(value ?? "0").trim();
+  return /^\d+$/.test(normalized)
+    ? BigInt(normalized).toLocaleString("en-GB")
+    : "0";
+}
+
+function formatExactGold(value) {
+  const normalized = String(value ?? "").trim();
+  const match = normalized.match(/^(\d+)(\.5)?$/);
+  if (!match) return "Unknown";
+  return `${BigInt(match[1]).toLocaleString("en-GB")}${match[2] ?? ""}g`;
 }
 
 function formatDaysAndHours(days) {
@@ -7178,6 +7191,23 @@ function regionalMarketReadScope(claimId) {
   return { current, allowedRegionIds };
 }
 
+function discordPriceRegionId(claimId, requestedRegion) {
+  const { allowedRegionIds } = regionalMarketReadScope(claimId);
+  const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+  const fallback = [
+    claim.regionId,
+    claim.region_id,
+    getSettings().defaultRegion,
+    allowedRegionIds[0],
+  ].map((value) => String(value ?? "").trim()).find((value) => /^\d+$/.test(value)) ?? "";
+  const regionId = String(requestedRegion ?? fallback).trim();
+  if (!/^\d+$/.test(regionId)) throw new Error("A numeric active region is required.");
+  if (allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+    throw new Error(`Region ${regionId} is outside the configured active-region scope.`);
+  }
+  return regionId;
+}
+
 function regionalMarketRegionRows(claimId) {
   const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
   const data = current?.data && typeof current.data === "object" && !Array.isArray(current.data)
@@ -7733,7 +7763,7 @@ const discordCommands = [
   },
   {
     name: "price",
-    description: "Look up recent BitJita sale pricing for an item.",
+    description: "Look up current Relay market orders for an item.",
     options: [
       { type: 3, name: "item", description: "Item name", required: true, autocomplete: true },
       { type: 4, name: "region", description: "Region number, defaults to settlement region", required: false },
@@ -7961,9 +7991,29 @@ async function discordAutocomplete(interaction) {
   const query = String(focused.value ?? "").trim();
   if (query.length < 2) return { type: 8, data: { choices: [] } };
   try {
-    const payload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
-    const entries = unwrap(payload, "items", []).slice(0, 20);
-    return { type: 8, data: { choices: entries.map((item) => ({ name: String(item.name ?? item.itemName ?? "Item").slice(0, 100), value: String(item.name ?? item.itemName ?? query).slice(0, 100) })) } };
+    const { claimId } = getSettings();
+    const regionId = discordPriceRegionId(claimId, discordOption(interaction, "region"));
+    const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+    const entries = regionalMarketCatalogView(
+      current?.data,
+      providerCatalogRepository.findEntities(query),
+      {
+        query,
+        regionId,
+        allowedRegionIds,
+        availableOnly: true,
+        limit: 20,
+      },
+    ).items;
+    return {
+      type: 8,
+      data: {
+        choices: entries.map((item) => ({
+          name: `${item.name} · ${item.itemType === "cargo" ? "Cargo" : "Item"}`.slice(0, 100),
+          value: `${item.itemType}:${item.itemId}`.slice(0, 100),
+        })),
+      },
+    };
   } catch {
     return { type: 8, data: { choices: [] } };
   }
@@ -7975,7 +8025,7 @@ function discordHelpCommand() {
     { name: "/supplies", value: "Current settlement supplies, upkeep and runway.", inline: false },
     { name: "/online", value: "Shows which settlement members are currently online.", inline: false },
     { name: "/crafts", value: "Lists current settlement crafts. Optional skill filter supported.", inline: false },
-    { name: "/price", value: "Looks up recent BitJita sale prices for an item.", inline: false },
+    { name: "/price", value: "Shows current Relay sell and buy orders for an item.", inline: false },
     { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
     { name: "/craft-plan", value: "Shows Craft Planner progress. Choose a profession for a focused report.", inline: false },
     { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
@@ -8325,33 +8375,72 @@ async function discordPriceCommand(itemName, regionOption) {
   const query = itemName.trim();
   if (query.length < 2) throw new Error("Enter an item name.");
   const { claimId } = getSettings();
-  const claimPayload = await fetchBitjita(`/claims/${claimId}`).catch(() => ({}));
-  const regionId = String(regionOption ?? (claimPayload.claim ?? claimPayload)?.regionId ?? "").trim();
-  const searchPayload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
-  const item = unwrap(searchPayload, "items", []).find((candidate) => String(candidate.name ?? candidate.itemName ?? "").toLowerCase() === query.toLowerCase()) ?? unwrap(searchPayload, "items", [])[0];
-  if (!item) return discordCommandEmbed("Price Finder", `No market item found for **${query}**.`, [], 0x838e9e);
-  const itemId = item.id ?? item.itemId;
-  const itemType = item.itemType ?? item.type ?? 0;
-  const historyPath = `/market/items/${encodeURIComponent(String(itemId))}/price-history?bucket=1%20day&limit=30${regionId ? `&regionId=${encodeURIComponent(regionId)}` : ""}`;
-  const history = await fetchBitjita(historyPath);
-  const buckets = unwrap(history, "buckets", []);
-  const avg = (days) => {
-    const selected = buckets.slice(-days).filter((bucket) => toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume));
-    const totalValue = selected.reduce((sum, bucket) => sum + toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value), 0);
-    const quantity = selected.reduce((sum, bucket) => sum + toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume), 0);
-    return quantity ? Math.round(totalValue / quantity) : 0;
-  };
-  const a1 = avg(1);
-  const a7 = avg(7);
-  const a30 = avg(30);
-  const suggested = a7 || a30 || a1;
-  return discordCommandEmbed("Price Finder", `**${item.name ?? item.itemName}**${regionId ? ` pricing in **R${regionId}**` : ""}`, [
-    { name: "24h average", value: a1 ? formatGold(a1) : "No sales", inline: true },
-    { name: "7d average", value: a7 ? formatGold(a7) : "No sales", inline: true },
-    { name: "30d average", value: a30 ? formatGold(a30) : "No sales", inline: true },
-    { name: "Suggested list price", value: suggested ? formatGold(suggested) : "Not enough sales data", inline: false },
-    { name: "Item type", value: String(itemType), inline: true },
-  ], suggested ? 0xf0c64f : 0x838e9e);
+  const regionId = discordPriceRegionId(claimId, regionOption);
+  const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+  const status = regionalMarketResponseStatus(current, regionId, allowedRegionIds);
+  if (status.freshness === "unavailable") {
+    return discordCommandEmbed(
+      "Live Market Price",
+      `Relay market data for **R${regionId}** has not loaded yet.`,
+      [{ name: "Status", value: status.warnings[0] ?? "Unavailable", inline: false }],
+      0x838e9e,
+    );
+  }
+  const keyMatch = query.match(/^(item|cargo):(\d+)$/i);
+  const matchedEntity = keyMatch
+    ? providerCatalogRepository.getEntity(`${keyMatch[1].toLowerCase() === "cargo" ? "cargo" : "items"}:${keyMatch[2]}`)
+    : null;
+  const catalogRows = matchedEntity
+    ? [matchedEntity]
+    : providerCatalogRepository.findEntities(query);
+  const items = regionalMarketCatalogView(current?.data, catalogRows, {
+    query: matchedEntity ? "" : query,
+    regionId,
+    allowedRegionIds,
+    availableOnly: true,
+    limit: 20,
+  }).items;
+  const item = items.find((candidate) => (
+    String(candidate.name).toLowerCase() === query.toLowerCase()
+  )) ?? items[0];
+  if (!item) {
+    return discordCommandEmbed(
+      "Live Market Price",
+      `No current market orders matched **${query}** in **R${regionId}**.`,
+      [],
+      0x838e9e,
+    );
+  }
+  const quote = regionalMarketPriceQuote(
+    current?.data,
+    providerCatalogRepository.getEntity(`${item.itemType === "cargo" ? "cargo" : "items"}:${item.itemId}`),
+    {
+      itemType: item.itemType,
+      itemId: item.itemId,
+      regionId,
+      allowedRegionIds,
+    },
+  );
+  const fields = [
+    { name: "Lowest sell", value: quote.sell.lowestUnitPrice ? formatExactGold(quote.sell.lowestUnitPrice) : "No sell orders", inline: true },
+    { name: "Sell median", value: quote.sell.medianUnitPrice ? formatExactGold(quote.sell.medianUnitPrice) : "No sell orders", inline: true },
+    { name: "Highest buy", value: quote.buy.highestUnitPrice ? formatExactGold(quote.buy.highestUnitPrice) : "No buy orders", inline: true },
+    { name: "Sell liquidity", value: `${quote.sell.orderCount.toLocaleString()} orders · ${formatExactInteger(quote.sell.totalQuantity)} units`, inline: true },
+    { name: "Buy demand", value: `${quote.buy.orderCount.toLocaleString()} orders · ${formatExactInteger(quote.buy.totalQuantity)} units`, inline: true },
+    {
+      name: "Data status",
+      value: status.freshness === "stale"
+        ? `Stale Relay last-good data${status.ageMs == null ? "" : ` · ${Math.max(0, Math.floor(status.ageMs / 1000)).toLocaleString()}s old`}${status.warnings.length ? `\n${status.warnings[0]}` : ""}`
+        : "Live Relay order book",
+      inline: false,
+    },
+  ];
+  return discordCommandEmbed(
+    "Live Market Price",
+    `**${quote.item.name}** current orders in **R${regionId}**`,
+    fields,
+    quote.sell.orderCount || quote.buy.orderCount ? 0xf0c64f : 0x838e9e,
+  );
 }
 
 async function registerDiscordCommands() {

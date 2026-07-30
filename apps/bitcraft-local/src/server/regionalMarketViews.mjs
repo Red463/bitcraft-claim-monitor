@@ -433,6 +433,45 @@ export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) 
   };
 }
 
+function exactMedian(values) {
+  const sorted = values
+    .map(decimal)
+    .sort(compareBigInt);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  const numerator = BigInt(sorted[middle - 1]) + BigInt(sorted[middle]);
+  const whole = numerator / 2n;
+  return numerator % 2n === 0n ? whole.toString() : `${whole}.5`;
+}
+
+function sumDecimal(values) {
+  return values.reduce((total, value) => total + BigInt(decimal(value)), 0n).toString();
+}
+
+export function regionalMarketPriceQuote(snapshot, catalogRow, options = {}) {
+  const orderBook = regionalMarketOrderBookView(snapshot, catalogRow, options);
+  const sellPrices = orderBook.sellOrders.map((order) => order.price);
+  const buyPrices = orderBook.buyOrders.map((order) => order.price);
+  const sortedSellPrices = [...sellPrices].sort(compareBigInt);
+  const sortedBuyPrices = [...buyPrices].sort(compareBigInt);
+  return {
+    item: orderBook.item,
+    regionId: String(options.regionId ?? "all").trim().toLowerCase() || "all",
+    sell: {
+      orderCount: orderBook.sellOrders.length,
+      totalQuantity: sumDecimal(orderBook.sellOrders.map((order) => order.quantity)),
+      lowestUnitPrice: sortedSellPrices[0] ?? null,
+      medianUnitPrice: exactMedian(sellPrices),
+    },
+    buy: {
+      orderCount: orderBook.buyOrders.length,
+      totalQuantity: sumDecimal(orderBook.buyOrders.map((order) => order.quantity)),
+      highestUnitPrice: sortedBuyPrices.at(-1) ?? null,
+    },
+  };
+}
+
 export function regionalMarketStallsView(snapshot, options = {}) {
   const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
   const query = String(options.query ?? options.search ?? "").trim().toLowerCase();

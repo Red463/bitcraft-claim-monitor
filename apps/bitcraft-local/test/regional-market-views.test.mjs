@@ -408,6 +408,105 @@ test("regional market order-book view preserves exact prices and scopes regions"
   });
 });
 
+test("regional market price quote derives exact live order statistics without sale history", () => {
+  assert.equal(
+    typeof views.regionalMarketPriceQuote,
+    "function",
+    "regional market live price quote must exist",
+  );
+  const result = views.regionalMarketPriceQuote({
+    activeRegionIds: ["7", "19"],
+    orders: [{
+      entityId: "901",
+      side: "sell",
+      claimEntityId: "100",
+      regionId: "19",
+      ownerEntityId: "701",
+      itemId: "43",
+      itemType: "cargo",
+      price: "9007199254740993",
+      quantity: "2",
+    }, {
+      entityId: "902",
+      side: "sell",
+      claimEntityId: "101",
+      regionId: "19",
+      ownerEntityId: "702",
+      itemId: "43",
+      itemType: "cargo",
+      price: "9007199254740994",
+      quantity: "3",
+    }, {
+      entityId: "903",
+      side: "buy",
+      claimEntityId: "102",
+      regionId: "19",
+      ownerEntityId: "703",
+      itemId: "43",
+      itemType: "cargo",
+      price: "9007199254740992",
+      quantity: "4",
+    }, {
+      entityId: "904",
+      side: "sell",
+      claimEntityId: "103",
+      regionId: "7",
+      ownerEntityId: "704",
+      itemId: "43",
+      itemType: "cargo",
+      price: "1",
+      quantity: "99",
+    }, {
+      entityId: "905",
+      side: "sell",
+      claimEntityId: "104",
+      regionId: "19",
+      ownerEntityId: "705",
+      itemId: "43",
+      itemType: "item",
+      price: "2",
+      quantity: "88",
+    }],
+  }, {
+    catalogKey: "cargo:43",
+    kind: "cargo",
+    targetId: "43",
+    name: "Timber Package",
+  }, {
+    itemType: "cargo",
+    itemId: "43",
+    regionId: "19",
+    allowedRegionIds: ["7", "19"],
+  });
+
+  assert.deepEqual(result, {
+    item: {
+      id: "43",
+      itemId: "43",
+      itemType: "cargo",
+      name: "Timber Package",
+      category: "",
+      tag: "",
+      tier: null,
+      rarity: "",
+      rarityStr: "",
+      iconAssetName: null,
+    },
+    regionId: "19",
+    sell: {
+      orderCount: 2,
+      totalQuantity: "5",
+      lowestUnitPrice: "9007199254740993",
+      medianUnitPrice: "9007199254740993.5",
+    },
+    buy: {
+      orderCount: 1,
+      totalQuantity: "4",
+      highestUnitPrice: "9007199254740992",
+    },
+  });
+});
+
 test("regional market deals derive truthful live arbitrage without trade history", () => {
   const result = views.regionalMarketDealsView({
     activeRegionIds: ["7", "19"],

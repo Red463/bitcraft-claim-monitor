@@ -72,7 +72,6 @@ test("every data table and custom horizontal table scroller has a durable keyboa
 
 for (const [name, relativePath] of [
   ["Craft Calculator", "../src/pages/CraftCalculatorPage.tsx"],
-  ["Price Finder", "../src/pages/market/PriceFinder.tsx"],
   ["Craft Plan Manager", "../src/pages/CraftPlanManagerDialog.tsx"],
 ]) {
   test(`${name} autocomplete exposes complete keyboard combobox semantics`, () => {

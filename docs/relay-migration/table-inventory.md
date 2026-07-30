@@ -271,3 +271,20 @@ be a committed domain event, not a scheduled ingestion sweep.
 - The legacy BitJita endpoint and inventory-collector ownership were removed.
 - `domain_payload_current` remains the durable last-good boundary. No
   Recruitment table, refresh ledger, or scheduled ingestion job was added.
+
+## Live price lookup vertical evidence
+
+- Market Browse is the browser price-search and order-book surface; the
+  unreferenced legacy Price Finder component has been removed.
+- Discord `/price` and autocomplete read `domain_payload_current`'s committed
+  `regional-market` generation and the existing `game_catalog_entities`
+  index.
+- Price statistics are derived on request with exact `BigInt` arithmetic.
+  Item and Cargo identities remain distinct, including when their numeric IDs
+  collide.
+- The command reports current orders and explicit freshness only. It does not
+  call a completed-sale history endpoint or infer a sale from an order
+  disappearing.
+- No price-lookup table, cache, refresh ledger, or scheduled acquisition job
+  was added. Current freshness remains owned by the adaptive regional session
+  pool.

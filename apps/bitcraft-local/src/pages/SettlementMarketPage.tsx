@@ -85,12 +85,10 @@ import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDi
 /*
  * Main application pages that still share a large amount of display logic.
  *
- * AppShell passes normalized BitJita data and local history into these pages.
- * Keep automatic BitJita fetching out of page components unless the interaction
- * is an explicit user-triggered tool such as market search or map catalog lookup.
+ * AppShell passes normalized provider data and locally observed history into
+ * these pages. Page components contact only provider-neutral local routes.
  */
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMeta: Map<string, AnyRecord> }) {
   const [sort, setSort] = React.useState<BestSellerSortKey>("units");
@@ -106,7 +104,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
       <div className="market-best-empty">
         <Star size={24} />
         <strong>No confirmed best sellers yet</strong>
-        <span>API-confirmed sales will appear here once BitJita reports completed trades for this selection.</span>
+        <span>Confirmed sales will appear here when an authoritative completed-trade signal is available for this selection.</span>
       </div>
     );
   }
@@ -368,7 +366,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
                     <strong>{formatNumber(row.totalValue)}g</strong>
                     <small>{formatNumber(row.salesCount)} sale{row.salesCount === 1 ? "" : "s"} - {formatNumber(row.unitsSold)} units</small>
                   </div>
-                )) : <p className="legend">No API-confirmed sales found for this selection.</p>}
+                )) : <p className="legend">No confirmed sales have been observed for this selection.</p>}
               </div>
             </section>
           </div>

@@ -117,6 +117,14 @@ completed-sale signal, the UI labels this baseline as a live median and never
 presents it as historical sales evidence. Expired per-region last-good data
 remains readable in market pages but cannot emit a new Deal Watch alert.
 
+Discord `/price` and its autocomplete are live consumers of that same
+generation and the continuously maintained catalog. The command reports
+lowest sell, exact sell median, highest buy, liquidity, demand, and freshness
+for one configured region. It does not call an upstream history endpoint or
+describe open orders as completed trades. Market Browse replaces the retired
+orphaned browser Price Finder, so no duplicate page, cache table, refresh
+ledger, or scheduled price-ingestion job remains.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;
