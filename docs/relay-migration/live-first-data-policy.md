@@ -109,6 +109,13 @@ planner projections, after which the browser is notified of the new
 generation. Users do not trigger the large upstream query and do not wait for
 a daily catalog refresh.
 
+The browser may reuse its last rendered snapshot to paint a migrated page
+without delay, but that snapshot must not suppress a provider-neutral local
+read. Migrated pages always re-read the current committed generation in the
+background on navigation. The temporary 20-second navigation short-circuit is
+restricted to unmigrated legacy-proxy pages while upstream rate limits still
+apply, and is deleted with that compatibility path.
+
 Add a provider-neutral local event stream:
 
 ```http

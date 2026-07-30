@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import packageJson from "../package.json";
-import { useBitjitaData } from "./api/bitjita";
+import { useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
@@ -74,10 +74,9 @@ import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTas
  * dedicated /bot dashboard route. Page-level rendering has mostly been moved to
  * focused modules, but cross-cutting state remains here because routing,
  * persisted browser settings, auth, analytics consent, notifications, and the
- * current BitJita payload all need to meet in one place.
+ * current normalized game-data payload all need to meet in one place.
  */
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
 const CHANGELOG_URL = `${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md`;
@@ -184,7 +183,7 @@ function accountDisplayName(user: UserAuthState["user"]): string {
 /**
  * Main public application route.
  *
- * This component owns public navigation, BitJita refreshes, browser-local
+ * This component owns public navigation, live game-data refreshes, browser-local
  * preferences, user Discord auth state, notifications, and page composition.
  */
 function DashboardApp() {
@@ -320,10 +319,10 @@ function DashboardApp() {
         throw error;
       });
   }, [active, manualRefreshCoordinator, manualRefreshRequest]);
-  const state = useBitjitaData(refreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
+  const state = useGameData(refreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
-    // BitJita payloads vary by endpoint. Normalize them once here, then apply
+    // Provider payloads vary by domain during migration. Normalize them once, then apply
     // the admin-controlled member visibility filter before any page receives
     // app data.
     const normalized = normalizeData(state.data);

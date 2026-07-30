@@ -41,6 +41,7 @@ Disposition values:
 | `craft_plan_settings` | keep-user | Authenticated plan edits | Saved plan targets, sources, and overrides. |
 | `craft_plan_progress_audit_snapshots`, `craft_plan_progress_audit_events`, `craft_plan_progress_audit_state` | keep-history | Normalized planner state transitions | Required for progress audit and restart continuity. |
 | Selected-player inventory and housing state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | Members, Craft Planner, and its admin manager share the provider-neutral player-data service. Inventory and housing load only for a selected monitored member. No SQL current/cache table or scheduled refresh job is justified. |
+| Browser page-navigation state | no table | In-memory last-rendered snapshot plus immediate provider-neutral local re-read | Migrated pages reuse visible data only to avoid a blank transition; the browser snapshot never suppresses a current-generation read and does not justify SQL persistence. |
 | `market_deal_watches` | keep-user | Authenticated deal-watch edits | User-owned alert configuration. |
 | `market_deal_alerts` | keep-history | Locally derived market transitions | Alert deduplication, acknowledgement, and delivery history. |
 | `admin_audit_log`, `admin_login_events` | keep-operations | Auth/admin security events | Security and accountability history. |

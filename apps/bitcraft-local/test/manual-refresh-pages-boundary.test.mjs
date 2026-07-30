@@ -10,15 +10,16 @@ function source(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("main BitJita loader bypasses the browser cache and tracks forced page loads", () => {
-  const bitjita = source("../src/api/bitjita.ts");
+test("main game-data loader keeps Relay pages live while legacy pages retain navigation throttling", () => {
+  const loader = source("../src/api/gameDataLoader.ts");
 
-  assert.match(bitjita, /manualRefreshApplies/);
-  assert.match(bitjita, /manualRefreshHeaders/);
-  assert.match(bitjita, /const forced = manualRefreshApplies\(manualRefreshRequest, activePanel\)/);
-  assert.match(bitjita, /if \(!forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS\)/);
-  assert.match(bitjita, /headers:\s*\{[^}]*\.\.\.manualHeaders/s);
-  assert.match(bitjita, /trackManualRefreshPromise\("main-data", load\(\)\)/);
+  assert.match(loader, /manualRefreshApplies/);
+  assert.match(loader, /manualRefreshHeaders/);
+  assert.match(loader, /const providerNeutral = usesProviderNeutralGameData\(activePanel\)/);
+  assert.match(loader, /const forced = manualRefreshApplies\(manualRefreshRequest, activePanel\)/);
+  assert.match(loader, /if \(!providerNeutral && !forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS\)/);
+  assert.match(loader, /headers:\s*\{[^}]*\.\.\.manualHeaders/s);
+  assert.match(loader, /trackManualRefreshPromise\("main-data", load\(\)\)/);
 });
 
 test("local page history joins the same active refresh request", () => {
@@ -52,7 +53,7 @@ for (const [label, path] of [
 
 test("provider-neutral Production joins selected-member Toolbelt to the active refresh", () => {
   const page = source("../src/pages/ProductionPage.tsx");
-  const loader = source("../src/api/bitjita.ts");
+  const loader = source("../src/api/gameDataLoader.ts");
 
   assert.match(page, /useManualRefresh|manualRefreshHeaders|trackPromise/);
   assert.match(page, /request\?\.sequence/);

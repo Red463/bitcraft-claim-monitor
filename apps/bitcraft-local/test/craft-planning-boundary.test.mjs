@@ -409,7 +409,7 @@ test("Craft Planning reads the continuously projected Relay catalog without a sc
 test("Craft Planning serves a compact live board and lazy item drilldowns", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const bitjitaEndpoints = readFileSync(new URL("../src/api/bitjitaEndpoints.ts", import.meta.url), "utf8");
+  const legacyPageEndpoints = readFileSync(new URL("../src/api/legacyPageEndpoints.ts", import.meta.url), "utf8");
 
   assert.match(server, /computedCompactCraftPlanResponse/);
   assert.match(server, /createCraftPlanResponseWorkspace/);
@@ -427,7 +427,7 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);
-  assert.match(bitjitaEndpoints, /activePanel === "planning"/);
+  assert.match(legacyPageEndpoints, /activePanel === "planning"/);
 });
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {

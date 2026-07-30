@@ -1,7 +1,7 @@
 import type { ActivePanel } from "../types/app.ts";
 import { usesProviderNeutralGameData } from "./pageDomains.ts";
 
-export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
+export function legacyPageEndpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
   if (activePanel && usesProviderNeutralGameData(activePanel)) return {};
   const endpoints = {
     claim: `/claims/${claimId}`,

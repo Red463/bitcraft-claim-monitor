@@ -6,8 +6,8 @@ import { manualRefreshApplies, manualRefreshHeaders } from "../refresh/manualRef
 import type { ActivePanel, LoadState } from "../types/app";
 import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
-import { marketEndpointMap } from "./bitjitaEndpoints.ts";
 import { loadGameData } from "./gameData.ts";
+import { legacyPageEndpointMap } from "./legacyPageEndpoints.ts";
 import { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
 
 /*
@@ -16,7 +16,7 @@ import { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
  * Relay vertical slice is complete.
  */
 
-const API = "/api/bitjita";
+const LEGACY_API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 function appendPartialError(raw: AnyRecord, message: string) {
   const current = Array.isArray(raw.partialErrors) ? raw.partialErrors : [];
@@ -74,7 +74,7 @@ function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now(), override
 function loadedState(data: AnyRecord, overrideCacheState?: string): LoadState<AnyRecord> {
   return { loading: false, error: null, data, ...freshnessFromPayload(data, Date.now(), overrideCacheState) };
 }
-export function useBitjitaData(
+export function useGameData(
   refreshToken: number,
   claimId: string,
   activePanel: ActivePanel,
@@ -91,9 +91,10 @@ export function useBitjitaData(
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
     const cachedAgeMs = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
+    const providerNeutral = usesProviderNeutralGameData(activePanel);
     const forced = manualRefreshApplies(manualRefreshRequest, activePanel);
     const manualHeaders = manualRefreshHeaders(manualRefreshRequest, activePanel);
-    if (!forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
+    if (!providerNeutral && !forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
       setState({ loading: false, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: "browser-cache", stale: cached.stale });
       return;
     }
@@ -106,7 +107,7 @@ export function useBitjitaData(
     async function load() {
       try {
         async function request(path: string) {
-          const response = await fetch(`${API}${path}`, { headers: { ...manualHeaders }, signal: controller.signal });
+          const response = await fetch(`${LEGACY_API}${path}`, { headers: { ...manualHeaders }, signal: controller.signal });
           if (!response.ok) throw new Error(httpErrorMessage(path, response.status));
           return response.json();
         }
@@ -118,7 +119,7 @@ export function useBitjitaData(
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
-        if (usesProviderNeutralGameData(activePanel)) {
+        if (providerNeutral) {
           const raw = await loadGameData(
             claimId,
             pageDomains(activePanel),
@@ -130,7 +131,7 @@ export function useBitjitaData(
           if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
           return;
         }
-        const requestedEndpoints = marketEndpointMap(claimId, activePanel);
+        const requestedEndpoints = legacyPageEndpointMap(claimId, activePanel);
         if (Object.keys(requestedEndpoints).length === 0) {
           if (!cancelled) React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
           return;

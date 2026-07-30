@@ -5,8 +5,8 @@ import test from "node:test";
 const { loadGameData, pageDomains, usesProviderNeutralGameData } = await import(
   new URL("../src/api/gameData.ts", import.meta.url).href,
 );
-const { marketEndpointMap } = await import(
-  new URL("../src/api/bitjitaEndpoints.ts", import.meta.url).href,
+const { legacyPageEndpointMap } = await import(
+  new URL("../src/api/legacyPageEndpoints.ts", import.meta.url).href,
 );
 
 test("claim overview, Members, Professions, and Leaderboard request provider-neutral local domains", async () => {
@@ -64,8 +64,16 @@ test("claim overview, Members, Professions, and Leaderboard request provider-neu
   assert.equal(result.serverFreshness.stale, false);
 });
 
+test("AppShell depends on the provider-neutral transitional loader", async () => {
+  const appShell = await readFile(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /import \{ useGameData \} from "\.\/api\/gameDataLoader"/);
+  assert.match(appShell, /const state = useGameData\(/);
+  assert.doesNotMatch(appShell, /useBitjitaData|\.\/api\/bitjita/);
+});
+
 test("browser loader routes the first Milestone 3 pages through local game data", async () => {
-  const source = await readFile(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/api/gameDataLoader.ts", import.meta.url), "utf8");
   for (const panel of ["dashboard", "members", "skills", "leaderboard", "inventory", "craft-monitor"]) {
     assert.equal(usesProviderNeutralGameData(panel), true);
   }
@@ -91,7 +99,7 @@ test("Construction uses the provider-neutral live regional snapshot and local ca
   const source = await readFile(new URL("../src/pages/ConstructionPage.tsx", import.meta.url), "utf8");
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.equal(usesProviderNeutralGameData("construction"), true);
-  assert.deepEqual(marketEndpointMap("1369094286777412590", "construction"), {});
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "construction"), {});
   assert.deepEqual(pageDomains("construction"), [
     "claim",
     "members",
@@ -106,7 +114,7 @@ test("Construction uses the provider-neutral live regional snapshot and local ca
 
 test("Research uses the provider-neutral live regional state and global technology catalog", () => {
   assert.equal(usesProviderNeutralGameData("research"), true);
-  assert.deepEqual(marketEndpointMap("1369094286777412590", "research"), {});
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "research"), {});
   assert.deepEqual(pageDomains("research"), [
     "claim",
     "members",
@@ -117,7 +125,7 @@ test("Research uses the provider-neutral live regional state and global technolo
 test("Hexite Deposits enters Empires through provider-neutral game data without starting the legacy overview request", async () => {
   const source = await readFile(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
   assert.equal(usesProviderNeutralGameData("empires"), true);
-  assert.deepEqual(marketEndpointMap("1369094286777412590", "empires"), {});
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "empires"), {});
   assert.deepEqual(pageDomains("empires"), [
     "claim",
     "members",
