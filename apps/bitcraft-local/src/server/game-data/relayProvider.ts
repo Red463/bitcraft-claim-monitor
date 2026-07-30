@@ -289,8 +289,15 @@ export class RelayBitCraftProvider implements GameDataProvider {
     }
     if (domains.includes("deposits")) {
       try {
+        const deposits = normalizeDeposits(await http.deposits(regionId));
+        const foreignDeposit = deposits.find((deposit) => deposit.regionId !== regionId);
+        if (foreignDeposit) {
+          throw new ClaimScopeError(
+            `Relay deposit region ${foreignDeposit.regionId} does not match the claim region ${regionId}.`,
+          );
+        }
         batch.domains.deposits = {
-          data: normalizeDeposits(await http.deposits(regionId)),
+          data: deposits,
           confidence: "joined",
           provenance: {
             provider: "relay",

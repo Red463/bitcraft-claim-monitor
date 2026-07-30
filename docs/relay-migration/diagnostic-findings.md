@@ -319,6 +319,24 @@ use regional sessions. The one matching empire-settlement row is useful but
 does not prove global completeness for empire nodes, siege, watchtowers, or
 membership; those remain subject to regional comparison.
 
+## Hexite deposit HTTP semantics
+
+The Region 19 Relay deposit route was sampled again on 2026-07-30. It returned
+10 exact-identity rows. Five rows supplied a future `respawn_at`; the other
+five omitted it. Of those without a respawn time, one explicitly reported
+`status: "unknown"` and four omitted status entirely.
+
+Only an explicit `status: "active"` is therefore treated as active. A future
+`respawn_at` is normalized as `respawning`; missing or unrecognized state is
+`unknown`. Even after a recorded respawn time passes, the UI reports
+`Respawn overdue` and waits for Relay confirmation instead of assuming the
+deposit is harvestable.
+
+The domain refreshes on the 15-second Relay HTTP loop and manual refresh uses
+the same single-flight provider coordination. Current rows live only in
+`domain_payload_current`; there is no deposit-specific SQL table or scheduled
+ingestion job.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or

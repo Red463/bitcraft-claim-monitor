@@ -282,6 +282,43 @@ test("Relay provider loads bounded inventory, craft, and deposit HTTP domains", 
   assert.deepEqual(craftCompletedFilters, ["false", "true"]);
 });
 
+test("Relay provider rejects cross-region deposit rows and preserves the last-good domain", async () => {
+  const responses = relayResponses();
+  responses.set("/deposits", {
+    deposits: [{ entity_id: "1", region: 20, status: "active" }],
+  });
+  const batches = [];
+  const errors = [];
+  const provider = new RelayBitCraftProvider({
+    fetcher: async (input) => {
+      const body = responses.get(new URL(String(input)).pathname);
+      return body
+        ? new Response(JSON.stringify(body), { status: 200 })
+        : new Response("missing", { status: 404 });
+    },
+    scheduleTopologyRefresh: () => () => {},
+  });
+  await provider.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    activeRegionIds: ["19"],
+  }, {
+    commitGeneration: async (batch) => batches.push(batch),
+    appendEvents: async () => {},
+    markError: async (_claimId, domain, error) => errors.push([domain, error]),
+  });
+
+  await assert.rejects(provider.refresh({
+    claimId: "1369094286777412590",
+    domains: ["deposits"],
+    reason: "scheduled",
+  }), /region 20 does not match.*region 19/i);
+
+  assert.equal(batches.length, 1);
+  assert.equal(Object.hasOwn(batches[0].domains, "deposits"), false);
+  assert.deepEqual(errors.map(([domain]) => domain), ["deposits"]);
+});
+
 test("Relay provider coalesces concurrent refreshes covered by the same in-flight domains", async () => {
   const responses = relayResponses();
   responses.set("/claim/1369094286777412590/inventory", {

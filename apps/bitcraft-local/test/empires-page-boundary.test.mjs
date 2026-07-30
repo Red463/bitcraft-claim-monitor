@@ -24,6 +24,19 @@ test("Empires renders a restricted state when every view is denied", () => {
   assert.match(empiresPage, /No empire views are available for your account\./);
 });
 
+test("Empires exposes live provider-neutral Hexite deposits without treating unknown rows as active", () => {
+  const depositsPanel = readFileSync(new URL("../src/pages/empires/DepositsPanel.tsx", import.meta.url), "utf8");
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(empiresPage, /id: "deposits" as const, label: "Hexite Deposits"/);
+  assert.match(empiresPage, /<DepositsPanel data=\{providerData\} loading=\{providerLoading\} error=\{providerError\} monitoredRegionId=\{monitoredRegionId\}/);
+  assert.match(appShell, /providerData=\{data\.raw\}/);
+  assert.doesNotMatch(depositsPanel, /fetch\(|loadGameData/);
+  assert.doesNotMatch(depositsPanel, /\/api\/bitjita|relay\.bitcraftsync\.app/i);
+  assert.match(depositsPanel, /Unknown does not mean active or harvestable/);
+  assert.match(depositsPanel, /scrollLabel="Hexite deposits table"/);
+});
+
 test("Empires contains wide tables on phones and names their keyboard scrollers", () => {
   const dataTable = readFileSync(new URL("../src/components/main/DataTable.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");

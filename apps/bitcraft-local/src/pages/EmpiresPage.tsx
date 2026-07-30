@@ -1,6 +1,6 @@
 import React from "react";
 import "../styles/empires.css";
-import { AlertTriangle, Castle, Clock, Crown, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, Castle, Clock, Crown, Gem, Hammer, Landmark, MapPin, Package, RadioTower, Shield, Users, X, Zap } from "lucide-react";
 import { DataTable, type DataTableColumn } from "../components/main/DataTable";
 import { AsyncState } from "../components/main/AsyncState";
 import { AppSkeleton } from "../components/main/AppChrome";
@@ -14,13 +14,14 @@ import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "..
 import { resolveAllowedView } from "../navigation/routeState.ts";
 import { presentHexiteReserveSummary } from "./empires/hexitePresentation";
 import { EmpireDetailsDialog } from "./empires/EmpireDetailsDialog";
+import { DepositsPanel } from "./empires/DepositsPanel";
 import { SiegeDetailsDialog } from "./empires/SiegeDetailsDialog";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
-type EmpireTab = "overview" | "watchtowers";
+type EmpireTab = "overview" | "watchtowers" | "deposits";
 type ActiveRegion = { regionId: string; regionName?: string; source?: string };
 
 function useEmpireRegions(includeRegionId?: string): ActiveRegion[] {
@@ -249,13 +250,26 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
     </Dialog>
   );
 }
-export function Empires({ monitoredRegionId, access }: { monitoredRegionId: string; access?: EffectiveAccess | null }) {
+export function Empires({
+  monitoredRegionId,
+  providerData,
+  providerLoading,
+  providerError,
+  access,
+}: {
+  monitoredRegionId: string;
+  providerData: AnyRecord | null;
+  providerLoading: boolean;
+  providerError: string | null;
+  access?: EffectiveAccess | null;
+}) {
   const { request, trackPromise } = useManualRefresh();
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
   const empireTabs = React.useMemo(() => [
     { id: "overview" as const, label: "Overview", icon: <Landmark size={15} /> },
     { id: "watchtowers" as const, label: "Watchtowers", icon: <RadioTower size={15} /> },
+    { id: "deposits" as const, label: "Hexite Deposits", icon: <Gem size={15} /> },
   ].filter((entry) => effectiveTargetAllowed(access, targetIdForTab("empires", entry.id))), [access]);
   const resolvedTab = resolveAllowedView(tab, empireTabs.map((entry) => entry.id));
   const currentTab = resolvedTab ?? tab;
@@ -279,6 +293,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
   }, [initialRegion, regionId, regions, setRegionId]);
 
   React.useEffect(() => {
+    if (currentTab !== "overview") return;
     const controller = new AbortController();
     setOverview((current) => ({ ...current, loading: true, error: null }));
     const refresh = fetch(`${LOCAL_API}/empires?regionId=${encodeURIComponent(regionId)}`, { headers: manualRefreshHeaders(request, "empires"), signal: controller.signal })
@@ -289,7 +304,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
         if (!controller.signal.aborted) setOverview((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [regionId, request?.sequence, trackPromise]);
+  }, [currentTab, regionId, request?.sequence, trackPromise]);
 
   React.useEffect(() => {
     if (currentTab !== "watchtowers") return;
@@ -421,12 +436,16 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           <p>Regional empire overview and claimed watchtower scouting.</p>
         </div>
         <div className="page-title-actions">
+          {currentTab === "deposits" ? (
+            <span className="status-pill good">Settlement region R{monitoredRegionId}</span>
+          ) : (
           <label className="field compact-field">
             <span>Region</span>
             <select className="select-control" value={regionId} onChange={(event) => setRegionId(event.target.value)}>
               {regions.length ? regions.map((region) => <option key={region.regionId} value={region.regionId}>{regionLabel(region, monitoredRegionId)}</option>) : <option value={regionId}>R{regionId}</option>}
             </select>
           </label>
+          )}
         </div>
       </header>
 
@@ -456,7 +475,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           </section>
         </>
             )
-      ) : (
+      ) : currentTab === "watchtowers" ? (
         watchtowers.loading && !watchtowers.data
           ? <AppSkeleton />
           : watchtowers.error && !watchtowers.data
@@ -500,7 +519,7 @@ export function Empires({ monitoredRegionId, access }: { monitoredRegionId: stri
           </section>
         </>
             )
-      )}
+      ) : <DepositsPanel data={providerData} loading={providerLoading} error={providerError} monitoredRegionId={monitoredRegionId} />}
       {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
       {selectedSiegeTower ? (
         <SiegeDetailsDialog

@@ -113,6 +113,18 @@ test("Research uses the provider-neutral live regional state and global technolo
   ]);
 });
 
+test("Hexite Deposits enters Empires through provider-neutral game data without starting the legacy overview request", async () => {
+  const source = await readFile(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
+  assert.equal(usesProviderNeutralGameData("empires"), true);
+  assert.deepEqual(marketEndpointMap("1369094286777412590", "empires"), {});
+  assert.deepEqual(pageDomains("empires"), [
+    "claim",
+    "members",
+    "deposits",
+  ]);
+  assert.match(source, /React\.useEffect\(\(\) => \{\s*if \(currentTab !== "overview"\) return;\s*const controller = new AbortController\(\);\s*setOverview/);
+});
+
 test("Members uses Relay equipment, passive crafts, and bounded player inventory", async () => {
   const source = await readFile(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
   assert.match(source, /data\.raw\?\.equipment\?\.members/);

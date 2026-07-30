@@ -61,7 +61,8 @@ generation plus `domain_payload_current` for durable last-good recovery.
 | Research and recruitment | No dedicated table | Claim-filtered regional subscriptions with incremental catalog joins |
 | Equipment, buffs, and player state | No dedicated table | Member-filtered regional subscriptions |
 | Claim layout and current locations | No dedicated table | Bounded claim/entity-filtered regional subscriptions |
-| Current empire, watchtower, siege, and deposit state | No dedicated table | Global rows where proven complete; otherwise bounded adaptive regional sessions |
+| Current empire, watchtower, and siege state | No dedicated table | Global rows where proven complete; otherwise bounded adaptive regional sessions |
+| Current Hexite deposit state | No dedicated table | Bounded Relay HTTP snapshot on the 15-second live loop with durable last-good recovery in `domain_payload_current` |
 | Current market orders and listings | No raw mirror table by default | Order subscriptions and incremental transition handling |
 
 An implementation may retain or add a compact derived-current index only after

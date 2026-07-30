@@ -20,7 +20,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
 | Region | BitJita region/status/trade volume | Configured regional sessions | baseline |
 | Empires/watchtowers/siege | BitJita empire routes | Proven global rows or regional sessions | blocked on evidence |
-| Deposits | Normalized Relay snapshot available; page still legacy | Relay HTTP deposits with explicit state | in progress |
+| Deposits | Empires Hexite Deposits tab reads the provider-neutral 15-second Relay snapshot with last-good fallback; `unknown` and overdue rows are never promoted to active; no deposit-specific table or scheduled job | Relay HTTP deposits with explicit state | ready for soak |
 | Map/layout | BitJita layout/player routes | Claim parents and bounded location rows | blocked on evidence |
 | Catalogs/planner inputs | Typed global item/cargo repository live; remaining description tables and planner reads still legacy | Global typed subscriptions | in progress |
 | Item/cargo icons | BitJita image URLs | Digest-verified local assets; permission confirmation recorded | blocked on assets |

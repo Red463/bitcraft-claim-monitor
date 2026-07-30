@@ -1,4 +1,4 @@
-/* Empires page: BitJita-only scouting views for regional empires and claimed watchtowers. */
+/* Empires page: regional empire scouting plus live Relay Hexite deposits. */
 .empires-page {
   min-width: 0;
 }
@@ -134,6 +134,31 @@
 
 .coordinate-cell {
   white-space: nowrap;
+}
+
+.deposit-name-cell,
+.deposit-status-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.deposit-name-cell svg,
+.deposit-status-note svg {
+  flex: 0 0 auto;
+  color: var(--gold);
+}
+
+.deposit-status-note {
+  align-items: flex-start;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.deposit-status-note strong {
+  color: var(--text);
 }
 
 .hexite-reserve-note {
