@@ -1,7 +1,7 @@
 import type { AnyRecord } from "../main-app-data";
 
 // Craft Calculator recipe planning lives here so the page can stay focused on
-// search/selection UI. BitJita exposes multiple recipe families and sometimes
+// search/selection UI. The normalized catalog exposes multiple recipe families and sometimes
 // package/unpack routes; this module normalizes those into a deterministic plan
 // without inventing missing recipe data.
 export type RecipeKind = "items" | "cargo";
@@ -148,7 +148,7 @@ export function selectedRecipeForTarget(detail: RecipeDetail, target: RecipeTarg
 /**
  * Builds a recursive material plan for the requested target.
  *
- * `detailsByKey` must contain BitJita recipe detail responses keyed by
+ * `detailsByKey` must contain normalized recipe detail responses keyed by
  * `items:<id>` or `cargo:<id>`. Missing details are treated as source materials
  * rather than guessed, because showing a wrong recipe tree is worse than showing
  * an incomplete one.
@@ -170,7 +170,7 @@ export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByK
     const key = recipeKey(nextTarget.kind, nextTarget.id);
     const detail = detailsByKey.get(key);
     if (!detail) {
-      // The calculator only expands items BitJita can describe. Source materials
+      // The calculator only expands items the normalized catalog can describe. Source materials
       // and unavailable endpoints stop here by design.
       addRaw({ ...nextTarget, quantity });
       warnings.push(`No recipe data was available for ${nextTarget.name}; it was treated as a source material.`);
@@ -198,7 +198,7 @@ export function buildRecipePlan(target: RecipeTarget, amount: number, detailsByK
     }
 
     const outputStack = recipeOutputs(recipe).find((candidate) => stackMatches(candidate, nextTarget));
-    const outputPerCraft = Math.max(1, Number(outputStack?.quantity ?? recipe.outputQuantity ?? 1) || 1);
+    const outputPerCraft = Math.max(Number.EPSILON, Number(outputStack?.quantity ?? recipe.outputQuantity ?? 1) || 1);
     const craftCount = Math.ceil(quantity / outputPerCraft);
     const directInputs = recipeInputs(recipe).map((inputStack, index) => {
       const material = enrichStack(inputStack, recipe.consumedItems?.[index]);

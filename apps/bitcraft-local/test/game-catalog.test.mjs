@@ -728,3 +728,25 @@ test("game catalog repository preserves separate item and cargo identities witho
   assert.equal("replaceRefreshTargets" in repository, false);
   db.close();
 });
+
+test("game catalog repository searches normalized item and cargo identities with exact and prefix priority", () => {
+  const db = createDb();
+  const repository = createGameCatalogRepository(db);
+  repository.upsertEntityIdentity({ id: "100", itemType: 0, name: "Rough Plank", tier: 1 }, { updatedAt: UPDATED_AT });
+  repository.upsertEntityIdentity({ id: "200", itemType: 0, name: "Rough Plank Bundle", tier: 1 }, { updatedAt: UPDATED_AT });
+  repository.upsertEntityIdentity({ id: "300", itemType: 1, name: "Packed Rough Plank", tier: 1 }, { updatedAt: UPDATED_AT, kind: "cargo" });
+  repository.upsertEntityIdentity({ id: "400", itemType: 0, name: "Fine Rough Plank", tier: 3 }, { updatedAt: UPDATED_AT });
+
+  assert.deepEqual(
+    repository.searchEntities("rough plank", 4).map((row) => [row.kind, row.targetId, row.name]),
+    [
+      ["items", "100", "Rough Plank"],
+      ["items", "200", "Rough Plank Bundle"],
+      ["cargo", "300", "Packed Rough Plank"],
+      ["items", "400", "Fine Rough Plank"],
+    ],
+  );
+  assert.deepEqual(repository.searchEntities("300", 10).map((row) => row.catalogKey), ["cargo:300"]);
+  assert.equal(repository.searchEntities("r", 10).length, 0);
+  db.close();
+});

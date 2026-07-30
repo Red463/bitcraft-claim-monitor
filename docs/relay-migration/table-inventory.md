@@ -19,7 +19,7 @@ Disposition values:
 |---|---|---|---|
 | `domain_payload_current` | keep-current | Current-state repository; atomic provider generation | Canonical last-good boundary for normalized domains. Inventory uses this table and adds no inventory-specific cache table; Craft Planner reads the same committed member and settlement-inventory generations directly. |
 | `provider_source_health`, `provider_subscription_health` | keep-operations | Relay provider/runtime health events | Required for separate worker/web visibility, schema health, lag, and reconnect diagnostics. |
-| `game_catalog_entities`, `game_catalog_source_state`, `game_catalog_descriptions` | keep-current | Global typed subscription generation | Durable normalized Relay catalog and exact item/cargo enrichment source. Craft Planner workstation presets join building descriptions, construction recipes, and exact item/cargo identities here without an upstream page-load request or workstation cache table. |
+| `game_catalog_entities`, `game_catalog_source_state`, `game_catalog_descriptions` | keep-current | Global typed subscription generation | Durable normalized Relay catalog and exact item/cargo enrichment source. Craft Calculator and Craft Plan target search query this continuously updated local index directly. Craft Planner workstation presets join building descriptions, construction recipes, and exact item/cargo identities here without an upstream page-load request or workstation cache table. |
 | `game_catalog_recipes`, `game_catalog_recipe_inputs`, `game_catalog_recipe_outputs`, `game_catalog_recipe_sources`, `game_catalog_recipe_output_components` | keep-current | Global typed subscription generation | Indexed Craft Planner and item-detail read model. Crafting and extraction rows now replace atomically in the same live generation as catalog descriptions. |
 | `game_catalog_item_list_outputs`, `game_catalog_item_lists`, `game_catalog_item_list_possibilities`, `game_catalog_item_list_possibility_outputs`, `game_catalog_resources`, `game_catalog_resource_completion_outputs` | keep-current | Global typed subscription generation | Required for exact probabilistic output and gathering calculations; now replaced atomically from live item-list/resource descriptions without an external download. |
 | `game_catalog_probability_snapshot`, `game_catalog_probability_sources`, `game_catalog_effort_weights` | keep-current | Global subscription generation plus immediate catalog-derived calculation | Compact planner projections with measured benefit. A full live generation currently applies in about 474 ms in disposable SQLite; no scheduled freshness owner is justified. |
@@ -104,6 +104,10 @@ be a committed domain event, not a scheduled ingestion sweep.
   cache table. Its process-memory calculation cache is generation-keyed and
   falls back to a five-second TTL, so a committed source change is visible on
   the next planner read without a scheduled rebuild.
+- Craft Calculator and Craft Plan target search read the live-maintained
+  `game_catalog_entities` index. Recipe trees compose direct and probabilistic
+  item-list producer routes from the current normalized generation on demand;
+  there is no search cache, recipe-detail cache, or scheduled rebuild.
 - `production_jobs` and `production_contributions` remain history/event tables
   for lifecycle and notification semantics; they are not the current page's
   source of truth.

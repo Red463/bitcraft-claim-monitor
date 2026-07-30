@@ -7,7 +7,6 @@ import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
 
 const LOCAL_API = "/api/local";
-const BITJITA_API = "/api/bitjita";
 const TABS = ["targets", "sources", "players", "routes", "buffers", "audit"] as const;
 type ManagerTab = typeof TABS[number];
 type ManagerOperation = "loading" | "refreshing" | "saving" | "preset" | null;
@@ -295,7 +294,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     if (trimmed.length < 2) { setSearchResults([]); return; }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`${BITJITA_API}/market?search=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
+      fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { signal: controller.signal })
         .then((response) => response.ok ? response.json() : { items: [], cargos: [] })
         .then((body) => {
           setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
@@ -451,14 +450,14 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </section>
             <section className="craft-plan-tier-presets craft-plan-workstation-presets" aria-label="Workstation tier presets">
               <div className="craft-plan-tier-presets-header">
-                <div><h4><Package size={16} /> Workstation presets</h4><p>Add one of every standard workstation at the selected tier. Construction requirements are loaded from BitJita.</p></div>
+                <div><h4><Package size={16} /> Workstation presets</h4><p>Add one of every standard workstation at the selected tier. Construction requirements come from the live Relay catalog.</p></div>
                 <small>{workstationPresets.length ? `${workstationPresets.length} tiers loaded` : "No presets loaded"}</small>
               </div>
               {workstationPresets.length ? <div className="craft-plan-preset-grid">
                 {workstationPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add workstation targets for ${preset.label}`} disabled={busy} key={preset.key} onClick={() => void addWorkstationPreset(preset)}>{preset.label}</button>)}
-              </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>BitJita did not return compatible workstation definitions.</span></div>}
+              </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>The live Relay catalog has no compatible workstation definitions yet.</span></div>}
             </section>
-            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search BitJita items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
+            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search live catalog items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
             {searchResults.length ? <div className="craft-plan-search-results" id="craft-plan-target-suggestions" role="listbox">{searchResults.map((item, index) => <button id={`craft-plan-target-suggestion-${index}`} role="option" aria-selected={activeSearchResultIndex === index} tabIndex={-1} className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onMouseEnter={() => setActiveSearchResultIndex(index)} onClick={() => selectSearchResult(item)}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}>
@@ -477,7 +476,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </div>
           </section> : null}
 
-          {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each BitJita storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
+          {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each live Relay storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
 
           {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories, active crafts, and banks count toward the plan. Banks include all Relay-visible settlement banks for that player, including banks in other settlements, as confirmed stock.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), config.sourceRules.bankPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked), (checked) => updateSource("bankPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
 

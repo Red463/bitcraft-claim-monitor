@@ -626,7 +626,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
   return recipes;
 }
 
-function recipesForTarget(detail, target, detailsByKey = null) {
+export function recipesForTarget(detail, target, detailsByKey = null) {
   const recipes = [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)];
   return recipes.sort((a, b) => {
     const gatheringOrder = Number(routeIsGathering(b)) - Number(routeIsGathering(a));

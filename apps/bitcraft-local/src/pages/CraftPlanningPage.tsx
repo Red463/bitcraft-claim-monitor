@@ -327,7 +327,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                     <strong>{craft.passive ? `Passive craft · ${craft.buildingName ?? "Unknown structure"}` : craft.buildingName ?? "Crafting station"}</strong>
                     <small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small>
                   </>}
-                  {craft.locationUnknown ? <small>Location not reported by BitJita</small> : null}
+                  {craft.locationUnknown ? <small>Location not reported by Relay</small> : null}
                 </span>
                 <span className="craft-plan-tracked-craft-totals"><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
               </div>)}

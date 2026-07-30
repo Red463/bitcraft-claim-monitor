@@ -1192,6 +1192,39 @@ test("computeCraftPlan prefers the highest-yield probabilistic producer route", 
   assert.equal(plan.materials.some((material) => material.name === "Muddy Auratus"), false);
 });
 
+test("recipesForTarget exposes normalized item-list producer routes for calculator detail responses", () => {
+  const target = { id: "9000", kind: "items", itemType: 0, name: "Rough Resin" };
+  const targetDetail = { item: { ...target, itemType: 0 }, craftingRecipes: [] };
+  const producerDetail = {
+    item: { id: "9100", name: "Rough Forestry Products", itemType: 0 },
+    craftingRecipes: [{
+      id: "forestry-products",
+      name: "Process Rough Logs",
+      consumedItemStacks: [{ item_id: "9200", item_type: "item", quantity: 2 }],
+      consumedItems: [{ id: "9200", name: "Rough Log", itemType: 0 }],
+      craftedItemStacks: [{ item_id: "9100", item_type: "item", quantity: 1 }],
+    }],
+    itemListPossibilities: [{
+      targetId: "9000",
+      targetItem: { ...target, itemType: 0 },
+      quantity: 0.25,
+      quantityIsExpected: true,
+      chance: 0.25,
+      guaranteedQuantity: 0,
+    }],
+  };
+  const details = new Map([
+    [recipeKey("items", "9000"), targetDetail],
+    [recipeKey("items", "9100"), producerDetail],
+  ]);
+
+  const recipes = craftPlanning.recipesForTarget(targetDetail, target, details);
+  assert.equal(recipes.length, 1);
+  assert.equal(recipes[0].id, "possibility:forestry-products:items:9000");
+  assert.equal(recipes[0].craftedItemStacks[0].quantity, 0.25);
+  assert.equal(recipes[0].consumedItemStacks[0].item_id, "9200");
+});
+
 test("computeCraftPlan keeps tracked craft status and ready-to-collect outputs", () => {
   const plan = computeCraftPlan({
     config: normalizeCraftPlanConfig({

@@ -37,7 +37,7 @@ import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKey
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess, resetLegacyMarketAccessRules } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, recipesForTarget as catalogRecipesForTarget, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
   calculateCraftPlanEffortProgress,
@@ -1519,8 +1519,24 @@ function recipeDetailFromLocalCatalog(target) {
     error.statusCode = 404;
     throw error;
   }
+  const source = detail.item ?? detail.cargo ?? target;
+  const normalizedTarget = {
+    ...target,
+    id,
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    name: source?.name ?? target?.name ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`,
+    tier: source?.tier ?? target?.tier ?? null,
+    rarityStr: source?.rarityStr ?? source?.rarity ?? target?.rarity ?? null,
+    tag: source?.tag ?? target?.tag ?? null,
+    iconAssetName: source?.iconAssetName ?? target?.iconAssetName ?? null,
+  };
   return {
-    detail,
+    detail: {
+      ...detail,
+      craftingRecipes: catalogRecipesForTarget(detail, normalizedTarget, detailsByKey),
+      extractionRecipes: [],
+    },
     cached: true,
     provider: "relay",
     lastSyncedAt: providerCatalogRepository.getSourceState()?.receivedAt ?? null,
@@ -9488,6 +9504,30 @@ const server = createServer(async (req, res) => {
         recipes: providerCatalogRepository.listDescriptions("crafting_recipe"),
         skills: providerCatalogRepository.listDescriptions("skill"),
       }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/catalog/search") {
+      const query = String(url.searchParams.get("q") ?? "").trim();
+      if (query.length < 2) return send(res, 400, { error: "Catalog search requires at least two characters." });
+      const limit = Math.max(1, Math.min(50, Math.floor(Number(url.searchParams.get("limit") ?? 20) || 20)));
+      const rows = gameCatalogRepository.searchEntities(query, limit);
+      const item = (row) => ({
+        id: row.targetId,
+        kind: row.kind,
+        itemType: row.itemType,
+        name: row.name,
+        tag: row.tag,
+        tier: row.tier,
+        rarityStr: row.rarity,
+        iconAssetName: row.iconAssetName,
+      });
+      return send(res, 200, {
+        query,
+        generatedAt: new Date().toISOString(),
+        provider: "relay",
+        source: providerCatalogRepository.getSourceState(),
+        items: rows.filter((row) => row.kind === "items").map(item),
+        cargos: rows.filter((row) => row.kind === "cargo").map(item),
+      });
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
       return proxyBitjita(req, url, res);

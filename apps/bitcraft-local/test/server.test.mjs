@@ -720,11 +720,15 @@ test("server collection paginates listings and protects production mutations", a
   });
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
+  const catalogSearch = await fetch(`${origin}/api/local/catalog/search?q=simple%20plank&limit=10`).then((response) => response.json());
   assert.equal(recipeDetailOne.detail.item.name, "Simple Plank");
   assert.equal(recipeDetailOne.cached, true);
   assert.equal(recipeDetailOne.provider, "relay");
   assert.equal(recipeDetailTwo.detail.item.name, "Simple Plank");
   assert.equal(recipeDetailTwo.cached, true);
+  assert.equal(catalogSearch.provider, "relay");
+  assert.deepEqual(catalogSearch.items.map((item) => [item.id, item.name, item.itemType]), [["2020003", "Simple Plank", 0]]);
+  assert.deepEqual(catalogSearch.cargos, []);
   assert.equal(recipeDetailRequests, 0);
   const playerDetailPayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
   const playerDetailsOne = await fetch(`${origin}/api/local/player-details`, {

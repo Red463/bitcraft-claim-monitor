@@ -343,6 +343,19 @@ test("Craft Planning manager does not expose the retired scheduled catalog refre
   assert.doesNotMatch(styles, /\.craft-plan-catalog-band|\.craft-plan-catalog-stats|\.craft-plan-catalog-stat/);
   assert.match(styles, /\.craft-plan-manager-backdrop \{ position: fixed; inset: 0;/);
 });
+
+test("Craft Calculator and Craft Plan target search use the provider-neutral local catalog", () => {
+  const calculator = readFileSync(new URL("../src/pages/CraftCalculatorPage.tsx", import.meta.url), "utf8");
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+
+  for (const source of [calculator, manager]) {
+    assert.match(source, /\/catalog\/search\?q=/);
+    assert.doesNotMatch(source, /\/api\/bitjita|BITJITA_API|market\?q=|market\?search=/);
+  }
+  assert.doesNotMatch(calculator, /findOutputAliasDetail|augmentDetailWithOutputAlias/);
+  assert.doesNotMatch(calculator, /BitJita/);
+  assert.doesNotMatch(manager, /Search BitJita items/);
+});
 test("Dashboard shows Gather Next instead of Recent Activity", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 

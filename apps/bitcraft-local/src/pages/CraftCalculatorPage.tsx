@@ -9,18 +9,16 @@ import { MiniStat } from "../components/main/Stats";
 import { AsyncState } from "../components/main/AsyncState";
 import { AppSkeleton } from "../components/main/AppChrome";
 import { formatNumber } from "../utils/format";
-import { itemTypeFromKind, isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
+import { isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
 /*
  * Craft Calculator page.
  *
- * The calculator builds a recursive recipe plan from BitJita recipe detail data.
- * Recipe details are fetched through local endpoints so the server can use its
- * catalog cache and rate limiting. Package/unpack recipes remain selectable,
- * but normal material-processing routes are preferred by default.
+ * The calculator builds a recursive recipe plan from the normalized live Relay
+ * catalog. Package/unpack recipes remain selectable, but normal
+ * material-processing routes are preferred by default.
  */
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 const RECIPE_DETAIL_CACHE_MS = 30 * 60 * 1000;
 const recipeDetailCache = new Map<string, { expiresAt: number; detail: RecipeDetail }>();
@@ -68,59 +66,6 @@ async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Pro
   return detail;
 }
 
-function isPackageRecipe(recipe: AnyRecord) {
-  return isUnpackRecipe(recipe);
-}
-
-function recipeHasProductionRoute(detail: RecipeDetail, target: RecipeTarget) {
-  const recipes = recipesForTarget(detail, target);
-  return recipes.some((recipe) => !isPackageRecipe(recipe));
-}
-
-async function findOutputAliasDetail(target: RecipeTarget, signal: AbortSignal): Promise<RecipeDetail | null> {
-  if (/ output$/i.test(target.name)) return null;
-  const response = await fetch(`${API}/market?q=${encodeURIComponent(`${target.name} Output`)}`, { signal });
-  if (!response.ok) return null;
-  const payload = await response.json();
-  const items: AnyRecord[] = payload.data?.items ?? [];
-  const alias = items.find((item) =>
-    String(item.name ?? "").toLowerCase() === `${target.name} output`.toLowerCase()
-    && recipeKindFromType(item.itemType ?? item.item_type) === "items",
-  );
-  if (!alias) return null;
-  return fetchRecipeDetail({ ...catalogItemToTarget(alias), kind: "items", itemType: 0 }, signal);
-}
-
-async function augmentDetailWithOutputAlias(detail: RecipeDetail, target: RecipeTarget, signal: AbortSignal): Promise<RecipeDetail> {
-  if (recipeHasProductionRoute(detail, target)) return detail;
-  const aliasDetail = await findOutputAliasDetail(target, signal).catch((error) => {
-    if (signal.aborted) throw error;
-    return null;
-  });
-  if (!aliasDetail) return detail;
-  const possibilities: AnyRecord[] = Array.isArray(aliasDetail.itemListPossibilities) ? aliasDetail.itemListPossibilities : [];
-  const matchingPossibilities = possibilities.filter((possibility) =>
-    String(possibility.targetId ?? possibility.targetItem?.id ?? "") === String(target.id)
-    && recipeKindFromType(possibility.isCargo ? "cargo" : "items") === target.kind,
-  );
-  if (!matchingPossibilities.length) return detail;
-  const outputQuantity = Math.max(1, ...matchingPossibilities.map((possibility) => toNumber(possibility.quantity)));
-  const aliasRecipes = [...(aliasDetail.craftingRecipes ?? []), ...(aliasDetail.extractionRecipes ?? [])].map((recipe: AnyRecord) => ({
-    ...recipe,
-    id: `alias:${target.kind}:${target.id}:${recipe.id ?? aliasDetail.item?.id ?? target.name}`,
-    name: `${recipe.name ?? aliasDetail.item?.name ?? target.name} (${target.name})`,
-    craftedItemStacks: [{ item_id: target.id, item_type: target.kind === "cargo" ? "cargo" : "item", quantity: outputQuantity }],
-    craftedItems: [{ id: target.id, itemType: itemTypeFromKind(target.kind), name: target.name, iconAssetName: target.iconAssetName, tier: target.tier, rarityStr: target.rarityStr }],
-    outputQuantity,
-    outputAliasName: aliasDetail.item?.name,
-    extraOutputs: possibilities.filter((possibility) => String(possibility.targetId ?? possibility.targetItem?.id ?? "") !== String(target.id)),
-  }));
-  return {
-    ...detail,
-    craftingRecipes: [...(detail.craftingRecipes ?? []), ...aliasRecipes],
-  };
-}
-
 async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, selections: RecipeSelections, maxDepth = 14) {
   const details = new Map<string, RecipeDetail>();
   const pending = new Set<string>();
@@ -140,7 +85,7 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
     }
     pending.delete(key);
     const normalizedTarget = { ...detailTarget(fetchedDetail), ...nextTarget };
-    const detail = await augmentDetailWithOutputAlias(fetchedDetail, normalizedTarget, signal);
+    const detail = fetchedDetail;
     details.set(key, detail);
     const recipe = selectedRecipeForTarget(detail, normalizedTarget, selections);
     if (!recipe) return;
@@ -224,11 +169,12 @@ export function CraftCalculatorPage() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchState("loading");
-      fetch(`${API}/market?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
+      fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(query.trim())}&limit=10`, { signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`)))
         .then((payload) => {
-          const items: AnyRecord[] = payload.data?.items ?? [];
-          setSuggestions(items.filter((item) => String(item.name ?? "").toLowerCase().includes(query.trim().toLowerCase())).slice(0, 10));
+          const items: AnyRecord[] = payload.items ?? [];
+          const cargos: AnyRecord[] = payload.cargos ?? [];
+          setSuggestions([...items, ...cargos].slice(0, 10));
           setActiveSuggestionIndex(-1);
           setSearchState("idle");
         })
@@ -305,7 +251,7 @@ export function CraftCalculatorPage() {
       <header className="members-topbar craftcalc-topbar">
         <div>
           <h2>Craft Calculator</h2>
-          <p>Build a material tree and step plan from BitJita recipe data.</p>
+          <p>Build a material tree and step plan from the live Relay catalog.</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
@@ -325,7 +271,7 @@ export function CraftCalculatorPage() {
       <section className="command-filter-panel craftcalc-controls">
         <div className="command-filter-header">
           <span className="command-filter-title"><Calculator size={15} /> Recipe lookup</span>
-          <span>Item and cargo recipes are resolved recursively where BitJita exposes the chain.</span>
+          <span>Item and cargo recipes are resolved recursively from the normalized local catalog.</span>
         </div>
         <div className="craftcalc-control-grid">
           <div className="research-filter-field">
@@ -341,7 +287,7 @@ export function CraftCalculatorPage() {
                 </button>
               ))}</div> : null}
             </div>
-            <small className="legend" role="status" aria-live="polite">{searchState === "loading" ? "Searching BitJita item catalogue..." : searchState === "error" ? "Unable to search items right now." : query.trim().length >= 2 ? `${suggestions.length} results available.` : "Type at least two characters to search."}</small>
+            <small className="legend" role="status" aria-live="polite">{searchState === "loading" ? "Searching the live item catalogue..." : searchState === "error" ? "Unable to search items right now." : query.trim().length >= 2 ? `${suggestions.length} results available.` : "Type at least two characters to search."}</small>
           </div>
           <label className="research-filter-field">
             <span>Amount to make</span>
@@ -354,7 +300,7 @@ export function CraftCalculatorPage() {
         <section className="command-filter-panel craftcalc-recipe-picker">
           <div className="command-filter-header">
             <span className="command-filter-title"><Workflow size={15} /> Recipe routes</span>
-            <span>Choose which BitJita recipe to use when an item has multiple valid routes.</span>
+            <span>Choose which catalog recipe to use when an item has multiple valid routes.</span>
           </div>
           <div className="craftcalc-route-list">
             {recipeChoices.map(({ key, target, recipes }) => {
@@ -413,7 +359,7 @@ export function CraftCalculatorPage() {
             <div className="craftcalc-material-grid">
               {state.plan.directMaterials.length
                 ? state.plan.directMaterials.map((material) => <MaterialRow key={`${material.kind}-${material.id}`} material={material} />)
-                : <AsyncState kind="empty" title="No direct recipe materials available" detail="BitJita did not expose direct inputs for this item." compact />}
+                : <AsyncState kind="empty" title="No direct recipe materials available" detail="The Relay catalog does not expose direct inputs for this item." compact />}
             </div>
           </section>
           <section className="craftcalc-section">
@@ -443,7 +389,7 @@ export function CraftCalculatorPage() {
           </section>
         </>
       ) : null}
-      <p className="legend">Recipe data is provided by BitJita. If BitJita does not expose a recipe for an ingredient, this calculator treats that ingredient as a source material rather than guessing.</p>
+      <p className="legend">Recipe data comes from the live Relay catalog. If no recipe is available for an ingredient, the calculator treats it as a source material rather than guessing.</p>
     </div>
   );
 }

@@ -8,6 +8,10 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function escapedLikePattern(value) {
+  return String(value ?? "").replace(/[\\%_]/g, "\\$&");
+}
+
 function normalizeInteger(value, fallback = null) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.trunc(number) : fallback;
@@ -693,6 +697,23 @@ export function createGameCatalogRepository(db) {
       SELECT * FROM game_catalog_entities
       ORDER BY kind ASC, name COLLATE NOCASE ASC, target_id ASC
     `),
+    searchEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      WHERE target_id = ?
+        OR name LIKE ? ESCAPE '\\' COLLATE NOCASE
+      ORDER BY
+        CASE
+          WHEN lower(name) = lower(?) THEN 0
+          WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1
+          ELSE 2
+        END,
+        tier ASC,
+        name COLLATE NOCASE ASC,
+        kind ASC,
+        target_id ASC
+      LIMIT ?
+    `),
     listRawItemListRows: db.prepare(`
       SELECT
         lists.item_list_id,
@@ -1042,6 +1063,19 @@ export function createGameCatalogRepository(db) {
     },
     getEntity(catalogKey) {
       return mapEntityRow(statements.getEntity.get(catalogKey));
+    },
+    searchEntities(query, limit = 20) {
+      const normalizedQuery = String(query ?? "").trim();
+      if (normalizedQuery.length < 2) return [];
+      const escaped = escapedLikePattern(normalizedQuery);
+      const normalizedLimit = Math.max(1, Math.min(50, Math.floor(toNumber(limit, 20) || 20)));
+      return statements.searchEntities.all(
+        normalizedQuery,
+        `%${escaped}%`,
+        normalizedQuery,
+        `${escaped}%`,
+        normalizedLimit,
+      ).map(mapEntityRow);
     },
     listProducerRecipesForOutput(outputKey) {
       return statements.listProducerRecipesForOutput.all(outputKey).map((row) => recipeWithLinks(row));
