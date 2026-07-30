@@ -98,6 +98,12 @@ be a committed domain event, not a scheduled ingestion sweep.
   the current snapshot; it does not scan or copy the full recipe catalog.
 - The Production page no longer calls `/api/bitjita`,
   `/api/local/production/crafts`, or `/api/local/passive-crafts`.
+- Craft Planner reads the same committed claim craft generation. It performs
+  passive classification and configured tracked-player selection locally, so
+  it makes no claim/member craft request fan-out and adds no planner craft
+  cache table. Its process-memory calculation cache is generation-keyed and
+  falls back to a five-second TTL, so a committed source change is visible on
+  the next planner read without a scheduled rebuild.
 - `production_jobs` and `production_contributions` remain history/event tables
   for lifecycle and notification semantics; they are not the current page's
   source of truth.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs, trackedRelayCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
 const MONITORED_CLAIM_ID = "claim-monitored";
 
@@ -91,6 +91,106 @@ test("trackedPassiveCraftPlanOutputs expands probabilistic farming products", ()
   assert.equal(straw?.quantity, 2);
   assert.equal(straw?.guaranteedQuantity, 0);
   assert.equal(straw?.status, "Passive craft in progress");
+});
+
+test("trackedRelayCraftPlanOutputs preserves tracked-player completion rules from one claim snapshot", () => {
+  const payload = {
+    catalog: {
+      "items:100": { targetId: "100", kind: "items", name: "Rough Plank", tier: 1 },
+      "items:200": { targetId: "200", kind: "items", name: "Embergrain Products", tier: 1 },
+    },
+    craftResults: [
+      {
+        entityId: "ordinary-active",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        ownerUsername: "Builder",
+        buildingName: "Carpentry Station",
+        completed: false,
+        isPassive: false,
+        craftCount: 2,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "3" }],
+      },
+      {
+        entityId: "ordinary-ready-tracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        ownerUsername: "Planner",
+        buildingName: "Carpentry Station",
+        completed: true,
+        isPassive: false,
+        craftCount: 4,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "ordinary-ready-untracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        completed: true,
+        isPassive: false,
+        craftCount: 99,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "passive-processing",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        ownerUsername: "Planner",
+        buildingName: "Farming Station",
+        completed: false,
+        isPassive: true,
+        craftCount: 5,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "passive-untracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        completed: false,
+        isPassive: true,
+        craftCount: 100,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "unknown-recipe-kind",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        completed: false,
+        isPassive: null,
+        craftCount: 100,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "foreign-craft",
+        claimEntityId: "foreign-claim",
+        ownerEntityId: "tracked-player",
+        completed: false,
+        isPassive: false,
+        craftCount: 100,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+    ],
+  };
+
+  const outputs = trackedRelayCraftPlanOutputs(
+    payload,
+    new Map(),
+    MONITORED_CLAIM_ID,
+    ["tracked-player"],
+  );
+
+  assert.deepEqual(outputs.map((output) => [
+    output.craftId,
+    output.name,
+    output.quantity,
+    output.status,
+    output.passive === true,
+    output.locationUnknown,
+  ]), [
+    ["ordinary-active", "Rough Plank", 6, "In progress", false, undefined],
+    ["ordinary-ready-tracked", "Rough Plank", 4, "Ready to collect", false, undefined],
+    ["passive-processing", "Embergrain Products", 5, "Passive craft in progress", true, false],
+  ]);
 });
 
 test("trackedCraftPlanOutputs counts only ordinary crafts that prove monitored claim ownership", () => {

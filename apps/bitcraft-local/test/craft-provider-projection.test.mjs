@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const {
+  enrichCraftsForPlanning,
   enrichCraftsWithCatalog,
 } = await import(
   new URL("../src/server/game-data/craftProjection.ts", import.meta.url).href,
@@ -123,4 +124,44 @@ test("craft projection preserves unknown recipes without misclassifying them as 
 
   assert.equal(projected.craftResults.length, 1);
   assert.equal(projected.passiveCraftResults.length, 0);
+});
+
+test("planner craft projection retains complete rows and marks unknown recipe kinds safely", () => {
+  const projected = enrichCraftsForPlanning({
+    craftResults: [{
+      entityId: "complete-passive",
+      recipeId: "20",
+      completed: true,
+      craftCount: "2",
+      craftedItem: [{ itemId: "42", itemType: "item", quantity: "3" }],
+    }, {
+      entityId: "unknown",
+      recipeId: "999",
+      completed: false,
+      craftCount: "1",
+      craftedItem: [{ itemId: "7", itemType: "cargo", quantity: "1" }],
+    }],
+  }, (key) => ({
+    catalogKey: key,
+    targetId: key.split(":")[1],
+    name: key === "items:42" ? "Nubi Crop" : "Unknown Cargo",
+  }), (id) => id === "20" ? {
+    id: "20",
+    name: "Grow Nubi Crop",
+    isPassive: true,
+  } : null);
+
+  assert.deepEqual(projected.craftResults.map((row) => [
+    row.entityId,
+    row.completed,
+    row.isPassive,
+  ]), [
+    ["complete-passive", true, true],
+    ["unknown", false, null],
+  ]);
+  assert.equal(projected.catalog["items:42"].name, "Nubi Crop");
+  assert.equal(projected.catalog["cargo:7"].name, "Unknown Cargo");
+  assert.deepEqual(projected.warnings, [
+    "Craft unknown references unavailable recipe 999.",
+  ]);
 });

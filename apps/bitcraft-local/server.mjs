@@ -66,7 +66,7 @@ import {
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { buildMarketOverview, collectMarketSnapshots, snapshotRetentionCutoff } from "./src/server/globalMarketInsights.mjs";
 import {
@@ -92,6 +92,7 @@ import {
   buildCatalogItemDetail,
   buildResearchTierPresets,
   enrichConstructionWithCatalog,
+  enrichCraftsForPlanning,
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
@@ -2069,7 +2070,7 @@ const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_
 const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 
 const CRAFT_PLAN_KEY = "active";
-const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(5000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 20_000));
+const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(1000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 5_000));
 const craftPlanResponseCache = new Map();
 const craftPlanResponseInflight = new Map();
 const craftPlanEffortBaselineCache = createCraftPlanEffortBaselineCache();
@@ -2217,6 +2218,16 @@ function currentInventoryProjection(claimId) {
   return enrichInventoryWithCatalog(
     current.data,
     (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  );
+}
+
+function currentCraftPlanProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "crafts");
+  if (!current?.data) throw new Error("Relay settlement crafts have not loaded yet");
+  return enrichCraftsForPlanning(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
   );
 }
 
@@ -2538,6 +2549,12 @@ async function computedCompactCraftPlanResponse(claimId = getSettings().claimId,
   return (await computedCraftPlanWorkspace(claimId, options)).compact();
 }
 
+function craftPlanCurrentSourceRevision(claimId) {
+  return ["members", "inventories", "crafts", "construction", "catalogs"]
+    .map((domain) => `${domain}:${currentStateRepository.read(String(claimId), domain)?.generation ?? 0}`)
+    .join("|");
+}
+
 function craftPlanBaselineChangeSince(claimId, since = "") {
   try {
     const change = craftPlanProgressAudit.latestBaselineChange(claimId);
@@ -2565,9 +2582,22 @@ async function computedCraftPlanWorkspace(claimId = getSettings().claimId, optio
   const cached = craftPlanResponseCache.get(normalizedClaimId);
   const forceRefresh = options.forceRefresh === true;
   const refreshId = String(options.refreshId ?? "");
-  if (cached && cached.expiresAt > now && (!forceRefresh || cached.refreshId === refreshId)) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
+  let sourceRevision = craftPlanCurrentSourceRevision(normalizedClaimId);
+  if (cached && cached.expiresAt > now && cached.sourceRevision === sourceRevision && (!forceRefresh || cached.refreshId === refreshId)) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
   const existing = craftPlanResponseInflight.get(normalizedClaimId);
-  if (existing?.generation === craftPlanResponseGeneration && (!forceRefresh || existing.refreshId === refreshId)) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
+  if (existing?.generation === craftPlanResponseGeneration && existing?.sourceRevision === sourceRevision && (!forceRefresh || existing.refreshId === refreshId)) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
+  if (forceRefresh && relayProviderStarted) {
+    try {
+      await relayProvider.refresh({
+        claimId: normalizedClaimId,
+        domains: ["inventories", "crafts"],
+        reason: "manual",
+      });
+    } catch {
+      // The calculation below deliberately uses the durable last-good generation.
+    }
+    sourceRevision = craftPlanCurrentSourceRevision(normalizedClaimId);
+  }
   const generation = craftPlanResponseGeneration;
   const startedAt = Date.now();
   plannerTelemetry.freshCalculations += 1;
@@ -2575,14 +2605,27 @@ async function computedCraftPlanWorkspace(claimId = getSettings().claimId, optio
     const workspace = createCraftPlanResponseWorkspace(plan);
     plannerTelemetry.lastDurationMs = Date.now() - startedAt;
     plannerTelemetry.lastCompletedAt = new Date().toISOString();
-    if (generation === craftPlanResponseGeneration) {
-      craftPlanResponseCache.set(normalizedClaimId, { workspace, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS, refreshId: forceRefresh ? refreshId : "" });
+    if (
+      generation === craftPlanResponseGeneration
+      && craftPlanCurrentSourceRevision(normalizedClaimId) === sourceRevision
+    ) {
+      craftPlanResponseCache.set(normalizedClaimId, {
+        workspace,
+        sourceRevision,
+        expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS,
+        refreshId: forceRefresh ? refreshId : "",
+      });
     }
     return workspace;
   }).finally(() => {
     if (craftPlanResponseInflight.get(normalizedClaimId)?.promise === promise) craftPlanResponseInflight.delete(normalizedClaimId);
   });
-  craftPlanResponseInflight.set(normalizedClaimId, { generation, promise, refreshId: forceRefresh ? refreshId : "" });
+  craftPlanResponseInflight.set(normalizedClaimId, {
+    generation,
+    sourceRevision,
+    promise,
+    refreshId: forceRefresh ? refreshId : "",
+  });
   return promise;
 }
 
@@ -2610,52 +2653,29 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     [],
     { requireValidatedProbabilities: true },
   );
-  const [inventoriesResult, publicCraftsResult, membersPayload] = await Promise.all([
+  const [inventoriesResult, craftsResult, membersPayload] = await Promise.all([
     craftPlanSourceResult(
       { sourceId: String(claimId), label: "Settlement inventories", type: "Settlement storage" },
       () => currentInventoryProjection(claimId),
     ),
     craftPlanSourceResult(
-      { sourceId: String(claimId), label: "Settlement active crafts", type: "Tracked crafts" },
-      () => fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }),
+      { sourceId: String(claimId), label: "Settlement crafts", type: "Tracked crafts" },
+      () => currentCraftPlanProjection(claimId),
     ),
     Promise.resolve().then(() => currentMembersProjection(claimId)).catch(() => ({ members: [] })),
   ]);
   const inventoriesPayload = inventoriesResult.value ?? { buildings: [] };
-  const publicCraftsPayload = publicCraftsResult.value ?? { craftResults: [] };
-  const sourceFailures = [inventoriesResult, publicCraftsResult]
+  const craftsPayload = craftsResult.value ?? { craftResults: [] };
+  if (Array.isArray(craftsPayload.warnings)) {
+    catalogWarnings.push(...craftsPayload.warnings);
+  }
+  const sourceFailures = [inventoriesResult, craftsResult]
     .filter((result) => result.error)
     .map((result) => ({ ...result.source, error: result.error }));
   const memberNames = new Map(unwrap(membersPayload, "members", []).map((member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     return [playerId, String(member.userName ?? member.username ?? playerId)];
   }));
-  const [playerCraftResults, playerPassiveCraftResults] = await Promise.all([
-    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
-      try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, forceRefresh });
-        return { playerId, payload, error: "" };
-      } catch (error) {
-        return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
-      }
-    })),
-    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
-      try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { timeoutMs: 6000, forceRefresh });
-        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload, error: "" };
-      } catch (error) {
-        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
-      }
-    })),
-  ]);
-  const craftPayloads = [publicCraftsPayload, ...playerCraftResults.map((result) => result.payload)];
-  const craftSourceErrors = playerCraftResults
-    .filter((result) => result.error)
-    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerId} crafts`, type: "Tracked crafts", error: result.error }));
-  const passiveCraftSourceErrors = playerPassiveCraftResults
-    .filter((result) => result.error)
-    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerName} passive crafts`, type: "Tracked passive crafts", error: result.error }));
-  sourceFailures.push(...craftSourceErrors, ...passiveCraftSourceErrors);
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const bankSources = [];
@@ -2707,11 +2727,16 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     playerSources,
     bankSources,
     deployableSources,
-    activeCrafts: [
-      ...trackedCraftPlanOutputs(craftPayloads, detailsByKey, claimId),
-      ...trackedPassiveCraftPlanOutputs(playerPassiveCraftResults, detailsByKey),
-    ],
-    craftSourceErrors: [...craftSourceErrors, ...passiveCraftSourceErrors],
+    activeCrafts: trackedRelayCraftPlanOutputs(
+      craftsPayload,
+      detailsByKey,
+      claimId,
+      config.sourceRules.craftPlayerIds,
+    ),
+    craftSourceErrors: craftsResult.error ? [{
+      ...craftsResult.source,
+      error: craftsResult.error,
+    }] : [],
   });
   const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
   if (storedEffortModelVersion !== CRAFT_PLAN_EFFORT_MODEL_VERSION) {
@@ -2754,21 +2779,20 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   }));
   sourceStatus.push(
     { ...inventoriesResult.source, available: !inventoriesResult.error, error: inventoriesResult.error },
-    { ...publicCraftsResult.source, available: !publicCraftsResult.error, error: publicCraftsResult.error },
-    ...playerCraftResults.map((result) => ({
-      sourceId: String(result.playerId),
-      label: `${memberNames.get(String(result.playerId)) ?? result.playerId} crafts`,
+    { ...craftsResult.source, available: !craftsResult.error, error: craftsResult.error },
+    ...config.sourceRules.craftPlayerIds.flatMap((playerId) => [{
+      sourceId: `${String(playerId)}:crafts`,
+      label: `${memberNames.get(String(playerId)) ?? playerId} crafts`,
       type: "Tracked crafts",
-      available: !result.error,
-      error: result.error,
-    })),
-    ...playerPassiveCraftResults.map((result) => ({
-      sourceId: String(result.playerId),
-      label: `${result.playerName} passive crafts`,
+      available: !craftsResult.error,
+      error: craftsResult.error,
+    }, {
+      sourceId: `${String(playerId)}:passive-crafts`,
+      label: `${memberNames.get(String(playerId)) ?? playerId} passive crafts`,
       type: "Tracked passive crafts",
-      available: !result.error,
-      error: result.error,
-    })),
+      available: !craftsResult.error,
+      error: craftsResult.error,
+    }]),
   );
 
   const capturedAt = new Date().toISOString();

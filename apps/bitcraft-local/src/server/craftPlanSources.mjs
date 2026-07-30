@@ -127,10 +127,12 @@ function trackedCraftPlanOutputsFromPayloads(craftPayloads = [], detailsByKey = 
     items: payloads.flatMap((payload) => asArray(payload?.items)),
     cargos: payloads.flatMap((payload) => asArray(payload?.cargos)),
   };
-  const catalog = new Map([
-    ...craftsPayload.items.map((item) => [craftOutputKey("items", item.id), item]),
-    ...craftsPayload.cargos.map((item) => [craftOutputKey("cargo", item.id), item]),
-  ]);
+  const catalog = new Map();
+  for (const payload of payloads) {
+    for (const [key, item] of craftPlanCatalogLookup(payload)) {
+      if (String(key).includes(":")) catalog.set(key, item);
+    }
+  }
   const publicCrafts = asArray(payloads[0]?.craftResults);
   const playerCrafts = payloads.slice(1).flatMap((payload) => asArray(payload?.craftResults));
   const crafts = mergeCurrentCraftRows(publicCrafts, playerCrafts);
@@ -197,6 +199,56 @@ export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new M
       .filter((craft) => craftClaimId(craft) === expectedClaimId),
   }));
   return trackedCraftPlanOutputsFromPayloads(scopedPayloads, detailsByKey);
+}
+
+function craftOwnerId(craft) {
+  return String(
+    craft?.ownerEntityId
+      ?? craft?.playerEntityId
+      ?? craft?.crafterEntityId
+      ?? craft?.ownerId
+      ?? "",
+  ).trim();
+}
+
+function craftCompleted(craft) {
+  return craft?.completed === true || isCompletedProductionJob(craft);
+}
+
+export function trackedRelayCraftPlanOutputs(
+  craftPayload = {},
+  detailsByKey = new Map(),
+  monitoredClaimId = "",
+  trackedPlayerIds = [],
+) {
+  const expectedClaimId = String(monitoredClaimId).trim();
+  if (!expectedClaimId) return [];
+  const trackedPlayers = new Set(asArray(trackedPlayerIds).map(String));
+  const claimCrafts = asArray(craftPayload?.craftResults)
+    .filter((craft) => craftClaimId(craft) === expectedClaimId);
+  const ordinaryCrafts = claimCrafts.filter((craft) => (
+    craft?.isPassive === false
+    && (!craftCompleted(craft) || trackedPlayers.has(craftOwnerId(craft)))
+  ));
+  const passiveCrafts = claimCrafts.filter((craft) => (
+    craft?.isPassive === true
+    && trackedPlayers.has(craftOwnerId(craft))
+  ));
+  const ordinaryOutputs = trackedCraftPlanOutputsFromPayloads([{
+    ...craftPayload,
+    craftResults: ordinaryCrafts,
+  }], detailsByKey);
+  const passiveOutputs = trackedCraftPlanOutputsFromPayloads([
+    { craftResults: [] },
+    { ...craftPayload, craftResults: passiveCrafts },
+  ], detailsByKey).map((output) => ({
+    ...output,
+    passive: true,
+    sourceType: "Passive craft",
+    locationUnknown: !String(output.buildingName ?? "").trim(),
+    status: output.completed ? "Passive craft ready to collect" : "Passive craft in progress",
+  }));
+  return [...ordinaryOutputs, ...passiveOutputs];
 }
 
 function passiveCraftStatus(craft) {

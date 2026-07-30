@@ -65,6 +65,48 @@ function enrichedCraft(craft: CraftRow, recipe: CraftRecipe | undefined) {
   };
 }
 
+export function enrichCraftsForPlanning(
+  snapshot: unknown,
+  getEntity: (catalogKey: string) => CatalogEntity | null,
+  getRecipe: (recipeId: string) => CraftRecipe | null,
+) {
+  const source = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? snapshot as Record<string, unknown>
+    : {};
+  const rows = Array.isArray(source.craftResults) ? source.craftResults as CraftRow[] : [];
+  const recipeById = new Map<string, CraftRecipe | null>();
+  const catalog: Record<string, CatalogEntity> = {};
+  const warnings: string[] = [];
+  const warnedRecipeIds = new Set<string>();
+
+  const craftResults = rows.map((craft) => {
+    const recipeId = String(craft.recipeId ?? "");
+    if (!recipeById.has(recipeId)) recipeById.set(recipeId, getRecipe(recipeId));
+    const recipe = recipeById.get(recipeId);
+    if (!recipe && !warnedRecipeIds.has(recipeId)) {
+      warnedRecipeIds.add(recipeId);
+      warnings.push(`Craft ${String(craft.entityId ?? "unknown")} references unavailable recipe ${recipeId || "unknown"}.`);
+    }
+    for (const output of Array.isArray(craft.craftedItem) ? craft.craftedItem : []) {
+      const key = inventoryStackKey(output);
+      if (catalog[key]) continue;
+      const entity = getEntity(key);
+      if (entity) catalog[key] = entity;
+    }
+    return {
+      ...enrichedCraft(craft, recipe ?? undefined),
+      isPassive: recipe ? recipe.isPassive === true : null,
+    };
+  });
+
+  return {
+    ...source,
+    craftResults,
+    catalog,
+    warnings,
+  };
+}
+
 export function enrichCraftsWithCatalog(
   snapshot: unknown,
   getEntity: (catalogKey: string) => CatalogEntity | null,

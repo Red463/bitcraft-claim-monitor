@@ -253,6 +253,18 @@ This replaces the Production page's claim/member BitJita craft fan-out and its
 per-member passive-craft helper. Contributor amounts remain excluded because
 the separate contributor mapping is not proven.
 
+The same committed claim generation now supplies Craft Planner. The planner
+classifies rows from the typed recipe catalog, counts every unfinished
+ordinary craft in the monitored claim, and counts completed ordinary or
+active/completed passive crafts only for configured tracked players. This
+preserves the legacy source-selection behavior without issuing one claim
+request plus ordinary/passive requests for every selected member. Missing
+recipe descriptions remain explicitly unresolved and are not guessed as
+ordinary or passive. Planner result reuse is keyed to the current members,
+inventories, crafts, construction, and catalog generations, so any committed
+source change invalidates the result immediately; the remaining
+calculation-only fallback TTL is five seconds.
+
 ## Town Bank inventory
 
 The observed `bank_state.building_entity_id` was used in a second bounded
