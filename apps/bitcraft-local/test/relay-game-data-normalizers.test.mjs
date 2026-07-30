@@ -647,6 +647,40 @@ test("typed building descriptions retain Relay compendium visibility and worksta
   });
 });
 
+test("typed enemy descriptions retain map finder identity and huntable metadata", () => {
+  assert.deepEqual(normalizeCatalogDescription({
+    enemyType: 42,
+    name: "Sagi Bird",
+    description: "A huntable bird.",
+    maxHealth: 250,
+    minDamage: 3,
+    maxDamage: 7,
+    attackLevel: 2,
+    defenseLevel: 1,
+    iconAddress: "Enemies/SagiBird",
+    tier: 2,
+    tag: "Animal",
+    rarity: { tag: "Common" },
+    huntable: true,
+  }, "enemy"), {
+    kind: "enemy",
+    id: "42",
+    enemyType: "42",
+    name: "Sagi Bird",
+    description: "A huntable bird.",
+    maxHealth: 250,
+    minDamage: 3,
+    maxDamage: 7,
+    attackLevel: 2,
+    defenseLevel: 1,
+    iconAssetName: "Enemies/SagiBird",
+    tier: 2,
+    tag: "Animal",
+    rarity: "Common",
+    huntable: true,
+  });
+});
+
 test("claim technology descriptions retain progression caps and automatic unlocks", () => {
   assert.deepEqual(normalizeCatalogDescription({
     id: 1826500486,

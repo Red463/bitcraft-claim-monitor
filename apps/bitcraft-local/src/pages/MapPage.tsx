@@ -8,6 +8,7 @@ import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
+import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { gameIconUrl } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
@@ -122,6 +123,8 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
+  const [resourceNotice, setResourceNotice] = React.useState("");
+  const [resourceCatalogLoaded, setResourceCatalogLoaded] = React.useState(false);
   const [, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
   const memberRoster = React.useMemo(() => {
     const detailById = new Map(data.players
@@ -156,6 +159,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
   const degradedPlayerCount = roster.filter((player) => player.detailAvailable === false).length;
   const rosterSource = degradedPlayerCount ? "members + partial detail" : roster.length ? "members + player detail" : "empty";
   const activeRegions = useActiveRegions(String(data.claim.regionId ?? ""));
+  const catalogGeneration = useGameDataGeneration(String(data.claim.entityId ?? ""), ["catalogs"]);
   React.useEffect(() => {
     const controller = new AbortController();
     fetch(`${LOCAL_API}/map/catalog`, { signal: controller.signal })
@@ -169,12 +173,16 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
           .map((creature) => ({ ...creature, id: `enemy:${creature.enemyType}`, mapKind: "enemy", mapId: String(creature.enemyType), mapSortOrder: 100000 + toNumber(creature.enemyType), tag: "Huntable Animal" }));
         setResources([...resourceRows, ...creatureRows].sort((a, b) => toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name))));
         setResourceError("");
+        setResourceNotice(String(catalogPayload.freshness ?? "") === "stale"
+          ? String(catalogPayload.warnings?.[0] ?? "Relay catalog is stale.")
+          : "");
+        setResourceCatalogLoaded(true);
       })
       .catch((error) => {
         if (!controller.signal.aborted) setResourceError(error instanceof Error ? error.message : String(error));
       });
     return () => controller.abort();
-  }, []);
+  }, [catalogGeneration]);
   const current = React.useMemo(() => currentMapPlayerSelection(selectedIds, roster), [selectedIds, roster]);
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",
@@ -357,6 +365,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
             </div>
           ) : null}
           {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
+          {resourceNotice ? <p className="legend">{resourceNotice}</p> : null}
           <div className="map-resource-list">
             {visibleResources.map((resource) => {
               const id = mapResourceToken(resource);
@@ -369,7 +378,7 @@ export function MapPanel({ data, focus, onClearFocus }: { data: ReturnType<typeo
                 <small>{resource.mapKind === "enemy" ? "Animal" : mapResourceCategory(resource) || resource.tag || "Resource"}</small>
               </button>;
             })}
-            {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : "Loading resources from BitJita..."}</p> : null}
+            {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : resourceCatalogLoaded ? "No map resources are available from Relay." : "Loading live Relay resources..."}</p> : null}
           </div></> : null}
         </aside>
         <div className={`map-frame-host is-${frameState}`}>

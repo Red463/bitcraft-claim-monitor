@@ -125,6 +125,13 @@ describe open orders as completed trades. Market Browse replaces the retired
 orphaned browser Price Finder, so no duplicate page, cache table, refresh
 ledger, or scheduled price-ingestion job remains.
 
+Map Resource Finder reads `resource_desc` and huntable `enemy_desc` rows from
+the same continuously maintained global subscription. The provider-neutral
+local map catalog route serves the atomic durable catalog projection, reports
+freshness, and is invalidated by `catalogs` generation events. The legacy
+ten-minute resources/creatures request cache is removed; no map-catalog table
+or scheduled refresh job replaces it.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;

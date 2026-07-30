@@ -11,6 +11,7 @@ export type CatalogDescriptionKind =
   | "building_type"
   | "skill"
   | "resource"
+  | "enemy"
   | "equipment"
   | "tool"
   | "buff"
@@ -134,6 +135,8 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
   const row = record(value, `Relay ${kind} description`);
   const idValue = kind === "equipment"
     ? row.itemId ?? row.item_id
+    : kind === "enemy"
+      ? row.enemyType ?? row.enemy_type
     : row.id;
   const id = decimalString(idValue, `${kind}.id`);
   const base = { kind, id };
@@ -261,6 +264,24 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
       tag: String(row.tag ?? ""),
       rarity: enumLabel(row.rarity) ?? "Unknown",
       onDestroyYield: records(row.onDestroyYield).map(normalizeDescriptionStack),
+    };
+  }
+  if (kind === "enemy") {
+    return {
+      ...base,
+      enemyType: id,
+      name: String(row.name ?? "").trim(),
+      description: String(row.description ?? ""),
+      maxHealth: integer(row.maxHealth ?? row.max_health ?? 0, "enemy max health"),
+      minDamage: integer(row.minDamage ?? row.min_damage ?? 0, "enemy minimum damage"),
+      maxDamage: integer(row.maxDamage ?? row.max_damage ?? 0, "enemy maximum damage"),
+      attackLevel: integer(row.attackLevel ?? row.attack_level ?? 0, "enemy attack level"),
+      defenseLevel: integer(row.defenseLevel ?? row.defense_level ?? 0, "enemy defense level"),
+      iconAssetName: String(row.iconAddress ?? row.icon_address ?? ""),
+      tier: integer(row.tier ?? 0, "enemy tier"),
+      tag: String(row.tag ?? ""),
+      rarity: enumLabel(row.rarity) ?? "Unknown",
+      huntable: row.huntable === true,
     };
   }
   if (kind === "equipment") {

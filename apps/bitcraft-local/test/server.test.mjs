@@ -531,12 +531,57 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(proxiedResourcesOne.headers.get("cache-control"), "public, max-age=3600");
   assert.equal(proxiedResourcesOne.headers.get("x-bitjita-cache"), "miss");
   assert.equal(proxiedResourcesTwo.headers.get("x-bitjita-cache"), "hit");
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
+    const receivedAt = new Date().toISOString();
+    const insert = catalogDb.prepare(`
+      INSERT INTO game_catalog_descriptions (
+        description_kind, description_id, data_json, updated_at
+      ) VALUES (?, ?, ?, ?)
+    `);
+    insert.run("resource", "21", JSON.stringify({
+      kind: "resource",
+      id: "21",
+      name: "Oak Tree",
+      description: "",
+      iconAssetName: "",
+      maxHealth: 100,
+      tier: 2,
+      tag: "Tree",
+      rarity: "Common",
+      onDestroyYield: [],
+    }), receivedAt);
+    insert.run("enemy", "42", JSON.stringify({
+      kind: "enemy",
+      id: "42",
+      enemyType: "42",
+      name: "Sagi Bird",
+      description: "",
+      maxHealth: 50,
+      minDamage: 1,
+      maxDamage: 2,
+      attackLevel: 1,
+      defenseLevel: 1,
+      iconAssetName: "",
+      tier: 1,
+      tag: "Animal",
+      rarity: "Common",
+      huntable: true,
+    }), receivedAt);
+    catalogDb.prepare(`
+      INSERT INTO game_catalog_source_state (
+        source_key, provider, database_name, schema_fingerprint,
+        generation, received_at, row_count
+      ) VALUES ('global', 'relay', 'relay-global', 'global-v1', 1, ?, 2)
+    `).run(receivedAt);
+  });
   const mapCatalogOne = await fetch(`${origin}/api/local/map/catalog`).then((response) => response.json());
   const mapCatalogTwo = await fetch(`${origin}/api/local/map/catalog`).then((response) => response.json());
-  assert.deepEqual(mapCatalogOne.resources, [{ id: 21, name: "Oak Tree", tier: 2 }]);
-  assert.deepEqual(mapCatalogTwo.creatures, [{ enemyType: 42, name: "Sagi Bird", huntable: true }]);
+  assert.deepEqual(mapCatalogOne.resources.map((row) => [row.id, row.name, row.tier]), [["21", "Oak Tree", 2]]);
+  assert.deepEqual(mapCatalogTwo.creatures.map((row) => [row.enemyType, row.name, row.huntable]), [["42", "Sagi Bird", true]]);
+  assert.equal(mapCatalogOne.provider, "relay");
+  assert.equal(mapCatalogOne.source.generation, 1);
   assert.equal(resourceCatalogRequests, 1);
-  assert.equal(creatureCatalogRequests, 1);
+  assert.equal(creatureCatalogRequests, 0);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["3", "19", "23", "24"]);
   assert.equal(activeRegions.regions.find((region) => region.regionId === "24").source, "admin");

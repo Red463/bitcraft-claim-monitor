@@ -355,6 +355,59 @@ test("market response freshness includes the older global catalog dependency", (
   });
 });
 
+test("global catalog status immediately marks a failed expected runtime stale", () => {
+  assert.equal(
+    typeof views.globalCatalogStatus,
+    "function",
+    "global catalog status must be shared by catalog-backed routes",
+  );
+  assert.deepEqual(views.globalCatalogStatus({
+    receivedAt: "2026-07-30T11:59:59.500Z",
+  }, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeExpected: true,
+    runtimeHealth: {
+      running: false,
+      lastError: "Relay topology unavailable",
+      subscription: {
+        connected: false,
+        applied: false,
+        lastError: null,
+      },
+    },
+  }), {
+    freshness: "stale",
+    confidence: "partial",
+    ageMs: 500,
+    warnings: ["Relay global catalog error: Relay topology unavailable"],
+  });
+});
+
+test("global catalog status allows a split web process to use fresh worker data", () => {
+  assert.deepEqual(views.globalCatalogStatus({
+    receivedAt: "2026-07-30T11:59:59.500Z",
+  }, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeExpected: false,
+    runtimeHealth: {
+      running: false,
+      lastError: null,
+      subscription: {
+        connected: false,
+        applied: false,
+        lastError: null,
+      },
+    },
+  }), {
+    freshness: "fresh",
+    confidence: "authoritative",
+    ageMs: 500,
+    warnings: [],
+  });
+});
+
 test("regional market order-book view preserves exact prices and scopes regions", () => {
   assert.equal(
     typeof views.regionalMarketOrderBookView,

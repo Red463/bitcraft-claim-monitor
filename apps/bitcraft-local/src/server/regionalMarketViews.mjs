@@ -193,8 +193,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
   };
 }
 
-export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
-  const orders = record(orderStatus);
+export function globalCatalogStatus(catalogSource, options = {}) {
   if (!catalogSource || typeof catalogSource !== "object" || Array.isArray(catalogSource)) {
     return {
       freshness: "unavailable",
@@ -207,36 +206,65 @@ export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
   const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs) || 60_000);
   const receivedAtMs = Date.parse(String(catalogSource.receivedAt ?? ""));
   const catalogAgeMs = Number.isFinite(receivedAtMs) ? Math.max(0, nowMs - receivedAtMs) : null;
+  const runtime = record(options.runtimeHealth);
   const subscription = record(options.runtimeHealth?.subscription);
-  const runtimeKnown = Object.keys(subscription).length > 0;
-  const runtimeHealthy = runtimeKnown
-    && subscription.connected === true
-    && subscription.applied === true
-    && !subscription.lastError;
-  const catalogStale = runtimeKnown
-    ? !runtimeHealthy
-    : catalogAgeMs == null || catalogAgeMs > staleAfterMs;
-  const warnings = Array.isArray(orders.warnings) ? orders.warnings.map(String) : [];
+  const runtimeError = subscription.lastError ?? runtime.lastError;
+  const runtimeExpected = options.runtimeExpected === true;
+  const runtimeUnhealthy = runtimeError
+    || (runtime.running === true && (
+      subscription.connected !== true
+      || subscription.applied !== true
+    ))
+    || (runtimeExpected && runtime.running !== true);
+  const catalogStale = Boolean(runtimeUnhealthy)
+    || catalogAgeMs == null
+    || catalogAgeMs > staleAfterMs;
+  const warnings = [];
   if (catalogStale) {
-    if (subscription.lastError) {
-      warnings.push(`Relay global catalog error: ${String(subscription.lastError)}`);
-    } else if (runtimeKnown && subscription.connected !== true) {
+    if (runtimeError) {
+      warnings.push(`Relay global catalog error: ${String(runtimeError)}`);
+    } else if ((runtime.running === true || runtimeExpected) && subscription.connected !== true) {
       warnings.push("Relay global catalog subscription is disconnected.");
+    } else if ((runtime.running === true || runtimeExpected) && subscription.applied !== true) {
+      warnings.push("Relay global catalog subscription has not applied yet.");
+    } else if (runtimeExpected && runtime.running !== true) {
+      warnings.push("Relay global catalog runtime is not running.");
     } else if (catalogAgeMs == null) {
       warnings.push("Relay global catalog has no valid receive time.");
     } else {
       warnings.push(`Relay global catalog is older than ${Math.round(staleAfterMs / 1_000)} seconds.`);
     }
   }
+  return {
+    freshness: catalogStale ? "stale" : "fresh",
+    confidence: catalogStale ? "partial" : "authoritative",
+    ageMs: catalogAgeMs,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
+  const orders = record(orderStatus);
+  const runtimeSubscription = record(options.runtimeHealth?.subscription);
+  const catalog = globalCatalogStatus(catalogSource, {
+    ...options,
+    runtimeExpected: options.runtimeExpected
+      ?? Object.keys(runtimeSubscription).length > 0,
+  });
+  if (catalog.freshness === "unavailable") return catalog;
+  const warnings = [
+    ...(Array.isArray(orders.warnings) ? orders.warnings.map(String) : []),
+    ...catalog.warnings,
+  ];
   const orderAgeMs = Number.isFinite(Number(orders.ageMs)) ? Number(orders.ageMs) : null;
-  const ageMs = [orderAgeMs, catalogAgeMs].filter((age) => age != null);
+  const ageMs = [orderAgeMs, catalog.ageMs].filter((age) => age != null);
   return {
     freshness: orders.freshness === "unavailable"
       ? "unavailable"
-      : catalogStale || orders.freshness === "stale"
+      : catalog.freshness === "stale" || orders.freshness === "stale"
         ? "stale"
         : "fresh",
-    confidence: catalogStale || orders.confidence !== "authoritative"
+    confidence: catalog.confidence !== "authoritative" || orders.confidence !== "authoritative"
       ? (orders.freshness === "unavailable" ? "unknown" : "partial")
       : "authoritative",
     ageMs: ageMs.length ? Math.max(...ageMs) : null,

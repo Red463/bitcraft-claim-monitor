@@ -27,6 +27,7 @@ import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/serve
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import {
   combinedMarketStatus,
+  globalCatalogStatus,
   regionalBuyOrdersView,
   regionalMarketCatalogView,
   regionalMarketDealsView,
@@ -1410,7 +1411,6 @@ const passiveCraftSummariesCache = new Map();
 const passiveCraftSummariesInflight = new Map();
 const productionCraftsCache = new Map();
 const productionCraftsInflight = new Map();
-let mapCatalogCache = null;
 const dashboardDataCache = new Map();
 const dashboardDataInflight = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
@@ -6226,17 +6226,6 @@ async function fetchCachedActiveRegions(extraRegionIds = [], options = {}) {
   return value;
 }
 
-async function fetchMapCatalog() {
-  if (mapCatalogCache && mapCatalogCache.expiresAt > Date.now()) return mapCatalogCache.value;
-  const [resources, creatures] = await Promise.all([
-    fetchBitjita("/resources"),
-    fetchBitjita("/creatures"),
-  ]);
-  const value = { resources: unwrap(resources, "resources", []), creatures: unwrap(creatures, "creatures", []) };
-  mapCatalogCache = { expiresAt: Date.now() + 10 * 60 * 1000, value };
-  return value;
-}
-
 function passiveCraftTimestamp(value) {
   const parsed = new Date(String(value ?? ""));
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
@@ -7262,6 +7251,22 @@ function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
       staleAfterMs: relayGlobalCatalogStaleMs,
     },
   );
+}
+
+function globalCatalogReadStatus() {
+  const source = providerCatalogRepository.getSourceState();
+  const runtime = relayGlobalCatalogRuntime.health();
+  return {
+    ...globalCatalogStatus(source, {
+      runtimeHealth: runtime,
+      runtimeExpected: processRoleConfig.runBackgroundJobs
+        && !isTestRuntime
+        && process.env.ENABLE_RELAY_PROVIDER !== "false"
+        && process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false",
+      staleAfterMs: relayGlobalCatalogStaleMs,
+    }),
+    source,
+  };
 }
 
 function currentGameDataGenerationEvent(claimId, domains) {
@@ -9154,7 +9159,19 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
-      return send(res, 200, await fetchMapCatalog());
+      const status = globalCatalogReadStatus();
+      const payload = {
+        provider: "relay",
+        generatedAt: status.source?.receivedAt ?? null,
+        freshness: status.freshness,
+        confidence: status.confidence,
+        ageMs: status.ageMs,
+        warnings: status.warnings,
+        source: status.source,
+        resources: providerCatalogRepository.listDescriptions("resource"),
+        creatures: providerCatalogRepository.listDescriptions("enemy"),
+      };
+      return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
       const type = url.pathname.slice("/api/local/branding/".length);

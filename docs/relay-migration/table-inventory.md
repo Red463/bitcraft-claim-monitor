@@ -288,3 +288,19 @@ be a committed domain event, not a scheduled ingestion sweep.
 - No price-lookup table, cache, refresh ledger, or scheduled acquisition job
   was added. Current freshness remains owned by the adaptive regional session
   pool.
+
+## Map resource catalog vertical evidence
+
+- The typed global subscription includes `resource_desc` and `enemy_desc`.
+  Enemy identity remains the exact decimal `enemy_type`, with huntable, tier,
+  tag, rarity, and icon metadata normalized before persistence.
+- `/api/local/map/catalog` reads the existing
+  `game_catalog_descriptions` projection and reports global-catalog freshness.
+  It does not contact Relay or another upstream service on a browser request.
+- Open Map pages re-read the local catalog when the `catalogs` generation
+  changes and preserve the last rendered rows when a local read fails.
+- The BitJita-era ten-minute in-process map catalog cache is removed. No
+  dedicated resource, creature, map-catalog, refresh-ledger, or scheduled-job
+  table was added.
+- Claim layout, player locations, and active-region discovery remain separate
+  incomplete Map/Region verticals and are not inferred from catalog rows.
