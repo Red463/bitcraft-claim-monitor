@@ -940,6 +940,23 @@ test("server collection paginates listings and protects production mutations", a
         side: "sell",
       },
     ],
+    stalls: [{
+      entityId: "9007199254740993",
+      regionId: "19",
+      claimEntityId: "4001",
+      claimName: "High Market",
+      ownerEntityId: "5004",
+      ownerName: "Stall Keeper",
+      nickname: "Leather Exchange",
+      locationX: -123,
+      locationZ: 456,
+      orders: [{
+        entityId: "9007199254740995",
+        remainingStock: "2147483647",
+        offers: [{ itemId: "30", itemType: "item", quantity: "2" }],
+        requires: [{ itemId: "30", itemType: "item", quantity: "9007199254740993" }],
+      }],
+    }],
     regions: [
       {
         regionId: "9",
@@ -1023,6 +1040,17 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(marketOrderBook.buyOrders.map((order) => order.entityId), ["3001"]);
   assert.equal(marketOrderBook.sellOrders[0].price, "15");
   assert.equal(marketOrderBook.item.name, "Leather");
+  const marketStalls = await fetch(`${origin}/api/local/market/stalls?claimId=${claimId}&regionId=19&q=Leather&activeOnly=true&page=1`).then((response) => response.json());
+  assert.equal(marketStalls.totalStalls, 1);
+  assert.equal(marketStalls.totalOrders, 1);
+  assert.equal(marketStalls.stalls[0].entityId, "9007199254740993");
+  assert.equal(marketStalls.stalls[0].orders[0].remainingStock, "2147483647");
+  assert.equal(marketStalls.stalls[0].orders[0].offers[0].itemName, "Leather");
+  assert.equal(marketStalls.stalls[0].orders[0].requires[0].quantity, "9007199254740993");
+  const foreignRegionStalls = await fetch(`${origin}/api/local/market/stalls?claimId=${claimId}&regionId=9`);
+  assert.equal(foreignRegionStalls.status, 403);
+  const foreignClaimStalls = await fetch(`${origin}/api/local/market/stalls?claimId=999999999&regionId=19`);
+  assert.equal(foreignClaimStalls.status, 403);
   const marketPriceHistory = await fetch(`${origin}/api/local/market/price-history?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
   assert.equal(marketPriceHistory.coverage, "unavailable");
   assert.equal(marketPriceHistory.observedSince, null);

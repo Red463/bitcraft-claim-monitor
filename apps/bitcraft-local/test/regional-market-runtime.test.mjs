@@ -102,7 +102,15 @@ test("regional market runtime merges configured regions into one durable live do
   await runtime.warmActiveRegions();
 
   await handlers.get("19")({
-    data: { orders: [order("19", "190")] },
+    data: {
+      orders: [order("19", "190")],
+      stalls: [{
+        entityId: "9007199254740993",
+        regionId: "19",
+        claimEntityId: "100",
+        orders: [],
+      }],
+    },
     warnings: [],
     database: "relay-region-19",
     regionId: "19",
@@ -116,7 +124,7 @@ test("regional market runtime merges configured regions into one durable live do
   ]);
 
   await handlers.get("7")({
-    data: { orders: [order("7", "70")] },
+    data: { orders: [order("7", "70")], stalls: [] },
     warnings: [],
     database: "relay-region-7",
     regionId: "7",
@@ -132,6 +140,10 @@ test("regional market runtime merges configured regions into one durable live do
   assert.deepEqual(
     writes[1].domains["regional-market"].data.activeRegionIds,
     ["7", "19"],
+  );
+  assert.deepEqual(
+    writes[1].domains["regional-market"].data.stalls.map((row) => row.entityId),
+    ["9007199254740993"],
   );
   assert.deepEqual(
     writes[1].domains["regional-market"].data.regions.map((row) => [row.regionId, row.count]),

@@ -532,3 +532,79 @@ test("regional market overview derives liquidity, hubs, and open-order activity"
   assert.deepEqual(result.movers, []);
   assert.equal(result.moverBaseline, "unavailable");
 });
+
+test("regional market stalls view scopes, enriches, searches, and pages the live generation", () => {
+  assert.equal(
+    typeof views.regionalMarketStallsView,
+    "function",
+    "regional market stalls view must exist",
+  );
+  const result = views.regionalMarketStallsView({
+    activeRegionIds: ["7", "19"],
+    stalls: [{
+      entityId: "9007199254740993",
+      regionId: "19",
+      claimEntityId: "100",
+      claimName: "Timbersteel Trade",
+      ownerEntityId: "701",
+      ownerName: "Stall Keeper",
+      nickname: "Exact Exchange",
+      locationX: -123,
+      locationZ: 456,
+      orders: [{
+        entityId: "9007199254740995",
+        remainingStock: "2147483647",
+        offers: [{ itemId: "44", itemType: "item", quantity: "2" }],
+        requires: [{ itemId: "43", itemType: "cargo", quantity: "9007199254740993" }],
+      }, {
+        entityId: "9007199254740996",
+        remainingStock: "0",
+        offers: [{ itemId: "45", itemType: "item", quantity: "1" }],
+        requires: [],
+      }],
+    }, {
+      entityId: "800",
+      regionId: "7",
+      claimEntityId: "101",
+      claimName: "Outside Scope",
+      ownerEntityId: "702",
+      ownerName: "Other Keeper",
+      nickname: "",
+      orders: [],
+    }],
+  }, {
+    regionId: "19",
+    allowedRegionIds: ["7", "19"],
+    query: "timber package",
+    activeOnly: true,
+    page: 1,
+    pageSize: 20,
+    getEntity: (key) => ({
+      "items:44": { name: "Timber Package", iconAssetName: "timber.png" },
+      "cargo:43": { name: "Heavy Cargo", iconAssetName: "cargo.png" },
+    })[key] ?? null,
+  });
+
+  assert.equal(result.totalStalls, 1);
+  assert.equal(result.totalOrders, 1);
+  assert.equal(result.page, 1);
+  assert.equal(result.totalPages, 1);
+  assert.deepEqual(result.stalls[0].orders, [{
+    entityId: "9007199254740995",
+    remainingStock: "2147483647",
+    offers: [{
+      itemId: "44",
+      itemType: "item",
+      quantity: "2",
+      itemName: "Timber Package",
+      iconAssetName: "timber.png",
+    }],
+    requires: [{
+      itemId: "43",
+      itemType: "cargo",
+      quantity: "9007199254740993",
+      itemName: "Heavy Cargo",
+      iconAssetName: "cargo.png",
+    }],
+  }]);
+});

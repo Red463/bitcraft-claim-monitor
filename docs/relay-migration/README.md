@@ -99,6 +99,13 @@ cannot hide a stale or disconnected enrichment source. Order books publish
 independently of trade-history reads. Location distance/map actions remain
 unavailable until the bounded location join is proven.
 
+Barter Stalls shares those same regional sessions and the generic
+`regional-market` generation. The provider begins with the bounded stall set,
+follows only exact stall IDs into trade orders, buildings, nicknames, and
+locations, then follows only the resulting claim and owner IDs. The local
+route performs search, active-order filtering, pagination, and catalog
+enrichment on demand. No stall SQL table or scheduled stall collector exists.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;

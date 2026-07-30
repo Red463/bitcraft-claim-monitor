@@ -8,7 +8,6 @@ const {
   filterMarketDeals,
   marketFavoriteKeys,
   normalizeMarketOrders,
-  normalizeStallsPayload,
 } = globalMarket;
 
 test("bestMarketDealPotential does not add overlapping route capacity", () => {
@@ -119,34 +118,6 @@ test("deal region filtering requires both route endpoints inside the selected se
   assert.deepEqual(filterMarketDeals(deals, ["12"]).map((deal) => deal.id), ["same"]);
   assert.deepEqual(filterMarketDeals(deals, ["12", "14"]).map((deal) => deal.id), ["same", "cross", "other"]);
   assert.deepEqual(filterMarketDeals(deals, []).map((deal) => deal.id), ["same", "cross", "other"]);
-});
-
-test("stall normalization preserves item-for-item and cargo-for-cargo offers", () => {
-  const payload = normalizeStallsPayload({
-    stalls: [{
-      entityId: "stall-1",
-      ownerName: "Trader",
-      regionId: 11,
-      orderCount: 2,
-      orders: [{
-        entityId: "order-1",
-        remainingStock: "9",
-        offerItems: [{ itemId: 1, itemName: "Iron", quantity: "3" }],
-        requiredItems: [{ itemId: 2, itemName: "Wood", quantity: "4" }],
-        offerCargo: [{ itemId: 1, itemName: "Iron Package", quantity: "1" }],
-        requiredCargo: [{ itemId: 2, itemName: "Wood Package", quantity: "2" }],
-      }],
-    }],
-    totalStalls: 1,
-    totalOrders: 2,
-    page: 1,
-    totalPages: 1,
-    limit: 20,
-  });
-
-  assert.deepEqual(payload.stalls[0].orders[0].offers.map((entry) => entry.itemType), ["item", "cargo"]);
-  assert.deepEqual(payload.stalls[0].orders[0].requires.map((entry) => entry.itemType), ["item", "cargo"]);
-  assert.equal(payload.stalls[0].orders[0].remainingStock, 9);
 });
 
 test("favorite parsing rejects malformed entries and preserves exact decimal ids by type", () => {

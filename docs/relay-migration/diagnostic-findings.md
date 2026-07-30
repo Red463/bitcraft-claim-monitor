@@ -1,5 +1,40 @@
 # Relay diagnostic findings
 
+## Barter stall ownership and live-read path — 2026-07-30
+
+Region 19 exposed 312 `barter_stall_state` rows and 23,693
+`trade_order_state` rows during the diagnostic. Of those trade orders, 3,263
+were non-traveller orders, 2,720 joined to a known barter-stall entity, and
+2,684 had positive remaining stock across 180 stalls.
+
+Every observed `barter_stall_state.market_mode_enabled` value was `false`.
+That field therefore does not qualify as an active-stall filter. The
+provider instead uses barter-stall membership, joins trade orders by
+`shop_entity_id`, and excludes rows with a non-null
+`traveler_trade_order_id`.
+
+The regional market session subscribes to the naturally bounded stall table,
+then issues chunked equality subscriptions for only those stall entity IDs
+against trade orders, buildings, nicknames, and locations. A second bounded
+stage follows the resulting claim and constructed-by player IDs for names.
+Exact item/cargo identities and quantities are normalized before the generic
+`regional-market` generation commits; catalog labels are joined locally at
+read time.
+
+The first production-shaped verification exposed and fixed a staging race:
+initial rows delivered while the detail subscription was applying could
+restart that subscription before publication. Focused coverage now proves
+that initial staged inserts do not restart the in-flight generation, while
+real base or detail changes observed during staging trigger another bounded
+discovery pass before publication. A final live apply proof remains pending
+because the Relay health source changed region 19 upstream state to `down`
+before the post-fix rerun.
+
+Barter Stalls uses no dedicated SQL table, refresh ledger, or scheduled
+ingestion job. The browser reads `/api/local/market/stalls`, invalidates on
+catalog or `regional-market` generation changes, and keeps last-good
+freshness visible.
+
 ## Storage activity semantics and retention — 2026-07-30
 
 The public Relay storage endpoint was exercised against a monitored claim

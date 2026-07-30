@@ -1,4 +1,7 @@
-import { normalizeRegionalOrders } from "./normalizers.ts";
+import {
+  normalizeRegionalOrders,
+  normalizeRegionalStalls,
+} from "./normalizers.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 import {
   assertSchemaFingerprint,
@@ -31,8 +34,13 @@ type BindingConnection = {
   db: {
     buyOrderState: CachedTable;
     sellOrderState: CachedTable;
+    barterStallState: CachedTable;
+    tradeOrderState: CachedTable;
+    buildingState: CachedTable;
+    buildingNicknameState: CachedTable;
     claimState: CachedTable;
     playerUsernameState: CachedTable;
+    locationState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -63,6 +71,7 @@ type SessionConfig = {
   generation: number;
   regionId: string;
   maxOrders?: number;
+  maxStalls?: number;
   maxIdsPerQuery?: number;
   maxApplyRows?: number;
 };
@@ -76,7 +85,8 @@ type SessionDependencies = {
 };
 
 export type RegionalMarketSnapshot = {
-  data: ReturnType<typeof normalizeRegionalOrders>["data"];
+  data: ReturnType<typeof normalizeRegionalOrders>["data"]
+    & ReturnType<typeof normalizeRegionalStalls>["data"];
   warnings: string[];
   database: string;
   regionId: string;
@@ -88,6 +98,7 @@ export type RegionalMarketSnapshot = {
 type WireRecord = Record<string, unknown>;
 
 const DEFAULT_MAX_ORDERS = 5_000;
+const DEFAULT_MAX_STALLS = 1_000;
 const DEFAULT_MAX_IDS_PER_QUERY = 100;
 const DEFAULT_MAX_APPLY_ROWS = 12_000;
 
@@ -130,18 +141,21 @@ export class RelayRegionalMarketRegionSession {
   #bindings: RegionalBindingModule | null = null;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
-  #detailSubscription: SubscriptionHandle | null = null;
-  #config: Required<Pick<SessionConfig, "maxOrders" | "maxIdsPerQuery" | "maxApplyRows">>
-    & Omit<SessionConfig, "maxOrders" | "maxIdsPerQuery" | "maxApplyRows">
+  #stallDetailSubscription: SubscriptionHandle | null = null;
+  #identitySubscription: SubscriptionHandle | null = null;
+  #config: Required<Pick<SessionConfig, "maxOrders" | "maxStalls" | "maxIdsPerQuery" | "maxApplyRows">>
+    & Omit<SessionConfig, "maxOrders" | "maxStalls" | "maxIdsPerQuery" | "maxApplyRows">
     | null = null;
   #nextGeneration = 0;
   #detailEpoch = 0;
   #detailRefreshQueued = false;
   #snapshotQueued = false;
   #refreshingDetails = false;
+  #detailRefreshPending = false;
   #applyInFlight = false;
   #applyPending = false;
-  #listenersAttached = false;
+  #baseListenersAttached = false;
+  #stallDetailListenersAttached = false;
   #connectionEpoch = 0;
   #reconnectAttempt = 0;
   #detailRetryAttempt = 0;
@@ -184,6 +198,10 @@ export class RelayRegionalMarketRegionSession {
       maxOrders: positiveSafeInteger(
         config.maxOrders ?? DEFAULT_MAX_ORDERS,
         "Relay regional market order budget",
+      ),
+      maxStalls: positiveSafeInteger(
+        config.maxStalls ?? DEFAULT_MAX_STALLS,
+        "Relay regional market stall budget",
       ),
       maxIdsPerQuery: positiveSafeInteger(
         config.maxIdsPerQuery ?? DEFAULT_MAX_IDS_PER_QUERY,
@@ -231,6 +249,7 @@ export class RelayRegionalMarketRegionSession {
           .subscribe([
             "SELECT * FROM buy_order_state",
             "SELECT * FROM sell_order_state",
+            "SELECT * FROM barter_stall_state",
           ]);
       })
       .onConnectError((_context, error) => {
@@ -281,20 +300,84 @@ export class RelayRegionalMarketRegionSession {
     this.#cancelDetailRetry = null;
     const buyRows = rows(connection.db.buyOrderState);
     const sellRows = rows(connection.db.sellOrderState);
+    const stallRows = rows(connection.db.barterStallState);
     const orderCount = buyRows.length + sellRows.length;
     if (orderCount > config.maxOrders) {
       throw new Error(
         `Relay regional market order budget ${config.maxOrders} exceeded by ${orderCount} rows`,
       );
     }
+    if (stallRows.length > config.maxStalls) {
+      throw new Error(
+        `Relay regional market stall budget ${config.maxStalls} exceeded by ${stallRows.length} rows`,
+      );
+    }
     this.#refreshingDetails = true;
+    this.#detailRefreshPending = false;
     this.#detailEpoch += 1;
     const epoch = this.#detailEpoch;
-    this.#detailSubscription?.unsubscribe();
-    this.#detailSubscription = null;
+    this.#removeStallDetailListeners(connection);
+    this.#stallDetailSubscription?.unsubscribe();
+    this.#stallDetailSubscription = null;
+    this.#identitySubscription?.unsubscribe();
+    this.#identitySubscription = null;
+    const stallIds = stallRows.map((value, index) => {
+      const row = wireRecord(value, `Relay regional market stall ${index}`);
+      return decimalInteger(
+        row.entityId ?? row.entity_id,
+        `Relay regional market stall ${index} entity id`,
+      );
+    });
+    const queries = [
+      ...equalitySubscriptionQueries(
+        "trade_order_state",
+        "shop_entity_id",
+        stallIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "building_state",
+        "entity_id",
+        stallIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "building_nickname_state",
+        "entity_id",
+        stallIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "location_state",
+        "entity_id",
+        stallIds,
+        config.maxIdsPerQuery,
+      ),
+    ];
+    if (!queries.length) {
+      this.#attachStallDetailListeners(connection);
+      this.#beginIdentityRefresh(connection, epoch);
+      return;
+    }
+    this.#stallDetailSubscription = connection.subscriptionBuilder()
+      .onApplied(() => this.#guard(() => {
+        if (epoch !== this.#detailEpoch) return;
+        this.#attachStallDetailListeners(connection);
+        this.#beginIdentityRefresh(connection, epoch);
+      }))
+      .onError((_context, error) => this.#handleDetailError(connection, epoch, error))
+      .subscribe(queries);
+  }
+
+  #beginIdentityRefresh(connection: BindingConnection, epoch: number): void {
+    if (epoch !== this.#detailEpoch || connection !== this.#connection || this.#stopping) return;
+    const config = this.#requiredConfig();
     const claimIds: string[] = [];
     const ownerIds: string[] = [];
-    for (const [index, value] of [...buyRows, ...sellRows].entries()) {
+    for (const [index, value] of [
+      ...rows(connection.db.buyOrderState),
+      ...rows(connection.db.sellOrderState),
+    ].entries()) {
       const row = wireRecord(value, `Relay regional market order ${index}`);
       claimIds.push(decimalInteger(
         row.claimEntityId ?? row.claim_entity_id,
@@ -303,6 +386,17 @@ export class RelayRegionalMarketRegionSession {
       ownerIds.push(decimalInteger(
         row.ownerEntityId ?? row.owner_entity_id,
         `Relay regional market order ${index} owner id`,
+      ));
+    }
+    for (const [index, value] of rows(connection.db.buildingState).entries()) {
+      const row = wireRecord(value, `Relay regional market stall building ${index}`);
+      claimIds.push(decimalInteger(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Relay regional market stall building ${index} claim id`,
+      ));
+      ownerIds.push(decimalInteger(
+        row.constructedByPlayerEntityId ?? row.constructed_by_player_entity_id,
+        `Relay regional market stall building ${index} owner id`,
       ));
     }
     const queries = [
@@ -320,27 +414,37 @@ export class RelayRegionalMarketRegionSession {
       ),
     ];
     if (!queries.length) {
-      this.#refreshingDetails = false;
-      this.#applySnapshot(connection);
+      this.#finishDetailRefresh(connection, epoch);
       return;
     }
-    this.#detailSubscription = connection.subscriptionBuilder()
+    this.#identitySubscription = connection.subscriptionBuilder()
       .onApplied(() => this.#guard(() => {
         if (epoch !== this.#detailEpoch) return;
-        this.#detailRetryAttempt = 0;
-        this.#refreshingDetails = false;
-        this.#applySnapshot(connection);
+        this.#finishDetailRefresh(connection, epoch);
       }))
       .onError((_context, error) => this.#handleDetailError(connection, epoch, error))
       .subscribe(queries);
+  }
+
+  #finishDetailRefresh(connection: BindingConnection, epoch: number): void {
+    if (epoch !== this.#detailEpoch || connection !== this.#connection || this.#stopping) return;
+    if (this.#detailRefreshPending) {
+      this.#beginDetailRefresh(connection);
+      return;
+    }
+    this.#detailRetryAttempt = 0;
+    this.#refreshingDetails = false;
+    this.#applySnapshot(connection);
   }
 
   #handleDetailError(connection: BindingConnection, epoch: number, error: unknown): void {
     if (epoch !== this.#detailEpoch || connection !== this.#connection || this.#stopping) return;
     this.#refreshingDetails = false;
     this.#recordError(error);
-    this.#detailSubscription?.unsubscribe();
-    this.#detailSubscription = null;
+    this.#stallDetailSubscription?.unsubscribe();
+    this.#stallDetailSubscription = null;
+    this.#identitySubscription?.unsubscribe();
+    this.#identitySubscription = null;
     if (this.#cancelDetailRetry) return;
     const delayMs = this.#retryDelay(this.#detailRetryAttempt);
     this.#detailRetryAttempt += 1;
@@ -385,9 +489,22 @@ export class RelayRegionalMarketRegionSession {
     try {
       const buyRows = rows(connection.db.buyOrderState);
       const sellRows = rows(connection.db.sellOrderState);
+      const stallRows = rows(connection.db.barterStallState);
+      const tradeOrderRows = rows(connection.db.tradeOrderState);
+      const buildingRows = rows(connection.db.buildingState);
+      const buildingNicknameRows = rows(connection.db.buildingNicknameState);
       const claimRows = rows(connection.db.claimState);
       const usernameRows = rows(connection.db.playerUsernameState);
-      const rowCount = buyRows.length + sellRows.length + claimRows.length + usernameRows.length;
+      const locationRows = rows(connection.db.locationState);
+      const rowCount = buyRows.length
+        + sellRows.length
+        + stallRows.length
+        + tradeOrderRows.length
+        + buildingRows.length
+        + buildingNicknameRows.length
+        + claimRows.length
+        + usernameRows.length
+        + locationRows.length;
       if (rowCount > config.maxApplyRows) {
         throw new Error(
           `Relay regional market apply row budget ${config.maxApplyRows} exceeded by ${rowCount} rows`,
@@ -400,6 +517,16 @@ export class RelayRegionalMarketRegionSession {
         claimRows,
         usernameRows,
       });
+      const normalizedStalls = normalizeRegionalStalls({
+        regionId: config.regionId,
+        stallRows,
+        tradeOrderRows,
+        buildingRows,
+        buildingNicknameRows,
+        claimRows,
+        usernameRows,
+        locationRows,
+      });
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
@@ -407,8 +534,11 @@ export class RelayRegionalMarketRegionSession {
       this.#health.rowCount = rowCount;
       this.#health.lastApplyDurationMs = Date.now() - startedAt;
       Promise.resolve(this.#onSnapshot({
-        data: normalized.data,
-        warnings: normalized.warnings,
+        data: {
+          ...normalized.data,
+          ...normalizedStalls.data,
+        },
+        warnings: [...normalized.warnings, ...normalizedStalls.warnings],
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -437,7 +567,12 @@ export class RelayRegionalMarketRegionSession {
   }
 
   #queueDetailRefresh(): void {
-    if (this.#detailRefreshQueued || !this.#connection) return;
+    if (!this.#connection) return;
+    if (this.#refreshingDetails) {
+      this.#detailRefreshPending = true;
+      return;
+    }
+    if (this.#detailRefreshQueued) return;
     this.#detailRefreshQueued = true;
     queueMicrotask(() => {
       this.#detailRefreshQueued = false;
@@ -455,8 +590,12 @@ export class RelayRegionalMarketRegionSession {
   }
 
   #attachListeners(connection: BindingConnection): void {
-    if (this.#listenersAttached) return;
-    for (const table of [connection.db.buyOrderState, connection.db.sellOrderState]) {
+    if (this.#baseListenersAttached) return;
+    for (const table of [
+      connection.db.buyOrderState,
+      connection.db.sellOrderState,
+      connection.db.barterStallState,
+    ]) {
       table.onInsert?.(this.#baseChanged);
       table.onUpdate?.(this.#baseChanged);
       table.onDelete?.(this.#baseChanged);
@@ -466,12 +605,18 @@ export class RelayRegionalMarketRegionSession {
       table.onUpdate?.(this.#detailChanged);
       table.onDelete?.(this.#detailChanged);
     }
-    this.#listenersAttached = true;
+    this.#baseListenersAttached = true;
   }
 
   #removeListeners(connection = this.#connection): void {
-    if (!this.#listenersAttached || !connection) return;
-    for (const table of [connection.db.buyOrderState, connection.db.sellOrderState]) {
+    if (!connection) return;
+    this.#removeStallDetailListeners(connection);
+    if (!this.#baseListenersAttached) return;
+    for (const table of [
+      connection.db.buyOrderState,
+      connection.db.sellOrderState,
+      connection.db.barterStallState,
+    ]) {
       table.removeOnInsert?.(this.#baseChanged);
       table.removeOnUpdate?.(this.#baseChanged);
       table.removeOnDelete?.(this.#baseChanged);
@@ -481,7 +626,37 @@ export class RelayRegionalMarketRegionSession {
       table.removeOnUpdate?.(this.#detailChanged);
       table.removeOnDelete?.(this.#detailChanged);
     }
-    this.#listenersAttached = false;
+    this.#baseListenersAttached = false;
+  }
+
+  #attachStallDetailListeners(connection: BindingConnection): void {
+    if (this.#stallDetailListenersAttached) return;
+    for (const table of [
+      connection.db.tradeOrderState,
+      connection.db.buildingState,
+      connection.db.buildingNicknameState,
+      connection.db.locationState,
+    ]) {
+      table.onInsert?.(this.#baseChanged);
+      table.onUpdate?.(this.#baseChanged);
+      table.onDelete?.(this.#baseChanged);
+    }
+    this.#stallDetailListenersAttached = true;
+  }
+
+  #removeStallDetailListeners(connection: BindingConnection): void {
+    if (!this.#stallDetailListenersAttached) return;
+    for (const table of [
+      connection.db.tradeOrderState,
+      connection.db.buildingState,
+      connection.db.buildingNicknameState,
+      connection.db.locationState,
+    ]) {
+      table.removeOnInsert?.(this.#baseChanged);
+      table.removeOnUpdate?.(this.#baseChanged);
+      table.removeOnDelete?.(this.#baseChanged);
+    }
+    this.#stallDetailListenersAttached = false;
   }
 
   #clearConnectionState(connection: BindingConnection): void {
@@ -490,11 +665,14 @@ export class RelayRegionalMarketRegionSession {
     this.#cancelDetailRetry = null;
     this.#detailRetryAttempt = 0;
     this.#removeListeners(connection);
-    this.#detailSubscription?.unsubscribe();
-    this.#detailSubscription = null;
+    this.#stallDetailSubscription?.unsubscribe();
+    this.#stallDetailSubscription = null;
+    this.#identitySubscription?.unsubscribe();
+    this.#identitySubscription = null;
     this.#baseSubscription?.unsubscribe();
     this.#baseSubscription = null;
     this.#detailRefreshQueued = false;
+    this.#detailRefreshPending = false;
     this.#snapshotQueued = false;
     this.#refreshingDetails = false;
   }
@@ -536,6 +714,7 @@ export class RelayRegionalMarketRegionSession {
     this.#reconnectAttempt = 0;
     this.#detailRetryAttempt = 0;
     this.#detailRefreshQueued = false;
+    this.#detailRefreshPending = false;
     this.#snapshotQueued = false;
     this.#refreshingDetails = false;
     this.#applyInFlight = false;

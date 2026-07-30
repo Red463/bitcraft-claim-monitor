@@ -68,6 +68,19 @@ function scopedOrders(snapshot, options = {}) {
     });
 }
 
+function scopedStalls(snapshot, options = {}) {
+  const source = record(snapshot);
+  const selectedRegion = String(options.regionId ?? "all").trim().toLowerCase() || "all";
+  const allowedRegionIds = new Set(regionIds(options.allowedRegionIds));
+  return (Array.isArray(source.stalls) ? source.stalls : [])
+    .map(record)
+    .filter((stall) => {
+      const regionId = decimal(stall.regionId);
+      return (!allowedRegionIds.size || allowedRegionIds.has(regionId))
+        && (selectedRegion === "all" || regionId === selectedRegion);
+    });
+}
+
 function warningInScope(warning, allowedRegionIds) {
   if (!allowedRegionIds.size) return true;
   const match = String(warning).match(/(?:^Region|region)\s+(\d+)/);
@@ -417,6 +430,88 @@ export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) 
     }),
     sellOrders: orders.filter((order) => String(order.side).toLowerCase() === "sell"),
     buyOrders: orders.filter((order) => String(order.side).toLowerCase() !== "sell"),
+  };
+}
+
+export function regionalMarketStallsView(snapshot, options = {}) {
+  const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  const query = String(options.query ?? options.search ?? "").trim().toLowerCase();
+  const activeOnly = options.activeOnly === true
+    || options.activeOnly === "true"
+    || options.hideEmpty === true
+    || options.hideEmpty === "true";
+  const pageSize = Math.max(1, Math.min(100, Math.floor(Number(options.pageSize) || 20)));
+  const requestedPage = Math.max(1, Math.floor(Number(options.page) || 1));
+  const enrichStack = (value) => {
+    const stack = record(value);
+    const type = itemType(stack.itemType);
+    const id = decimal(stack.itemId);
+    const entity = record(getEntity(`${type === "cargo" ? "cargo" : "items"}:${id}`));
+    return {
+      itemId: id,
+      itemType: type,
+      quantity: decimal(stack.quantity),
+      itemName: String(entity.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${id}`),
+      iconAssetName: entity.iconAssetName ?? null,
+    };
+  };
+  const stalls = scopedStalls(snapshot, options).flatMap((value) => {
+    const stall = record(value);
+    const orders = (Array.isArray(stall.orders) ? stall.orders : [])
+      .map((orderValue) => {
+        const order = record(orderValue);
+        return {
+          entityId: decimal(order.entityId),
+          remainingStock: decimal(order.remainingStock),
+          offers: (Array.isArray(order.offers) ? order.offers : []).map(enrichStack),
+          requires: (Array.isArray(order.requires) ? order.requires : []).map(enrichStack),
+        };
+      })
+      .filter((order) => !activeOnly || BigInt(order.remainingStock) > 0n);
+    if (activeOnly && !orders.length) return [];
+    const normalized = {
+      ...stall,
+      entityId: decimal(stall.entityId),
+      regionId: decimal(stall.regionId),
+      regionName: `R${decimal(stall.regionId)}`,
+      claimEntityId: stall.claimEntityId == null ? null : decimal(stall.claimEntityId),
+      ownerEntityId: stall.ownerEntityId == null ? null : decimal(stall.ownerEntityId),
+      orders,
+      orderCount: orders.length,
+    };
+    if (query) {
+      const values = [
+        normalized.entityId,
+        normalized.nickname,
+        normalized.claimName,
+        normalized.ownerName,
+        ...orders.flatMap((order) => [
+          ...order.offers.map((stack) => stack.itemName),
+          ...order.requires.map((stack) => stack.itemName),
+        ]),
+      ];
+      if (!values.some((entry) => String(entry ?? "").toLowerCase().includes(query))) {
+        return [];
+      }
+    }
+    return [normalized];
+  });
+  stalls.sort((left, right) => (
+    compareText(left.nickname || left.ownerName, right.nickname || right.ownerName)
+    || compareBigInt(left.entityId, right.entityId)
+  ));
+  const totalStalls = stalls.length;
+  const totalOrders = stalls.reduce((total, stall) => total + stall.orders.length, 0);
+  const totalPages = Math.max(1, Math.ceil(totalStalls / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  return {
+    stalls: stalls.slice(offset, offset + pageSize),
+    totalStalls,
+    totalOrders,
+    page,
+    totalPages,
+    limit: pageSize,
   };
 }
 

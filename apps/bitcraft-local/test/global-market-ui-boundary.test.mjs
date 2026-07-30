@@ -28,6 +28,12 @@ test("stall cards show coordinates and item detail shows metadata plus order cou
   const stalls = source("../src/pages/market/MarketStalls.tsx");
   const browse = source("../src/pages/market/MarketBrowse.tsx");
   assert.match(stalls, /X \$\{formatNumber\(stall\.locationX\)\}, Z \$\{formatNumber\(stall\.locationZ\)\}/);
+  assert.match(stalls, /\/api\/local\/market\/stalls/);
+  assert.match(stalls, /useGameDataGeneration\([^)]*"catalogs"[^)]*"regional-market"/s);
+  assert.match(stalls, /selectedStallKey/);
+  assert.match(stalls, /stalls\.find\(/);
+  assert.doesNotMatch(stalls, /setSelectedStall\(stall\)/);
+  assert.doesNotMatch(stalls, /api\/bitjita|BitJita/i);
   assert.match(browse, /itemMetadata\.category \?\? itemMetadata\.tag/);
   assert.match(browse, /label="Sell Orders" value=\{formatNumber\(sells\.length\)\}/);
   assert.match(browse, /label="Buy Orders" value=\{formatNumber\(buys\.length\)\}/);
@@ -122,10 +128,10 @@ test("Browse invalidates on regional-market generation events and keeps history 
   assert.match(generationHook, /\/api\/local\/game-data\/generation/);
 });
 
-test("Market source copy identifies the live Relay browse path during migration", () => {
+test("Market source copy identifies every migrated live Relay workspace", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
 
-  assert.match(marketPage, /Browse and regional order books use live Relay data/);
+  assert.match(marketPage, /Browse, order books, Overview, Deals, and Barter Stalls use live Relay data/);
   assert.doesNotMatch(marketPage, /Live market data is provided by BitJita/);
 });
 

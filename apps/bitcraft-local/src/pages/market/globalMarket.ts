@@ -146,53 +146,6 @@ export function bestMarketDealPotential(deals: AnyRecord[]): string {
   }, 0n).toString();
 }
 
-function normalizeTradeItem(raw: AnyRecord, itemType: MarketItemType) {
-  return {
-    itemType,
-    itemId: finiteNumber(raw.itemId ?? raw.item_id) ?? 0,
-    itemName: String(raw.itemName ?? raw.name ?? "Unknown item"),
-    iconAssetName: raw.iconAssetName ?? raw.itemIconAssetName ?? null,
-    quantity: finiteNumber(raw.quantity) ?? 0,
-    raw,
-  };
-}
-
-export function normalizeStallsPayload(payload: AnyRecord) {
-  const stalls = (Array.isArray(payload?.stalls) ? payload.stalls : []).map((stall: AnyRecord) => ({
-    ...stall,
-    entityId: String(stall.entityId ?? stall.id ?? ""),
-    ownerName: String(stall.ownerName ?? ""),
-    nickname: String(stall.nickname ?? ""),
-    claimName: String(stall.claimName ?? ""),
-    regionName: String(stall.regionName ?? ""),
-    regionId: finiteNumber(stall.regionId),
-    orderCount: finiteNumber(stall.orderCount) ?? 0,
-    locationX: finiteNumber(stall.locationX),
-    locationZ: finiteNumber(stall.locationZ),
-    orders: (Array.isArray(stall.orders) ? stall.orders : []).map((order: AnyRecord) => ({
-      ...order,
-      entityId: String(order.entityId ?? order.id ?? ""),
-      remainingStock: finiteNumber(order.remainingStock) ?? 0,
-      offers: [
-        ...(Array.isArray(order.offerItems) ? order.offerItems.map((entry: AnyRecord) => normalizeTradeItem(entry, "item")) : []),
-        ...(Array.isArray(order.offerCargo) ? order.offerCargo.map((entry: AnyRecord) => normalizeTradeItem(entry, "cargo")) : []),
-      ],
-      requires: [
-        ...(Array.isArray(order.requiredItems) ? order.requiredItems.map((entry: AnyRecord) => normalizeTradeItem(entry, "item")) : []),
-        ...(Array.isArray(order.requiredCargo) ? order.requiredCargo.map((entry: AnyRecord) => normalizeTradeItem(entry, "cargo")) : []),
-      ],
-    })),
-  }));
-  return {
-    stalls,
-    totalStalls: finiteNumber(payload?.totalStalls) ?? stalls.length,
-    totalOrders: finiteNumber(payload?.totalOrders) ?? 0,
-    page: finiteNumber(payload?.page) ?? 1,
-    totalPages: finiteNumber(payload?.totalPages) ?? 1,
-    limit: finiteNumber(payload?.limit) ?? 20,
-  };
-}
-
 export function marketFavoriteKeys(value: string | null): MarketItemKey[] {
   try {
     const parsed = JSON.parse(String(value ?? "[]"));

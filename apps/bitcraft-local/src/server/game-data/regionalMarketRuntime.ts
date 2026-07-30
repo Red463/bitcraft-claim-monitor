@@ -57,8 +57,14 @@ type RegionalOrder = Record<string, unknown> & {
   regionId: string;
 };
 
+type RegionalStall = Record<string, unknown> & {
+  entityId: string;
+  regionId: string;
+};
+
 type RegionSnapshotState = {
   orders: RegionalOrder[];
+  stalls: RegionalStall[];
   warnings: string[];
   database: string;
   schemaFingerprint: string;
@@ -84,6 +90,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function normalizedOrder(value: unknown, regionId: string): RegionalOrder | null {
+  const row = asRecord(value);
+  const entityId = String(row.entityId ?? "").trim();
+  if (!/^\d+$/.test(entityId) || String(row.regionId ?? "") !== regionId) return null;
+  return { ...row, entityId, regionId };
+}
+
+function normalizedStall(value: unknown, regionId: string): RegionalStall | null {
   const row = asRecord(value);
   const entityId = String(row.entityId ?? "").trim();
   if (!/^\d+$/.test(entityId) || String(row.regionId ?? "") !== regionId) return null;
@@ -340,8 +353,12 @@ export class RelayRegionalMarketRuntime {
     const orders = snapshot.data.orders
       .map((order) => normalizedOrder(order, snapshot.regionId))
       .filter((order): order is RegionalOrder => order != null);
+    const stalls = (snapshot.data.stalls ?? [])
+      .map((stall) => normalizedStall(stall, snapshot.regionId))
+      .filter((stall): stall is RegionalStall => stall != null);
     const nextRegion = {
       orders,
+      stalls,
       warnings: [...snapshot.warnings],
       database: snapshot.database,
       schemaFingerprint: snapshot.schemaFingerprint,
@@ -365,11 +382,18 @@ export class RelayRegionalMarketRuntime {
       numericStringOrder(left.regionId, right.regionId)
       || numericStringOrder(left.entityId, right.entityId)
     ));
+    const combinedStalls = this.#activeRegionIds.flatMap((regionId) => (
+      nextRegions.get(regionId)?.stalls ?? []
+    )).sort((left, right) => (
+      numericStringOrder(left.regionId, right.regionId)
+      || numericStringOrder(left.entityId, right.entityId)
+    ));
     const regions = this.#activeRegionIds.flatMap((regionId) => {
       const region = nextRegions.get(regionId);
       return region ? [{
         regionId,
         count: region.orders.length,
+        stallCount: region.stalls.length,
         database: region.database,
         schemaFingerprint: region.schemaFingerprint,
         receivedAt: region.receivedAt,
@@ -385,6 +409,7 @@ export class RelayRegionalMarketRuntime {
             data: {
               activeRegionIds: [...this.#activeRegionIds],
               orders: combinedOrders,
+              stalls: combinedStalls,
               regions,
             },
             confidence: warnings.length ? "partial" : "authoritative",
@@ -416,6 +441,7 @@ export class RelayRegionalMarketRuntime {
     const stored = this.#currentStateRepository.read(claimId, "regional-market");
     const data = asRecord(stored?.data);
     const orders = Array.isArray(data.orders) ? data.orders : [];
+    const stalls = Array.isArray(data.stalls) ? data.stalls : [];
     const metadata = Array.isArray(data.regions) ? data.regions : [];
     for (const value of metadata) {
       const row = asRecord(value);
@@ -424,8 +450,12 @@ export class RelayRegionalMarketRuntime {
       const regionalOrders = orders
         .map((order) => normalizedOrder(order, regionId))
         .filter((order): order is RegionalOrder => order != null);
+      const regionalStalls = stalls
+        .map((stall) => normalizedStall(stall, regionId))
+        .filter((stall): stall is RegionalStall => stall != null);
       this.#regions.set(regionId, {
         orders: regionalOrders,
+        stalls: regionalStalls,
         warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
         database: String(row.database ?? ""),
         schemaFingerprint: String(row.schemaFingerprint ?? ""),

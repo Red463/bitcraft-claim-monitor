@@ -1662,6 +1662,164 @@ export function normalizeRegionalOrders(options: {
   return { data: { orders }, warnings };
 }
 
+export function normalizeRegionalStalls(options: {
+  regionId: string;
+  stallRows: unknown[];
+  tradeOrderRows: unknown[];
+  buildingRows: unknown[];
+  buildingNicknameRows: unknown[];
+  claimRows: unknown[];
+  usernameRows: unknown[];
+  locationRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional stall region id");
+  const warnings: string[] = [];
+
+  function indexRows(values: unknown[], label: string): Map<string, WireRecord> {
+    const indexed = new Map<string, WireRecord>();
+    for (const [index, value] of values.entries()) {
+      try {
+        const row = record(value, `${label} row ${index}`);
+        const entityId = decimalString(
+          row.entityId ?? row.entity_id,
+          `${label} row ${index} entity id`,
+        );
+        if (!indexed.has(entityId)) indexed.set(entityId, row);
+      } catch (error) {
+        warnings.push(
+          `${label} omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return indexed;
+  }
+
+  function normalizeStacks(
+    values: unknown,
+    cargoIds: unknown,
+    label: string,
+  ): Array<{ itemId: string; itemType: ItemKind; quantity: string }> {
+    const totals = new Map<string, { itemId: string; itemType: ItemKind; quantity: bigint }>();
+    const add = (itemId: string, itemType: ItemKind, quantity: string) => {
+      const key = `${itemType}:${itemId}`;
+      const current = totals.get(key);
+      if (current) current.quantity += BigInt(quantity);
+      else totals.set(key, { itemId, itemType, quantity: BigInt(quantity) });
+    };
+    for (const [index, value] of (Array.isArray(values) ? values : []).entries()) {
+      const stack = record(value, `${label} item ${index}`);
+      add(
+        decimalString(stack.itemId ?? stack.item_id, `${label} item ${index} id`),
+        normalizeItemKind(enumLabel(stack.itemType ?? stack.item_type)),
+        decimalString(stack.quantity, `${label} item ${index} quantity`),
+      );
+    }
+    for (const [index, value] of (Array.isArray(cargoIds) ? cargoIds : []).entries()) {
+      add(decimalString(value, `${label} cargo ${index} id`), "cargo", "1");
+    }
+    return [...totals.values()].map((entry) => ({
+      itemId: entry.itemId,
+      itemType: entry.itemType,
+      quantity: entry.quantity.toString(),
+    }));
+  }
+
+  const stallsById = indexRows(options.stallRows, "Regional barter_stall_state");
+  const buildings = indexRows(options.buildingRows, "Regional building_state");
+  const nicknames = indexRows(
+    options.buildingNicknameRows,
+    "Regional building_nickname_state",
+  );
+  const claims = indexRows(options.claimRows, "Regional claim_state");
+  const usernames = indexRows(options.usernameRows, "Regional player_username_state");
+  const locations = indexRows(options.locationRows, "Regional location_state");
+  const ordersByStall = new Map<string, Array<Record<string, unknown>>>();
+
+  for (const [index, value] of options.tradeOrderRows.entries()) {
+    try {
+      const row = record(value, `Regional trade_order_state row ${index}`);
+      const travelerOrderId = row.travelerTradeOrderId ?? row.traveler_trade_order_id;
+      if (travelerOrderId != null) continue;
+      const shopEntityId = decimalString(
+        row.shopEntityId ?? row.shop_entity_id,
+        `Regional trade order ${index} shop id`,
+      );
+      if (!stallsById.has(shopEntityId)) continue;
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional trade order ${index} entity id`,
+      );
+      const orders = ordersByStall.get(shopEntityId) ?? [];
+      orders.push({
+        entityId,
+        remainingStock: decimalString(
+          row.remainingStock ?? row.remaining_stock,
+          `Regional trade order ${entityId} remaining stock`,
+        ),
+        offers: normalizeStacks(
+          row.offerItems ?? row.offer_items,
+          row.offerCargoId ?? row.offer_cargo_id,
+          `Regional trade order ${entityId} offers`,
+        ),
+        requires: normalizeStacks(
+          row.requiredItems ?? row.required_items,
+          row.requiredCargoId ?? row.required_cargo_id,
+          `Regional trade order ${entityId} requirements`,
+        ),
+      });
+      ordersByStall.set(shopEntityId, orders);
+    } catch (error) {
+      warnings.push(
+        `Regional trade_order_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const stalls = [...stallsById.entries()].map(([entityId, stall]) => {
+    const building = buildings.get(entityId);
+    const claimEntityId = building
+      ? decimalString(
+          building.claimEntityId ?? building.claim_entity_id,
+          `Regional stall ${entityId} claim id`,
+        )
+      : null;
+    const ownerEntityId = building
+      ? decimalString(
+          building.constructedByPlayerEntityId ?? building.constructed_by_player_entity_id,
+          `Regional stall ${entityId} owner id`,
+        )
+      : null;
+    const claim = claimEntityId ? claims.get(claimEntityId) : null;
+    const username = ownerEntityId ? usernames.get(ownerEntityId) : null;
+    const nickname = nicknames.get(entityId);
+    const location = locations.get(entityId);
+    const orders = ordersByStall.get(entityId) ?? [];
+    orders.sort((left, right) => (
+      BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
+    ));
+    return {
+      entityId,
+      regionId,
+      claimEntityId,
+      claimName: claim ? String(claim.name ?? "") : "",
+      ownerEntityId,
+      ownerName: username ? String(username.username ?? "") : "",
+      nickname: nickname ? String(nickname.nickname ?? "") : "",
+      marketModeEnabled: stall.marketModeEnabled === true || stall.market_mode_enabled === true,
+      locationX: location ? integer(location.x, `Regional stall ${entityId} location x`) : null,
+      locationZ: location ? integer(location.z, `Regional stall ${entityId} location z`) : null,
+      locationDimension: location
+        ? decimalString(location.dimension, `Regional stall ${entityId} location dimension`)
+        : null,
+      orders,
+    };
+  });
+  stalls.sort((left, right) => (
+    BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
+  ));
+  return { data: { stalls }, warnings };
+}
+
 export function normalizeRegionalBuyOrders(options: {
   regionId: string;
   buyRows: unknown[];

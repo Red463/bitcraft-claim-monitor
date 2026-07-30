@@ -32,6 +32,7 @@ import {
   regionalMarketDealsView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
+  regionalMarketStallsView,
   regionalMarketStatus,
 } from "./src/server/regionalMarketViews.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
@@ -8371,17 +8372,6 @@ async function proxyBitjita(req, url, res) {
   const { forceRefresh } = refresh;
   if ((forceRefresh || !bitjitaProxyCache.hasFreshCache(upstream)) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
   const response = await bitjitaProxyCache.fetchUpstreamCached(upstream, { forceRefresh });
-  if (upstream.pathname === "/api/stalls" && response.status >= 200 && response.status < 300) {
-    try {
-      const payload = JSON.parse(Buffer.from(response.body).toString("utf8"));
-      if (!Array.isArray(payload?.stalls)) throw new Error("Expected a stalls array");
-    } catch (error) {
-      const now = new Date().toISOString();
-      const message = `BitJita stalls feed shape changed: ${errorMessage(error)}`;
-      statements.upsertSetting.run("global_market_stalls_diagnostic", JSON.stringify({ recordedAt: now, message }), now);
-      if (!isTestRuntime) console.warn(message);
-    }
-  }
   res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
   res.end(response.body);
 }
@@ -10105,6 +10095,34 @@ const server = createServer(async (req, res) => {
           limit: 500,
         }),
         ...regionalMarketResponseStatus(current, "all", scopedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/stalls") {
+      if (!rateLimit(req, res, "global-market-stalls", RATE_LIMITS.expensiveLocal)) return;
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, {
+        ...regionalMarketStallsView(current?.data, {
+          ...Object.fromEntries(url.searchParams.entries()),
+          query: url.searchParams.get("q") ?? url.searchParams.get("search") ?? "",
+          activeOnly: url.searchParams.get("activeOnly") ?? url.searchParams.get("hideEmpty") ?? "true",
+          regionId,
+          allowedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+        }),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
       });
     }
