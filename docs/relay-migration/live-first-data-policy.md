@@ -16,6 +16,34 @@ only purpose was working around BitJita bulk-request sizes or rate limits.
 The public browser remains isolated from Relay and SpacetimeDB. It reads local
 provider-neutral routes only.
 
+## Current-state storage hierarchy
+
+Use the smallest and fastest layer that preserves correctness:
+
+1. The provider's committed in-memory generation is the primary source for
+   current operational state while the process is healthy.
+2. `domain_payload_current` is the generic durable last-good boundary used for
+   restart recovery, outages, and atomic generation publication. A domain does
+   not receive another current-state table merely because the legacy app had
+   one.
+3. A dedicated derived-current table is allowed only when an indexed local
+   query has a measured material benefit, the result is shared across
+   processes, or rebuilding it on every read would miss a user-facing latency
+   budget.
+4. History/event, user-owned, outbox, audit, and operational tables remain
+   durable because Relay cannot replace their local semantics.
+
+Every retained derived-current projection must update from the same committed
+subscription or HTTP generation that changed its inputs. It must not wait for
+an hourly, daily, or multi-minute scheduled rebuild. If it cannot update
+incrementally, its bounded rebuild begins immediately after the source
+generation commits and publishes atomically when complete.
+
+The default decision for a new Relay vertical is therefore **no new SQL
+table**. The implementation plan must record evidence before making an
+exception: expected row count, measured uncached query/apply cost, required
+indexes, restart cost, readers, writers, and the latency improvement obtained.
+
 ## Update paths
 
 | Source class | Normal update path | Scheduled work allowed |
@@ -44,6 +72,14 @@ state SQL table merely to avoid a page-level request.
 immediately. If an HTTP-backed domain is older than its freshness budget, the
 server requests a priority single-flight refresh without making the current
 page wait for unrelated domains.
+
+Page navigation must render the latest committed data immediately and may not
+wait for the next scheduled job, a full-catalog crawl, or an unrelated domain
+refresh. Expensive features such as Craft Planner read live-maintained local
+indexes: subscription changes update only the affected catalog entities and
+planner projections, after which the browser is notified of the new
+generation. Users do not trigger the large upstream query and do not wait for
+a daily catalog refresh.
 
 Add a provider-neutral local event stream:
 
@@ -85,6 +121,7 @@ apply time.
 
 | Path | Required budget while healthy |
 |---|---|
+| Local provider-neutral API response from an already committed generation | p95 at or below 100 ms |
 | Committed snapshot to local API visibility | p95 at or below 250 ms |
 | Received subscription change to committed normalized generation | p95 at or below 2 seconds; p99 at or below 5 seconds |
 | Committed generation to an open browser update | p95 at or below 1 second |
@@ -170,6 +207,12 @@ Apply these decisions:
 - `operations`: provider health, subscription generations, outbox delivery,
   backups, privacy, and diagnostics.
 
+Dedicated per-domain current tables are presumed `retire` unless their
+inventory entry contains the exception evidence required by the current-state
+storage hierarchy. “The old implementation queried this table” is not
+evidence. A retained current table whose writer is a scheduled ingestion job
+fails this policy.
+
 Initial candidates requiring explicit dependency proof are:
 
 | Existing table or group | Planned disposition |
@@ -225,8 +268,13 @@ the schema and every retained table has a current owner and update trigger.
 
 - Deliver each operational domain through its live update path before removing
   its legacy collector or cache.
+- Start each vertical with the generic committed domain snapshot and add no
+  dedicated SQL table unless the measured exception gate is satisfied.
 - Update derived planner, market, construction, map, and empire projections
   incrementally from committed domain changes.
+- Construction, research, recruitment, equipment, buffs, layout, and current
+  empire state must not use scheduled-materialization tables merely to mirror
+  Relay rows.
 - Measure regional session and HTTP-loop load; adjust freshness intervals only
   from observed capacity and operator guidance.
 
@@ -259,6 +307,11 @@ Add focused coverage proving:
 - a worker restart serves the durable last-good snapshot immediately;
 - scheduled ingestion jobs can be disabled without stopping live current data;
 - derived planner and market projections update incrementally;
+- current-data API p95 latency remains within budget while a reconciliation or
+  history-retention job is running;
+- every dedicated current-state table has measured exception evidence, and
+  domains without that evidence use no table beyond
+  `domain_payload_current`;
 - freshness transitions and latency metrics are accurate;
 - retired tables and scheduled-job keys are absent from a fresh schema;
 - runtime database tracing fails tests when removed table names are accessed;

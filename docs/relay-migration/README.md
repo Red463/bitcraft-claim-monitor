@@ -22,9 +22,15 @@ Live-first data policy:
 - subscription-backed domains publish validated changes continuously;
 - HTTP-only domains use bounded single-flight refresh loops rather than
   page-triggered upstream fan-out;
+- the committed in-memory provider generation is the healthy current-state
+  source, with `domain_payload_current` retained only as the generic durable
+  last-good boundary;
 - open pages receive local provider-neutral generation notifications;
 - scheduled ingestion is a reconciliation mechanism, never something users
   normally wait for;
+- new Relay domains add no dedicated current-state SQL table by default;
+- a derived-current table is retained only with measured indexed-query,
+  cross-process, or restart-recovery value and must update from domain events;
 - legacy tables that only supported BitJita bulk fetching, rate limiting, or
   refresh orchestration are removed after dependency and recovery proofs.
 

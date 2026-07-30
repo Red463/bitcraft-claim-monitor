@@ -49,6 +49,26 @@ Disposition values:
 | `discord_youtube_channels`, `discord_youtube_videos`, `discord_craft_watches` | keep-user | Authenticated Discord configuration and monitor observations | User-owned bot configuration and deduplicated monitor state. |
 | `discord_mod_cases`, `discord_warnings`, `discord_mod_notes`, `discord_custom_commands`, `discord_component_votes`, `discord_component_messages`, `discord_temp_bans` | keep-user | Authenticated Discord moderation/community actions | Independent Discord feature state; not a game-data cache. |
 
+## Default for remaining live domains
+
+The remaining operational verticals begin with no dedicated current-state SQL
+table. Their latest complete state belongs in the provider's in-memory
+generation plus `domain_payload_current` for durable last-good recovery.
+
+| Domain | Default SQL decision | Live update path |
+|---|---|---|
+| Construction | No dedicated table | Claim-filtered regional subscription; recipe/building enrichment from the continuously maintained global catalog |
+| Research and recruitment | No dedicated table | Claim-filtered regional subscriptions with incremental catalog joins |
+| Equipment, buffs, and player state | No dedicated table | Member-filtered regional subscriptions |
+| Claim layout and current locations | No dedicated table | Bounded claim/entity-filtered regional subscriptions |
+| Current empire, watchtower, siege, and deposit state | No dedicated table | Global rows where proven complete; otherwise bounded adaptive regional sessions |
+| Current market orders and listings | No raw mirror table by default | Order subscriptions and incremental transition handling |
+
+An implementation may retain or add a compact derived-current index only after
+recording measured query cost, row count, indexes, restart cost, all readers
+and writers, and the user-visible latency improvement. Its update trigger must
+be a committed domain event, not a scheduled ingestion sweep.
+
 ## Inventory vertical evidence
 
 - Browser source: `InventoryPage.tsx` contacts only provider-neutral local
