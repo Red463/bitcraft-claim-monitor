@@ -44,7 +44,7 @@ export function craftPlanCatalogLookup(payload = {}) {
   const lookup = new Map();
   const addRows = (rows, kind) => {
     for (const item of rows) {
-      const id = String(item.id ?? item.itemId ?? "").trim();
+      const id = String(item.id ?? item.itemId ?? item.targetId ?? "").trim();
       if (!id) continue;
       lookup.set(`${kind}:${id}`, item);
       if (!lookup.has(id)) lookup.set(id, item);
@@ -52,6 +52,12 @@ export function craftPlanCatalogLookup(payload = {}) {
   };
   addRows([...asArray(payload.items), ...asArray(payload.data?.items)], "items");
   addRows([...asArray(payload.cargos), ...asArray(payload.data?.cargos)], "cargo");
+  for (const [key, item] of Object.entries(payload.catalog ?? payload.data?.catalog ?? {})) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const [rawKind] = String(key).split(":", 1);
+    const kind = rawKind === "cargo" ? "cargo" : "items";
+    addRows([item], kind);
+  }
   return lookup;
 }
 
@@ -233,7 +239,7 @@ export function settlementStorageSourcesFromInventories(inventories = {}, allowe
     const sourceId = String(building.entityId ?? building.id ?? building.buildingName ?? "").trim();
     return {
       sourceId,
-      label: String(building.buildingNickname ?? building.buildingName ?? (sourceId || "Settlement storage")),
+      label: String(building.buildingNickname ?? building.nickname ?? building.buildingName ?? building.name ?? (sourceId || "Settlement storage")),
       type: "Settlement storage",
       items: sourceItemsFromSlots(building.inventory, lookup),
     };

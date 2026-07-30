@@ -2116,36 +2116,6 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   return normalized;
 }
 
-async function fetchCraftPlanItemDetail(item) {
-  const id = String(item.id ?? item.itemId ?? "").trim();
-  if (!/^\d+$/.test(id)) return item;
-  const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items")) === "cargo" ? "cargo" : "items";
-  try {
-    const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`, { timeoutMs: 6000, cache: true });
-    return detail.item ?? detail.cargo ?? detail.data?.item ?? detail.data?.cargo ?? item;
-  } catch {
-    return item;
-  }
-}
-
-async function enrichCraftPlanRequirement(item) {
-  const detail = await fetchCraftPlanItemDetail(item);
-  return { ...item, ...targetFromRecipeCatalogItem({ ...detail, id: item.id, itemType: item.itemType }), quantity: item.quantity };
-}
-
-async function enrichCraftPlanSourceItems(sources = []) {
-  const cache = new Map();
-  async function enrichItem(item) {
-    const key = `${String(item.kind ?? "items")}:${String(item.id ?? item.itemId ?? "")}`;
-    if (!cache.has(key)) cache.set(key, enrichCraftPlanRequirement(item));
-    return cache.get(key);
-  }
-  return Promise.all((Array.isArray(sources) ? sources : []).map(async (source) => {
-    const items = Array.isArray(source.items) ? await Promise.all(source.items.map(enrichItem)) : [];
-    return { ...source, items, itemCount: source.itemCount ?? items.length };
-  }));
-}
-
 function craftPlanSourceCatalogKey(item = {}) {
   const id = String(item.id ?? item.itemId ?? "").trim();
   if (!id) return null;
@@ -2227,6 +2197,22 @@ function currentRecruitmentProjection(claimId) {
   ).data;
 }
 
+function currentMembersProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "members");
+  const members = current?.data;
+  if (!Array.isArray(members)) throw new Error("Relay claim members have not loaded yet");
+  return { members };
+}
+
+function currentInventoryProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "inventories");
+  if (!current?.data) throw new Error("Relay settlement inventories have not loaded yet");
+  return enrichInventoryWithCatalog(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  );
+}
+
 async function craftPlanTierPresets(claimId) {
   const projection = currentResearchProjection(claimId);
   return buildResearchTierPresets(
@@ -2256,10 +2242,18 @@ async function resolveCraftPlanWorkstationPreset(tier) {
 }
 async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
-  const [membersPayload, inventoriesPayload] = await Promise.all([
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`).catch(() => ({ members: [] })),
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
-  ]);
+  let membersPayload = { members: [] };
+  let inventoriesPayload = { buildings: [] };
+  try {
+    membersPayload = currentMembersProjection(claimId);
+  } catch {
+    // Admin configuration remains available while the first Relay member generation loads.
+  }
+  try {
+    inventoriesPayload = currentInventoryProjection(claimId);
+  } catch {
+    // Admin configuration remains available while the first Relay inventory generation loads.
+  }
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, []);
   const members = unwrap(membersPayload, "members", []);
   const deployableOptions = [];
@@ -2269,9 +2263,17 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
     if (!playerId) continue;
     const label = String(member.userName ?? member.username ?? playerId);
     try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
-      const sources = playerInventoryContainerSources(playerId, label, payload);
-      deployableOptions.push(...await enrichCraftPlanSourceItems(sources.deployableOptions));
+      const envelope = await relayPlayerDataService.inventory({
+        configuredClaimId: currentClaimId(),
+        claimId: String(claimId),
+        playerId,
+        forceRefresh: false,
+      });
+      const sources = playerInventoryContainerSources(playerId, label, envelope.data);
+      deployableOptions.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        sources.deployableOptions,
+      ));
     } catch {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
@@ -2589,13 +2591,13 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   const [inventoriesResult, publicCraftsResult, membersPayload] = await Promise.all([
     craftPlanSourceResult(
       { sourceId: String(claimId), label: "Settlement inventories", type: "Settlement storage" },
-      () => fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`, { forceRefresh }),
+      () => currentInventoryProjection(claimId),
     ),
     craftPlanSourceResult(
       { sourceId: String(claimId), label: "Settlement active crafts", type: "Tracked crafts" },
       () => fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }),
     ),
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { forceRefresh }).catch(() => ({ members: [] })),
+    Promise.resolve().then(() => currentMembersProjection(claimId)).catch(() => ({ members: [] })),
   ]);
   const inventoriesPayload = inventoriesResult.value ?? { buildings: [] };
   const publicCraftsPayload = publicCraftsResult.value ?? { craftResults: [] };
@@ -2641,8 +2643,14 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   for (const playerId of selectedPlayerInventoryIds(config.sourceRules)) {
     const label = memberNames.get(playerId) ?? playerId;
     try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, forceRefresh });
-      const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
+      const envelope = await relayPlayerDataService.inventory({
+        configuredClaimId: currentClaimId(),
+        claimId: String(claimId),
+        playerId,
+        forceRefresh,
+      });
+      catalogWarnings.push(...envelope.warnings.map((warning) => `${label} inventories: ${warning}`));
+      const sources = playerInventoryContainerSources(playerId, label, envelope.data, config.sourceRules.deployableContainerIds);
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push(enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.inventory, catalogWarnings));
       }

@@ -235,7 +235,7 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /Players & deployables/);
   assert.match(manager, /bankPlayerIds/);
   assert.match(manager, />Banks<\/span>/);
-  assert.match(manager, /all BitJita-visible settlement banks/i);
+  assert.match(manager, /all Relay-visible settlement banks/i);
   assert.match(manager, /craft-plan-player-source-card/);
   assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(100px,\s*1fr\)\)/s);
   assert.match(styles, /\.craft-plan-player-source-card\s+header\s*\{[^}]*display:\s*grid/s);
@@ -259,6 +259,29 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(server, /\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
   assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
+});
+
+test("Craft Planning reads current members and inventories from Relay-owned services", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const adminStart = server.indexOf("async function craftPlanAdminResponse");
+  const adminEnd = server.indexOf("function craftPlanAuditLabels", adminStart);
+  const adminResponse = adminStart >= 0 && adminEnd > adminStart ? server.slice(adminStart, adminEnd) : "";
+  const liveStart = server.indexOf("async function computedCraftPlanResponseFresh");
+  const liveEnd = server.indexOf("async function craftPlanDiscordReport", liveStart);
+  const liveResponse = liveStart >= 0 && liveEnd > liveStart ? server.slice(liveStart, liveEnd) : "";
+
+  assert.match(server, /function currentMembersProjection/);
+  assert.match(server, /function currentInventoryProjection/);
+  assert.match(adminResponse, /currentMembersProjection\(claimId\)/);
+  assert.match(adminResponse, /currentInventoryProjection\(claimId\)/);
+  assert.match(adminResponse, /relayPlayerDataService\.inventory/);
+  assert.match(liveResponse, /currentMembersProjection\(claimId\)/);
+  assert.match(liveResponse, /currentInventoryProjection\(claimId\)/);
+  assert.match(liveResponse, /relayPlayerDataService\.inventory/);
+  assert.doesNotMatch(adminResponse, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/(?:members|inventories)/);
+  assert.doesNotMatch(adminResponse, /fetchBitjita\(`\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/);
+  assert.doesNotMatch(liveResponse, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/(?:members|inventories)/);
+  assert.doesNotMatch(liveResponse, /fetchBitjita\(`\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/);
 });
 
 test("Craft Planning manager exposes a lazy, resilient audit history tab", () => {
@@ -378,8 +401,8 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
   assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?64,[\s\S]*?\[\],[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
-  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`/);
-  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`/);
+  assert.match(computedCraftPlan, /currentInventoryProjection\(claimId\)/);
+  assert.match(computedCraftPlan, /currentMembersProjection\(claimId\)/);
   assert.match(computedCraftPlan, /memberNames/);
   assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`/);
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
@@ -399,7 +422,7 @@ test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not
   assert.match(computedCraftPlan, /calculateCraftPlanEffortProgress/);
   assert.match(computedCraftPlan, /effortProgress/);
   const playerInventoryLoop = computedCraftPlan.match(/for \(const playerId of selectedPlayerInventoryIds\(config\.sourceRules\)\)[\s\S]*?const livePlan/)?.[0] ?? "";
-  assert.equal((playerInventoryLoop.match(/\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/g) ?? []).length, 1);
+  assert.equal((playerInventoryLoop.match(/relayPlayerDataService\.inventory/g) ?? []).length, 1);
   assert.match(playerInventoryLoop, /inventoryPlayerIds\.has\(playerId\)/);
   assert.match(playerInventoryLoop, /bankPlayerIds\.has\(playerId\)/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);

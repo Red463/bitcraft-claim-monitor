@@ -17,7 +17,7 @@ Disposition values:
 
 | Tables | Disposition | Owner and update trigger | Migration decision |
 |---|---|---|---|
-| `domain_payload_current` | keep-current | Current-state repository; atomic provider generation | Canonical last-good boundary for normalized domains. Inventory uses this table and adds no inventory-specific cache table. |
+| `domain_payload_current` | keep-current | Current-state repository; atomic provider generation | Canonical last-good boundary for normalized domains. Inventory uses this table and adds no inventory-specific cache table; Craft Planner reads the same committed member and settlement-inventory generations directly. |
 | `provider_source_health`, `provider_subscription_health` | keep-operations | Relay provider/runtime health events | Required for separate worker/web visibility, schema health, lag, and reconnect diagnostics. |
 | `game_catalog_entities`, `game_catalog_source_state`, `game_catalog_descriptions` | keep-current | Global typed subscription generation | Durable normalized Relay catalog and exact item/cargo enrichment source. |
 | `game_catalog_recipes`, `game_catalog_recipe_inputs`, `game_catalog_recipe_outputs`, `game_catalog_recipe_sources`, `game_catalog_recipe_output_components` | keep-current | Global catalog projection; subscription/domain event | Indexed Craft Planner and item-detail read model. Must become fully subscription-maintained before legacy catalog removal. |
@@ -40,6 +40,7 @@ Disposition values:
 | `app_settings`, `app_secrets` | keep-user | Authenticated admin configuration | Application configuration and secrets; independent of game-data provider. |
 | `craft_plan_settings` | keep-user | Authenticated plan edits | Saved plan targets, sources, and overrides. |
 | `craft_plan_progress_audit_snapshots`, `craft_plan_progress_audit_events`, `craft_plan_progress_audit_state` | keep-history | Normalized planner state transitions | Required for progress audit and restart continuity. |
+| Selected-player Craft Planner inventory state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | The planner and its admin manager share the provider-neutral player inventory service. No SQL current/cache table or scheduled refresh job is justified. |
 | `market_deal_watches` | keep-user | Authenticated deal-watch edits | User-owned alert configuration. |
 | `market_deal_alerts` | keep-history | Locally derived market transitions | Alert deduplication, acknowledgement, and delivery history. |
 | `admin_audit_log`, `admin_login_events` | keep-operations | Auth/admin security events | Security and accountability history. |

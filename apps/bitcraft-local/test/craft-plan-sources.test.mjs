@@ -1,9 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
 const MONITORED_CLAIM_ID = "claim-monitored";
+
+test("settlementStorageSourcesFromInventories reads normalized Relay buildings and catalog identities", () => {
+  const result = settlementStorageSourcesFromInventories({
+    catalog: {
+      "items:100": {
+        catalogKey: "items:100",
+        targetId: "100",
+        kind: "items",
+        itemType: 0,
+        name: "Simple Wood Log",
+        tier: 1,
+      },
+      "cargo:100": {
+        catalogKey: "cargo:100",
+        targetId: "100",
+        kind: "cargo",
+        itemType: 1,
+        name: "Simple Wood Cargo",
+        tier: 1,
+      },
+    },
+    buildings: [{
+      entityId: "500",
+      name: "Town Bank",
+      nickname: "Trade Hall",
+      inventory: [
+        { contents: { itemId: "100", itemType: "item", quantity: "12" } },
+        { contents: { itemId: "100", itemType: "cargo", quantity: "3" } },
+      ],
+    }],
+  }, []);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sourceId, "500");
+  assert.equal(result[0].label, "Trade Hall");
+  assert.deepEqual(result[0].items.map((item) => [item.kind, item.id, item.name, item.quantity]), [
+    ["items", "100", "Simple Wood Log", 12],
+    ["cargo", "100", "Simple Wood Cargo", 3],
+  ]);
+});
 
 test("trackedPassiveCraftPlanOutputs counts processing and complete jobs but ignores other states", () => {
   const outputs = trackedPassiveCraftPlanOutputs([{
