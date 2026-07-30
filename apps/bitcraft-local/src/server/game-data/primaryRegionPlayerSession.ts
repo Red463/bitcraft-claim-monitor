@@ -42,6 +42,8 @@ type BindingConnection = {
     buildingState: CachedTable;
     claimTechState: CachedTable;
     claimRecruitmentState: CachedTable;
+    travelerTaskState: CachedTable;
+    travelerTaskDesc: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -128,6 +130,11 @@ export function playerStateQueries(members: Member[]): string[] {
   ];
 }
 
+function travelerTaskQuery(members: Member[]): string {
+  const ids = [...new Set(members.map(memberEntityId))];
+  return `SELECT * FROM traveler_task_state WHERE ${ids.map((id) => `player_entity_id = ${id}`).join(" OR ")}`;
+}
+
 function constructionQuery(claimIdValue: string): string {
   const claimId = String(claimIdValue ?? "").trim();
   if (!/^\d+$/.test(claimId)) {
@@ -201,6 +208,8 @@ export class RelayPrimaryRegionPlayerSession {
       buildingQuery(config.claimId),
       researchQuery(config.claimId),
       recruitmentQuery(config.claimId),
+      travelerTaskQuery(config.members),
+      "SELECT * FROM traveler_task_desc",
     ];
     if (queries.length === 0) {
       throw new Error("Relay regional player session requires at least one claim member");
@@ -242,6 +251,8 @@ export class RelayPrimaryRegionPlayerSession {
       const normalized = normalizeRegionalPlayers({
         members: config.members,
         playerRows: [...connection.db.playerState.iter()],
+        taskRows: [...connection.db.travelerTaskState.iter()],
+        taskDescriptionRows: [...connection.db.travelerTaskDesc.iter()],
         observedAt: receivedAt,
       });
       const equipment = normalizeRegionalEquipment({
@@ -335,6 +346,8 @@ export class RelayPrimaryRegionPlayerSession {
       connection.db.buildingState,
       connection.db.claimTechState,
       connection.db.claimRecruitmentState,
+      connection.db.travelerTaskState,
+      connection.db.travelerTaskDesc,
     ];
   }
 

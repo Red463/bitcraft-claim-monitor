@@ -30,14 +30,12 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { recruitmentSummary } from "./recruitmentView.ts";
 
-const LEGACY_API = "/api/bitjita";
-
 /**
  * Settlement roster and member-detail view.
  *
  * Summary, equipment, buffs, and passive crafts come from normalized Relay
- * domains. Toolbelt inventory is fetched for only the opened member; the few
- * remaining unmapped profile extras are optional and cannot hide Relay data.
+ * domains. Toolbelt and housing are fetched for only the opened member through
+ * one bounded provider-neutral request.
  */
 export function Members({
   data,
@@ -99,10 +97,9 @@ export function Members({
       equipment: relayEquipment?.equipment ?? { equipmentSlots: [] },
       equipmentPresets: relayEquipment?.equipmentPresets ?? { presets: [] },
       inventories: null,
-      housing: [],
+      housing: null,
       passiveCrafts: { craftResults: relayPassiveCrafts },
-      collections: {},
-      tasks: { tasks: [] },
+      tasks: selectedMember?.player?.tasks ?? { tasks: [] },
     };
     setProfile(relayProfile);
     setProfileLoading(true);
@@ -114,30 +111,21 @@ export function Members({
       return response.json();
     };
     const claimId = String(data.claim.entityId ?? data.raw?.claimId ?? "");
-    const playerQuery = new URLSearchParams({ claimId, playerId: selectedId, domains: "inventory" });
-    const refresh = Promise.allSettled([
-      requestJson(`/api/local/player-data?${playerQuery.toString()}`)
-        .then((payload) => payload?.domains?.inventory?.data ?? null),
-      requestJson(`${LEGACY_API}/players/${selectedId}/housing`),
-      requestJson(`${LEGACY_API}/players/${selectedId}/market-collections`),
-      requestJson(`${LEGACY_API}/players/${selectedId}/traveler-tasks`),
-    ]);
-    void trackPromise("member-details", refresh).then((results) => {
+    const playerQuery = new URLSearchParams({ claimId, playerId: selectedId, domains: "inventory,housing" });
+    const refresh = requestJson(`/api/local/player-data?${playerQuery.toString()}`);
+    void trackPromise("member-details", refresh).then((payload) => {
       if (controller.signal.aborted) return;
-      const [inventories, housing, collections, tasks] = results;
       setProfile({
         ...relayProfile,
-        inventories: inventories.status === "fulfilled" ? inventories.value : null,
-        housing: housing.status === "fulfilled" ? housing.value : [],
-        collections: collections.status === "fulfilled" ? collections.value : {},
-        tasks: tasks.status === "fulfilled" ? tasks.value : { tasks: [] },
+        inventories: payload?.domains?.inventory?.data ?? null,
+        housing: payload?.domains?.housing?.data ?? null,
       });
-      const failures = results.flatMap((result) => (
-        result.status === "rejected"
-          ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
-          : []
-      ));
-      setProfileError(failures.length ? failures.join(" ") : null);
+      const partialErrors = Array.isArray(payload?.partialErrors) ? payload.partialErrors : [];
+      setProfileError(partialErrors.length ? partialErrors.join(" ") : null);
+    }).catch((error) => {
+      if (!controller.signal.aborted) {
+        setProfileError(error instanceof Error ? error.message : String(error));
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setProfileLoading(false);
     });
@@ -149,6 +137,7 @@ export function Members({
     data.raw?.claimId,
     data.raw?.crafts,
     data.raw?.equipment,
+    selectedMember?.player?.tasks,
     request?.sequence,
     trackPromise,
   ]);
@@ -237,7 +226,7 @@ export function Members({
                 <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs?.buffs ?? []).length} />
                 <MiniStat icon={<Wrench />} label="Toolbelt Tools" value={playerToolbeltTools(profile.inventories).length} />
                 <MiniStat icon={<Shield />} label="Active Gear" value={equippedCount(activeGearSlots)} />
-                <MiniStat icon={<Home />} label="Housing" value={(profile.housing ?? []).length} />
+                <MiniStat icon={<Home />} label="Housing" value={profile.housing?.house ? 1 : 0} />
               </div>
               <section className="equipment-panel">
                 <h3><Wrench size={17} /> Toolbelt Tools</h3>

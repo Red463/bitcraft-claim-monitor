@@ -162,7 +162,7 @@ test("Relay HTTP current domains refresh on their own live loop instead of the l
   assert.doesNotMatch(server, /setInterval\(\(\) => void refreshRelay\(\), serverRefreshIntervalMs\(\)\)/);
 });
 
-test("bounded member inventory is exposed through a provider-neutral guarded local route", async () => {
+test("bounded member inventory and housing are exposed through a provider-neutral guarded local route", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const routeIndex = server.indexOf('url.pathname === "/api/local/player-data"');
   assert.notEqual(routeIndex, -1);
@@ -170,7 +170,9 @@ test("bounded member inventory is exposed through a provider-neutral guarded loc
   const handler = server.slice(routeIndex, boundary === -1 ? routeIndex + 2200 : boundary);
   assert.match(handler, /manualRefreshAccess\(req, res\)/);
   assert.match(handler, /relayPlayerDataService\.inventory/);
-  assert.match(handler, /domains:\s*\{\s*inventory/);
+  assert.match(handler, /relayPlayerDataService\.housing/);
+  assert.match(handler, /inventory/);
+  assert.match(handler, /housing/);
   assert.doesNotMatch(handler, /bitjita/i);
 });
 

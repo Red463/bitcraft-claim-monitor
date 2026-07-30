@@ -453,15 +453,52 @@ export function normalizeCitizensPayload(value: unknown) {
 export function normalizeRegionalPlayers(options: {
   members: unknown[];
   playerRows: unknown[];
+  taskRows?: unknown[];
+  taskDescriptionRows?: unknown[];
   observedAt: string;
 }) {
   const observedAtMs = Date.parse(options.observedAt);
   if (!Number.isFinite(observedAtMs)) throw new TypeError("regional player observedAt is invalid");
+  const includeTasks = options.taskRows !== undefined || options.taskDescriptionRows !== undefined;
+  const warnings: string[] = [];
   const rows = new Map(options.playerRows.map((value) => {
     const row = record(value, "regional player_state row");
     return [decimalString(row.entityId ?? row.entity_id, "regional player entity id"), row] as const;
   }));
-  const warnings: string[] = [];
+  const taskDescriptions = new Map((options.taskDescriptionRows ?? []).map((value) => {
+    const row = record(value, "regional traveler_task_desc row");
+    return [decimalString(row.id, "regional traveler task description id"), row] as const;
+  }));
+  const tasksByPlayer = new Map<string, Array<{
+    entityId: string;
+    travelerId: string;
+    taskId: string;
+    description: string;
+    completed: boolean;
+  }>>();
+  for (const [index, value] of (options.taskRows ?? []).entries()) {
+    try {
+      const row = record(value, `regional traveler_task_state row ${index}`);
+      const playerEntityId = decimalString(
+        row.playerEntityId ?? row.player_entity_id,
+        `regional traveler task ${index} player id`,
+      );
+      const taskId = decimalString(row.taskId ?? row.task_id, `regional traveler task ${index} task id`);
+      const description = taskDescriptions.get(taskId);
+      if (!description) warnings.push(`Regional traveler_task_desc omitted task ${taskId}.`);
+      const tasks = tasksByPlayer.get(playerEntityId) ?? [];
+      tasks.push({
+        entityId: decimalString(row.entityId ?? row.entity_id, `regional traveler task ${index} entity id`),
+        travelerId: decimalString(row.travelerId ?? row.traveler_id, `regional traveler task ${index} traveler id`),
+        taskId,
+        description: String(description?.description ?? `Task ${taskId}`),
+        completed: row.completed === true,
+      });
+      tasksByPlayer.set(playerEntityId, tasks);
+    } catch (error) {
+      warnings.push(`Regional traveler task ${index} ignored: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const data = options.members.map((value, index) => {
     const member = record(value, `regional player member ${index}`);
     const playerEntityId = decimalString(
@@ -469,6 +506,13 @@ export function normalizeRegionalPlayers(options: {
       `regional player member ${index} id`,
     );
     const row = rows.get(playerEntityId);
+    const tasks = {
+      tasks: (tasksByPlayer.get(playerEntityId) ?? []).sort((left, right) => (
+        Number(left.completed) - Number(right.completed)
+        || left.description.localeCompare(right.description)
+        || left.entityId.localeCompare(right.entityId)
+      )),
+    };
     if (!row) {
       warnings.push(`Regional player_state omitted member ${playerEntityId}.`);
       return {
@@ -479,6 +523,7 @@ export function normalizeRegionalPlayers(options: {
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
+        ...(includeTasks ? { tasks } : {}),
         ...(member.lastActiveTimestamp == null ? {} : {
           lastActiveTimestamp: String(member.lastActiveTimestamp),
         }),
@@ -503,6 +548,7 @@ export function normalizeRegionalPlayers(options: {
       sessionSeconds,
       timePlayedSeconds: Math.max(0, integer(row.timePlayed ?? row.time_played ?? 0, "regional player time played")),
       timeSignedInSeconds: Math.max(0, integer(row.timeSignedIn ?? row.time_signed_in ?? 0, "regional player time signed in")),
+      ...(includeTasks ? { tasks } : {}),
       ...(signInTimestamp ? { signInTimestamp } : {}),
       ...(member.lastActiveTimestamp == null ? {} : {
         lastActiveTimestamp: String(member.lastActiveTimestamp),
@@ -1110,6 +1156,36 @@ export function normalizePlayerInventory(value: unknown) {
       ...normalizePlayerTimestamp(player.last_login_timestamp, "lastLoginTimestamp"),
     },
     inventories,
+  };
+}
+
+export function normalizePlayerHousing(value: unknown) {
+  const payload = record(value, "Relay player housing payload");
+  const player = record(payload.player, "Relay player housing player");
+  const house = payload.house == null ? null : record(payload.house, "Relay player house");
+  return {
+    player: {
+      entityId: decimalString(player.entity_id, "housing player.entity_id"),
+      username: String(player.username ?? ""),
+      regionId: decimalString(player.region, "housing player.region"),
+      signedIn: player.signed_in === true,
+    },
+    house: house ? {
+      entityId: decimalString(house.entity_id, "house.entity_id"),
+      name: String(house.name ?? ""),
+      regionId: decimalString(house.region, "house.region"),
+    } : null,
+    buildings: (Array.isArray(payload.buildings) ? payload.buildings : []).map((value, buildingIndex) => {
+      const building = record(value, `Relay player housing building ${buildingIndex}`);
+      return {
+        entityId: decimalString(building.entity_id, `housing buildings[${buildingIndex}].entity_id`),
+        name: String(building.name ?? ""),
+        nickname: building.nickname == null ? null : String(building.nickname),
+        items: (Array.isArray(building.items) ? building.items : []).map((stack, stackIndex) => (
+          normalizeStack(stack, `housing buildings[${buildingIndex}].items[${stackIndex}]`)
+        )),
+      };
+    }),
   };
 }
 

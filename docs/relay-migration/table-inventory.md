@@ -40,7 +40,7 @@ Disposition values:
 | `app_settings`, `app_secrets` | keep-user | Authenticated admin configuration | Application configuration and secrets; independent of game-data provider. |
 | `craft_plan_settings` | keep-user | Authenticated plan edits | Saved plan targets, sources, and overrides. |
 | `craft_plan_progress_audit_snapshots`, `craft_plan_progress_audit_events`, `craft_plan_progress_audit_state` | keep-history | Normalized planner state transitions | Required for progress audit and restart continuity. |
-| Selected-player Craft Planner inventory state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | The planner and its admin manager share the provider-neutral player inventory service. No SQL current/cache table or scheduled refresh job is justified. |
+| Selected-player inventory and housing state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | Members, Craft Planner, and its admin manager share the provider-neutral player-data service. Inventory and housing load only for a selected monitored member. No SQL current/cache table or scheduled refresh job is justified. |
 | `market_deal_watches` | keep-user | Authenticated deal-watch edits | User-owned alert configuration. |
 | `market_deal_alerts` | keep-history | Locally derived market transitions | Alert deduplication, acknowledgement, and delivery history. |
 | `admin_audit_log`, `admin_login_events` | keep-operations | Auth/admin security events | Security and accountability history. |
@@ -119,11 +119,16 @@ be a committed domain event, not a scheduled ingestion sweep.
 - Current equipment, preset, and active-buff rows share
   `domain_payload_current` with the other provider domains.
 - No equipment, preset, buff, or page cache table was added.
-- Four member-filtered regional subscriptions push changes immediately and
-  swap `players` plus `equipment` in one repository generation.
+- Member-filtered player, equipment, preset, buff, and traveler-task
+  subscriptions push changes immediately and swap `players` plus `equipment`
+  in one repository generation. Traveler task descriptions are joined in that
+  live regional session.
 - Global equipment/buff descriptions remain in the existing indexed catalog
-  read model. UI enrichment and Toolbelt inventory are the next vertical
-  boundary; the legacy page calls are not considered retired yet.
+  read model. Toolbelt inventory and housing use one guarded provider-neutral
+  selected-member request with separate 15-second memory last-good entries.
+- The unused Market Collections request and the legacy Housing and Traveler
+  Tasks browser calls are retired. No member-detail SQL table or scheduled
+  refresh job was added.
 
 ## Construction vertical evidence
 

@@ -313,6 +313,19 @@ global `item_desc` and `tool_desc` rows, and exposes them through
 remain in process memory for 15 seconds; no player-inventory SQL table or
 scheduled fan-out job was added.
 
+The same selected-member boundary now exposes
+`GET /player/:playerId/housing`. A live Timbersteel member sample returned one
+house plus four named storage buildings with exact Item identities. Housing
+has an independent 15-second memory last-good entry, so opening a profile does
+not wait for a scheduled job or create a housing table.
+
+Member quests come from filtered regional `traveler_task_state` rows joined to
+typed `traveler_task_desc` rows in the already-connected primary-region
+session. The 2026-07-30 live verifier applied 432 task rows for the 18
+Timbersteel members, including four completed rows, with no normalization or
+description-join warnings. The previous Market Collections request had no
+rendered consumer and was removed; no replacement cache or table was created.
+
 ## Craft contributors
 
 One active Relay HTTP craft was queried by its exact craft entity ID:

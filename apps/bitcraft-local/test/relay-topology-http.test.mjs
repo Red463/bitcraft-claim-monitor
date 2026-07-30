@@ -99,7 +99,7 @@ test("Relay HTTP retries one transient response but never retries a permanent 4x
   assert.equal(permanentCalls, 1);
 });
 
-test("Relay HTTP requests one bounded player inventory by encoded player ID", async () => {
+test("Relay HTTP requests bounded player inventory and housing by encoded player ID", async () => {
   const requested = [];
   const client = new RelayHttpClient({
     baseUrl: "https://relay.example",
@@ -111,7 +111,11 @@ test("Relay HTTP requests one bounded player inventory by encoded player ID", as
   });
 
   await client.playerInventory("101/with separator");
-  assert.deepEqual(requested, ["https://relay.example/player/101%2Fwith%20separator/inventory"]);
+  await client.playerHousing("101/with separator");
+  assert.deepEqual(requested, [
+    "https://relay.example/player/101%2Fwith%20separator/inventory",
+    "https://relay.example/player/101%2Fwith%20separator/housing",
+  ]);
 });
 
 test("Relay HTTP requests bounded storage history for one regional container", async () => {

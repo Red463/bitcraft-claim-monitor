@@ -9461,32 +9461,50 @@ const server = createServer(async (req, res) => {
         .filter(Boolean);
       if (!claimId) return send(res, 400, { error: "claimId is required." });
       if (!playerId) return send(res, 400, { error: "playerId is required." });
-      if (domains.length !== 1 || domains[0] !== "inventory") {
-        return send(res, 400, { error: "The player-data route currently supports only the inventory domain." });
+      const requestedDomains = [...new Set(domains)];
+      if (!requestedDomains.length || requestedDomains.some((domain) => !["inventory", "housing"].includes(domain))) {
+        return send(res, 400, { error: "The player-data route supports the inventory and housing domains." });
       }
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      try {
-        const inventory = await relayPlayerDataService.inventory({
-          configuredClaimId: currentClaimId(),
-          claimId,
-          playerId,
-          forceRefresh: refresh.forceRefresh,
-        });
-        return send(res, 200, {
-          claimId,
-          playerId,
-          generatedAt: new Date().toISOString(),
-          domains: { inventory },
-          partialErrors: inventory.warnings,
-        });
-      } catch (error) {
-        const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+      const playerRequest = {
+        configuredClaimId: currentClaimId(),
+        claimId,
+        playerId,
+        forceRefresh: refresh.forceRefresh,
+      };
+      const results = await Promise.allSettled(requestedDomains.map(async (domain) => {
+        const envelope = domain === "inventory"
+          ? await relayPlayerDataService.inventory(playerRequest)
+          : await relayPlayerDataService.housing(playerRequest);
+        return { domain, envelope };
+      }));
+      const responseDomains = {};
+      const partialErrors = [];
+      let firstFailure = null;
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          responseDomains[result.value.domain] = result.value.envelope;
+          partialErrors.push(...result.value.envelope.warnings);
+        } else {
+          firstFailure ??= result.reason;
+          partialErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        }
+      }
+      if (!Object.keys(responseDomains).length) {
+        const status = Number.isInteger(firstFailure?.statusCode) ? firstFailure.statusCode : 503;
         return send(res, status, {
-          error: error instanceof Error ? error.message : "Unable to load Relay player data.",
+          error: firstFailure instanceof Error ? firstFailure.message : "Relay player data has not loaded.",
           source: "relay-player-data",
         });
       }
+      return send(res, 200, {
+        claimId,
+        playerId,
+        generatedAt: new Date().toISOString(),
+        domains: responseDomains,
+        partialErrors,
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/catalog/item-detail") {
       const kind = String(url.searchParams.get("kind") ?? "item").toLowerCase() === "cargo"

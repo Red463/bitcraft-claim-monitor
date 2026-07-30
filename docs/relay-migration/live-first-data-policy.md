@@ -252,7 +252,7 @@ Initial candidates requiring explicit dependency proof are:
 | `scheduled_jobs` | Keep for legitimate maintenance and delivery work; delete retired ingestion-job definitions and UI controls. |
 | `domain_payload_current`, `provider_source_health`, `provider_subscription_health` | Keep as the atomic last-good and operational boundary unless a typed projection demonstrably replaces the same responsibility. |
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |
-| Selected-player inventory/Toolbelt | No dedicated table. Fetch one monitored member through `/api/local/player-data`, coalesce in flight, and retain only a 15-second process-memory last-good entry. |
+| Selected-player inventory, Toolbelt, and housing | No dedicated table. Fetch one monitored member through `/api/local/player-data`, coalesce in flight, and retain independent 15-second process-memory last-good entries. |
 | Market, activity, membership, production, notification, and audit history | Keep according to explicit retention because Relay supplies current state, not the application's observation history. |
 
 No table is kept merely because the legacy application had it, and no table is

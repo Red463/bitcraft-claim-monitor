@@ -14,6 +14,7 @@ const {
   normalizeItemKind,
   normalizeMembers,
   normalizeMembersPayload,
+  normalizePlayerHousing,
   normalizePlayerInventory,
   normalizeCitizensPayload,
   normalizeRegionalEquipment,
@@ -24,6 +25,34 @@ const {
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("normalizes Relay player housing without merging Item and Cargo identities", () => {
+  assert.deepEqual(normalizePlayerHousing({
+    player: { entity_id: "101", username: "Ada", region: 19, signed_in: true },
+    house: { entity_id: "9001", name: "Ada's House", region: 19 },
+    buildings: [{
+      entity_id: "8001",
+      name: "Wicker Storage",
+      nickname: "Supplies",
+      items: [
+        { item_id: 42, item_type: "Item", quantity: 3 },
+        { item_id: 42, item_type: "Cargo", quantity: 4 },
+      ],
+    }],
+  }), {
+    player: { entityId: "101", username: "Ada", regionId: "19", signedIn: true },
+    house: { entityId: "9001", name: "Ada's House", regionId: "19" },
+    buildings: [{
+      entityId: "8001",
+      name: "Wicker Storage",
+      nickname: "Supplies",
+      items: [
+        { itemId: "42", itemType: "item", quantity: "3" },
+        { itemId: "42", itemType: "cargo", quantity: "4" },
+      ],
+    }],
+  });
+});
 
 test("regional recruitment preserves exact claim ownership and posting requirements", () => {
   assert.deepEqual(normalizeRegionalRecruitment({

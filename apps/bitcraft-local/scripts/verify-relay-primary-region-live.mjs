@@ -135,6 +135,14 @@ try {
     memberCount: members.length,
     playerCount: snapshot.players.length,
     signedInCount: snapshot.players.filter(({ signedIn }) => signedIn).length,
+    travelerTaskCount: snapshot.players.reduce(
+      (total, player) => total + (player.tasks?.tasks?.length ?? 0),
+      0,
+    ),
+    completedTravelerTaskCount: snapshot.players.reduce(
+      (total, player) => total + (player.tasks?.tasks?.filter(({ completed }) => completed).length ?? 0),
+      0,
+    ),
     equipmentMemberCount: snapshot.equipment.members.length,
     equippedItemCount: snapshot.equipment.members.reduce(
       (total, member) => total

@@ -84,6 +84,21 @@ function fakeBindings() {
     requiredSkillLevel: 1,
     requiredApproval: false,
   }]);
+  const travelerTaskState = cachedTable("traveler-task", [{
+    entityId: 6001n,
+    playerEntityId: 101n,
+    travelerId: 12,
+    taskId: 77,
+    completed: false,
+  }]);
+  const travelerTaskDesc = cachedTable("traveler-task-desc", [{
+    id: 77,
+    description: "Deliver fine planks",
+    levelRequirement: { skillId: 3, level: 20 },
+    requiredItems: [],
+    rewardedItems: [],
+    rewardedExperience: { skillId: 3, quantity: 125 },
+  }]);
   const connection = {
     db: {
       playerState,
@@ -94,6 +109,8 @@ function fakeBindings() {
       buildingState,
       claimTechState,
       claimRecruitmentState,
+      travelerTaskState,
+      travelerTaskDesc,
     },
     subscriptionBuilder() {
       const builder = {
@@ -186,6 +203,8 @@ test("primary-region session filters member and settlement state and emits norma
     "SELECT * FROM building_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM claim_tech_state WHERE entity_id = 1369094286777412590",
     "SELECT * FROM claim_recruitment_state WHERE claim_entity_id = 1369094286777412590",
+    "SELECT * FROM traveler_task_state WHERE player_entity_id = 101 OR player_entity_id = 202",
+    "SELECT * FROM traveler_task_desc",
   ]);
 
   fake.state.onApplied({});
@@ -201,6 +220,15 @@ test("primary-region session filters member and settlement state and emits norma
         timePlayedSeconds: 7200,
         timeSignedInSeconds: 3600,
         signInTimestamp: "2026-07-29T19:10:00.000Z",
+        tasks: {
+          tasks: [{
+            entityId: "6001",
+            travelerId: "12",
+            taskId: "77",
+            description: "Deliver fine planks",
+            completed: false,
+          }],
+        },
       },
       {
         entityId: "202",
@@ -210,6 +238,7 @@ test("primary-region session filters member and settlement state and emits norma
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
+        tasks: { tasks: [] },
       },
     ],
     warnings: ["Regional player_state omitted member 202."],

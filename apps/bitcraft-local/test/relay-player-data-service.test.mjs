@@ -25,11 +25,20 @@ function relayPayload() {
 function serviceFixture(overrides = {}) {
   let now = Date.parse("2026-07-30T12:00:00.000Z");
   let calls = 0;
+  let housingCalls = 0;
   const service = new RelayPlayerDataService({
     http: {
       async playerInventory() {
         calls += 1;
         return relayPayload();
+      },
+      async playerHousing() {
+        housingCalls += 1;
+        return {
+          player: { entity_id: "101", username: "Ada", region: 19, signed_in: true },
+          house: { entity_id: "9001", name: "Ada's House", region: 19 },
+          buildings: [],
+        };
       },
     },
     readMembers: () => [{ playerEntityId: "101", userName: "Ada" }],
@@ -46,11 +55,32 @@ function serviceFixture(overrides = {}) {
   return {
     service,
     calls: () => calls,
+    housingCalls: () => housingCalls,
     advance(milliseconds) {
       now += milliseconds;
     },
   };
 }
+
+test("player data service exposes Relay housing through the same guarded short cache", async () => {
+  const fixture = serviceFixture();
+  const request = {
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    playerId: "101",
+    forceRefresh: false,
+  };
+  const envelope = await fixture.service.housing(request);
+  assert.equal(envelope.data.house.entityId, "9001");
+  assert.equal(envelope.data.player.entityId, "101");
+  assert.equal(envelope.provenance.sourceKey, "relay-cache");
+  assert.equal(fixture.housingCalls(), 1);
+
+  fixture.advance(14_999);
+  const cached = await fixture.service.housing(request);
+  assert.equal(cached.ageMs, 14_999);
+  assert.equal(fixture.housingCalls(), 1);
+});
 
 test("player data service authorizes monitored members and enriches Toolbelt items", async () => {
   const fixture = serviceFixture();

@@ -1,14 +1,16 @@
 import type { DomainEnvelope } from "./contracts.ts";
-import { normalizePlayerInventory } from "./normalizers.ts";
+import { normalizePlayerHousing, normalizePlayerInventory } from "./normalizers.ts";
 
 type CatalogRecord = Record<string, unknown>;
 type NormalizedPlayerInventory = ReturnType<typeof normalizePlayerInventory> & {
   items?: Record<string, CatalogRecord>;
   cargos?: Record<string, CatalogRecord>;
 };
+type NormalizedPlayerHousing = ReturnType<typeof normalizePlayerHousing>;
 
 type RelayPlayerInventoryHttp = {
   playerInventory(playerId: string): Promise<unknown>;
+  playerHousing(playerId: string): Promise<unknown>;
 };
 
 type PlayerDataServiceOptions = {
@@ -29,6 +31,11 @@ type PlayerInventoryRequest = {
 
 type CachedPlayerInventory = {
   data: NormalizedPlayerInventory;
+  receivedAt: string;
+  receivedAtMs: number;
+};
+type CachedPlayerHousing = {
+  data: NormalizedPlayerHousing;
   receivedAt: string;
   receivedAtMs: number;
 };
@@ -108,6 +115,8 @@ export class RelayPlayerDataService {
   readonly #ttlMs: number;
   readonly #cache = new Map<string, CachedPlayerInventory>();
   readonly #inflight = new Map<string, Promise<CachedPlayerInventory>>();
+  readonly #housingCache = new Map<string, CachedPlayerHousing>();
+  readonly #housingInflight = new Map<string, Promise<CachedPlayerHousing>>();
 
   constructor(options: PlayerDataServiceOptions) {
     this.#http = options.http;
@@ -119,20 +128,7 @@ export class RelayPlayerDataService {
   }
 
   async inventory(request: PlayerInventoryRequest): Promise<DomainEnvelope<NormalizedPlayerInventory>> {
-    const configuredClaimId = decimalId(request.configuredClaimId, "configured claimId");
-    const claimId = decimalId(request.claimId, "claimId");
-    const playerId = decimalId(request.playerId, "playerId");
-    if (claimId !== configuredClaimId) {
-      throw new PlayerDataAccessError(403, "The requested claim is not the monitored claim.");
-    }
-    const members = this.#readMembers(claimId);
-    const memberRows = Array.isArray(members) ? members : [];
-    const isMember = memberRows.some((member) => (
-      member != null
-      && typeof member === "object"
-      && String((member as CatalogRecord).playerEntityId ?? (member as CatalogRecord).player_entity_id ?? "") === playerId
-    ));
-    if (!isMember) throw new PlayerDataAccessError(403, "The requested player is not a monitored claim member.");
+    const { claimId, playerId } = this.#authorize(request);
 
     const key = `${claimId}:${playerId}`;
     const now = this.#now();
@@ -168,6 +164,60 @@ export class RelayPlayerDataService {
     }
   }
 
+  async housing(request: PlayerInventoryRequest): Promise<DomainEnvelope<NormalizedPlayerHousing>> {
+    const { claimId, playerId } = this.#authorize(request);
+    const key = `${claimId}:${playerId}`;
+    const now = this.#now();
+    const cached = this.#housingCache.get(key);
+    if (!request.forceRefresh && cached && now - cached.receivedAtMs < this.#ttlMs) {
+      return this.#housingEnvelope(cached, "fresh", [], now);
+    }
+
+    let inflight = this.#housingInflight.get(key);
+    if (!inflight) {
+      inflight = this.#loadHousing(playerId);
+      this.#housingInflight.set(key, inflight);
+      void inflight.finally(() => this.#housingInflight.delete(key)).catch(() => {});
+    }
+    try {
+      const loaded = await inflight;
+      this.#housingCache.set(key, loaded);
+      return this.#housingEnvelope(loaded, "fresh", [], this.#now());
+    } catch (error) {
+      const lastGood = this.#housingCache.get(key);
+      if (lastGood) {
+        return this.#housingEnvelope(
+          lastGood,
+          "stale",
+          [`Relay player housing refresh failed: ${errorMessage(error)}`],
+          this.#now(),
+        );
+      }
+      throw new PlayerDataAccessError(
+        503,
+        `Relay player housing has not loaded: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  #authorize(request: PlayerInventoryRequest): { claimId: string; playerId: string } {
+    const configuredClaimId = decimalId(request.configuredClaimId, "configured claimId");
+    const claimId = decimalId(request.claimId, "claimId");
+    const playerId = decimalId(request.playerId, "playerId");
+    if (claimId !== configuredClaimId) {
+      throw new PlayerDataAccessError(403, "The requested claim is not the monitored claim.");
+    }
+    const members = this.#readMembers(claimId);
+    const memberRows = Array.isArray(members) ? members : [];
+    const isMember = memberRows.some((member) => (
+      member != null
+      && typeof member === "object"
+      && String((member as CatalogRecord).playerEntityId ?? (member as CatalogRecord).player_entity_id ?? "") === playerId
+    ));
+    if (!isMember) throw new PlayerDataAccessError(403, "The requested player is not a monitored claim member.");
+    return { claimId, playerId };
+  }
+
   async #load(playerId: string): Promise<CachedPlayerInventory> {
     const wire = await this.#http.playerInventory(playerId);
     const normalized = normalizePlayerInventory(wire);
@@ -182,12 +232,50 @@ export class RelayPlayerDataService {
     };
   }
 
+  async #loadHousing(playerId: string): Promise<CachedPlayerHousing> {
+    const wire = await this.#http.playerHousing(playerId);
+    const normalized = normalizePlayerHousing(wire);
+    if (normalized.player.entityId !== playerId) {
+      throw new Error(`Relay returned player ${normalized.player.entityId} for requested player ${playerId}.`);
+    }
+    const receivedAtMs = this.#now();
+    return {
+      data: normalized,
+      receivedAt: new Date(receivedAtMs).toISOString(),
+      receivedAtMs,
+    };
+  }
+
   #envelope(
     cached: CachedPlayerInventory,
     freshness: "fresh" | "stale",
     warnings: string[],
     now: number,
   ): DomainEnvelope<NormalizedPlayerInventory> {
+    return {
+      data: cached.data,
+      freshness,
+      confidence: "authoritative",
+      ageMs: Math.max(0, now - cached.receivedAtMs),
+      provenance: {
+        provider: "relay",
+        sourceKey: "relay-cache",
+        regionId: cached.data.player.regionId,
+        database: null,
+        schemaFingerprint: null,
+        sourceObservedAt: null,
+        receivedAt: cached.receivedAt,
+      },
+      warnings,
+    };
+  }
+
+  #housingEnvelope(
+    cached: CachedPlayerHousing,
+    freshness: "fresh" | "stale",
+    warnings: string[],
+    now: number,
+  ): DomainEnvelope<NormalizedPlayerHousing> {
     return {
       data: cached.data,
       freshness,
