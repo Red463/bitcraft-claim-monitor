@@ -2,6 +2,17 @@ const REQUIRED_DOMAINS = ["claim", "members", "inventories", "market"];
 const RELEVANT_DOMAINS = new Set(REQUIRED_DOMAINS);
 const DEFAULT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 
+class SettlementSourceValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "SettlementSourceValidationError";
+  }
+}
+
+function sourceValidationError(message) {
+  return new SettlementSourceValidationError(message);
+}
+
 function normalizedClaimId(value) {
   return String(value ?? "").trim();
 }
@@ -14,7 +25,9 @@ function record(value) {
 
 function exactInteger(value, label) {
   const text = String(value ?? "").trim();
-  if (!/^-?\d+$/.test(text)) throw new Error(`Relay settlement ${label} is malformed`);
+  if (!/^-?\d+$/.test(text)) {
+    throw sourceValidationError(`Relay settlement ${label} is malformed`);
+  }
   return BigInt(text).toString();
 }
 
@@ -35,18 +48,22 @@ function readCompleteSettlement(readDomainSnapshot, claimId, event) {
   const snapshots = {};
   for (const domain of REQUIRED_DOMAINS) {
     const snapshot = readDomainSnapshot(claimId, domain);
-    if (!snapshot?.data) throw new Error(`Relay settlement snapshot is unavailable for ${domain}`);
+    if (!snapshot?.data) {
+      throw sourceValidationError(`Relay settlement snapshot is unavailable for ${domain}`);
+    }
     const generation = validGeneration(snapshot.generation);
-    if (generation == null) throw new Error(`Relay settlement ${domain} snapshot generation is malformed`);
+    if (generation == null) {
+      throw sourceValidationError(`Relay settlement ${domain} snapshot generation is malformed`);
+    }
     if (
       snapshot.confidence === "partial"
       || snapshot.confidence === "unknown"
       || (Array.isArray(snapshot.warnings) && snapshot.warnings.length > 0)
     ) {
-      throw new Error(`Relay settlement ${domain} snapshot is incomplete`);
+      throw sourceValidationError(`Relay settlement ${domain} snapshot is incomplete`);
     }
     if (event.changedDomains.includes(domain) && generation < event.generation) {
-      throw new Error(`Relay settlement ${domain} snapshot is stale`);
+      throw sourceValidationError(`Relay settlement ${domain} snapshot is stale`);
     }
     snapshots[domain] = snapshot;
   }
@@ -55,32 +72,34 @@ function readCompleteSettlement(readDomainSnapshot, claimId, event) {
 
 function composeSummary(snapshots, claimId) {
   const claim = record(snapshots.claim.data);
-  if (!claim) throw new Error("Relay settlement claim snapshot is malformed");
+  if (!claim) throw sourceValidationError("Relay settlement claim snapshot is malformed");
   if (normalizedClaimId(claim.entityId) !== claimId) {
-    throw new Error("Relay settlement claim escaped the configured claim");
+    throw sourceValidationError("Relay settlement claim escaped the configured claim");
   }
 
   const members = snapshots.members.data;
-  if (!Array.isArray(members)) throw new Error("Relay settlement members snapshot is malformed");
+  if (!Array.isArray(members)) {
+    throw sourceValidationError("Relay settlement members snapshot is malformed");
+  }
   if (members.some((value) => normalizedClaimId(record(value)?.claimEntityId) !== claimId)) {
-    throw new Error("Relay settlement members escaped the configured claim");
+    throw sourceValidationError("Relay settlement members escaped the configured claim");
   }
 
   const inventories = record(snapshots.inventories.data);
   const inventoryClaim = record(inventories?.claim);
   if (!inventories || !inventoryClaim || !Array.isArray(inventories.dimensions) || !Array.isArray(inventories.buildings)) {
-    throw new Error("Relay settlement inventories snapshot is malformed");
+    throw sourceValidationError("Relay settlement inventories snapshot is malformed");
   }
   if (normalizedClaimId(inventoryClaim.entityId) !== claimId) {
-    throw new Error("Relay settlement inventories escaped the configured claim");
+    throw sourceValidationError("Relay settlement inventories escaped the configured claim");
   }
 
   const market = record(snapshots.market.data);
   if (!market || !Array.isArray(market.listings) || !Array.isArray(market.marketplaces)) {
-    throw new Error("Relay settlement market snapshot is malformed");
+    throw sourceValidationError("Relay settlement market snapshot is malformed");
   }
   if (normalizedClaimId(market.claimId) !== claimId) {
-    throw new Error("Relay settlement market escaped the configured claim");
+    throw sourceValidationError("Relay settlement market escaped the configured claim");
   }
 
   return {
@@ -117,6 +136,7 @@ export function createRelaySettlementTransitionCoordinator({
   onAttempt,
   onSuccess,
   onFailure,
+  onRecovery,
   retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
 }) {
   let pendingEvent = null;
@@ -126,6 +146,7 @@ export function createRelaySettlementTransitionCoordinator({
   let retryTimer = null;
   let retryAttempt = 0;
   const lastAppliedFingerprintByClaim = new Map();
+  const failedClaimIds = new Set();
   const idleWaiters = new Set();
   const boundedRetryDelays = Array.isArray(retryDelaysMs)
     ? retryDelaysMs
@@ -137,6 +158,13 @@ export function createRelaySettlementTransitionCoordinator({
     if (running || scheduled || pendingEvent || retryEvent || retryTimer) return;
     for (const resolve of idleWaiters) resolve();
     idleWaiters.clear();
+  }
+
+  function cancelRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+    retryEvent = null;
+    retryAttempt = 0;
   }
 
   function scheduleRetry(event) {
@@ -180,29 +208,34 @@ export function createRelaySettlementTransitionCoordinator({
         if (normalizedClaimId(configuredClaimId()) !== claimId) continue;
 
         let attempt;
-        let transitionStarted = false;
         try {
           const snapshots = readCompleteSettlement(readDomainSnapshot, claimId, event);
           const summary = composeSummary(snapshots, claimId);
           const fingerprint = summaryFingerprint(summary);
-          if (lastAppliedFingerprintByClaim.get(claimId) === fingerprint) continue;
           const context = {
             event,
             snapshots,
             generationVector: generationVector(snapshots),
             fingerprint,
           };
+          if (lastAppliedFingerprintByClaim.get(claimId) === fingerprint) {
+            if (failedClaimIds.delete(claimId)) {
+              safelyNotify(onRecovery, event, context);
+            }
+            continue;
+          }
           attempt = safelyNotify(onAttempt, event, context);
-          transitionStarted = true;
           await applySettlementTransition(claimId, summary, context);
           lastAppliedFingerprintByClaim.set(claimId, fingerprint);
+          failedClaimIds.delete(claimId);
           retryAttempt = 0;
           safelyNotify(onSuccess, event, context, attempt);
         } catch (error) {
+          failedClaimIds.add(claimId);
           safelyNotify(onFailure, error, event, attempt);
           const pendingGeneration = validGeneration(pendingEvent?.generation);
           if (
-            transitionStarted
+            !(error instanceof SettlementSourceValidationError)
             && (pendingGeneration == null || pendingGeneration < event.generation)
           ) {
             scheduleRetry(event);
@@ -236,12 +269,16 @@ export function createRelaySettlementTransitionCoordinator({
       const generation = validGeneration(event.generation);
       if (generation == null) return false;
       const normalizedEvent = { ...event, claimId, generation, changedDomains };
+      const retryClaimId = normalizedClaimId(retryEvent?.claimId);
       const retryGeneration = validGeneration(retryEvent?.generation);
-      if (retryTimer && retryGeneration != null && generation >= retryGeneration) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-        retryEvent = null;
-        retryAttempt = 0;
+      if (
+        retryEvent
+        && (
+          (retryClaimId && retryClaimId !== claimId)
+          || (retryGeneration != null && generation >= retryGeneration)
+        )
+      ) {
+        cancelRetry();
       }
       const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);
       if (

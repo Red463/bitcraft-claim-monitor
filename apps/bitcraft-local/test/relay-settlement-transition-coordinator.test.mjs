@@ -8,6 +8,10 @@ function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function settlementSnapshots(claimId = "claim-1", generation = 1) {
   return {
     claim: {
@@ -220,6 +224,32 @@ test("settlement transitions retry transient failures without another commit", a
   assert.deepEqual(successes, ["success"]);
 });
 
+test("settlement transitions retry unexpected snapshot read failures", async () => {
+  const snapshots = settlementSnapshots();
+  let claimReads = 0;
+  let applications = 0;
+  const failures = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => {
+      if (domain === "claim" && claimReads++ === 0) {
+        throw new Error("database is busy");
+      }
+      return snapshots[domain];
+    },
+    applySettlementTransition: async () => { applications += 1; },
+    retryDelaysMs: [0],
+    onFailure: (error) => failures.push(error.message),
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  assert.equal(claimReads, 2);
+  assert.equal(applications, 1);
+  assert.deepEqual(failures, ["database is busy"]);
+});
+
 test("settlement transition retries stop after the bounded backoff is exhausted", async () => {
   const snapshots = settlementSnapshots();
   let attempts = 0;
@@ -244,6 +274,75 @@ test("settlement transition retries stop after the bounded backoff is exhausted"
     "database remains busy",
     "database remains busy",
   ]);
+});
+
+test("a configured claim switch cancels an older claim retry and releases idle promptly", async () => {
+  let configuredClaimId = "claim-1";
+  let snapshots = settlementSnapshots("claim-1", 100);
+  const applications = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => configuredClaimId,
+    readDomainSnapshot: (_claimId, domain) => snapshots[domain],
+    applySettlementTransition: async (claimId) => {
+      applications.push(claimId);
+      if (claimId === "claim-1") throw new Error("claim-1 checkpoint busy");
+    },
+    retryDelaysMs: [200],
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 100, changedDomains: ["claim"] });
+  await flushAsyncWork();
+
+  configuredClaimId = "claim-2";
+  snapshots = settlementSnapshots("claim-2", 1);
+  coordinator.onCommit({ claimId: "claim-2", generation: 1, changedDomains: ["claim"] });
+  const reachedIdlePromptly = await Promise.race([
+    coordinator.whenIdle().then(() => true),
+    delay(40).then(() => false),
+  ]);
+  await delay(220);
+
+  assert.equal(reachedIdlePromptly, true);
+  assert.deepEqual(applications, ["claim-1", "claim-2"]);
+});
+
+test("a corrected equivalent generation reports health recovery without duplicate transition work", async () => {
+  const snapshots = settlementSnapshots();
+  let applications = 0;
+  const failures = [];
+  const recoveries = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => snapshots[domain],
+    applySettlementTransition: async () => { applications += 1; },
+    onFailure: (error) => failures.push(error.message),
+    onRecovery: (_event, context) => recoveries.push(context.generationVector),
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  snapshots.members = {
+    generation: 2,
+    data: [{ entityId: "member-1", claimEntityId: "claim-1" }],
+    confidence: "partial",
+    warnings: ["one member row was malformed"],
+  };
+  coordinator.onCommit({ claimId: "claim-1", generation: 2, changedDomains: ["members"] });
+  await coordinator.whenIdle();
+
+  snapshots.members = {
+    generation: 3,
+    data: [{ entityId: "member-1", claimEntityId: "claim-1" }],
+    confidence: "joined",
+    warnings: [],
+  };
+  coordinator.onCommit({ claimId: "claim-1", generation: 3, changedDomains: ["members"] });
+  await coordinator.whenIdle();
+
+  assert.equal(applications, 1);
+  assert.deepEqual(failures, ["Relay settlement members snapshot is incomplete"]);
+  assert.deepEqual(recoveries, ["claim:1|members:3|inventories:1|market:1"]);
 });
 
 test("equivalent committed settlement summaries do not duplicate transition evaluation", async () => {
@@ -303,6 +402,10 @@ test("server gives committed Relay domains sole ownership of settlement transiti
   assert.ok(collectEnd > collectStart);
   assert.match(server, /createRelaySettlementTransitionCoordinator/);
   assert.match(server, /settlementRelayTransitionCoordinator\?\.onCommit\(event\)/);
+  assert.match(
+    server,
+    /onRecovery:[\s\S]{0,200}collectorSuccess\("settlementTransitions"/,
+  );
   assert.doesNotMatch(collectServerSnapshot, /recordSettlementState/);
   assert.doesNotMatch(server, /url\.pathname === "\/api\/local\/snapshot"/);
   assert.doesNotMatch(collectServerSnapshot, /const buildings = unwrap\(currentData\.buildings/);

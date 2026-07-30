@@ -465,6 +465,7 @@ settlementRelayTransitionCoordinator = createRelaySettlementTransitionCoordinato
     return collectorAttempt("settlementTransitions", "Applying committed Relay settlement domains");
   },
   onSuccess: (_event, _context, startedAt) => collectorSuccess("settlementTransitions", startedAt),
+  onRecovery: () => collectorSuccess("settlementTransitions", Date.now()),
   onFailure: (error, _event, startedAt) => {
     setCollectorStatus("settlementTransitions", {
       label: "Settlement transitions",
