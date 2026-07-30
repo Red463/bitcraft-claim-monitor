@@ -32,3 +32,9 @@ test("global Market does not request monitored claim listings", () => {
 
   assert.equal("market" in endpoints, false);
 });
+
+for (const panel of ["craftcalc", "sync"]) {
+  test(`${panel} does not start an unused legacy settlement request`, () => {
+    assert.deepEqual(legacyPageEndpointMap("claim-42", panel), {});
+  });
+}

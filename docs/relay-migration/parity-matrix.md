@@ -29,7 +29,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Activity/history/charts | Activity member filters now receive the current Relay member generation through `AppShell` with no page-level provider request or roster cache table; retained event/chart rows still need every legacy collector reconnected | Local SQLite derived from normalized domain events | in progress |
 | Discord outbox and delivery | Local outbox, delivery gated by environment | Same outbox, default record mode until approval | in progress |
 | Admin health | Mixed legacy collector diagnostics plus Relay | Provider topology/freshness/generation | in progress |
-| Sync and public tools | Mixed BitJita/local | Provider-neutral domain repository | baseline |
+| Sync and public tools | Craft Calculator and Sync no longer start the unused legacy claim/member request; Craft Calculator reads the live local catalog. Public Craft Finder still requires the adaptive regional session pool | Provider-neutral domain repository | in progress |
 
 ## Scheduled/background inventory
 

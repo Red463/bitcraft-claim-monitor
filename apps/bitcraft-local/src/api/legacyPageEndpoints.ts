@@ -15,7 +15,7 @@ export function legacyPageEndpointMap(claimId: string, activePanel?: ActivePanel
     skills: "/skills",
   } as const;
   if (!activePanel) return endpoints;
-  if (activePanel === "activity" || activePanel === "admin" || activePanel === "planning") return {};
+  if (activePanel === "activity" || activePanel === "admin" || activePanel === "planning" || activePanel === "craftcalc" || activePanel === "sync") return {};
 
   const keys = new Set<keyof typeof endpoints>(["claim", "members"]);
   const add = (...nextKeys: Array<keyof typeof endpoints>) => nextKeys.forEach((key) => keys.add(key));
