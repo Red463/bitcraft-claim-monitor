@@ -143,7 +143,7 @@ test("collector settings still clamp submitted intervals to the existing bounds"
 
   assert.equal(normalized.productionContributions.intervalSeconds, 15);
 });
-test("production activity and settlement state rows are not gated by contribution sync cadence", () => {
+test("production lifecycle follows committed Relay crafts while contribution sync keeps its cadence", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const activityStart = source.indexOf("async function runProductionActivityCollector");
   const contributionStart = source.indexOf("async function runProductionContributionCollector");
@@ -154,7 +154,8 @@ test("production activity and settlement state rows are not gated by contributio
   assert.ok(activityStart > -1);
   assert.ok(contributionStart > activityStart);
   assert.ok(snapshotStart > contributionStart);
-  assert.match(source, /await runProductionActivityCollector\(claimId, currentData\);\s*await runProductionContributionCollector\(claimId, currentData, force\);/);
+  assert.match(source, /productionRelayLifecycleCoordinator\?\.onCommit\(event\)/);
+  assert.doesNotMatch(source.slice(snapshotStart), /await runProductionActivityCollector\(claimId, currentData\);/);
   assert.match(source, /recordSettlementState\(\{/);
   assert.doesNotMatch(source, /sideEffectCollectorDue\("snapshotHistory"/);
   assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("snapshotHistory"/);

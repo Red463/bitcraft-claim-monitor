@@ -2121,9 +2121,9 @@ test("server collection paginates listings and protects production mutations", a
   );
   notificationSecretDb.close();
   const notificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
-  assert.equal(notificationActivity.events.length >= 2, true);
+  assert.equal(notificationActivity.events.length >= 1, true);
   assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed", "production_started", "production_completed"].includes(event.event_type)), true);
-  assert.equal(notificationActivity.events.some((event) => event.event_type === "production_started"), true);
+  assert.equal(notificationActivity.events.some((event) => event.event_type === "production_started"), false);
   assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length, 1);
   assert.equal(notificationActivity.events.some((event) => event.event_type === "storage"), false);
   const secretNotification = notificationActivity.events.find((event) => event.source_key === "release-secret-sentinel");
@@ -2200,7 +2200,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(history.events.some((event) => event.event_type === "partial_sale"), false);
   const secondActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(secondActivity.events.filter((event) => event.event_type === "storage").length, 1);
-  assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 2);
+  assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 0);
 
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
   craftEntityRevision = 2;
@@ -2216,8 +2216,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(afterOldFills.totals.confirmedUnits, 5);
   assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), false);
   const thirdActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
-  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 2);
-  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started" && event.summary.includes("Public Output")).length, 1);
+  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 0);
+  assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started" && event.summary.includes("Public Output")).length, 0);
 
   const contributionLeaderboard = await fetch(`${origin}/api/local/leaderboard?claimId=${claimId}`).then((response) => response.json());
   assert.equal(contributionLeaderboard.summary.contributorCount, 1);
@@ -2260,15 +2260,8 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(ageGatedPoll.status, 200);
   const ageGatedActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
-  assert.equal(ageGatedActivity.events.filter((event) => event.event_type === "production_started").length, 3);
-  assert.equal(ageGatedActivity.events.some((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3"), true);
-  const ageGatedProductionStart = ageGatedActivity.events.find((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3");
-  assert.ok(ageGatedProductionStart);
-  assert.match(ageGatedProductionStart.source_key, /^production_started:/);
-  const ageGateDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
-  const ageGatedJobRow = ageGateDb.prepare("SELECT start_notified FROM production_jobs WHERE raw_json LIKE ?").get('%"entityId":"public-craft-3"%');
-  ageGateDb.close();
-  assert.equal(ageGatedJobRow?.start_notified, 0);
+  assert.equal(ageGatedActivity.events.filter((event) => event.event_type === "production_started").length, 0);
+  assert.equal(ageGatedActivity.events.some((event) => event.event_type === "production_started" && JSON.parse(event.metadata_json).raw?.entityId === "public-craft-3"), false);
 
   craftEntityRevision = 4;
   craftOwnerUsername = "Tester";
@@ -2281,7 +2274,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(completedOnArrivalPoll.status, 200);
   const completedOnArrivalActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=30`).then((response) => response.json());
-  assert.equal(completedOnArrivalActivity.events.filter((event) => event.event_type === "production_started").length, 3);
+  assert.equal(completedOnArrivalActivity.events.filter((event) => event.event_type === "production_started").length, 0);
   assert.equal(completedOnArrivalActivity.events.some((event) => event.event_type === "production_started" && event.summary.includes("Collected Station")), false);
   craftProgressOverride = null;
   historicalTrades = [

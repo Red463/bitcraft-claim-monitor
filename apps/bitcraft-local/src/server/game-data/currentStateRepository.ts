@@ -138,10 +138,8 @@ export function createCurrentStateRepository(
       try {
         for (const [domain, snapshot] of Object.entries(batch.domains)) {
           if (!snapshot) continue;
-          changedDomains.push(domain as DomainKey);
           const receivedAt = snapshot.provenance.receivedAt;
-          if (!generatedAt || receivedAt > generatedAt) generatedAt = receivedAt;
-          upsert.run(
+          const result = upsert.run(
             batch.claimId,
             domain,
             JSON.stringify(snapshot.data),
@@ -161,6 +159,10 @@ export function createCurrentStateRepository(
             batch.generation,
             JSON.stringify(snapshot.warnings),
           );
+          if (Number(result.changes) > 0) {
+            changedDomains.push(domain as DomainKey);
+            if (!generatedAt || receivedAt > generatedAt) generatedAt = receivedAt;
+          }
         }
         db.exec("COMMIT");
       } catch (error) {

@@ -27,6 +27,7 @@ import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/serve
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
+import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
 import { relayReconnectDelayMs } from "./src/server/relayRuntimeBackoff.mjs";
 import {
   empireClaimMembersView,
@@ -403,7 +404,9 @@ applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalM
 
 const statements = createPreparedStatements(db);
 const gameDataGenerationListeners = new Set();
+let productionRelayLifecycleCoordinator = null;
 function publishGameDataGeneration(event) {
+  productionRelayLifecycleCoordinator?.onCommit(event);
   for (const listener of gameDataGenerationListeners) {
     if (listener.claimId !== event.claimId) continue;
     const changedDomains = event.changedDomains.filter((domain) => listener.domains.has(domain));
@@ -420,6 +423,29 @@ const currentStateRepository = createCurrentStateRepository(db, {
 });
 const relayProvider = new RelayBitCraftProvider();
 const providerCatalogRepository = createProviderCatalogRepository(db);
+productionRelayLifecycleCoordinator = createRelayProductionLifecycleCoordinator({
+  configuredClaimId: currentClaimId,
+  readCraftSnapshot: (claimId) => currentStateRepository.read(claimId, "crafts"),
+  enrichCrafts: (crafts) => {
+    const enriched = enrichCraftsForPlanning(
+      crafts,
+      (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+      (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+    );
+    const catalog = Object.values(enriched.catalog ?? {});
+    return {
+      ...enriched,
+      items: catalog.filter((item) => item.kind !== "cargo" && Number(item.itemType) !== 1),
+      cargos: catalog.filter((item) => item.kind === "cargo" || Number(item.itemType) === 1),
+    };
+  },
+  applyProductionLifecycle: async (claimId, crafts) => {
+    await runProductionActivityCollector(claimId, { crafts });
+  },
+  onAttempt: () => collectorAttempt("production", "Applying committed Relay crafts"),
+  onSuccess: (_event, _snapshot, startedAt) => collectorSuccess("production", startedAt),
+  onFailure: (error, _event, startedAt) => collectorFailure("production", startedAt, error),
+});
 const relayStorageActivityService = new RelayStorageActivityService({
   http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
   appendEvents: (events) => currentStateRepository.appendEvents(events),
@@ -6622,7 +6648,6 @@ async function collectServerSnapshot(force = false) {
       buildingsCount: buildings.length,
       market: currentData.market ?? { listings: [] },
     });
-    await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
     const marketStartedAt = collectorAttempt("marketTrades");
     const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });

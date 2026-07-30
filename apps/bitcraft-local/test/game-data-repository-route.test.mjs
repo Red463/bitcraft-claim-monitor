@@ -115,6 +115,36 @@ test("generation commit notifies browser delivery only after the transaction suc
   db.close();
 });
 
+test("stale generation commits do not publish unchanged craft snapshots", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const events = [];
+  const repository = createCurrentStateRepository(db, {
+    onCommit: (event) => events.push(event),
+  });
+  const crafts = (generation, receivedAt) => ({
+    claimId: "1369094286777412590",
+    generation,
+    domains: {
+      crafts: {
+        data: { craftResults: [] },
+        confidence: "joined",
+        provenance: relayProvenance(receivedAt),
+        warnings: [],
+      },
+    },
+  });
+
+  await repository.commitGeneration(crafts(7, "2026-07-30T12:00:00.000Z"));
+  events.length = 0;
+  await repository.commitGeneration(crafts(6, "2026-07-30T12:01:00.000Z"));
+
+  assert.deepEqual(events, []);
+  assert.equal(repository.read("1369094286777412590", "crafts").generation, 7);
+  db.close();
+});
+
 test("repository resumes generations after a process restart", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);
