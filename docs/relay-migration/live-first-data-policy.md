@@ -16,6 +16,34 @@ only purpose was working around BitJita bulk-request sizes or rate limits.
 The public browser remains isolated from Relay and SpacetimeDB. It reads local
 provider-neutral routes only.
 
+## Locked product decision: as live as possible
+
+User-facing current data is event-driven by default. A scheduled job must never
+be a prerequisite for initially opening a page, seeing a newly committed Relay
+change, or using an operational feature.
+
+- Long-lived SpacetimeDB subscriptions are the preferred current-state path.
+- Relay HTTP-only data uses a shared bounded refresh loop and priority
+  stale-while-revalidate, not one upstream request per browser or a long
+  scheduled crawl.
+- Opening a page returns the latest complete local generation immediately.
+  Existing data remains visible with an explicit stale age while a refresh is
+  in progress.
+- Current-state changes notify open browsers as soon as the normalized
+  generation commits; users do not need to reload or wait for a periodic job.
+- Craft Planner and other calculation-heavy tools run on demand against
+  continuously maintained local normalized indexes. They do not issue a bulk
+  Relay query or wait for a catalog-refresh job when the user opens them.
+- Scheduled work is reserved for history retention, backups, reports,
+  reconciliation, integrity checks, and delivery retries. Reconciliation may
+  repair live state but cannot own it.
+
+This decision does not require removing useful local indexes. It requires
+removing legacy rate-limit caches and scheduled materializations that no longer
+have an independent role. A compact indexed projection may remain when it
+measurably makes a feature faster, provided Relay changes update it
+incrementally and atomically.
+
 ## Current-state storage hierarchy
 
 Use the smallest and fastest layer that preserves correctness:

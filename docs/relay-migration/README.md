@@ -19,6 +19,8 @@ history.
 
 Live-first data policy:
 
+- current screens and tools are event-driven and must never depend on a
+  scheduled ingestion job becoming due;
 - subscription-backed domains publish validated changes continuously;
 - HTTP-only domains use bounded single-flight refresh loops rather than
   page-triggered upstream fan-out;
@@ -33,6 +35,9 @@ Live-first data policy:
   cross-process, or restart-recovery value and must update from domain events;
 - legacy tables that only supported BitJita bulk fetching, rate limiting, or
   refresh orchestration are removed after dependency and recovery proofs.
+- calculation-heavy features such as Craft Planner execute against
+  continuously maintained local normalized indexes, so they neither repeat
+  large Relay reads nor wait for a scheduled catalog build.
 
 Implementation is dependency-ordered:
 
