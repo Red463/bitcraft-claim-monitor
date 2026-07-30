@@ -578,6 +578,85 @@ export function normalizeRegionalResearch(options: {
   };
 }
 
+export function normalizeRegionalRecruitment(options: {
+  claimId: string;
+  stateRows: unknown[];
+}) {
+  const claimId = decimalString(options.claimId, "regional recruitment claim id");
+  const warnings: string[] = [];
+  const recruitment: Array<{
+    entityId: string;
+    claimEntityId: string;
+    remainingStock: string;
+    requiredSkillId: string;
+    requiredSkillLevel: string;
+    requiredApproval: boolean;
+    isRecruiting: boolean;
+  }> = [];
+  const seen = new Set<string>();
+  for (const [index, value] of options.stateRows.entries()) {
+    try {
+      const row = record(value, `regional claim_recruitment_state row ${index}`);
+      const claimEntityId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `regional claim_recruitment_state row ${index} claim id`,
+      );
+      if (claimEntityId !== claimId) {
+        warnings.push(`Regional claim_recruitment_state omitted cross-claim row ${claimEntityId}.`);
+        continue;
+      }
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `regional claim_recruitment_state row ${index} entity id`,
+      );
+      if (seen.has(entityId)) {
+        warnings.push(`Regional claim_recruitment_state omitted duplicate row ${entityId}.`);
+        continue;
+      }
+      const remainingStock = decimalString(
+        row.remainingStock ?? row.remaining_stock,
+        `regional claim_recruitment_state row ${index} remaining stock`,
+      );
+      const requiredSkillId = decimalString(
+        row.requiredSkillId ?? row.required_skill_id,
+        `regional claim_recruitment_state row ${index} required skill id`,
+      );
+      const requiredSkillLevel = decimalString(
+        row.requiredSkillLevel ?? row.required_skill_level,
+        `regional claim_recruitment_state row ${index} required skill level`,
+      );
+      const requiredApproval = row.requiredApproval ?? row.required_approval;
+      if (typeof requiredApproval !== "boolean") {
+        throw new TypeError(
+          `regional claim_recruitment_state row ${index} required approval must be boolean`,
+        );
+      }
+      seen.add(entityId);
+      recruitment.push({
+        entityId,
+        claimEntityId,
+        remainingStock,
+        requiredSkillId,
+        requiredSkillLevel,
+        requiredApproval,
+        isRecruiting: BigInt(remainingStock) > 0n,
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional claim_recruitment_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return {
+    data: {
+      claimId,
+      isRecruiting: recruitment.some((posting) => posting.isRecruiting),
+      recruitment,
+    },
+    warnings,
+  };
+}
+
 export function normalizeRegionalConstruction(options: {
   claimId: string;
   projectRows: unknown[];

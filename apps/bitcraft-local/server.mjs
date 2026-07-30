@@ -95,6 +95,7 @@ import {
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
+  enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
   parseDomainKeys,
@@ -2199,6 +2200,15 @@ function currentResearchProjection(claimId) {
   return enrichResearchWithCatalog(
     current.data,
     providerCatalogRepository.listDescriptions("claim_tech"),
+  ).data;
+}
+
+function currentRecruitmentProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "recruitment");
+  if (!current) return { claimId: String(claimId), isRecruiting: false, recruitment: [] };
+  return enrichRecruitmentWithCatalog(
+    current.data,
+    providerCatalogRepository.listDescriptions("skill"),
   ).data;
 }
 
@@ -8274,7 +8284,7 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     tradeVolume: payload("tradeVolume", {}),
     regionalBuyOrders: payload("regionalBuyOrders", { regions: [], orders: [] }),
     inventories: payload("inventories", { buildings: [] }),
-    recruitment: payload("recruitment", { applications: [] }),
+    recruitment: currentRecruitmentProjection(claimId),
     layout: payload("layout", {}),
     skills: payload("skills", {}),
     partialErrors: [...new Set(partialErrors)],
@@ -8533,7 +8543,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     productionPayload,
     playerPayload,
     inventoriesPayload,
-    recruitmentPayload,
     layoutPayload,
     skillsPayload,
     regionStatus,
@@ -8550,13 +8559,13 @@ async function buildCurrentClaimData(claimId, options = {}) {
       : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
     collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
     collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "inventory", "recruitment", options) ? fetchDomainPayload(previous, "recruitment", { applications: [] }, "Recruitment", () => timedCollectorFetch(metrics, "inventory", "recruitment", () => fetchBitjita(`/claims/${id}/recruitment`))) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
     collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => timedCollectorFetch(metrics, "inventory", "layout", () => fetchBitjita(`/claims/${id}/layout`))) : Promise.resolve(previousPayload(previous, "layout", {})),
     collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
     collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
   const researchPayload = currentResearchProjection(id);
+  const recruitmentPayload = currentRecruitmentProjection(id);
   const contributionEntries = collectorDue(id, "production", "contributions", options)
     ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
     : Object.entries(previousPayload(previous, "contributions", {}));
@@ -10297,6 +10306,16 @@ const server = createServer(async (req, res) => {
             const projected = enrichResearchWithCatalog(
               data,
               providerCatalogRepository.listDescriptions("claim_tech"),
+            );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
+          }
+          if (domain === "recruitment") {
+            const projected = enrichRecruitmentWithCatalog(
+              data,
+              providerCatalogRepository.listDescriptions("skill"),
             );
             return {
               ...projected,

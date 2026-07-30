@@ -19,9 +19,62 @@ const {
   normalizeRegionalEquipment,
   normalizeRegionalConstruction,
   normalizeRegionalPlayers,
+  normalizeRegionalRecruitment,
   normalizeRegionalResearch,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional recruitment preserves exact claim ownership and posting requirements", () => {
+  assert.deepEqual(normalizeRegionalRecruitment({
+    claimId: "1369094286777412590",
+    stateRows: [{
+      entityId: 1369094286821318198n,
+      claimEntityId: 1369094286777412590n,
+      remainingStock: 19,
+      requiredSkillId: 1,
+      requiredSkillLevel: 1,
+      requiredApproval: false,
+    }, {
+      entityId: 9007199254740993n,
+      claimEntityId: 999n,
+      remainingStock: 4,
+      requiredSkillId: 2,
+      requiredSkillLevel: 10,
+      requiredApproval: true,
+    }],
+  }), {
+    data: {
+      claimId: "1369094286777412590",
+      isRecruiting: true,
+      recruitment: [{
+        entityId: "1369094286821318198",
+        claimEntityId: "1369094286777412590",
+        remainingStock: "19",
+        requiredSkillId: "1",
+        requiredSkillLevel: "1",
+        requiredApproval: false,
+        isRecruiting: true,
+      }],
+    },
+    warnings: [
+      "Regional claim_recruitment_state omitted cross-claim row 999.",
+    ],
+  });
+});
+
+test("regional recruitment treats no configured-claim row as authoritatively closed", () => {
+  assert.deepEqual(normalizeRegionalRecruitment({
+    claimId: "42",
+    stateRows: [],
+  }), {
+    data: {
+      claimId: "42",
+      isRecruiting: false,
+      recruitment: [],
+    },
+    warnings: [],
+  });
+});
 
 test("regional research state preserves exact claim ownership and learned technology IDs", () => {
   const result = normalizeRegionalResearch({

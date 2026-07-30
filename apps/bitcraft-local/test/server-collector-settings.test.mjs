@@ -30,7 +30,7 @@ test("collector settings normalize saved dashboard configuration safely", () => 
 
 test("due collectors select only the domain payloads they own", () => {
   assert.deepEqual(payloadDomainsForCollectors(["members", "inventory"]), [
-    "members", "inventories", "recruitment", "layout",
+    "members", "inventories", "layout",
   ]);
   assert.deepEqual(payloadDomainsForCollectors([]), []);
 });
@@ -40,6 +40,7 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
   assert.equal(payloadDomainCollector.tradeVolume, "market");
   assert.equal(payloadDomainCollector.research, undefined);
+  assert.equal(payloadDomainCollector.recruitment, undefined);
   assert.equal(collectorPrimaryPayloadDomain.research, undefined);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "research"), false);
   assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);

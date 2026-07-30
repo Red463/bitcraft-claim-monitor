@@ -1,5 +1,34 @@
 # Relay diagnostic findings
 
+## Recruitment state semantics — 2026-07-30
+
+The generated regional binding was exercised against the topology-discovered
+region 19 source using a claim-filtered subscription:
+
+```sql
+SELECT * FROM claim_recruitment_state
+WHERE claim_entity_id = 1369094286777412590
+```
+
+- Timbersteel had exactly one recruitment posting: entity
+  `1369094286821318198`.
+- `claim_entity_id` is the monitored claim ID and is directly filterable.
+- The live row reported `remaining_stock = 19`, `required_skill_id = 1`,
+  `required_skill_level = 1`, and `required_approval = false`.
+- `entity_id` is the posting identity; it is not the claim ID.
+- `remaining_stock > 0` proves that the posting is currently recruiting.
+- The generated remove-recruitment contract deletes by posting identity, so no
+  matching row is an authoritative closed state rather than an ingestion
+  warning.
+- The skill ID joins to the continuously maintained global `skill_desc`
+  catalog. The Relay row contains no free-form description and is not an
+  applicant list, so neither is fabricated by normalization.
+
+Runtime consequence: Recruitment is part of the continuously connected primary
+regional session, skill identity is joined at the provider-neutral local route,
+and Members renders the committed live state. No Recruitment SQL table,
+scheduled ingestion job, or Relay polling request is justified.
+
 ## Research state and availability semantics — 2026-07-30
 
 The generated regional binding was exercised against the topology-discovered

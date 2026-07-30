@@ -10,6 +10,7 @@ import {
   Shield,
   Star,
   User,
+  UserPlus,
   Users,
   Wrench,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { normalizeData } from "../utils/normalize";
 import { memberClaimRole } from "../utils/ownership";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { recruitmentSummary } from "./recruitmentView.ts";
 
 const LEGACY_API = "/api/bitjita";
 
@@ -68,6 +70,7 @@ export function Members({
   const filtered = merged.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
   const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
+  const recruitment = recruitmentSummary(data.raw?.recruitment);
   const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
   const openMemberDetails = (member: AnyRecord) => {
     setSelectedId(String(member.playerEntityId));
@@ -174,6 +177,7 @@ export function Members({
         <article><Activity /><span>Total Levels</span><strong>{formatNumber(totalMemberLevels)}</strong><small>Across visible citizens</small></article>
         <article><Hammer /><span>Build Access</span><strong>{merged.filter((member) => member.buildPermission).length}</strong><small>Members with build rights</small></article>
         <article><Shield /><span>Storage Access</span><strong>{merged.filter((member) => member.inventoryPermission).length}</strong><small>Members with inventory rights</small></article>
+        <article className="members-recruitment-summary"><UserPlus /><span>Recruitment</span><strong>{recruitment.statusLabel}</strong><small>{recruitment.requirementLabel} · {recruitment.approvalLabel}</small></article>
       </div>
       <div className="toolbar-row members-toolbar">
         <SearchBox label="Search settlement members" value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />

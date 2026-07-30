@@ -102,6 +102,21 @@ try {
       + ` for claim ${snapshot.research.claimId} with ${snapshot.researchWarnings.length} warnings`,
     );
   }
+  const crossClaimRecruitment = snapshot.recruitment.recruitment.filter(
+    ({ claimEntityId }) => claimEntityId !== claimId,
+  );
+  if (
+    snapshot.recruitment.claimId !== claimId
+    || snapshot.recruitment.recruitment.length === 0
+    || crossClaimRecruitment.length
+    || snapshot.recruitmentWarnings.length
+  ) {
+    throw new Error(
+      `Regional recruitment verification found ${snapshot.recruitment.recruitment.length} postings`
+      + ` for claim ${snapshot.recruitment.claimId}, ${crossClaimRecruitment.length} cross-claim rows,`
+      + ` and ${snapshot.recruitmentWarnings.length} warnings`,
+    );
+  }
   console.log(JSON.stringify({
     ok: true,
     sourceKey: source.sourceKey,
@@ -128,11 +143,17 @@ try {
     ),
     learnedResearchCount: snapshot.research.learnedTechIds.length,
     researchingTechId: snapshot.research.researchingTechId,
+    recruitmentPostingCount: snapshot.recruitment.recruitment.length,
+    recruitmentStock: snapshot.recruitment.recruitment.map(({ remainingStock }) => remainingStock),
+    recruitmentRequiresApproval: snapshot.recruitment.recruitment.some(
+      ({ requiredApproval }) => requiredApproval,
+    ),
     regionalRowsFound,
     warningCount: snapshot.warnings.length
       + snapshot.equipmentWarnings.length
       + snapshot.constructionWarnings.length
-      + snapshot.researchWarnings.length,
+      + snapshot.researchWarnings.length
+      + snapshot.recruitmentWarnings.length,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

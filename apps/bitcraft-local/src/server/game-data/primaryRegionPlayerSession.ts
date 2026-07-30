@@ -2,6 +2,7 @@ import {
   normalizeRegionalConstruction,
   normalizeRegionalEquipment,
   normalizeRegionalPlayers,
+  normalizeRegionalRecruitment,
   normalizeRegionalResearch,
 } from "./normalizers.ts";
 import {
@@ -39,6 +40,7 @@ type BindingConnection = {
     activeBuffState: CachedTable;
     projectSiteState: CachedTable;
     claimTechState: CachedTable;
+    claimRecruitmentState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -91,6 +93,8 @@ export type RegionalPlayerSnapshot = {
   constructionWarnings: string[];
   research: ReturnType<typeof normalizeRegionalResearch>["data"];
   researchWarnings: string[];
+  recruitment: ReturnType<typeof normalizeRegionalRecruitment>["data"];
+  recruitmentWarnings: string[];
   database: string;
   regionId: string;
   schemaFingerprint: string;
@@ -139,6 +143,14 @@ function researchQuery(claimIdValue: string): string {
   return `SELECT * FROM claim_tech_state WHERE entity_id = ${claimId}`;
 }
 
+function recruitmentQuery(claimIdValue: string): string {
+  const claimId = String(claimIdValue ?? "").trim();
+  if (!/^\d+$/.test(claimId)) {
+    throw new TypeError("regional recruitment claim id is invalid");
+  }
+  return `SELECT * FROM claim_recruitment_state WHERE claim_entity_id = ${claimId}`;
+}
+
 export class RelayPrimaryRegionPlayerSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
@@ -178,6 +190,7 @@ export class RelayPrimaryRegionPlayerSession {
       ...playerStateQueries(config.members),
       constructionQuery(config.claimId),
       researchQuery(config.claimId),
+      recruitmentQuery(config.claimId),
     ];
     if (queries.length === 0) {
       throw new Error("Relay regional player session requires at least one claim member");
@@ -235,6 +248,10 @@ export class RelayPrimaryRegionPlayerSession {
         claimId: config.claimId,
         stateRows: [...connection.db.claimTechState.iter()],
       });
+      const recruitment = normalizeRegionalRecruitment({
+        claimId: config.claimId,
+        stateRows: [...connection.db.claimRecruitmentState.iter()],
+      });
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
       this.#applyInFlight = true;
@@ -247,6 +264,8 @@ export class RelayPrimaryRegionPlayerSession {
         constructionWarnings: construction.warnings,
         research: research.data,
         researchWarnings: research.warnings,
+        recruitment: recruitment.data,
+        recruitmentWarnings: recruitment.warnings,
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -303,6 +322,7 @@ export class RelayPrimaryRegionPlayerSession {
       connection.db.activeBuffState,
       connection.db.projectSiteState,
       connection.db.claimTechState,
+      connection.db.claimRecruitmentState,
     ];
   }
 

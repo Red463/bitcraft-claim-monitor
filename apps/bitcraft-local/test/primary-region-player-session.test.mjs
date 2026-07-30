@@ -69,6 +69,14 @@ function fakeBindings() {
     },
     scheduledId: null,
   }]);
+  const claimRecruitmentState = cachedTable("recruitment", [{
+    entityId: 1369094286821318198n,
+    claimEntityId: 1369094286777412590n,
+    remainingStock: 19,
+    requiredSkillId: 1,
+    requiredSkillLevel: 1,
+    requiredApproval: false,
+  }]);
   const connection = {
     db: {
       playerState,
@@ -77,6 +85,7 @@ function fakeBindings() {
       activeBuffState,
       projectSiteState,
       claimTechState,
+      claimRecruitmentState,
     },
     subscriptionBuilder() {
       const builder = {
@@ -167,6 +176,7 @@ test("primary-region session filters member and settlement state and emits norma
     "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
     "SELECT * FROM project_site_state WHERE owner_id = 1369094286777412590",
     "SELECT * FROM claim_tech_state WHERE entity_id = 1369094286777412590",
+    "SELECT * FROM claim_recruitment_state WHERE claim_entity_id = 1369094286777412590",
   ]);
 
   fake.state.onApplied({});
@@ -236,6 +246,20 @@ test("primary-region session filters member and settlement state and emits norma
       scheduledId: null,
     },
     researchWarnings: [],
+    recruitment: {
+      claimId: "1369094286777412590",
+      isRecruiting: true,
+      recruitment: [{
+        entityId: "1369094286821318198",
+        claimEntityId: "1369094286777412590",
+        remainingStock: "19",
+        requiredSkillId: "1",
+        requiredSkillLevel: "1",
+        requiredApproval: false,
+        isRecruiting: true,
+      }],
+    },
+    recruitmentWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -307,6 +331,7 @@ test("primary-region player session coalesces rapid changes while a snapshot app
   fake.state.callbacks.get("buff:insert")({}, {});
   fake.state.callbacks.get("project:update")({}, {}, {});
   fake.state.callbacks.get("research:update")({}, {}, {});
+  fake.state.callbacks.get("recruitment:update")({}, {}, {});
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(snapshots.length, 1);

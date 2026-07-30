@@ -21,6 +21,12 @@ test("migrated Research has no legacy endpoint map", () => {
   assert.deepEqual(endpoints, {});
 });
 
+test("legacy endpoint inventory no longer includes Recruitment", () => {
+  const endpoints = marketEndpointMap("claim-42");
+
+  assert.equal(endpoints.recruitment, undefined);
+});
+
 test("global Market does not request monitored claim listings", () => {
   const endpoints = marketEndpointMap("claim-42", "market");
 

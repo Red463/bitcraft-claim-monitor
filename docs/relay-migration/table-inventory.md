@@ -142,3 +142,15 @@ be a committed domain event, not a scheduled ingestion sweep.
 - The legacy scheduled Research collector was removed so it cannot overwrite a
   newer Relay generation. Dashboard aggregates and Craft Planner tier presets
   now compose from the same committed Relay state and local global catalog.
+
+## Recruitment vertical evidence
+
+- `claim_recruitment_state.claim_entity_id` was proven live to be the owning
+  claim ID; the regional subscription is filtered to the configured claim.
+- Posting, claim, stock, skill, and level identities remain decimal strings.
+  Skill display identity is joined from the live global catalog.
+- Members requests the provider-neutral Recruitment domain and displays the
+  current stock, skill gate, and approval mode.
+- The legacy BitJita endpoint and inventory-collector ownership were removed.
+- `domain_payload_current` remains the durable last-good boundary. No
+  Recruitment table, refresh ledger, or scheduled ingestion job was added.

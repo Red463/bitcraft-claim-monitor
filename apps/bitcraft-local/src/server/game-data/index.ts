@@ -15,6 +15,7 @@ export * from "./primaryRegionPlayerSession.ts";
 export * from "./primaryRegionRuntime.ts";
 export * from "./researchProjection.ts";
 export * from "./researchTierPresets.ts";
+export * from "./recruitmentProjection.ts";
 export * from "./relayProvider.ts";
 export * from "./schemaManifest.ts";
 export * from "./topology.ts";

@@ -9,7 +9,6 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
     citizens: `/claims/${claimId}/citizens`,
     buildings: `/claims/${claimId}/buildings`,
     inventories: `/claims/${claimId}/inventories`,
-    recruitment: `/claims/${claimId}/recruitment`,
     market: `/claims/${claimId}/market/listings?limit=200`,
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
     layout: `/claims/${claimId}/layout`,

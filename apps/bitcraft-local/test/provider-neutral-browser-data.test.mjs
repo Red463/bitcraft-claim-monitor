@@ -11,7 +11,15 @@ const { marketEndpointMap } = await import(
 
 test("claim overview, Members, Professions, and Leaderboard request provider-neutral local domains", async () => {
   assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players", "construction"]);
-  assert.deepEqual(pageDomains("members"), ["claim", "members", "citizens", "players", "equipment", "crafts"]);
+  assert.deepEqual(pageDomains("members"), [
+    "claim",
+    "members",
+    "citizens",
+    "players",
+    "equipment",
+    "crafts",
+    "recruitment",
+  ]);
   assert.deepEqual(pageDomains("skills"), ["claim", "members", "citizens", "players", "skills"]);
   assert.deepEqual(pageDomains("leaderboard"), ["claim", "members", "citizens", "players", "skills"]);
 
@@ -112,6 +120,7 @@ test("Members uses Relay equipment, passive crafts, and bounded player inventory
   assert.match(source, /\/api\/local\/player-data/);
   assert.doesNotMatch(source, /players\/\$\{selectedId\}\/(?:buffs|equipment|equipment\/presets|inventories|passive-crafts)/);
   assert.doesNotMatch(source, /BitJita has not reported gear/);
+  assert.match(source, /recruitmentSummary\(data\.raw\?\.recruitment\)/);
 });
 
 test("Inventory uses only provider-neutral local routes", async () => {
