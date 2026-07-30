@@ -45,6 +45,7 @@ Disposition values:
 | Activity member-filter roster | no table | Current Relay `members` domain passed through `AppShell` | The Activity page shares the normal live member generation and no longer performs or persists a separate roster fetch. |
 | Craft Calculator and Sync opening state | no table | Their focused local/browser-owned services | Neither page consumes the central settlement payload, so opening them starts no legacy claim/member request and requires no replacement current table. |
 | Public Craft Finder monitored-settlement context | no table | Current Relay `claim` domain | Region and owner context share the current claim generation; the later cross-region job projection must not introduce a page cache table. |
+| Adaptive regional connection state | no table | In-memory `AdaptiveRegionSessionPool` leases, health, hard cap, stagger, and idle sweep | Connection orchestration is ephemeral process state. Durable normalized generations remain in `domain_payload_current`; no session, lease, queue, or pagination table is justified. |
 | `market_deal_watches` | keep-user | Authenticated deal-watch edits | User-owned alert configuration. |
 | `market_deal_alerts` | keep-history | Locally derived market transitions | Alert deduplication, acknowledgement, and delivery history. |
 | `admin_audit_log`, `admin_login_events` | keep-operations | Auth/admin security events | Security and accountability history. |

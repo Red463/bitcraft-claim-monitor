@@ -21,6 +21,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Global market tools | BitJita search/history/trades | Local aggregation and region pool | baseline |
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
 | Region | BitJita region/status/trade volume | Configured regional sessions | baseline |
+| Adaptive region-session pool | Typed pool foundation pins the monitored region, single-flights concurrent opens, enforces configured-region and hard connection limits including in-flight opens, staggers warmups, and closes idle non-primary sessions | Shared runtime owner for cross-region crafts, market, region, map, and empires | in progress |
 | Empires/watchtowers/siege | BitJita empire routes | Proven global rows or regional sessions | blocked on evidence |
 | Deposits | Empires Hexite Deposits tab reads the provider-neutral 15-second Relay snapshot with last-good fallback; `unknown` and overdue rows are never promoted to active; no deposit-specific table or scheduled job | Relay HTTP deposits with explicit state | ready for soak |
 | Map/layout | BitJita layout/player routes | Claim parents and bounded location rows | blocked on evidence |
